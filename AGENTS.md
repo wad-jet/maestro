@@ -2,11 +2,11 @@
 
 ## What this repo is
 
-This is the **authoring repo** for the OpenCode `maestro` system (the "maestro" agent for the `finances-flow` application). It is **not** the application repo — there is no application code here.
+This is the **authoring repo** for the OpenCode `maestro` system (the "maestro" agent that orchestrates feature/bugfix implementation in a target application). It is **not** the application repo — there is no application code here.
 
 - `skills/maestro/SKILL.md` — authoritative pipeline spec (feature/bugfix orchestration, HITL gates, regression registry). Read it before touching anything in `skills/`.
-- `skills/maestro/agents/*.md` — OpenCode subagent configs (`mode`, `permission`, `hidden`, `description` in YAML frontmatter). `maestro.md` is `mode: primary`; the rest (`haiku`, `sonnet`, `opus`, `fable`, `code-reviewer`) are subagents.
-- `skills/maestro/commands/*.md` — `@command` configs (frontmatter `agent:` field).
+- `agents/*.md` — OpenCode agent configs (`mode`, `permission`, `hidden`, `description` in YAML frontmatter). `maestro.md` is `mode: primary`; the rest (`haiku`, `sonnet`, `opus`, `fable`, `code-reviewer`) are subagents.
+- `commands/*.md` — `@command` configs (frontmatter `agent:` field).
 - `skills/maestro/{implementer-prompt.md,spec-review-prompt.md,stack-detection.md}` — support files referenced by SKILL.md.
 - `skills/manual-docs/SKILL.md` — user-docs skill for `manual_docs/` (Diátaxis).
 - `plugins/maestro-bootstrap/` — ESM OpenCode plugin.
@@ -22,8 +22,8 @@ This is the **authoring repo** for the OpenCode `maestro` system (the "maestro" 
 
 `skills/` here is the source of truth; OpenCode loads runtime copies from the application repo. When you edit a source file, update the runtime copy too:
 
-- `skills/maestro/agents/*.md` → `.opencode/agents/*.md`
-- `skills/maestro/commands/*.md` → `.opencode/commands/*.md`
+- `agents/*.md` → `.opencode/agents/*.md`
+- `commands/*.md` → `.opencode/commands/*.md`
 - any skill under `skills/` → `.opencode/skills/<name>/SKILL.md` (see `skills/manual-docs/SKILL.md` → Правило 5)
 
 SKILL.md files are read by the orchestrator agent; `implementer-prompt.md` is self-contained and must stay loadable without the `skill` tool.

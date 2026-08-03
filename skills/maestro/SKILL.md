@@ -952,8 +952,8 @@ tree должен быть чистым.
 - Spec Review — только по HITL, никогда не запускается автоматически
 - SKILL.md читает оркестратор; dispatch суб-агентов идёт через `Task` tool
 - `implementer-prompt.md` — self-contained, не требует загрузки скилла субагентом
-- Агенты синхронизируются: `skills/maestro/agents/*.md` → `.opencode/agents/*.md`
-- Команды синхронизируются: `skills/maestro/commands/*.md` → `.opencode/commands/*.md`
+- Агенты синхронизируются: `agents/*.md` → `.opencode/agents/*.md`
+- Команды синхронизируются: `commands/*.md` → `.opencode/commands/*.md`
 - Все скиллы синхронизируются: `skills/` → `.opencode/skills/`
 - Регрессия НЕ запускается автоматически на шаге 15 — только standalone `@regression`
 

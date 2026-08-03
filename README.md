@@ -1,22 +1,21 @@
 # maestro-agent
 
 Authoring-репозиторий системы `maestro` — агента для OpenCode, который
-оркестрирует сквозную реализацию фич и багфиксов в приложении **finances-flow**
+оркестрирует сквозную реализацию фич и багфиксов в целевом приложении
 (brainstorm → spec → plan → SDD → review → docs, с HITL-гейтами).
 
 Это репозиторий-**источник** конфигурации: здесь нет кода приложения. OpenCode
 загружает runtime-копии скиллов, агентов и команд из целевого репозитория
-`finances-flow` (каталог `.opencode/`), а сюда они не копируются.
+(каталог `.opencode/`), а сюда они не копируются.
 
 ## Структура
 
 - `skills/maestro/SKILL.md` — спецификация pipeline (фичи/багфиксы, HITL-гейты,
   реестр регрессии). Читать перед изменениями в `skills/`.
-- `skills/maestro/agents/*.md` — конфиги агентов OpenCode. `maestro.md` —
+- `agents/*.md` — конфиги агентов OpenCode. `maestro.md` —
   `mode: primary`; `haiku`, `sonnet`, `opus`, `fable`, `code-reviewer` —
   субагенты, вызываются программно через `task`.
-- `skills/maestro/commands/*.md` — конфиги `@command` (`@regression`,
-  `@test-*`).
+- `commands/*.md` — конфиги `@command` (`@regression`, `@test-*`).
 - `skills/maestro/` — вспомогательные файлы: `implementer-prompt.md`,
   `spec-review-prompt.md`, `stack-detection.md`.
 - `skills/manual-docs/SKILL.md` — скилл пользовательской документации
@@ -26,11 +25,11 @@ Authoring-репозиторий системы `maestro` — агента дл�
 
 ## Синхронизация с целевым репо
 
-`skills/` здесь — источник истины; runtime-копии живут в приложении. При правке
-файла обновлять и копию:
+`skills/`, `agents/` и `commands/` здесь — источник истины; runtime-копии живут
+в приложении. При правке файла обновлять и копию:
 
-- `skills/maestro/agents/*.md` → `.opencode/agents/*.md`
-- `skills/maestro/commands/*.md` → `.opencode/commands/*.md`
+- `agents/*.md` → `.opencode/agents/*.md`
+- `commands/*.md` → `.opencode/commands/*.md`
 - любой скилл в `skills/` → `.opencode/skills/<name>/SKILL.md`
 
 Подробнее — в `AGENTS.md` (раздел «Скиллы / Skills»).

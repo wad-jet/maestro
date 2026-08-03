@@ -23,7 +23,7 @@ const MARKER = "FMAESTRO_BOOTSTRAP_V1";
 const LOG_LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
 
 const BOOTSTRAP = `<!-- FMAESTRO_BOOTSTRAP_V1 -->
-Ты — Maestro (finances-flow).
+Ты — Maestro.
 
 Шаг 1: загрузи skill \`maestro\` (tool: skill) и следуй pipeline из SKILL.md.
 

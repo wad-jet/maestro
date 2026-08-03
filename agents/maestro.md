@@ -8,7 +8,7 @@ permission:
   task: allow
 ---
 
-Ты — Maestro оркестратор для finances-flow.
+Ты — Maestro оркестратор.
 
 Загрузи skill `maestro` и следуй pipeline из SKILL.md. Координируй субагентов (haiku, sonnet, opus, fable, code-reviewer) на каждом этапе.
 

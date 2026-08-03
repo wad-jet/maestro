@@ -1,13 +1,13 @@
 ---
 name: manual-docs
-description: Use when adding or changing API endpoints, modules, configs, user-facing behavior, or completing sprint deliverables — maintains user-facing documentation in manual_docs/ (Diátaxis) and is enforced by docs.coverage.spec.ts. Also use when writing examples, tutorials, or reference docs for Finances Flow.
+description: Use when adding or changing API endpoints, modules, configs, user-facing behavior, or completing sprint deliverables — maintains user-facing documentation in manual_docs/ (Diátaxis) and is enforced by docs.coverage.spec.ts. Also use when writing examples, tutorials, or reference docs for the project.
 ---
 
 # Manual Docs
 
 ## Обзор
 
-Навык ведения пользовательской документации платформы **Finances Flow** по методологии
+Навык ведения пользовательской документации платформы по методологии
 **Diátaxis** (tutorials / how-to / reference / explanation). Документация живёт в
 `manual_docs/` отдельно от технической документации разработчика в `docs/`.
 
@@ -128,7 +128,7 @@ manual_docs/
 ### Шаблон README.md (обязательные разделы)
 
 ```markdown
-# Finances Flow
+# <Название проекта>
 
 ## 📖 Описание
 Краткое описание проекта (1-2 абзаца).
