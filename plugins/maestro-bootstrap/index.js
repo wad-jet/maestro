@@ -13,7 +13,7 @@
  * (gitignored), one file per day for future rotation. Levels: debug / info / warn / error.
  * Config via env:
  *   MAESTRO_BOOTSTRAP_LOG_LEVEL  (default: debug)
- *   MAESTRO_BOOTSTRAP_LOG_MASK   (default: debug,info,warn,error)
+ *   MAESTRO_BOOTSTRAP_LOG_MASK   (default: info,warn,error)
  *   MAESTRO_BOOTSTRAP_LOG_DIR    (default: <directory>/.maestro)
  */
 
@@ -40,7 +40,7 @@ function makeLogger(directory) {
   const logDir =
     process.env.MAESTRO_BOOTSTRAP_LOG_DIR || path.join(directory, ".maestro");
   const threshold = LOG_LEVELS[process.env.MAESTRO_BOOTSTRAP_LOG_LEVEL || "debug"] ?? 10;
-  const MASK_DEFAULT = "debug,info,warn,error";
+  const MASK_DEFAULT = "info,warn,error";
   const enabled = new Set(
     (process.env.MAESTRO_BOOTSTRAP_LOG_MASK || MASK_DEFAULT)
       .split(",")

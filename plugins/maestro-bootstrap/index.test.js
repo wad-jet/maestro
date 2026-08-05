@@ -198,7 +198,7 @@ describe("maestro-bootstrap log mask (MAESTRO_BOOTSTRAP_LOG_MASK)", () => {
     await p["chat.params"]({ sessionID, agent: "maestro", model: { providerID: "p", modelID: "m" } }, {});
   }
 
-  it("default mask logs all levels (backward compat)", async () => {
+  it("default mask disables debug but keeps info/warn/error", async () => {
     const { dir, p } = await build(null);
     try {
       await seed(p, "s");
@@ -206,9 +206,23 @@ describe("maestro-bootstrap log mask (MAESTRO_BOOTSTRAP_LOG_MASK)", () => {
       await p["tool.execute.before"]({ tool: "bash", sessionID: "s", callID: "inf" }, { args: {} });
       await p.event({ event: { type: "session.error", properties: { sessionID: "s", error: { type: "x", message: "m" } } } });
       const entries = readLogs(dir);
-      assert.ok(entries.find((e) => e.callID === "dbg"), "debug-level entry logged by default");
+      assert.equal(entries.find((e) => e.callID === "dbg"), undefined, "debug disabled by default");
       assert.ok(entries.find((e) => e.callID === "inf"), "info-level entry logged by default");
       assert.ok(entries.find((e) => e.msg === "session.error"), "warn-level entry logged by default");
+      const init = entries.find((e) => e.msg === "plugin initialized");
+      assert.equal(init.mask, "info,warn,error");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("explicit full mask re-enables debug (backward compat)", async () => {
+    const { dir, p } = await build("debug,info,warn,error");
+    try {
+      await seed(p, "s");
+      await p["tool.execute.before"]({ tool: "read", sessionID: "s", callID: "dbg" }, {});
+      const entries = readLogs(dir);
+      assert.ok(entries.find((e) => e.callID === "dbg"), "debug logged when explicitly in mask");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

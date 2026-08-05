@@ -46,13 +46,16 @@ gitignored, создаётся автоматически). Логи **разб�
 | Переменная | Значение | По умолчанию |
 |---|---|---|
 | `MAESTRO_BOOTSTRAP_LOG_LEVEL` | `debug` \| `info` \| `warn` \| `error` | `debug` |
-| `MAESTRO_BOOTSTRAP_LOG_MASK` | список включённых уровней через запятую | `debug,info,warn,error` |
+| `MAESTRO_BOOTSTRAP_LOG_MASK` | список включённых уровней через запятую | `info,warn,error` |
 | `MAESTRO_BOOTSTRAP_LOG_DIR` | каталог для лог-файлов | `<project>/.maestro` |
 
 `MAESTRO_BOOTSTRAP_LOG_LEVEL` — порог детализации (пишутся уровни `>=` заданного).
 `MAESTRO_BOOTSTRAP_LOG_MASK` — явный список включённых уровней; позволяет
 включать/выключать каждый тип независимо. Запись пишется при **пересечении**
 двух условий: уровень входит в маску **и** не ниже порога.
+
+По умолчанию `debug` **выключен** (маска `info,warn,error`). Чтобы вернуть
+debug-логи, укажите `MAESTRO_BOOTSTRAP_LOG_MASK=debug,info,warn,error`.
 
 Примеры:
 
