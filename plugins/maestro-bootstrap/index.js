@@ -12,8 +12,8 @@
  * Logging: JSONL to `<project>/.maestro/maestro-bootstrap-<date>.log`
  * (gitignored), one file per day for future rotation. Levels: debug / info / warn / error.
  * Config via env:
- *   MAESTRO_BOOTSTRAP_LOG_LEVEL  (default: debug)
- *   MAESTRO_BOOTSTRAP_LOG_MASK   (default: info,warn,error)
+ *   MAESTRO_BOOTSTRAP_LOG_LEVEL  (default: info)
+ *   MAESTRO_BOOTSTRAP_LOG_MASK   (default: derived from LOG_LEVEL)
  *   MAESTRO_BOOTSTRAP_LOG_DIR    (default: <directory>/.maestro)
  */
 
@@ -36,17 +36,19 @@ const BOOTSTRAP = `<!-- FMAESTRO_BOOTSTRAP_V1 -->
 
 Команды: @maestro (вход), @regression (реестр), @test-* (диагностика)`;
 
-function makeLogger(directory) {
+export function makeLogger(directory) {
   const logDir =
     process.env.MAESTRO_BOOTSTRAP_LOG_DIR || path.join(directory, ".maestro");
-  const threshold = LOG_LEVELS[process.env.MAESTRO_BOOTSTRAP_LOG_LEVEL || "debug"] ?? 10;
-  const MASK_DEFAULT = "info,warn,error";
+  const levelEnv = process.env.MAESTRO_BOOTSTRAP_LOG_LEVEL || "info";
+  const threshold = LOG_LEVELS[levelEnv] ?? 10;
+  // Явная маска — список уровней через запятую. Если не задана, выводится из
+  // порога: все уровни >= LOG_LEVEL. Чтобы «и порог, и маска» давали единое
+  // поведение, они применяются как пересечение.
+  const maskEnv = process.env.MAESTRO_BOOTSTRAP_LOG_MASK;
   const enabled = new Set(
-    (process.env.MAESTRO_BOOTSTRAP_LOG_MASK || MASK_DEFAULT)
-      .split(",")
-      .map((s) => s.trim())
-      .filter(Boolean)
-      .filter((l) => l in LOG_LEVELS),
+    maskEnv
+      ? maskEnv.split(",").map((s) => s.trim()).filter(Boolean).filter((l) => l in LOG_LEVELS)
+      : Object.keys(LOG_LEVELS).filter((l) => LOG_LEVELS[l] >= threshold),
   );
 
   try {
@@ -78,11 +80,32 @@ function makeLogger(directory) {
 
   return {
     logDir,
+    level: levelEnv,
     mask: [...enabled].join(","),
     debug: (msg, extra) => write("debug", msg, extra),
     info: (msg, extra) => write("info", msg, extra),
     warn: (msg, extra) => write("warn", msg, extra),
     error: (msg, extra) => write("error", msg, extra),
+  };
+}
+
+// Ограниченная карта: при переполнении вытесняет самую старую запись по
+// порядку вставки — защита от неограниченного роста в долгоживущем процессе.
+// Для диагностического плагина вытеснение записи активной сессии безопасно:
+// логирование такой сессии тихо прекратится до освобождения слота.
+export function makeBoundedMap(max = 1024) {
+  const m = new Map();
+  return {
+    get: (k) => m.get(k),
+    set: (k, v) => {
+      if (!m.has(k) && m.size >= max) {
+        const oldest = m.keys().next().value;
+        if (oldest !== undefined) m.delete(oldest);
+      }
+      return m.set(k, v);
+    },
+    delete: (k) => m.delete(k),
+    size: () => m.size,
   };
 }
 
@@ -99,14 +122,14 @@ export const MaestroBootstrapPlugin = async ({ directory }) => {
   log.info("plugin initialized", {
     agent: "maestro",
     logDir: log.logDir,
-    level: process.env.MAESTRO_BOOTSTRAP_LOG_LEVEL || "debug",
-    mask: log.mask ?? null,
+    level: log.level,
+    mask: log.mask,
   });
 
   // sessionID -> agent (для фильтрации tool-логов по агенту)
-  const agentBySession = new Map();
+  const agentBySession = makeBoundedMap();
   // callID -> timestamp (для подсчёта длительности тула)
-  const toolCalls = new Map();
+  const toolCalls = makeBoundedMap(2048);
   // Ключевые тулы pipeline: загрузка скилла, диспатч субагентов, bash (тесты/сборка/линт/коммиты)
   const KEY_TOOLS = new Set(["skill", "task", "bash"]);
 

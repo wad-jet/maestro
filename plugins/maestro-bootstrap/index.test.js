@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MaestroBootstrapPlugin } from "./index.js";
+import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap } from "./index.js";
 
 function readLogs(dir) {
   const logDir = path.join(dir, ".maestro");
@@ -19,9 +19,22 @@ function readLogs(dir) {
 }
 
 describe("maestro-bootstrap tool logging", () => {
-  let dir, plugin, hooks, entries;
+  let dir, plugin, hooks, entries, savedLogEnv;
+
+  const LOG_ENV = [
+    "MAESTRO_BOOTSTRAP_LOG_MASK",
+    "MAESTRO_BOOTSTRAP_LOG_LEVEL",
+    "MAESTRO_BOOTSTRAP_LOG_DIR",
+  ];
 
   before(async () => {
+    // Изолируем env: блок полагается на дефолтные настройки логгера, чтобы
+    // внешние переменные окружения не меняли поведение (и невалидировали).
+    savedLogEnv = {};
+    for (const k of LOG_ENV) {
+      savedLogEnv[k] = process.env[k];
+      delete process.env[k];
+    }
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-test-"));
     plugin = await MaestroBootstrapPlugin({ directory: dir });
     hooks = plugin;
@@ -30,6 +43,10 @@ describe("maestro-bootstrap tool logging", () => {
 
   after(() => {
     fs.rmSync(dir, { recursive: true, force: true });
+    for (const k of LOG_ENV) {
+      if (savedLogEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedLogEnv[k];
+    }
   });
 
   it("should register chat.params and tool.execute hooks", () => {
@@ -217,12 +234,27 @@ describe("maestro-bootstrap log mask (MAESTRO_BOOTSTRAP_LOG_MASK)", () => {
   });
 
   it("explicit full mask re-enables debug (backward compat)", async () => {
-    const { dir, p } = await build("debug,info,warn,error");
+    const { dir, p } = await build("debug,info,warn,error", "debug");
     try {
       await seed(p, "s");
       await p["tool.execute.before"]({ tool: "read", sessionID: "s", callID: "dbg" }, {});
       const entries = readLogs(dir);
       assert.ok(entries.find((e) => e.callID === "dbg"), "debug logged when explicitly in mask");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("LOG_LEVEL=debug (no mask) derives mask incl. debug", async () => {
+    const { dir, p } = await build(null, "debug");
+    try {
+      await seed(p, "s");
+      await p["tool.execute.before"]({ tool: "read", sessionID: "s", callID: "dbg" }, {});
+      const entries = readLogs(dir);
+      assert.ok(entries.find((e) => e.callID === "dbg"), "debug enabled via LOG_LEVEL=debug");
+      const init = entries.find((e) => e.msg === "plugin initialized");
+      assert.equal(init.level, "debug");
+      assert.equal(init.mask, "debug,info,warn,error");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -261,7 +293,7 @@ describe("maestro-bootstrap log mask (MAESTRO_BOOTSTRAP_LOG_MASK)", () => {
   });
 
   it("disabling info suppresses info-level entries only", async () => {
-    const { dir, p } = await build("debug,warn,error");
+    const { dir, p } = await build("debug,warn,error", "debug"); // порог debug не режет mask-уровни
     try {
       await seed(p, "s");
       await p["tool.execute.before"]({ tool: "bash", sessionID: "s", callID: "inf" }, { args: {} });
@@ -301,5 +333,123 @@ describe("maestro-bootstrap log mask (MAESTRO_BOOTSTRAP_LOG_MASK)", () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("maestro-bootstrap makeLogger (level filtering)", () => {
+  const KEY = "MAESTRO_BOOTSTRAP_LOG_MASK";
+  const LEVEL = "MAESTRO_BOOTSTRAP_LOG_LEVEL";
+  let saved;
+
+  before(() => {
+    saved = { key: process.env[KEY], level: process.env[LEVEL] };
+    delete process.env[KEY];
+    delete process.env[LEVEL];
+  });
+
+  after(() => {
+    if (saved.key === undefined) delete process.env[KEY];
+    else process.env[KEY] = saved.key;
+    if (saved.level === undefined) delete process.env[LEVEL];
+    else process.env[LEVEL] = saved.level;
+  });
+
+  function build(mask, level) {
+    delete process.env[KEY];
+    delete process.env[LEVEL];
+    if (mask) process.env[KEY] = mask;
+    if (level) process.env[LEVEL] = level;
+    const host = fs.mkdtempSync(path.join(os.tmpdir(), "fab-host-"));
+    const log = makeLogger(host);
+    return { host, log };
+  }
+
+  function cleanup(host) {
+    fs.rmSync(host, { recursive: true, force: true });
+  }
+
+  it("error level can be disabled by mask", () => {
+    const { host, log } = build("debug,info,warn"); // без error
+    try {
+      log.error("some.error", { detail: "x" });
+      const entries = readLogs(host);
+      assert.equal(entries.find((e) => e.msg === "some.error"), undefined, "error suppressed when not in mask");
+    } finally {
+      cleanup(host);
+    }
+  });
+
+  it("error level logged when in mask", () => {
+    const { host, log } = build("debug,info,warn,error");
+    try {
+      log.error("some.error", { detail: "x" });
+      const entries = readLogs(host);
+      const entry = entries.find((e) => e.msg === "some.error");
+      assert.ok(entry, "error logged when in mask");
+      assert.equal(entry.level, "error");
+      assert.equal(entry.detail, "x");
+    } finally {
+      cleanup(host);
+    }
+  });
+
+  it("error level can be disabled by threshold when mask includes it", () => {
+    const { host, log } = build(null, "error"); // mask выведен из порога: только error
+    try {
+      log.error("some.error", {});
+      const entries = readLogs(host);
+      assert.ok(entries.find((e) => e.msg === "some.error"), "error logged at threshold error");
+    } finally {
+      cleanup(host);
+    }
+  });
+
+  it("invalid LOG_LEVEL value falls back to debug threshold", () => {
+    const { host, log } = build(null, "bogus"); // невалидный уровень → порог 10 (debug)
+    try {
+      log.debug("d", {});
+      log.error("e", {});
+      const entries = readLogs(host);
+      assert.ok(entries.find((e) => e.msg === "d"), "debug logged (threshold fallback)");
+      assert.ok(entries.find((e) => e.msg === "e"), "error logged");
+    } finally {
+      cleanup(host);
+    }
+  });
+});
+
+describe("maestro-bootstrap makeBoundedMap", () => {
+  it("evicts oldest entry when exceeding max", () => {
+    const m = makeBoundedMap(2);
+    m.set("a", 1);
+    m.set("b", 2);
+    m.set("c", 3); // вытесняет "a"
+    assert.equal(m.size(), 2);
+    assert.equal(m.get("a"), undefined, "oldest evicted");
+    assert.equal(m.get("b"), 2);
+    assert.equal(m.get("c"), 3);
+  });
+
+  it("delete reduces size and allows reuse", () => {
+    const m = makeBoundedMap(2);
+    m.set("a", 1);
+    m.set("b", 2);
+    m.delete("a");
+    m.set("c", 3);
+    m.set("d", 4); // вытесняет "b" (старейший из оставшихся)
+    assert.equal(m.size(), 2);
+    assert.equal(m.get("b"), undefined);
+    assert.equal(m.get("c"), 3);
+    assert.equal(m.get("d"), 4);
+  });
+
+  it("resetting existing key does not evict (size stable)", () => {
+    const m = makeBoundedMap(2);
+    m.set("a", 1);
+    m.set("b", 2);
+    m.set("a", 10);
+    assert.equal(m.size(), 2, "re-set does not grow size");
+    assert.equal(m.get("a"), 10);
+    assert.equal(m.get("b"), 2);
   });
 });
