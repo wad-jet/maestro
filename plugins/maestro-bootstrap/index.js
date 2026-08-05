@@ -13,6 +13,7 @@
  * (gitignored), one file per day for future rotation. Levels: debug / info / warn / error.
  * Config via env:
  *   MAESTRO_BOOTSTRAP_LOG_LEVEL  (default: debug)
+ *   MAESTRO_BOOTSTRAP_LOG_MASK   (default: debug,info,warn,error)
  *   MAESTRO_BOOTSTRAP_LOG_DIR    (default: <directory>/.maestro)
  */
 
@@ -39,6 +40,14 @@ function makeLogger(directory) {
   const logDir =
     process.env.MAESTRO_BOOTSTRAP_LOG_DIR || path.join(directory, ".maestro");
   const threshold = LOG_LEVELS[process.env.MAESTRO_BOOTSTRAP_LOG_LEVEL || "debug"] ?? 10;
+  const MASK_DEFAULT = "debug,info,warn,error";
+  const enabled = new Set(
+    (process.env.MAESTRO_BOOTSTRAP_LOG_MASK || MASK_DEFAULT)
+      .split(",")
+      .map((s) => s.trim())
+      .filter(Boolean)
+      .filter((l) => l in LOG_LEVELS),
+  );
 
   try {
     fs.mkdirSync(logDir, { recursive: true });
@@ -50,6 +59,7 @@ function makeLogger(directory) {
     path.join(logDir, `maestro-bootstrap-${date}.log`);
 
   const write = (level, msg, extra) => {
+    if (!enabled.has(level)) return;
     if (LOG_LEVELS[level] < threshold) return;
     const now = new Date();
     const date = now.toISOString().slice(0, 10);
@@ -68,6 +78,7 @@ function makeLogger(directory) {
 
   return {
     logDir,
+    mask: [...enabled].join(","),
     debug: (msg, extra) => write("debug", msg, extra),
     info: (msg, extra) => write("info", msg, extra),
     warn: (msg, extra) => write("warn", msg, extra),
@@ -89,6 +100,7 @@ export const MaestroBootstrapPlugin = async ({ directory }) => {
     agent: "maestro",
     logDir: log.logDir,
     level: process.env.MAESTRO_BOOTSTRAP_LOG_LEVEL || "debug",
+    mask: log.mask ?? null,
   });
 
   // sessionID -> agent (для фильтрации tool-логов по агенту)

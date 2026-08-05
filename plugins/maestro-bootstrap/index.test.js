@@ -161,3 +161,131 @@ describe("maestro-bootstrap tool logging", () => {
     assert.equal(emptyEntry, undefined, "no empty_result entry for non-maestro session");
   });
 });
+
+describe("maestro-bootstrap log mask (MAESTRO_BOOTSTRAP_LOG_MASK)", () => {
+  // Каждый case строит собственный плагин, т.к. маска читается при инициализации.
+  const KEY = "MAESTRO_BOOTSTRAP_LOG_MASK";
+  const LEVEL = "MAESTRO_BOOTSTRAP_LOG_LEVEL";
+  let saved;
+
+  before(() => {
+    saved = { key: process.env[KEY], level: process.env[LEVEL] };
+    delete process.env[KEY];
+    delete process.env[LEVEL];
+  });
+
+  after(() => {
+    if (saved.key === undefined) delete process.env[KEY];
+    else process.env[KEY] = saved.key;
+    if (saved.level === undefined) delete process.env[LEVEL];
+    else process.env[LEVEL] = saved.level;
+  });
+
+  // Не-ключевой тул (не skill/task/bash) логируется на debug; bash — на info;
+  // session.error — на warn. env ставится ДО создания плагина (маска и порог
+  // читаются при инициализации).
+  async function build(mask, level) {
+    delete process.env[KEY];
+    delete process.env[LEVEL];
+    if (mask) process.env[KEY] = mask;
+    if (level) process.env[LEVEL] = level;
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-mask-"));
+    const p = await MaestroBootstrapPlugin({ directory: dir });
+    return { dir, p };
+  }
+
+  async function seed(p, sessionID) {
+    await p["chat.params"]({ sessionID, agent: "maestro", model: { providerID: "p", modelID: "m" } }, {});
+  }
+
+  it("default mask logs all levels (backward compat)", async () => {
+    const { dir, p } = await build(null);
+    try {
+      await seed(p, "s");
+      await p["tool.execute.before"]({ tool: "read", sessionID: "s", callID: "dbg" }, {});
+      await p["tool.execute.before"]({ tool: "bash", sessionID: "s", callID: "inf" }, { args: {} });
+      await p.event({ event: { type: "session.error", properties: { sessionID: "s", error: { type: "x", message: "m" } } } });
+      const entries = readLogs(dir);
+      assert.ok(entries.find((e) => e.callID === "dbg"), "debug-level entry logged by default");
+      assert.ok(entries.find((e) => e.callID === "inf"), "info-level entry logged by default");
+      assert.ok(entries.find((e) => e.msg === "session.error"), "warn-level entry logged by default");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("disabling debug suppresses debug-level entries only", async () => {
+    const { dir, p } = await build("info,warn,error");
+    try {
+      await seed(p, "s");
+      await p["tool.execute.before"]({ tool: "read", sessionID: "s", callID: "dbg" }, {});
+      await p["tool.execute.before"]({ tool: "bash", sessionID: "s", callID: "inf" }, { args: {} });
+      await p.event({ event: { type: "session.error", properties: { sessionID: "s", error: { type: "x", message: "m" } } } });
+      const entries = readLogs(dir);
+      assert.equal(entries.find((e) => e.callID === "dbg"), undefined, "debug suppressed");
+      assert.ok(entries.find((e) => e.callID === "inf"), "info still logged");
+      assert.ok(entries.find((e) => e.msg === "session.error"), "warn still logged");
+      const init = entries.find((e) => e.msg === "plugin initialized");
+      assert.equal(init.mask, "info,warn,error");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("disabling warn suppresses warn-level entries only", async () => {
+    const { dir, p } = await build("debug,info,error");
+    try {
+      await seed(p, "s");
+      await p["tool.execute.before"]({ tool: "bash", sessionID: "s", callID: "inf" }, { args: {} });
+      await p.event({ event: { type: "session.error", properties: { sessionID: "s", error: { type: "x", message: "m" } } } });
+      const entries = readLogs(dir);
+      assert.ok(entries.find((e) => e.callID === "inf"), "info still logged");
+      assert.equal(entries.find((e) => e.msg === "session.error"), undefined, "warn suppressed");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("disabling info suppresses info-level entries only", async () => {
+    const { dir, p } = await build("debug,warn,error");
+    try {
+      await seed(p, "s");
+      await p["tool.execute.before"]({ tool: "bash", sessionID: "s", callID: "inf" }, { args: {} });
+      await p["tool.execute.before"]({ tool: "read", sessionID: "s", callID: "dbg" }, {});
+      const entries = readLogs(dir);
+      assert.equal(entries.find((e) => e.callID === "inf"), undefined, "info suppressed");
+      assert.ok(entries.find((e) => e.callID === "dbg"), "debug still logged");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("mask intersects with MAESTRO_BOOTSTRAP_LOG_LEVEL threshold", async () => {
+    const { dir, p } = await build("debug,info,warn,error", "info"); // порог отсекает debug
+    try {
+      await seed(p, "s");
+      await p["tool.execute.before"]({ tool: "read", sessionID: "s", callID: "dbg" }, {});
+      await p["tool.execute.before"]({ tool: "bash", sessionID: "s", callID: "inf" }, { args: {} });
+      const entries = readLogs(dir);
+      assert.equal(entries.find((e) => e.callID === "dbg"), undefined, "debug cut by threshold");
+      assert.ok(entries.find((e) => e.callID === "inf"), "info still logged");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("mask without valid levels disables all levels", async () => {
+    const { dir, p } = await build("bogus,nonexsistent"); // ни один уровень не валиден
+    try {
+      await seed(p, "s");
+      await p["tool.execute.before"]({ tool: "bash", sessionID: "s", callID: "inf" }, { args: {} });
+      await p.event({ event: { type: "session.error", properties: { sessionID: "s", error: { type: "x", message: "m" } } } });
+      const entries = readLogs(dir);
+      assert.equal(entries.find((e) => e.msg === "plugin initialized"), undefined, "no logs with invalid-only mask");
+      assert.equal(entries.find((e) => e.callID === "inf"), undefined, "no info with invalid-only mask");
+      assert.equal(entries.find((e) => e.msg === "session.error"), undefined, "no warn with invalid-only mask");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
