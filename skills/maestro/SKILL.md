@@ -33,9 +33,9 @@ Interactive — агент комментирует находки по ходу
 - superpowers:brainstorming — для сложных фич (3+ модуля, новая таблица, public API)
 - superpowers:writing-plans — создание implementation plan
 - superpowers:subagent-driven-development — исполнение plan (implementer + reviewer per task)
+- superpowers:test-driven-development — TDD-дисциплина для шага 13 (SDD)
 - superpowers:using-git-worktrees — изоляция workspace
-- superpowers:git-flow-branch-creator — имя feature-ветки
-- superpowers:manual-docs — пользовательская документация
+- manual-docs (локальный скил репозитория) — пользовательская документация
 - superpowers:requesting-code-review — финальное ревью
 - superpowers:finishing-a-development-branch — завершение
 - superpowers:systematic-debugging — поиск и анализ багов (debug sub-pipeline)
@@ -169,7 +169,13 @@ Interactive — агент комментирует находки по ходу
       В interactive mode: (a) да — (b) skip → D1 — (c) отмена
 🟡  3. [agent] Pre-flight: диагностика состояния (см. ниже Фазу 1)
 🟡  4. [agent] Pre-flight: запрос действия у пользователя (см. ниже Фазу 2)
-🟡  5. [agent] git-flow-branch-creator -> имя feature-branch
+🟡  5. [agent] Имя ветки (inline-конвенция)
+      — Имя зависит от маршрута шага 1:
+        - feature → `feature/<kebab-case>`, например `feature/export-csv`
+        - bugfix → `fix/<kebab-case>`, например `fix/login-null-pointer`
+        - hotfix → `hotfix/<kebab-case>`, например `hotfix/fix-broken-tests`
+      — `<kebab-case>` — короткое название на латинице, выводится оркестратором,
+        без отдельного скила. При неоднозначности — уточнить у пользователя.
 🟢  6. [agent] Изоляция:
       - Если выбран worktree -> using-git-worktrees (git worktree add -b <branch>)
       - Если выбрана просто ветка -> git checkout -b <branch>
@@ -525,7 +531,7 @@ pipeline; после завершения переход на шаг 11 (writing
 > "Уже в worktree на feature/old-xxx. **(a)** выйти в основной репо → создать новый worktree — **(b)** ветвиться отсюда ($GIT_DIR уже есть) — **(c)** отмена"
 
 После выбора пользователя оркестратор:
-- Создаёт ветку (`git-flow-branch-creator` + `git checkout -b`)
+- Создаёт ветку (`feature/<kebab-case>` / `fix/<kebab-case>` / `hotfix/<kebab-case>` по inline-конвенции + `git checkout -b`)
 - Опционально — worktree (`using-git-worktrees`)
 
 ## Интеграция с существующими скиллами
@@ -534,10 +540,10 @@ pipeline; после завершения переход на шаг 11 (writing
 |---|---|
 | Дизайн | `brainstorming` |
 | План | `writing-plans` |
-| Ветка | `git-flow-branch-creator` (определяет имя ветки) |
+| Ветка | inline-конвенция `feature/<kebab-case>` / `fix/<kebab-case>` / `hotfix/<kebab-case>` (определяет имя ветки) |
 | Изоляция | `using-git-worktrees` (worktree) / `git checkout -b` (простая ветка) |
 | Имплементация | `subagent-driven-development` + `test-driven-development` |
-| Документация | `manual-docs` |
+| Документация | `manual-docs` (локальный скил репозитория) |
 | Ревью | `requesting-code-review` |
 | Завершение | `finishing-a-development-branch`, `git-commit` |
 | Регрессия | `@regression` (standalone, по запросу) — реестр рисков `regression/` (в git) |
@@ -1034,7 +1040,7 @@ Pipeline не имеет механизма cross-repo координации (�
 Шаг 4:  [agent] Pre-flight — Фаза 2: запрос
         "Изолировать в worktree? (a) worktree — (b) git checkout -b"
         -> Пользователь: (b) проще на одной ветке
-Шаг 5:  [agent] git-flow-branch-creator -> feature/resource-activation
+Шаг 5:  [agent] имя ветки (inline-конвенция) -> feature/resource-activation
 Шаг 6:  [agent] git checkout -b feature/resource-activation
 Шаг 7:  -- HITL: фича сложная -> идём на brainstorm --
 Шаг 8:  [agent] Brainstorming -> Spec
