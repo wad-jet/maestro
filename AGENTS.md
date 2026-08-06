@@ -8,6 +8,7 @@ This is the **authoring repo** for the OpenCode `maestro` system (the "maestro" 
 - `agents/*.md` — OpenCode agent configs (`mode`, `permission`, `hidden`, `description` in YAML frontmatter). `maestro.md` is `mode: primary`; the rest (`haiku`, `sonnet`, `opus`, `fable`, `code-reviewer`) are subagents.
 - `commands/*.md` — `@command` configs (frontmatter `agent:` field).
 - `skills/maestro/{implementer-prompt.md,spec-review-prompt.md,stack-detection.md}` — support files referenced by SKILL.md.
+- `skills/init/{SKILL.md,init-context.md}` — `/maestro-init` skill for bootstrapping new projects (project-context.md 14 categories, architecture design, scaffold, roadmap).
 - `skills/manual-docs/SKILL.md` — user-docs skill for `manual_docs/` (Diátaxis).
 - `plugins/maestro-bootstrap/` — ESM OpenCode plugin.
 

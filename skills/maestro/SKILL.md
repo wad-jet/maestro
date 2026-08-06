@@ -105,7 +105,9 @@ Interactive — агент комментирует находки по ходу
 🟡  0. [agent] Load Project Context
       — Читает docs/project-context.md (если существует)
       — Если файла нет: HITL-диалог для создания по 14 категориям
-        (включая секцию 14 — Commands, см. ниже)
+        (включая секцию 14 — Commands, см. ниже). Перечень категорий —
+        см. `skills/init/init-context.md`; для нового проекта рекомендуется
+        команда `/maestro-init` (создаёт context + дизайн + scaffold + roadmap).
       — Если файл есть: HITL-подтверждение актуальности
             — Устанавливает PROJECT_CONTEXT (переменная сессии)
             — Извлекает команды из секции 14 (Commands):
@@ -925,6 +927,8 @@ active ── отмена (Gate: отмена) ──→ released (status: canc
 
 - Spec файлы: `docs/superpowers/specs/YYYY-MM-DD-<feature-name>-design.md`
 - Plan файлы: `docs/superpowers/plans/YYYY-MM-DD-<feature-name>-plan.md`
+- Roadmap: `docs/roadmap.md` (MVP + этапы развития; создаётся `/maestro-init`
+  для новых проектов) — вход для планирования спринтов
 - SDD progress: `.maestro/sdd/progress.md` (в gitignore)
 - Regression registry: `regression/entries/YYYY-MM-DD-<feature-name>.md`
   (в git, см. секцию «Regression Registry»)
