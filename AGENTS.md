@@ -14,7 +14,7 @@ This is the **authoring repo** for the OpenCode `maestro` system (the "maestro" 
 
 ## Gotchas
 
-- **No git repo here.** `git`, `opencode.json`, `docs/project-context.md`, `regression/`, `manual_docs/`, `.opencode/` all belong to the target application repo, not this one. Git commands fail here — don't run the pipeline steps here.
+- **No git repo here.** `git`, `opencode.json`, `docs/project-context.md`, `regression/`, `.opencode/` all belong to the target application repo, not this one. Git commands fail here — don't run the pipeline steps here. **Exception:** `manual_docs/` *does* live here — it documents the maestro skill itself (user-facing docs for developers of the target app); the target app has its own `manual_docs/` for its own product.
 - **`opencode.json` doesn't exist here.** The plugin README says it is registered there; that registration lives in the application repo's `opencode.json`.
 - **Agent was renamed `feature-agent` → `maestro` (2026-08-03).** The application repo must be updated in lockstep: `opencode.json` keys `agent.feature-agent` → `agent.maestro` and plugin path `plugins/feature-agent-bootstrap/index.js` → `plugins/maestro-bootstrap/index.js`, `.opencode/` mirrors (`agents/maestro.md`, `skills/maestro/`), and `.gitignore` entry `.feature-agent/` → `.maestro/`.
 - **Russian is the working language.** All HITL gates, user messages, agent descriptions, and docs are in Russian. Match it in new content.
@@ -26,6 +26,7 @@ This is the **authoring repo** for the OpenCode `maestro` system (the "maestro" 
 - `agents/*.md` → `.opencode/agents/*.md`
 - `commands/*.md` → `.opencode/commands/*.md`
 - any skill under `skills/` → `.opencode/skills/<name>/SKILL.md` (see `skills/manual-docs/SKILL.md` → Правило 5)
+- **Changes to `skills/maestro/SKILL.md`, `commands/*.md` or `agents/*.md` must also be reflected in `manual_docs/`** (user-facing docs for the maestro skill). Keeping `manual_docs/` in sync is part of the acceptance criteria for skill changes — see `manual_docs/how-to/keep-docs-up-to-date.md`.
 
 SKILL.md files are read by the orchestrator agent; `implementer-prompt.md` is self-contained and must stay loadable without the `skill` tool.
 

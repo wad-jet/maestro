@@ -1,0 +1,65 @@
+# Выбор моделей
+
+[Назад к оглавлению](../index.md)
+
+## 🎯 Назначение
+
+Справочник tier-моделей и их ролей в pipeline скилла `maestro`. Модели
+настраиваются пользователем в `opencode.json`; выбор делает оркестратор по
+tier-правилам.
+
+## 📖 Tier → тип задачи
+
+| Tier | Когда использовать | OpenCode сабагент |
+|---|---|---|
+| **Haiku** (быстрая/дешёвая) | Механические task-и: 1-2 файла, полный spec, трансляция+тесты | `haiku` |
+| **Sonnet** (средняя/сбалансированная) | Интеграционные task-и: multi-file, pattern matching, debugging | `sonnet` |
+| **Opus** (наиболее мощная) | Архитектура, design judgment, final whole-branch review | `opus` |
+| **Fable** (креативная) | Примеры, метафоры, аналогии, пояснения в стиле историй | `fable` |
+
+## 📖 Шаг → Tier
+
+| Шаг | Tier | OpenCode сабагент |
+|---|---|---|
+| `spec_review` (шаг 9) | opus | `opus` |
+| `task_reviewer` (шаг 13, per-task) | sonnet | `sonnet` |
+| `code_review` (шаг 16) | opus | `code-reviewer` |
+| `implementer_mechanical` (шаг 13, 1-2 файла) | haiku | `haiku` |
+| `implementer_integration` (шаг 13, multi-file) | sonnet | `sonnet` |
+| `explain` (по запросу, примеры/метафоры) | fable | `fable` |
+
+**Fix-loop эскалация (rounds 4-5):** минимум на tier выше предыдущей попытки.
+
+> ⚠️ Без явного выбора tier сабагент наследует модель сессии (часто самую
+> дорогую) — это разрушает экономику tier-выбора. Всегда диспатчить сабагента
+> нужного tier'а.
+
+## 📖 Субагенты и их роли
+
+| Сабагент | Файл | Редактирование | Роль |
+|---|---|---|---|
+| `haiku` | `agents/haiku.md` | edit+bash | Механические задачи, юнит-тесты |
+| `sonnet` | `agents/sonnet.md` | edit+bash | Интеграционные, multi-file, отладка |
+| `opus` | `agents/opus.md` | read-only | Spec Review, security audit, архитектура |
+| `fable` | `agents/fable.md` | read-only | Примеры, метафоры, пояснения |
+| `code-reviewer` | `agents/code-reviewer.md` | bash+read (без edit) | Финальное ревью ветки |
+
+Все субагенты, кроме `maestro` и `code-reviewer`, объявлены `hidden: true`
+(вызываются только программно через `task` tool). `task: deny` — субагенты не
+диспатчат вложенные под-агенты (один уровень вложенности).
+
+## 💡 Как диспатч работает в OpenCode
+
+Модель жёстко привязана к именованному сабагенту в `opencode.json`
+(`agent.{haiku,sonnet,opus}.model`). `task` tool не принимает параметр `model` —
+оркестратор выбирает **сабагента** по таблице «Шаг → Tier».
+
+```
+SDD-шаблон:  Subagent (general-purpose): model: haiku
+OpenCode:    task(subagent_type="haiku", prompt="...")
+```
+
+## 🔗 Связанные разделы
+
+- [Классификация фич](feature-classification.md)
+- [Агенты и модель доверия](../explanation/agents-and-trust.md)
