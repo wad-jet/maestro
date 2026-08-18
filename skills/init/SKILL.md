@@ -8,7 +8,7 @@ description: Use when bootstrapping a NEW project with maestro — generates doc
 ## Overview
 
 Сквозная инициализация нового проекта для maestro. Команда `/maestro-init`
-(агент `maestro`) запускает этот скилл. Цель — довести пустой/новый проект до
+запускает этот скилл в любой primary-сессии. Цель — довести пустой/новый проект до
 состояния, в котором обычный pipeline maestro может работать: есть
 `docs/project-context.md` (источник контекста шага 0), дизайн/архитектура,
 рабочий каркас кода и `docs/roadmap.md`.

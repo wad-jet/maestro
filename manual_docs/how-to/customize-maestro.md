@@ -45,7 +45,8 @@ OpenCode загружает скиллы/агентов/команды из це
 
 ## 💡 Примеры
 
-- **Изменить описание агента:** `agents/maestro.md` → `.opencode/agents/maestro.md`.
+- **Изменить описание субагента:** `agents/haiku.md` → `.opencode/agents/haiku.md`.
+- **Изменить команду входа:** `commands/maestro.md` → `.opencode/commands/maestro.md`.
 - **Добавить команду:** `commands/foo.md` → `.opencode/commands/foo.md`.
 - **Изменить pipeline:** `skills/maestro/SKILL.md` → `.opencode/skills/maestro/SKILL.md`.
 

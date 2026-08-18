@@ -140,24 +140,73 @@ STATUS: CLEAN | FINDINGS_FOUND
 | 6 | `AGENTS.md` | Синхронизация `agents/sanitizer.md` → `.opencode/agents/`. |
 | 7 | Smoke-тест-кейс (M2) | Зафиксировать в `agents/sanitizer.md` пример: промпт с `POSTGRES_PASSWORD` → ожидаемый `SANITIZER FINDINGS` с `type: env_secret`. |
 
+## Уход от агента `maestro` (предпосылка Этапа 2)
+
+> **Решение (2026-08-18):** планы — полностью уйти от агента `maestro`, оставить
+> только скилл. Это меняет роль плагина и является предпосылкой для sanitizer.
+
+### Влияние
+
+- **Bootstrap-инжекция** директивы скилла: **убрать** (скилл вызывается явно
+  через `@maestro`, агент-фильтр исчезает).
+- **Observability**: **сократить** до нужного — `task`-диспатчи (аудит-лог
+  sanitizer) + ошибки. Убрать детальное bash/skill-логирование.
+- **Sanitizer (Ур.1)**: **добавить**, глобально на все `task`-диспатчи (без
+  агент-фильтра).
+- **File access control**: нативные permissions (не плагин).
+- Плагин из «bootstrap + observability для агента» превращается в
+  «глобальный sanitizer + минимальный аудит-лог + обработка ошибок».
+
+### Прочие компоненты «ухода от агента»
+
+- **Команда `@maestro` (новая, вход):** создать `commands/maestro.md`, которая в
+  любой сессии инструктирует «загрузи skill maestro и следуй pipeline».
+  Заменяет агента как точку входа. Поле `agent:` — без привязки к агенту.
+- `agents/maestro.md` — удалить (primary-агента нет).
+- `commands/regression.md`, `commands/maestro-init.md` — перепривязать: убрать
+  `agent: maestro` (работают в любой сессии).
+- `commands/test-maestro.md` — удалить (агента больше нет).
+- `SKILL.md` — модель оркестратора: не агент, а скилл в primary-сессии.
+- `manual_docs/`, `AGENTS.md`, README, `plugins/maestro-bootstrap/README.md` —
+  синхронизация.
+
+### Порядок
+
+1. Сначала «уход от агента» (пересмотр плагина + удаление агента + команда входа).
+2. Затем Этап 2 sanitizer поверх новой архитектуры плагина.
+
 ## Этап 2 — пересмотр плагина + реализация (второй PR)
 
-| # | Компонент | Действие |
-|---|---|---|
-| 8 | Пересмотр `maestro-bootstrap` | Документировать текущую миссию (bootstrap + observability); НЕ раздувать — sanitizer и file access control в отдельном модуле. |
-| 9 | `plugins/maestro-sanitizer/` | Новый плагин: `sanitize(prompt)` по правилам SKILL.md (env-secrets, поля данных, .env, DB/SFTP creds, ledger). Хук на `task`-диспатч (Уровень 1). Тесты. |
-| 10 | File access control в плагине | Перехват Read/Glob/Grep/Bash-read для untrusted сабагентов → HITL: (a) разрешить / (b) запретить. Trusted — skip. |
-| 11 | Whitelist (I4) | `.maestro/sanitizer-whitelist.json` — пути/паттерны, где маскирование Ур.1 пропускается (напр. `test/fixtures/*`, `*.spec.ts`). |
-| 12 | Регистрация | Подключение `maestro-sanitizer` в `opencode.json` целевого репо (документировать в README). |
-| 13 | Аудит-лог | `.maestro/sanitizer-log.md` (что отфильтровано, без содержимого; что файл-доступ запрошен/разрешён/запрещён). |
+| # | Компонент | Действие | Тип |
+|---|---|---|---|
+| 8 | Пересмотр `maestro-bootstrap` | Согласовать назначение/функции плагина. **Решение:** sanitizer реализуется **внутри** `maestro-bootstrap` (не отдельным плагином). File access control — нативные permissions (Путь A). | — |
+| 9 | `plugins/maestro-bootstrap/` — sanitize | В `index.js`: функция `sanitize(prompt, rules, whitelist)` по правилам Context Sanitizer. Хук `tool.execute.before` на `task`: `output.args.prompt = sanitize(...)` (Уровень 1, авто без HITL). | Код |
+| 10 | File access control | **Нативные permissions** (Путь A): в `agents/*.md` untrusted сабагентов `read/grep/glob/list/bash: ask` + `external_directory: ask`. OpenCode сам показывает HITL (`once/always/reject`). НЕ код плагина. | Конфиг |
+| 11 | Whitelist (I4) | `.maestro/sanitizer-whitelist.json` — полный: `rules` (вкл/выкл категорий), `by_agent`, `patterns`. В authoring-репо — пример; реальный — в целевом. | Конфиг |
+| 12 | Аудит-лог | `.maestro/sanitizer-log.md` (что замаскировано, без содержимого; что файл-доступ запрошен/разрешён/запрещён — через `permission.asked/replied`). | Код |
+| 13 | Регистрация | `maestro-bootstrap` уже зарегистрирован в `opencode.json` целевого репо — sanitizer подхватится автоматически. | Док |
+| 14 | Тесты | Расширить `index.test.js` тестами sanitize-функции. | Код |
+
+## Подтверждённые решения Этапа 2 (ревью 2026-08-18)
+
+1. **File access control — Путь A (нативные permissions)**, не код плагина.
+2. **Trust-реконсиляция — Вариант 1 (статичный конфиг):** доверие на уровне
+   конфига агента (`allow`-permissions = trusted, `ask` = untrusted). trust-config.json
+   — только для sanitizer.
+3. **Ур.1 (плагин):** санитайзинг промпта `task`-тула (`output.args.prompt = sanitize(...)`),
+   авто без HITL.
+4. **Ур.2 (сабагент sanitizer):** всегда, доп. слой поверх плагина (видит
+   уже_замаскированный промпт — осознанный трейд-офф).
+5. **Whitelist — полный:** категории вкл/выкл + per-subagent + паттерны-исключения.
+6. **Плагин:** sanitizer внутри `maestro-bootstrap` (не отдельный модуль).
+7. **Аудит-лог:** `.maestro/sanitizer-log.md`.
 
 ## Порядок реализации
 
-- **Этап 1** — самостоятельный PR: сабагент + правила + гейт + docs + trust-config
-  guidance. Sanitizer там **primary** (не fallback). File access control —
-  инструктивно в промпте (enforcement на Этапе 2).
-- **Этап 2** — отдельный PR: плагин-санитайзер как Уровень 1 поверх + file access
-  control enforcement; сабагент остаётся доп. слоем.
+- **Этап 1** — сделан (PR `c8247b2`): сабагент + правила + гейт + docs.
+- **Уход от агента** — предпосылка: команда `@maestro` (вход), удаление
+  `agents/maestro.md`, перепривязка команд, пересмотр плагина (инжекция/observability).
+- **Этап 2** — sanitizer в плагине + нативные permissions + whitelist + аудит-лог + docs.
 
 ## Known gaps Этапа 1 (закрываются на Этапе 2)
 

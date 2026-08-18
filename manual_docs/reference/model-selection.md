@@ -46,7 +46,7 @@ tier-правилам.
 | `code-reviewer` | `agents/code-reviewer.md` | bash+read (без edit) | Финальное ревью ветки |
 | `sanitizer` | `agents/sanitizer.md` | read-only | Security review — поиск и пометка чувствительных данных |
 
-Все субагенты, кроме `maestro` и `code-reviewer`, объявлены `hidden: true`
+Все субагенты, кроме `code-reviewer`, объявлены `hidden: true`
 (вызываются только программно через `task` tool). `task: deny` — субагенты не
 диспатчат вложенные под-агенты (один уровень вложенности).
 

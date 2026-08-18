@@ -1,25 +1,26 @@
 # maestro-bootstrap
 
-Плагин для OpenCode, который гарантирует, что сессии агента `maestro`
-начинаются с директивы загрузить скил `maestro` и следовать pipeline из
-SKILL.md. Решает проблему «модель не загружает скил»: инжекция происходит на
-уровне opencode (hook `experimental.chat.messages.transform`), а не через
-рекомендацию в system prompt.
+Плагин для OpenCode: **глобальная observability** (не привязан к агенту).
+Раньше инжектил bootstrap-директиву в сессии агента `maestro`; после ухода от
+агента (2026-08-18) инжекция удалена — скилл `maestro` вызывается через команду
+`@maestro` в любой primary-сессии. Плагин остаётся для логирования ключевых
+событий и (в перспективе, Этап 2) санитайзинга task-промптов.
 
 ## Что делает
 
-- Инжектит bootstrap-директиву в **первое user-сообщение** каждой сессии,
-  где активный агент — `maestro`.
-- Другие сессии (другие агенты, обычный chat) не затронуты.
-- Защита от повторной инжекции через маркер `FMAESTRO_BOOTSTRAP_V1`.
-- Тихая деградация: любая ошибка логируется и не ломает сессию.
-- Логирование решений в файл (см. раздел «Логирование»).
+- Логирует вызовы `task`-тула (диспатч субагентов) — ядро observability.
+- Логирует ошибки/повторы сессий (`session.error`, `session.status.retry`).
+- Детектит пустой результат субагента (`tool.execute.after.empty_result`).
+- (Этап 2) Санитайзинг промптов `task` — отдельная задача
+  (см. `SECURITY-REVIEW-PLAN.md`).
+
+Плагин **глобальный** — не фильтрует по агенту, работает во всех сессиях.
 
 ## Логирование
 
-Плагин пишет JSONL-лог каждого решения в `.maestro/` (каталог
-gitignored, создаётся автоматически). Логи **разбиваются по дням** — один файл
-на дату, что упрощает будущую ротацию:
+Плагин пишет JSONL-лог в `.maestro/` (каталог gitignored, создаётся
+автоматически). Логи **разбиваются по дням** — один файл на дату, что упрощает
+будущую ротацию:
 
 ```
 .maestro/maestro-bootstrap-2026-08-01.log
@@ -29,17 +30,19 @@ gitignored, создаётся автоматически). Логи **разб�
 Формат строки:
 
 ```json
-{"ts":"<ISO>","level":"info|debug|warn|error","msg":"...", "sessionID":"...", "agent":"..."}
+{"ts":"<ISO>","level":"info|debug|warn|error","msg":"...", "sessionID":"...", "callID":"..."}
 ```
 
 Что логируется:
 
 - `plugin initialized` — загрузка плагина (info)
-- `transform: bootstrap injected` — инжекция выполнена (info)
-- `transform: marker already present, skip` — анти-дубль сработал (debug)
-- `transform: agent mismatch, skip` — агент не `maestro` (debug)
-- `transform: no user message / no messages, skip` — нечего обрабатывать (debug)
-- `transform: error` — исключение в хуке (error)
+- `tool.execute.before` — вызов `task`-тула (info)
+- `tool.execute.after` — завершение `task` + `durationMs` (info)
+- `tool.execute.after.empty_result` — субагент вернул пустой результат (warn)
+- `session.error` — ошибка/прерывание модели (warn)
+- `session.status.retry` — перезапрос модели (warn)
+
+Детальное логирование `bash`/`skill`/`read` убрано (сокращение observability).
 
 Настройки через переменные окружения:
 
@@ -59,16 +62,10 @@ gitignored, создаётся автоматически). Логи **разб�
 полностью сохраняется (обратная совместимость): `MAESTRO_BOOTSTRAP_LOG_LEVEL=debug`
 даёт debug-логи, `=info` — info и выше.
 
-По умолчанию `debug` **выключен** (`LOG_LEVEL=info`). Чтобы вернуть debug-логи,
-задайте `MAESTRO_BOOTSTRAP_LOG_LEVEL=debug` (или явно
-`MAESTRO_BOOTSTRAP_LOG_MASK=debug,info,warn,error`).
-
 Примеры:
 
-- Выключить только `debug`, оставив остальные:
-  `MAESTRO_BOOTSTRAP_LOG_MASK=info,warn,error`
-- Выключить только `warn` (порогом это не сделать):
-  `MAESTRO_BOOTSTRAP_LOG_MASK=debug,info,error`
+- Выключить только `info`, оставив остальные:
+  `MAESTRO_BOOTSTRAP_LOG_MASK=debug,warn,error`
 - Выключить логирование полностью (в маске ни одного валидного уровня):
   `MAESTRO_BOOTSTRAP_LOG_MASK=off` (или пустое значение).
 
@@ -78,45 +75,7 @@ gitignored, создаётся автоматически). Логи **разб�
 tail -f .maestro/maestro-bootstrap-$(date +%F).log | jq -r '.ts + " " + .level + " " + .msg'
 ```
 
-### Логирование туловых операций
-
-Плагин логирует ключевые этапы работы агента `maestro` (загрузка скиллов,
-диспатч субагентов, запуск тестов/сборки/линта, коммиты) через хуки
-`chat.params` + `tool.execute.before/after`. Логируются **только сессии
-агента `maestro`** — сессии других агентов не затронуты.
-
-Что логируется:
-
-- `tool.execute.before` — вызов тула (info для `skill`/`task`/`bash`, debug для прочих)
-- `tool.execute.after` — завершение тула + `durationMs` + `title` результата
-- `chat.params` — фиксация маппинга сессия → агент (внутренний, не пишется в лог)
-
-Пример строк:
-
-```json
-{"ts":"...","level":"info","msg":"tool.execute.before","sessionID":"...","callID":"...","tool":"bash","command":"npm run test:unit"}
-{"ts":"...","level":"info","msg":"tool.execute.after","sessionID":"...","callID":"...","tool":"bash","durationMs":31250,"command":"npm run test:unit","title":"Test Suites: 45 passed"}
-```
-
-### Логирование проблем субагентов и модели
-
-Плагин фиксирует сбои в работе субагентов и прерывания модели (только для
-сессий агента `maestro`) через хук `event` и детект пустого результата:
-
-- `session.error` — ошибка/прерывание модели (warn): `errorType` (например
-  `message_aborted` — прерывание, `api_error`, `provider_auth`,
-  `message_output_length`) + `errorMessage`
-- `session.status.retry` — перезапрос модели (warn): `attempt` + `message`
-- `tool.execute.after.empty_result` — субагент вернул пустой результат
-  (warn): `tool` = `task` без `title`/`output`/`metadata`
-
-Пример строк:
-
-```json
-{"ts":"...","level":"warn","msg":"session.error","sessionID":"...","errorType":"message_aborted","errorMessage":"Aborted by user"}
-{"ts":"...","level":"warn","msg":"session.status.retry","sessionID":"...","attempt":2,"message":"rate limit"}
-{"ts":"...","level":"warn","msg":"tool.execute.after.empty_result","sessionID":"...","callID":"...","tool":"task"}
-```
+## Тесты
 
 Тесты плагина запускаются встроенным runner-ом Node:
 
@@ -132,7 +91,7 @@ npm test
 
 ## Установка
 
-Плагин уже зарегистрирован в `opencode.json` (корень репо):
+Плагин зарегистрирован в `opencode.json` (корень репо):
 
 ```json
 "plugin": [
@@ -142,20 +101,7 @@ npm test
 
 Перезапустите opencode, чтобы плагин подхватился.
 
-## Как проверить
-
-1. Запустите `opencode` и выберите агента `maestro` (или вызовите
-   `@maestro`).
-2. Отправьте любое сообщение.
-3. Проверка: в контексте первого user-сообщения присутствует маркер
-   `FMAESTRO_BOOTSTRAP_V1` и текст директивы.
-
-Отрицательные проверки:
-
-- В сессии с другим агентом маркера нет.
-- В обычной сессии (агент не задан) маркера нет.
-
 ## Требования
 
-- OpenCode с поддержкой hook `experimental.chat.messages.transform`.
+- OpenCode с поддержкой hooks `tool.execute.before/after`, `event`.
 - Файл подключается как ESM (`"type": "module"` в `package.json`).

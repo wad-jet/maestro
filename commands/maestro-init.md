@@ -1,6 +1,5 @@
 ---
 description: Инициализация нового проекта: project-context.md (14 категорий), дизайн/архитектура, scaffold, roadmap
-agent: maestro
 ---
 Загрузи skill `init` (tool: skill) и следуй SKILL.md из `skills/init/`.
 

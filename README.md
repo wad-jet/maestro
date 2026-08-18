@@ -1,6 +1,6 @@
 # maestro-agent
 
-Authoring-репозиторий системы `maestro` — агента для OpenCode, который
+Authoring-репозиторий системы `maestro` — скилла для OpenCode, который
 оркестрирует сквозную реализацию фич и багфиксов в целевом приложении
 (brainstorm → spec → plan → SDD → review → docs, с HITL-гейтами).
 
@@ -12,16 +12,17 @@ Authoring-репозиторий системы `maestro` — агента дл�
 
 - `skills/maestro/SKILL.md` — спецификация pipeline (фичи/багфиксы, HITL-гейты,
   реестр регрессии). Читать перед изменениями в `skills/`.
-- `agents/*.md` — конфиги агентов OpenCode. `maestro.md` —
-  `mode: primary`; `haiku`, `sonnet`, `opus`, `fable`, `code-reviewer` —
-  субагенты, вызываются программно через `task`.
-- `commands/*.md` — конфиги `@command` (`@regression`, `@test-*`).
+- `agents/*.md` — конфиги субагентов OpenCode: `haiku`, `sonnet`, `opus`,
+  `fable`, `code-reviewer`, `sanitizer` — вызываются программно через `task`.
+  Отдельного primary-агента `maestro` нет — вход через команду `@maestro`.
+- `commands/*.md` — конфиги `@command` (`@maestro` — вход, `@regression`,
+  `@maestro-init`, `@test-*`).
 - `skills/maestro/` — вспомогательные файлы: `implementer-prompt.md`,
   `spec-review-prompt.md`, `stack-detection.md`.
 - `skills/manual-docs/SKILL.md` — скилл пользовательской документации
   (`manual_docs/`, Diátaxis).
-- `plugins/maestro-bootstrap/` — ESM-плагин OpenCode, гарантирующий, что сессии
-  агента `maestro` начинаются с загрузки скилла и следования pipeline.
+- `plugins/maestro-bootstrap/` — ESM-плагин OpenCode: глобальная observability
+  (логирование `task`-диспатчей и ошибок сессий).
 
 ## Синхронизация с целевым репо
 
@@ -50,3 +51,10 @@ node --test plugins/maestro-bootstrap/index.test.js
 плагина `plugins/maestro-bootstrap/index.js` в `opencode.json`, зеркала
 `.opencode/` (`agents/maestro.md`, `skills/maestro/`) и запись `.maestro/` в
 `.gitignore`.
+
+## Уход от агента (2026-08-18)
+
+Primary-агент `maestro` удалён. Осталась команда `@maestro` (вход) + скилл.
+Приложение должно быть обновлено в том же шаге: удалить `agent.maestro` и
+`agents/maestro.md` из `opencode.json`/`.opencode/`, добавить команду
+`@maestro`, убрать `agent: maestro` у `@regression`/`@maestro-init`.

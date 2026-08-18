@@ -18,8 +18,8 @@ function readLogs(dir) {
   return out;
 }
 
-describe("maestro-bootstrap tool logging", () => {
-  let dir, plugin, hooks, entries, savedLogEnv;
+describe("maestro-bootstrap global logging", () => {
+  let dir, hooks, entries, savedLogEnv;
 
   const LOG_ENV = [
     "MAESTRO_BOOTSTRAP_LOG_MASK",
@@ -36,8 +36,7 @@ describe("maestro-bootstrap tool logging", () => {
       delete process.env[k];
     }
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-test-"));
-    plugin = await MaestroBootstrapPlugin({ directory: dir });
-    hooks = plugin;
+    hooks = await MaestroBootstrapPlugin({ directory: dir });
     entries = [];
   });
 
@@ -49,68 +48,70 @@ describe("maestro-bootstrap tool logging", () => {
     }
   });
 
-  it("should register chat.params and tool.execute hooks", () => {
-    assert.equal(typeof hooks["chat.params"], "function");
+  it("should register event and tool.execute hooks, no chat.params/transform", () => {
+    assert.equal(typeof hooks.event, "function");
     assert.equal(typeof hooks["tool.execute.before"], "function");
     assert.equal(typeof hooks["tool.execute.after"], "function");
+    // Инжекция и привязка к агенту удалены (уход от агента maestro)
+    assert.equal(hooks["experimental.chat.messages.transform"], undefined);
+    assert.equal(hooks["chat.params"], undefined);
   });
 
-  it("should log tool execution for maestro session", async () => {
-    await hooks["chat.params"]({ sessionID: "s1", agent: "maestro", model: { providerID: "p", modelID: "m" } }, {});
+  it("should log task dispatch (before/after) globally, no agent filter", async () => {
     await hooks["tool.execute.before"](
-      { tool: "bash", sessionID: "s1", callID: "c1" },
+      { tool: "task", sessionID: "any-session", callID: "c-task" },
+      { args: { description: "impl task 1" } },
+    );
+    await hooks["tool.execute.after"](
+      { tool: "task", sessionID: "any-session", callID: "c-task", args: { description: "impl task 1" } },
+      { title: "DONE", output: "ok", metadata: {} },
+    );
+
+    entries = readLogs(dir);
+    const beforeEntry = entries.find((e) => e.msg === "tool.execute.before" && e.callID === "c-task");
+    const afterEntry = entries.find((e) => e.msg === "tool.execute.after" && e.callID === "c-task");
+
+    assert.ok(beforeEntry, "task before entry must exist (global, no agent)");
+    assert.equal(beforeEntry.level, "info");
+    assert.equal(beforeEntry.tool, "task");
+    assert.equal(beforeEntry.sessionID, "any-session");
+
+    assert.ok(afterEntry, "task after entry must exist");
+    assert.equal(afterEntry.tool, "task");
+    assert.equal(typeof afterEntry.durationMs, "number");
+    assert.equal(afterEntry.title, "DONE");
+  });
+
+  it("should NOT log non-task tools (bash/skill) in detail", async () => {
+    const before = readLogs(dir).length;
+    await hooks["tool.execute.before"](
+      { tool: "bash", sessionID: "s1", callID: "c-bash" },
       { args: { command: "npm run test:unit" } },
     );
     await hooks["tool.execute.after"](
-      { tool: "bash", sessionID: "s1", callID: "c1", args: { command: "npm run test:unit" } },
-      { title: "Test Suites: 45 passed", output: "...", metadata: {} },
+      { tool: "bash", sessionID: "s1", callID: "c-bash", args: { command: "npm run test:unit" } },
+      { title: "ok", output: "...", metadata: {} },
     );
-
-    entries = readLogs(dir);
-    const beforeEntry = entries.find((e) => e.msg === "tool.execute.before");
-    const afterEntry = entries.find((e) => e.msg === "tool.execute.after");
-
-    assert.ok(beforeEntry, "before entry must exist");
-    assert.equal(beforeEntry.level, "info");
-    assert.equal(beforeEntry.tool, "bash");
-    assert.equal(beforeEntry.sessionID, "s1");
-    assert.equal(beforeEntry.command, "npm run test:unit");
-
-    assert.ok(afterEntry, "after entry must exist");
-    assert.equal(afterEntry.tool, "bash");
-    assert.equal(afterEntry.sessionID, "s1");
-    assert.equal(typeof afterEntry.durationMs, "number");
-    assert.equal(afterEntry.title, "Test Suites: 45 passed");
-  });
-
-  it("should NOT log tool execution for non-maestro session", async () => {
-    await hooks["chat.params"]({ sessionID: "s2", agent: "haiku", model: { providerID: "p", modelID: "m" } }, {});
     await hooks["tool.execute.before"](
-      { tool: "bash", sessionID: "s2", callID: "c2" },
-      { args: { command: "npm run test:unit" } },
+      { tool: "skill", sessionID: "s1", callID: "c-skill" },
+      { args: { name: "maestro" } },
     );
-    const entries = readLogs(dir);
-    assert.equal(entries.filter((e) => e.callID === "c2").length, 0);
+    await hooks["tool.execute.after"](
+      { tool: "skill", sessionID: "s1", callID: "c-skill", args: { name: "maestro" } },
+      { title: "ok", output: "", metadata: {} },
+    );
+
+    const added = readLogs(dir).slice(before);
+    assert.equal(added.filter((e) => e.callID === "c-bash").length, 0, "bash not logged");
+    assert.equal(added.filter((e) => e.callID === "c-skill").length, 0, "skill not logged");
   });
 
-  it("should log skill and task as info level", async () => {
-    await hooks["chat.params"]({ sessionID: "s1", agent: "maestro", model: { providerID: "p", modelID: "m" } }, {});
-    await hooks["tool.execute.before"]({ tool: "skill", sessionID: "s1", callID: "c3" }, { args: { name: "maestro" } });
-    await hooks["tool.execute.after"]({ tool: "skill", sessionID: "s1", callID: "c3", args: { name: "maestro" } }, { title: "ok", output: "", metadata: {} });
-
-    entries = readLogs(dir);
-    const skillBefore = entries.filter((e) => e.msg === "tool.execute.before" && e.tool === "skill");
-    assert.ok(skillBefore.length >= 1);
-    assert.equal(skillBefore[0].level, "info");
-  });
-
-  it("should log session.error for maestro session", async () => {
-    await hooks["chat.params"]({ sessionID: "s1", agent: "maestro", model: { providerID: "p", modelID: "m" } }, {});
+  it("should log session.error globally", async () => {
     await hooks.event({
       event: {
         type: "session.error",
         properties: {
-          sessionID: "s1",
+          sessionID: "any-session",
           error: { type: "message_aborted", message: "Aborted by user" },
         },
       },
@@ -118,19 +119,18 @@ describe("maestro-bootstrap tool logging", () => {
 
     entries = readLogs(dir);
     const errEntry = entries.find((e) => e.msg === "session.error");
-    assert.ok(errEntry, "session.error entry must exist");
+    assert.ok(errEntry, "session.error entry must exist (global)");
     assert.equal(errEntry.level, "warn");
-    assert.equal(errEntry.sessionID, "s1");
+    assert.equal(errEntry.sessionID, "any-session");
     assert.equal(errEntry.errorType, "message_aborted");
   });
 
-  it("should log session.status retry for maestro session", async () => {
-    await hooks["chat.params"]({ sessionID: "s1", agent: "maestro", model: { providerID: "p", modelID: "m" } }, {});
+  it("should log session.status retry globally", async () => {
     await hooks.event({
       event: {
         type: "session.status",
         properties: {
-          sessionID: "s1",
+          sessionID: "any-session",
           status: { type: "retry", attempt: 2, message: "rate limit", next: 5000 },
         },
       },
@@ -138,44 +138,33 @@ describe("maestro-bootstrap tool logging", () => {
 
     entries = readLogs(dir);
     const retryEntry = entries.find((e) => e.msg === "session.status.retry");
-    assert.ok(retryEntry, "retry entry must exist");
+    assert.ok(retryEntry, "retry entry must exist (global)");
     assert.equal(retryEntry.level, "warn");
     assert.equal(retryEntry.attempt, 2);
   });
 
-  it("should NOT log session.error for non-maestro session", async () => {
-    await hooks["chat.params"]({ sessionID: "s2", agent: "haiku", model: { providerID: "p", modelID: "m" } }, {});
-    const before = readLogs(dir).length;
-    await hooks.event({
-      event: { type: "session.error", properties: { sessionID: "s2", error: { type: "api_error", message: "x" } } },
-    });
-    assert.equal(readLogs(dir).length, before, "no new entries for non-maestro session");
-  });
-
-  it("should log empty subagent result for task tool", async () => {
-    await hooks["chat.params"]({ sessionID: "s1", agent: "maestro", model: { providerID: "p", modelID: "m" } }, {});
+  it("should log empty subagent result for task tool globally", async () => {
     await hooks["tool.execute.after"](
-      { tool: "task", sessionID: "s1", callID: "c-empty", args: { description: "impl" } },
+      { tool: "task", sessionID: "any-session", callID: "c-empty", args: { description: "impl" } },
       { title: undefined, output: "", metadata: {} },
     );
 
     entries = readLogs(dir);
-    const emptyEntry = entries.find((e) => e.msg === "tool.execute.after.empty_result");
-    assert.ok(emptyEntry, "empty result entry must exist");
+    const emptyEntry = entries.find((e) => e.msg === "tool.execute.after.empty_result" && e.callID === "c-empty");
+    assert.ok(emptyEntry, "empty result entry must exist (global)");
     assert.equal(emptyEntry.level, "warn");
     assert.equal(emptyEntry.tool, "task");
   });
 
-  it("should NOT log empty subagent result for non-maestro session", async () => {
-    await hooks["chat.params"]({ sessionID: "s2", agent: "haiku", model: { providerID: "p", modelID: "m" } }, {});
+  it("should NOT log empty subagent result for non-empty task result", async () => {
     await hooks["tool.execute.after"](
-      { tool: "task", sessionID: "s2", callID: "c-empty-s2", args: { description: "impl" } },
-      { title: undefined, output: "", metadata: {} },
+      { tool: "task", sessionID: "s1", callID: "c-not-empty", args: { description: "impl" } },
+      { title: "DONE", output: "ok", metadata: {} },
     );
 
     entries = readLogs(dir);
-    const emptyEntry = entries.find((e) => e.callID === "c-empty-s2");
-    assert.equal(emptyEntry, undefined, "no empty_result entry for non-maestro session");
+    const emptyEntry = entries.find((e) => e.callID === "c-not-empty" && e.msg === "tool.execute.after.empty_result");
+    assert.equal(emptyEntry, undefined, "no empty_result for non-empty result");
   });
 });
 
@@ -198,9 +187,9 @@ describe("maestro-bootstrap log mask (MAESTRO_BOOTSTRAP_LOG_MASK)", () => {
     else process.env[LEVEL] = saved.level;
   });
 
-  // Не-ключевой тул (не skill/task/bash) логируется на debug; bash — на info;
-  // session.error — на warn. env ставится ДО создания плагина (маска и порог
-  // читаются при инициализации).
+  // Плагин сокращён (уход от агента maestro): только `task` логируется на info,
+  // session.error — на warn; debug-логов тулов нет. env ставится ДО создания
+  // плагина (маска и порог читаются при инициализации).
   async function build(mask, level) {
     delete process.env[KEY];
     delete process.env[LEVEL];
@@ -211,19 +200,15 @@ describe("maestro-bootstrap log mask (MAESTRO_BOOTSTRAP_LOG_MASK)", () => {
     return { dir, p };
   }
 
-  async function seed(p, sessionID) {
-    await p["chat.params"]({ sessionID, agent: "maestro", model: { providerID: "p", modelID: "m" } }, {});
-  }
+  async function seed(_p, _sessionID) {}
 
-  it("default mask disables debug but keeps info/warn/error", async () => {
+  it("default mask keeps info/warn/error, no debug for tools", async () => {
     const { dir, p } = await build(null);
     try {
       await seed(p, "s");
-      await p["tool.execute.before"]({ tool: "read", sessionID: "s", callID: "dbg" }, {});
-      await p["tool.execute.before"]({ tool: "bash", sessionID: "s", callID: "inf" }, { args: {} });
+      await p["tool.execute.before"]({ tool: "task", sessionID: "s", callID: "inf" }, { args: { description: "t" } });
       await p.event({ event: { type: "session.error", properties: { sessionID: "s", error: { type: "x", message: "m" } } } });
       const entries = readLogs(dir);
-      assert.equal(entries.find((e) => e.callID === "dbg"), undefined, "debug disabled by default");
       assert.ok(entries.find((e) => e.callID === "inf"), "info-level entry logged by default");
       assert.ok(entries.find((e) => e.msg === "session.error"), "warn-level entry logged by default");
       const init = entries.find((e) => e.msg === "plugin initialized");
@@ -233,46 +218,15 @@ describe("maestro-bootstrap log mask (MAESTRO_BOOTSTRAP_LOG_MASK)", () => {
     }
   });
 
-  it("explicit full mask re-enables debug (backward compat)", async () => {
-    const { dir, p } = await build("debug,info,warn,error", "debug");
+  it("disabling info suppresses info-level entries only", async () => {
+    const { dir, p } = await build("warn,error", "debug");
     try {
       await seed(p, "s");
-      await p["tool.execute.before"]({ tool: "read", sessionID: "s", callID: "dbg" }, {});
-      const entries = readLogs(dir);
-      assert.ok(entries.find((e) => e.callID === "dbg"), "debug logged when explicitly in mask");
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("LOG_LEVEL=debug (no mask) derives mask incl. debug", async () => {
-    const { dir, p } = await build(null, "debug");
-    try {
-      await seed(p, "s");
-      await p["tool.execute.before"]({ tool: "read", sessionID: "s", callID: "dbg" }, {});
-      const entries = readLogs(dir);
-      assert.ok(entries.find((e) => e.callID === "dbg"), "debug enabled via LOG_LEVEL=debug");
-      const init = entries.find((e) => e.msg === "plugin initialized");
-      assert.equal(init.level, "debug");
-      assert.equal(init.mask, "debug,info,warn,error");
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
-  it("disabling debug suppresses debug-level entries only", async () => {
-    const { dir, p } = await build("info,warn,error");
-    try {
-      await seed(p, "s");
-      await p["tool.execute.before"]({ tool: "read", sessionID: "s", callID: "dbg" }, {});
-      await p["tool.execute.before"]({ tool: "bash", sessionID: "s", callID: "inf" }, { args: {} });
+      await p["tool.execute.before"]({ tool: "task", sessionID: "s", callID: "inf" }, { args: { description: "t" } });
       await p.event({ event: { type: "session.error", properties: { sessionID: "s", error: { type: "x", message: "m" } } } });
       const entries = readLogs(dir);
-      assert.equal(entries.find((e) => e.callID === "dbg"), undefined, "debug suppressed");
-      assert.ok(entries.find((e) => e.callID === "inf"), "info still logged");
+      assert.equal(entries.find((e) => e.callID === "inf"), undefined, "info suppressed");
       assert.ok(entries.find((e) => e.msg === "session.error"), "warn still logged");
-      const init = entries.find((e) => e.msg === "plugin initialized");
-      assert.equal(init.mask, "info,warn,error");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -282,7 +236,7 @@ describe("maestro-bootstrap log mask (MAESTRO_BOOTSTRAP_LOG_MASK)", () => {
     const { dir, p } = await build("debug,info,error");
     try {
       await seed(p, "s");
-      await p["tool.execute.before"]({ tool: "bash", sessionID: "s", callID: "inf" }, { args: {} });
+      await p["tool.execute.before"]({ tool: "task", sessionID: "s", callID: "inf" }, { args: { description: "t" } });
       await p.event({ event: { type: "session.error", properties: { sessionID: "s", error: { type: "x", message: "m" } } } });
       const entries = readLogs(dir);
       assert.ok(entries.find((e) => e.callID === "inf"), "info still logged");
@@ -292,29 +246,13 @@ describe("maestro-bootstrap log mask (MAESTRO_BOOTSTRAP_LOG_MASK)", () => {
     }
   });
 
-  it("disabling info suppresses info-level entries only", async () => {
-    const { dir, p } = await build("debug,warn,error", "debug"); // порог debug не режет mask-уровни
-    try {
-      await seed(p, "s");
-      await p["tool.execute.before"]({ tool: "bash", sessionID: "s", callID: "inf" }, { args: {} });
-      await p["tool.execute.before"]({ tool: "read", sessionID: "s", callID: "dbg" }, {});
-      const entries = readLogs(dir);
-      assert.equal(entries.find((e) => e.callID === "inf"), undefined, "info suppressed");
-      assert.ok(entries.find((e) => e.callID === "dbg"), "debug still logged");
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
-  });
-
   it("mask intersects with MAESTRO_BOOTSTRAP_LOG_LEVEL threshold", async () => {
-    const { dir, p } = await build("debug,info,warn,error", "info"); // порог отсекает debug
+    const { dir, p } = await build("debug,info,warn,error", "info"); // порог отсекает debug (нет debug-тулов)
     try {
       await seed(p, "s");
-      await p["tool.execute.before"]({ tool: "read", sessionID: "s", callID: "dbg" }, {});
-      await p["tool.execute.before"]({ tool: "bash", sessionID: "s", callID: "inf" }, { args: {} });
+      await p["tool.execute.before"]({ tool: "task", sessionID: "s", callID: "inf" }, { args: { description: "t" } });
       const entries = readLogs(dir);
-      assert.equal(entries.find((e) => e.callID === "dbg"), undefined, "debug cut by threshold");
-      assert.ok(entries.find((e) => e.callID === "inf"), "info still logged");
+      assert.ok(entries.find((e) => e.callID === "inf"), "info still logged (info >= threshold)");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
@@ -324,7 +262,7 @@ describe("maestro-bootstrap log mask (MAESTRO_BOOTSTRAP_LOG_MASK)", () => {
     const { dir, p } = await build("bogus,nonexsistent"); // ни один уровень не валиден
     try {
       await seed(p, "s");
-      await p["tool.execute.before"]({ tool: "bash", sessionID: "s", callID: "inf" }, { args: {} });
+      await p["tool.execute.before"]({ tool: "task", sessionID: "s", callID: "inf" }, { args: { description: "t" } });
       await p.event({ event: { type: "session.error", properties: { sessionID: "s", error: { type: "x", message: "m" } } } });
       const entries = readLogs(dir);
       assert.equal(entries.find((e) => e.msg === "plugin initialized"), undefined, "no logs with invalid-only mask");

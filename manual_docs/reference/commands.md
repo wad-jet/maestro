@@ -9,6 +9,11 @@
 
 ## 📖 Команды
 
+### `@maestro`
+
+Вход в pipeline: загружает скилл `maestro` и следует pipeline из SKILL.md.
+Работает в любой primary-сессии (привязки к агенту нет).
+
 ### `@regression`
 
 Регрессионный прогон по реестру рисков (`regression/`, в git). Standalone —
@@ -34,7 +39,7 @@ Bootstrap нового проекта: `docs/project-context.md` (14 катег�
 
 Проверка доступности субагента и его конфига в `opencode.json`
 (`agent.<name>.model`). Доступны: `@test-haiku`, `@test-sonnet`, `@test-opus`,
-`@test-fable`, `@test-code-reviewer`, `@test-maestro`.
+`@test-fable`, `@test-code-reviewer`.
 
 ## 💡 Примечания
 

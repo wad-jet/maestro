@@ -17,10 +17,12 @@
 - **Источник истины** — конфигурация живёт в authoring-репо `maestro-agent`
   (`skills/`, `agents/`, `commands/`, `plugins/`).
 - **Runtime** — OpenCode загружает копии из целевого репозитория в `.opencode/`
-  (`agents/maestro.md`, `skills/maestro/`, `commands/`).
-- **Точка входа** — сессия начинается с загрузки скилла через `@maestro`.
-  Плагин `maestro-bootstrap` гарантирует, что сессии агента начинаются с
-  загрузки скилла и следования pipeline.
+  (`agents/`, `skills/maestro/`, `commands/`).
+- **Точка входа** — команда `@maestro` в любой primary-сессии загружает скилл и
+  следует pipeline. Отдельного primary-агента `maestro` нет — только скилл и
+  команда.
+- **Плагин** `maestro-bootstrap` — глобальная observability (логирование
+  `task`-диспатчей и ошибок сессий), не привязан к агенту.
 
 ## 🔀 Два маршрута
 

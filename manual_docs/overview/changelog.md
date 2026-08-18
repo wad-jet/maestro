@@ -21,6 +21,12 @@
 
 ## [Unreleased]
 
+### Изменено
+- **Уход от агента `maestro`**: primary-агент удалён. Вход — команда `@maestro`
+  в любой primary-сессии. `@regression`/`@maestro-init` больше не привязаны к
+  агенту. Плагин `maestro-bootstrap` — глобальная observability (инжекция
+  директивы и агент-фильтр удалены). `@test-maestro` удалён.
+
 ### Добавлено
 - **Security Review** (Этап 1): сабагент `sanitizer` (trusted, read-only) —
   поиск и пометка чувствительных данных в spec/промпте перед диспатчем в

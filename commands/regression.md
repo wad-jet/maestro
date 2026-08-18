@@ -1,6 +1,5 @@
 ---
 description: Регрессионный прогон по реестру рисков (regression/, в git) — smoke/full/release/purge
-agent: maestro
 ---
 
 # @regression
