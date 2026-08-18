@@ -25,6 +25,7 @@
 | Модели / tier / субагенты | `reference/model-selection.md`, `explanation/agents-and-trust.md` |
 | Команды (`@command`) | `reference/commands.md` |
 | Trust / санитайзер | `explanation/agents-and-trust.md` |
+| Security Review / sanitizer-сабагент / file access control | `explanation/agents-and-trust.md`, `reference/model-selection.md`, `reference/hitl-gates.md` |
 | Реестр регрессии | `how-to/use-regression-registry.md` |
 | Любое изменение поведения | `overview/changelog.md` |
 

@@ -193,32 +193,50 @@ Interactive — агент комментирует находки по ходу
       Если (a) → Spec Review РЕКОМЕНДОВАН для сложных, ОБЯЗАТЕЛЕН
       для архитектурных. Оркестратор предложит его на шаге 9.
 🟢  8. [agent] Brainstorming -> Spec (обязательно для сложных фич)
-🟡  8.5. [agent] Оценка изменений контекста
-      — Оркестратор анализирует spec: появились ли новые категории,
-        изменения стека, команды или уточнения для проектного контекста.
-      — Если да — запоминает как pending context changes.
-      — Если нет — ничего не происходит.
-      — **HITL не требуется.** Изменения контекста будут зафиксированы
-        в плане (шаг 11) и применены автоматически после аппрува плана
-        (шаг 12a).
+🟢  8.5. [agent] Оценка изменений контекста
+       — Оркестратор анализирует spec: появились ли новые категории,
+         изменения стека, команды или уточнения для проектного контекста.
+       — Если да — запоминает как pending context changes.
+       — Если нет — ничего не происходит.
+       — **HITL не требуется.** Изменения контекста будут зафиксированы
+         в плане (шаг 11) и применены автоматически после аппрува плана
+         (шаг 12a).
+🟡  8.6. [agent] Spec security review (Точка 1, см. Security Review)
+       — Только для фич, где есть spec (сложные/архитектурные).
+       — Оркестратор диспатчит сабагент `sanitizer` (trusted) с spec.
+       — Sanitizer помечает чувствительные данные, возвращает structured-блок
+         `SANITIZER FINDINGS` + `STATUS: CLEAN | FINDINGS_FOUND`.
+       — При `FINDINGS_FOUND` → HITL-гейт (Трактовка Y):
+         (a) вычистить и продолжить — оркестратор вычищает spec по пометкам
+         (b) продолжить как есть (принять риск)
+         (c) стоп
+       — При `CLEAN` или после (a)/(b) → переход к шагу 9.
+       — **Перезапуск на каждый Revise-цикл:** если шаг 10 вернёт Revise →
+         шаг 8 → шаг 8.6 повторяется (spec мог измениться).
 🟢  9. [HITL] Spec Review на spec:
-      - **Для сложных фич: оркестратор ОБЯЗАН предложить Spec Review.
-        Шаг 10 (spec gate) не наступает, пока пользователь не ответил
-        на предложение (да/нет).**
-      - Для простых — пропускается.
-      - Для архитектурных — **обязателен**, пользователь не может отказаться.
-      - Режим: spec (единственный) — ревьюит spec: архитектура, требования,
-        риски дизайна
-      - Диспатч: OpenCode — `task` tool с `subagent_type=opus`;
-        Claude Code — Agent tool с `model=opus` + инструкция ревьюера
-      - Промпт ревьюера: `spec-review-prompt.md` из этого скилла
-      - Передать: spec + контекст + встроенный чеклист + вопросы
-      - Получить: structured review (severity-бакеты + verdict approve/revise/reject)
+       - **Spec уже прошёл security review (шаг 8.6)** — opus получает
+         очищенный spec; security-проверку не дублирует (см. Security Review).
+       - **Для сложных фич: оркестратор ОБЯЗАН предложить Spec Review.
+         Шаг 10 (spec gate) не наступает, пока пользователь не ответил
+         на предложение (да/нет).**
+       - Для простых — пропускается.
+       - Для архитектурных — **обязателен**, пользователь не может отказаться.
+       - Режим: spec (единственный) — ревьюит spec: архитектура, требования,
+         риски дизайна
+       - Диспатч: OpenCode — `task` tool с `subagent_type=opus`;
+         Claude Code — Agent tool с `model=opus` + инструкция ревьюера
+       - **Перед диспатчем opus (untrusted) — Точка 2 Security Review:**
+         оркестратор прогоняет промпт через sanitize (Ур.1 плагин + Ур.2
+         сабагент sanitizer, см. ниже). Trusted opus (если в trust-config) → skip.
+       - Промпт ревьюера: `spec-review-prompt.md` из этого скилла
+       - Передать: spec + контекст + встроенный чеклист + вопросы
+       - Получить: structured review (severity-бакеты + verdict approve/revise/reject)
 🟡 10. -- HITL GATE: spec утверждён (с учётом экспертного ревью) --
       Оркестратор ПОКАЗЫВАЕТ diff правок (что изменилось после review).
       ВАРИАНТЫ:
         (a) Approve — spec готов, переходим к плану (шаг 11)
-        (b) Revise — вернуться к шагу 8, доработать spec, повторный review
+        (b) Revise — вернуться к шагу 8, доработать spec, **повторить шаг 8.6
+            (security review)**, затем повторный review
         (c) Reject — фича отменяется, STOP
 🟢 11. [agent] writing-plans -> Implementation Plan
       After writing, оркестратор ПРОВЕРЯЕТ plan на качество:
@@ -286,11 +304,15 @@ Interactive — агент комментирует находки по ходу
            * Commands из `### Default (root)` в секции 14 Commands
            * (текущее поведение — backward compat)
       d. Per task: dispatch implementer-субагента (implementer-prompt.md) -> **обязательный** task review
-         — implementer-prompt.md находится в `skills/maestro/implementer-prompt.md`
-         — **Если имплементация расходится с планом** (число вызовов, сигнатуры,
-           контракты) — оркестратор исправляет план **в момент выявления**, до
-           перехода к следующему task. Не откладывать до pre-PR (шаг 17).
-           Исправленный план — актуальный source of truth для последующих задач.
+          — implementer-prompt.md находится в `skills/maestro/implementer-prompt.md`
+          — **Точка 2 Security Review:** перед диспатчем implementer (и
+            task-reviewer) — если сабагент untrusted, прогнать промпт через
+            sanitize (Ур.1 плагин + Ур.2 сабагент sanitizer). Trusted → skip.
+            См. секцию «Security Review».
+          — **Если имплементация расходится с планом** (число вызовов, сигнатуры,
+            контракты) — оркестратор исправляет план **в момент выявления**, до
+            перехода к следующему task. Не откладывать до pre-PR (шаг 17).
+            Исправленный план — актуальный source of truth для последующих задач.
          — Диспатч по tier (см. секцию "Шаг → Tier" в Model Selection):
           - OpenCode: `task` tool с `subagent_type=haiku` (механический) или
             `subagent_type=sonnet` (интеграционный)
@@ -371,6 +393,8 @@ Interactive — агент комментирует находки по ходу
             (b) real fail — fix-loop к шагу 13
             (c) skip с подтверждением
 🟡 16. [agent] requesting-code-review -> финальное ревью
+      — **Точка 2 Security Review:** перед диспатчем code-reviewer (untrusted)
+        — прогон промпта через sanitize. Trusted code-reviewer → skip.
 🟡 17. -- HITL GATE: pre-PR --
       Оркестратор ПОКАЗЫВАЕТ: git log, test results, coverage status.
       ВАРИАНТЫ:
@@ -399,9 +423,15 @@ Feature:
 - Шаг 1.5 — выбор режима (efficient/interactive/cancel)
 - Шаг 2 — запуск pre-flight (да/отмена/skip в interactive)
 - Шаг 7 — сложность фичи (сложная/простая/отмена)
+- Шаг 8.6 — spec security review: при `FINDINGS_FOUND` (вычистить и продолжить /
+  продолжить как есть (принять риск) / стоп)
 - Шаг 10 — spec утверждён (approve/revise/reject)
 - Шаг 12 — plan утверждён (approve/revise/cancel)
 - Шаг 17 — pre-PR (approve merge/fix/cancel)
+- Security Review (Точка 2) — при находке sanitizer перед untrusted-диспатчем
+  (вычистить и продолжить / продолжить как есть (принять риск) / стоп)
+- File access control — untrusted сабагент при попытке доступа к файлу
+  (разрешить / запретить)
 
 Bugfix:
 - Шаг D2 — утвердить гипотезу (да/новая гипотеза)
@@ -606,25 +636,41 @@ pipeline; после завершения переход на шаг 11 (writing
 | `opus` | `.opencode/agents/opus.md` + `opencode.json → agent.opus.model` |
 | `code-reviewer` | `.opencode/agents/code-reviewer.md` + `opencode.json → agent.code-reviewer.model` |
 | `fable` | `.opencode/agents/fable.md` + `opencode.json → agent.fable.model` |
+| `sanitizer` | `.opencode/agents/sanitizer.md` + `opencode.json → agent.sanitizer.model` |
 
 Все под-агенты `hidden: true` — не показываются в `@`-меню, вызываются только
 программно через `task` tool.
 
 - `permission` — `haiku`/`sonnet` могут редактировать файлы и запускать bash
-  (имплементация), `opus`/`fable` — read-only без bash (ревью, объяснения),
-  `code-reviewer` — `bash: allow` (git diff/log/show), `edit: deny` (без мутаций).
+  (имплементация), `opus`/`fable`/`sanitizer` — read-only без bash (ревью,
+  объяснения, security-пометки), `code-reviewer` — `bash: allow` (git
+  diff/log/show), `edit: deny` (без мутаций).
 - `task: deny` — агенты не диспатчат вложенные под-агенты
   (один уровень вложенности).
 
 **При диспатче:** оркестратор по таблице «Шаг → Tier» определяет нужный tier,
-маппит tier → имя агента (`haiku`/`sonnet`/`opus`/`code-reviewer`/`fable`), диспатчит через `task`
-tool с `subagent_type` = имени агента. Доступность модели обеспечивает
-провайдер OpenCode — отдельная проверка не требуется.
+маппит tier → имя агента (`haiku`/`sonnet`/`opus`/`code-reviewer`/`fable`/`sanitizer`),
+диспатчит через `task` tool с `subagent_type` = имени агента. Доступность модели
+обеспечивает провайдер OpenCode — отдельная проверка не требуется.
 
-**Trust check перед диспатчем:** оркестратор проверяет `trust-config.json`
-(загружен на шаге 0). Если сабагента нет в файле или значение ≠ `true` —
-untrusted: применяет Context Sanitizer к промпту. Санитайзер работает
-автоматически, без HITL.
+**Trust check перед диспатчем (два измерения):** оркестратор проверяет
+`trust-config.json` (загружен на шаге 0). Trust-статус управляет **двумя**
+измерениями защиты:
+
+| Trust | Sanitize промпта | File access control |
+|---|---|---|
+| **trusted** (`true` в `trust-config.json`) | **skip** | **skip** (без ограничений) |
+| **untrusted** (default) | Уровень 1 + Уровень 2 (см. Security Review) | HITL на каждый доступ к файлу |
+
+- **Sanitize промпта:** для untrusted — прогон через Security Review (см.
+  одноимённую секцию). Для trusted — промпт уходит как есть.
+- **File access control:** untrusted сабагент при попытке Read/Glob/Grep/Bash-read
+  любого файла → HITL: `(a) разрешить` / `(b) запретить`. Trusted — без ограничений.
+  На Этапе 1 (нет плагина) — инструктивно в промпте сабагента; enforcement на
+  Этапе 2 (перехват tools в плагине `maestro-sanitizer`).
+- **`sanitizer` сабагент — trusted:** единственный, кому разрешено видеть сырые
+  данные (чтобы пометить). Его собственный промпт при диспатче **не** санизируется
+  (он доверенный) — рекурсии нет.
 
 ### Anti-loop: диспатч и повторы
 
@@ -707,21 +753,22 @@ task(
 
 | Уровень | Описание | Контроль |
 |---|---|---|
-| **trusted** | Указан в `trust-config.json` со значением `true` | Без ограничений — данные передаются как есть |
-| **untrusted** | Не указан в `trust-config.json` или значение ≠ `true` | Перед диспатчем применяется Context Sanitizer |
+| **trusted** | Указан в `trust-config.json` со значением `true` | **Skip** sanitize промпта + **skip** file access control — данные передаются как есть, доступ к файлам без ограничений |
+| **untrusted** | Не указан в `trust-config.json` или значение ≠ `true` | Перед диспатчем — Security Review (sanitizer); во время работы — file access control (HITL на каждый доступ к файлу) |
 
 ### Subagent Trust Matrix
 
-| Сабагент | Trust по умолчанию |
-|---|---|
-| `haiku` | untrusted |
-| `sonnet` | untrusted |
-| `opus` | untrusted |
-| `code-reviewer` | untrusted |
-| `fable` | untrusted |
+| Сабагент | Trust по умолчанию | Примечание |
+|---|---|---|
+| `haiku` | untrusted | |
+| `sonnet` | untrusted | |
+| `opus` | untrusted | |
+| `code-reviewer` | untrusted | |
+| `fable` | untrusted | |
+| `sanitizer` | **trusted** | Единственный, кому разрешено видеть сырые данные (чтобы пометить). Его промпт при диспатче не санизируется — рекурсии нет. |
 
-Значение по умолчанию для любого сабагента — **untrusted**.
-Меняется только через `trust-config.json` (см. ниже).
+Значение по умолчанию для любого сабагента — **untrusted**, кроме `sanitizer`
+(trusted по своей роли). Меняется только через `trust-config.json` (см. ниже).
 От модели в `opencode.json` trust не зависит.
 
 ### Управление: trust-config.json
@@ -749,10 +796,12 @@ task(
 3. Изменения в `trust-config.json` вступают в силу со следующей сессии
 4. Файл обязателен к проверке — игнорировать его нельзя
 
-## Context Sanitizer
+## Context Sanitizer (правила детекта)
 
-Лёгковесный автоматический фильтр, применяемый к промпту **перед диспатчем**
-в untrusted сабагента. Не создаёт HITL-диалогов, не дублирует операции.
+Правила детекта чувствительных данных — основа для пометок (сабагент
+`sanitizer`) и маскирования (плагин `maestro-sanitizer`, Этап 2). Сама
+процедура security review описана в секции [Security Review](#security-review)
+ниже — два уровня (плагин + сабагент), HITL-гейт, file access control.
 
 ### Что фильтруется
 
@@ -781,20 +830,22 @@ task(
 На всех шагах, где происходит диспатч untrusted сабагента.
 Trust-уровень определяется по `trust-config.json` (см. Trust Model):
 
-| Шаг | Сабагент | Санитайзер |
+| Шаг | Сабагент | Security Review |
 |---|---|---|
 | Шаг 9 — Spec Review | `opus` | Применяется (untrusted) |
 | Шаг 13 — SDD implementer | `haiku` / `sonnet` | Применяется (untrusted) |
 | Шаг 13 — SDD task-reviewer | `sonnet` | Применяется (untrusted) |
 | Шаг 16 — Code Review | `code-reviewer` | Применяется (untrusted) |
+| (внутри Security Review) | `sanitizer` | **Skip** (trusted — видит сырые данные для пометок) |
 
-Если сабагент отмечен как trusted в `trust-config.json` — санитайзер
-**не применяется** (риск принят пользователем).
+Если сабагент отмечен как trusted в `trust-config.json` — sanitize промпта
+**не проводится** (риск принят пользователем).
 
 ### Правила применения
 
-1. Санитайзер запускается **автоматически** при диспатче untrusted сабагента
-2. **Без HITL** — пользователь не уведомляется о санитайзинге
+1. Уровень 1 (плагин, Этап 2) — авто-маскирование, **без HITL**
+2. Уровень 2 (сабагент `sanitizer`) — пометки, при находке → HITL
+   (Трактовка Y, см. Security Review)
 3. Оригинальный контекст оркестратора **не изменяется** — санитайзер
    создаёт копию промпта для untrusted сабагента
 4. Аудит-лог: в `.maestro/sanitizer-log.md` записывается:
@@ -802,6 +853,97 @@ Trust-уровень определяется по `trust-config.json` (см. Tr
    - сабагент
    - что отфильтровано (без содержимого)
    - размер промпта до/после
+
+## Security Review
+
+Двухуровневая защита чувствительных данных перед диспатчем в untrusted сабагенты
++ file access control во время работы. Цель: субагенты не должны получить
+чувствительные данные; минимум данных доходит даже до trusted-модели sanitizer.
+
+### Архитектура
+
+```
+Диспатч в сабагента:
+  trust check (trust-config.json)
+    │
+    ├── trusted → SKIP sanitize + SKIP file access control → диспатч как есть
+    │
+    └── untrusted →
+         [УРОВЕНЬ 1] maestro-sanitizer (плагин, Этап 2) ── авто, БЕЗ HITL
+            regex-детект + маскирование по правилам Context Sanitizer
+            нет находок → промпт уходит
+            ▼
+         [УРОВЕНЬ 2] сабагент sanitizer (trusted, read-only) ── всегда, доп. слой
+            находит и ПОМЕЧАЕТ чувствительные данные (не вычищает)
+            пометки есть → HITL до clean:
+            ▼
+         [HITL] (a) вычистить и продолжить / (b) продолжить как есть (принять риск) / (c) стоп
+            │
+         [FILE ACCESS CONTROL] — во время работы untrusted сабагента:
+            Read/Glob/Grep/Bash-read → HITL: (a) разрешить / (b) запретить
+```
+
+### Точки встраивания в pipeline
+
+- **Точка 1 — Spec security review:** после шага 8 (spec), до шага 9 (Spec
+  Review) и планирования. Сабагент `sanitizer` проверяет spec на чувствительные
+  данные. Только для фич, где есть spec (сложные/архитектурные). **Перезапуск
+  на каждый Revise-цикл** (шаг 10 → Revise → шаг 8 → повторный прогон sanitizer).
+- **Точка 2 — Перед диспатчем untrusted:** перед каждой отправкой промпта в
+  untrusted субагентов (шаги 9/13/16). Выполняется всегда. Trusted сабагенты
+  пропускают (skip sanitize).
+
+### Роль сабагента sanitizer
+
+- Trusted (видит сырые данные), read-only (`edit: deny`, `bash: deny`),
+  `task: deny`.
+- **Помечает** чувствительные данные (где, что, почему) — не вычищает.
+- **Оркестратор вычищает** промпт по пометкам (если пользователь выбрал (a)).
+- Формат выхода — structured-блок `SANITIZER FINDINGS` (см. `agents/sanitizer.md`):
+  `location / type / reason / snippet_hint` + `STATUS: CLEAN | FINDINGS_FOUND`.
+
+### HITL-гейт при находке (Трактовка Y)
+
+При `STATUS: FINDINGS_FOUND` оркестратор показывает находки пользователю и
+запрашивает решение **до** clean:
+
+- `(a) вычистить и продолжить` — оркестратор вычищает по пометкам, диспатчит
+  очищенный промпт.
+- `(b) продолжить как есть (принять риск)` — диспатч с sensitive-данными; явное
+  решение пользователя.
+- `(c) стоп` — остановить процесс.
+
+Утечка sensitive в untrusted возможна только по выбору (b).
+
+### Когда запускать Уровень 2 (sanitizer-сабагент)
+
+- **По умолчанию — всегда** (на каждом untrusted-диспатче + на spec review).
+- Опция (env/конфиг `MAESTRO_SANITIZER_MODE=hybrid`) переключает на гибрид:
+  spec review всегда + диспатч только если Уровень 1 что-то нашёл или недоступен.
+
+### File access control (Этап 2 — enforcement в плагине)
+
+Untrusted сабагент при попытке Read/Glob/Grep/Bash-read любого файла → HITL:
+`(a) разрешить` / `(b) запретить`. Trusted — без ограничений. На Этапе 1 (нет
+плагина) — инструктивно в промпте сабагента (`implementer-prompt.md`).
+
+### Этапность
+
+- **Этап 1 (сейчас):** только сабагент `sanitizer` (Уровень 2) + HITL-гейт +
+  правила + file access control инструктивно. Sanitizer там **primary**.
+- **Этап 2 (потом):** плагин `maestro-sanitizer` (Уровень 1, авто-маскирование) +
+  file access control enforcement (перехват tools) + whitelist
+  (`.maestro/sanitizer-whitelist.json`). Сабагент остаётся доп. слоем.
+
+### Known gaps Этапа 1
+
+- **Принцип «минимум данных до trusted sanitizer» не выполняется:** на Этапе 1
+  нет Уровня 1, sanitizer видит все raw-промпты. Закроется плагином на Этапе 2.
+- **Этап 1 модель-зависим:** оркестратор должен вручную диспатчить sanitizer
+  перед каждым untrusted-диспатчем. Модель может забыть/пропустить. Закроется
+  плагином на Этапе 2.
+- **File access control не enforced:** на Этапе 1 — только инструкция в промпте.
+  Enforcement — плагин на Этапе 2.
 
 ## Spec Review (опционально)
 

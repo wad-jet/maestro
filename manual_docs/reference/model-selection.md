@@ -27,6 +27,7 @@ tier-правилам.
 | `implementer_mechanical` (шаг 13, 1-2 файла) | haiku | `haiku` |
 | `implementer_integration` (шаг 13, multi-file) | sonnet | `sonnet` |
 | `explain` (по запросу, примеры/метафоры) | fable | `fable` |
+| `security_review` (шаг 8.6, перед untrusted-диспатчем) | trusted | `sanitizer` |
 
 **Fix-loop эскалация (rounds 4-5):** минимум на tier выше предыдущей попытки.
 
@@ -43,6 +44,7 @@ tier-правилам.
 | `opus` | `agents/opus.md` | read-only | Spec Review, security audit, архитектура |
 | `fable` | `agents/fable.md` | read-only | Примеры, метафоры, пояснения |
 | `code-reviewer` | `agents/code-reviewer.md` | bash+read (без edit) | Финальное ревью ветки |
+| `sanitizer` | `agents/sanitizer.md` | read-only | Security review — поиск и пометка чувствительных данных |
 
 Все субагенты, кроме `maestro` и `code-reviewer`, объявлены `hidden: true`
 (вызываются только программно через `task` tool). `task: deny` — субагенты не

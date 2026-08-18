@@ -105,3 +105,19 @@ optional — they are enforced by coverage tests and code review.
   * `{TEST_COMMAND}` — test command for this service's stack
   * `{LINT_COMMAND}` — lint command for this service's stack
 - Follow project conventions defined in Project Context
+
+## Security Rules (sensitive data + file access)
+
+- Do NOT request, read, or use sensitive data (secrets, `.env` values, DB/SFTP
+  credentials, personal/financial data fields, raw ledger entries) outside the
+  task scope. The task brief has been security-reviewed — it contains what you
+  need, and nothing more.
+- If you need a sensitive value to complete the task, do NOT guess or read it
+  yourself. Report `BLOCKED`/`NEEDS_CONTEXT` and let the orchestrator decide
+  (a HITL gate will prompt the user).
+- Do NOT read files outside the task scope without confirmation. Access to files
+  is gated: you may read only the files named in your task brief. If you must
+  read something outside scope, stop and report `NEEDS_CONTEXT` so the
+  orchestrator can ask the user for permission.
+- Never include sensitive values in your status report, commit messages, or any
+  output. Use placeholders/redaction if a sensitive value is unavoidable.

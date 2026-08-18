@@ -5,7 +5,7 @@
 This is the **authoring repo** for the OpenCode `maestro` system (the "maestro" agent that orchestrates feature/bugfix implementation in a target application). It is **not** the application repo — there is no application code here.
 
 - `skills/maestro/SKILL.md` — authoritative pipeline spec (feature/bugfix orchestration, HITL gates, regression registry). Read it before touching anything in `skills/`.
-- `agents/*.md` — OpenCode agent configs (`mode`, `permission`, `hidden`, `description` in YAML frontmatter). `maestro.md` is `mode: primary`; the rest (`haiku`, `sonnet`, `opus`, `fable`, `code-reviewer`) are subagents.
+- `agents/*.md` — OpenCode agent configs (`mode`, `permission`, `hidden`, `description` in YAML frontmatter). `maestro.md` is `mode: primary`; the rest (`haiku`, `sonnet`, `opus`, `fable`, `code-reviewer`, `sanitizer`) are subagents. `sanitizer` is trusted by default (security review).
 - `commands/*.md` — `@command` configs (frontmatter `agent:` field).
 - `skills/maestro/{implementer-prompt.md,spec-review-prompt.md,stack-detection.md}` — support files referenced by SKILL.md.
 - `skills/init/{SKILL.md,init-context.md}` — `/maestro-init` skill for bootstrapping new projects (project-context.md 14 categories, architecture design, scaffold, roadmap).
