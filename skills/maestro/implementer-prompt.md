@@ -71,6 +71,7 @@ MUST end with this status block:
 STATUS: DONE | BLOCKED | NEEDS_CONTEXT | DONE_WITH_CONCERNS
 COMMITS: <sha-range>
 FILES_CHANGED: <list>
+TEST_OUTPUT: <pass/fail summary — which test command(s) ran and the result>
 CONCERNS: <if DONE_WITH_CONCERNS, list them; else "none">
 BLOCKER: <if BLOCKED, describe; else "none">
 CONTEXT_NEEDED: <if NEEDS_CONTEXT, describe; else "none">
@@ -98,6 +99,7 @@ optional — they are enforced by coverage tests and code review.
 - If blocked: report BLOCKED with specifics, do NOT guess
 - If plan is ambiguous: report NEEDS_CONTEXT with specific questions
 - Run build/test commands in `{workdir}` (`cd {workdir}` first; if workdir is repo root, skip cd)
+- Run `{BUILD_COMMAND}` **before** `{TEST_COMMAND}` when tests run against build artifacts (`dist`/`build`, e.g. via package exports). Prevents false failures from stale artifacts (build output is often git-ignored).
 - Commands are provided in `{context}` (resolved per-service by orchestrator from Project Context section 14):
   * `{BUILD_COMMAND}` — build command for this service's stack
   * `{TEST_COMMAND}` — test command for this service's stack

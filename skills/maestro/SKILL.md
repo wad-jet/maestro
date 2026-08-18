@@ -225,6 +225,8 @@ Interactive — агент комментирует находки по ходу
       - Meta-commentary в тексте? ("Let me", "Actually", "I think", "Wait —")
       - Placeholders? ("TODO", "FIXME", "TBD")
       - Блоки кода без указания языка?
+      - **Число LLM-вызовов в псевдокоде тестов** — считать с учётом ВСЕХ моделей
+        в контуре (decomposer + agent loop и др.), а не только agent loop.
       - **Поле `**Service:**`:** если фича затрагивает несколько сервисов
         (полиглот-монорепо), каждая задача должна содержать опциональное
         поле `**Service:**` с путём к директории сервиса
@@ -285,10 +287,14 @@ Interactive — агент комментирует находки по ходу
            * (текущее поведение — backward compat)
       d. Per task: dispatch implementer-субагента (implementer-prompt.md) -> **обязательный** task review
          — implementer-prompt.md находится в `skills/maestro/implementer-prompt.md`
-          — Диспатч по tier (см. секцию "Шаг → Tier" в Model Selection):
-           - OpenCode: `task` tool с `subagent_type=haiku` (механический) или
-             `subagent_type=sonnet` (интеграционный)
-           - Claude Code: Agent tool с `model=haiku` или `model=sonnet`
+         — **Если имплементация расходится с планом** (число вызовов, сигнатуры,
+           контракты) — оркестратор исправляет план **в момент выявления**, до
+           перехода к следующему task. Не откладывать до pre-PR (шаг 17).
+           Исправленный план — актуальный source of truth для последующих задач.
+         — Диспатч по tier (см. секцию "Шаг → Tier" в Model Selection):
+          - OpenCode: `task` tool с `subagent_type=haiku` (механический) или
+            `subagent_type=sonnet` (интеграционный)
+          - Claude Code: Agent tool с `model=haiku` или `model=sonnet`
          — Task review: `subagent_type=sonnet` (OpenCode) / `model=sonnet` (Claude Code)
          — Если task зависит от другого (например, endpoint без тестов), указать:
            "Note: tests for this code may fail until Task N is completed — это ожидаемо"
@@ -633,6 +639,11 @@ Guard от петель диспатча (пустые/ошибочные рез
    3 попыток по одному и тому же `(subagent_type, задача)` в рамках одного хода
    (до следующего user-сообщения). «Ход» = непрерывная автономная работа
    оркестратора между HITL gates; ответ пользователя обнуляет счётчик.
+   **Перед повторным диспатчем — проверить рабочее дерево** (`git status
+   --porcelain`) и дифф (`git diff`). Пустой отчёт ≠ нет работы: имплементер
+   мог внести правки, но не закоммитить и не отчитаться. В этом случае не
+   диспатчить повторно, а потребовать отчёт по чек-листу (Status / Files /
+   Test output / Commit SHA) из `implementer-prompt.md`.
 3. **Превышение лимита → HITL:** пояснить пользователю статус (сколько попыток,
    последняя ошибка/пустой результат) и предложить варианты:
    (a) продолжить / (b) изменить формулировку / (c) отменить.
@@ -1038,6 +1049,7 @@ Pipeline не имеет механизма cross-repo координации (�
 | **Re-asking confirmed facts during implementation** | После D6 (гипотеза подтверждена) и шага 12 (план утверждён) ответы на ключевые вопросы уже установлены. Повторные вопросы в ходе реализации — потеря времени и признак неполной гипотезы. Если неясность возникла — вернуться к D1 для новой гипотезы, а не продолжать с вопросами. |
 | **Silently skip tests/build when command not detected** | Пропуск тестов или сборки без явного подтверждения пользователя — скатывание к anti-pattern «Skip baseline test check». Tier 3 (HITL-эскалация) обязателен. |
 | **Auto-detect picks first candidate without confirming if ambiguous** | Неоднозначность требует HITL: если детект нашёл несколько кандидатов, агент не выбирает сам, а представляет список пользователю. |
+| **Использовать `git stash` в manual-проверках оркестратора** | В репо с посторонними stash-entries `git stash pop` может применить чужой stash → конфликт. Для проверки pre-existing состояния использовать неразрушающие методы: `git diff --name-only <base>...HEAD` + точечный линтер по нашим файлам. |
 
 ## Example Workflow
 
