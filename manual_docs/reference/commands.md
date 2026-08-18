@@ -39,7 +39,7 @@ Bootstrap нового проекта: `docs/project-context.md` (14 катег�
 
 Проверка доступности субагента и его конфига в `opencode.json`
 (`agent.<name>.model`). Доступны: `@test-haiku`, `@test-sonnet`, `@test-opus`,
-`@test-fable`, `@test-code-reviewer`.
+`@test-fable`, `@test-code-reviewer`, `@test-sanitizer`.
 
 ## 💡 Примечания
 

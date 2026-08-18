@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap } from "./index.js";
+import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig } from "./index.js";
 
 function readLogs(dir) {
   const logDir = path.join(dir, ".maestro");
@@ -165,6 +165,381 @@ describe("maestro-bootstrap global logging", () => {
     entries = readLogs(dir);
     const emptyEntry = entries.find((e) => e.callID === "c-not-empty" && e.msg === "tool.execute.after.empty_result");
     assert.equal(emptyEntry, undefined, "no empty_result for non-empty result");
+  });
+});
+
+describe("maestro-bootstrap sanitize (Context Sanitizer, Level 1)", () => {
+  it("masks env secret assignments, keeping the variable name", () => {
+    const res = sanitize("POSTGRES_PASSWORD=s3cr3t and API_TOKEN=abc");
+    assert.equal(res.count, 2);
+    assert.match(res.text, /POSTGRES_PASSWORD=<redacted>/);
+    assert.match(res.text, /API_TOKEN=<redacted>/);
+  });
+
+  it("does not mask a non-secret env var", () => {
+    const res = sanitize("POSTGRES_HOST=localhost");
+    assert.equal(res.count, 0);
+    assert.equal(res.text, "POSTGRES_HOST=localhost");
+  });
+
+  it("masks sensitive data fields in JSON", () => {
+    const res = sanitize('{"amount": 1234.5, "currency": "USD", "name": "ok"}');
+    assert.equal(res.count, 2);
+    assert.match(res.text, /"amount": <redacted>/);
+    assert.match(res.text, /"currency": <redacted>/);
+    assert.match(res.text, /"name": "ok"/);
+  });
+
+  it("masks .env file references", () => {
+    const res = sanitize("config from .env.local is loaded");
+    assert.equal(res.count, 1);
+    assert.match(res.text, /<redacted>/);
+    assert.doesNotMatch(res.text, /\.env\.local/);
+  });
+
+  it("masks DB/SFTP URIs with embedded credentials", () => {
+    const res = sanitize("postgres://user:pw123@db:5432/app sftp://alice:secret@host/path");
+    assert.equal(res.count, 2);
+    assert.doesNotMatch(res.text, /pw123/);
+    assert.doesNotMatch(res.text, /secret/);
+  });
+
+  it("masks additional DB/SFTP URI schemes (ssh, ldap, clickhouse)", () => {
+    const res = sanitize("ssh://root:rpass@host ldap://cn=admin:pw@ldap.example ftp://u:fpw@host");
+    assert.equal(res.count, 3);
+    assert.doesNotMatch(res.text, /rpass/);
+    assert.doesNotMatch(res.text, /:pw@/);
+    assert.doesNotMatch(res.text, /fpw/);
+  });
+
+  it("masks connection-string password params (key=value)", () => {
+    const res = sanitize("host=db port=5432 user=admin password=s3cr3t dbname=app");
+    assert.equal(res.count, 1);
+    assert.doesNotMatch(res.text, /s3cr3t/);
+    assert.match(res.text, /host=db/);
+  });
+
+  it("masks camelCase/snake_case sensitive field variants", () => {
+    const res = sanitize('{"amountValue": 99.9, "ibanCode": "DE89...", "total_amount": 120}');
+    assert.equal(res.count, 3);
+    assert.doesNotMatch(res.text, /99\.9/);
+    assert.doesNotMatch(res.text, /DE89/);
+    assert.doesNotMatch(res.text, /120/);
+  });
+
+  it("masks PII and financial fields from expanded list", () => {
+    const res = sanitize('{"card_number": "4111...", "phone": "+7-900-000-00-00", "inn": "7701234567"}');
+    assert.equal(res.count, 3);
+    assert.doesNotMatch(res.text, /4111/);
+    assert.doesNotMatch(res.text, /\+7-900/);
+    assert.doesNotMatch(res.text, /7701234567/);
+  });
+
+  it("masks lowercase/camelCase env secret assignments", () => {
+    const res = sanitize("apiKey=abc123 dbPassword=secret accessToken=xyz");
+    assert.equal(res.count, 3);
+    assert.doesNotMatch(res.text, /abc123/);
+    assert.doesNotMatch(res.text, /secret/);
+    assert.doesNotMatch(res.text, /xyz/);
+  });
+
+  it("masks env secrets with new keywords (dsn, cert, salt)", () => {
+    const res = sanitize("DB_DSN=postgres://h/p app_cert=base64str password_salt=abc");
+    assert.equal(res.count, 3);
+    assert.doesNotMatch(res.text, /base64str/);
+    assert.doesNotMatch(res.text, /abc/);
+  });
+
+  it("masks private key blocks", () => {
+    const res = sanitize("key:\n-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n-----END RSA PRIVATE KEY-----");
+    assert.equal(res.count, 1);
+    assert.doesNotMatch(res.text, /MIIE/);
+  });
+
+  it("masks authorization headers", () => {
+    const res = sanitize("Authorization: Bearer eyJhbGciOiJIUzI1NiJ9 X-API-Key: key123");
+    assert.equal(res.count, 2);
+    assert.doesNotMatch(res.text, /eyJhbGci/);
+    assert.doesNotMatch(res.text, /key123/);
+  });
+
+  it("masks case-insensitive matches across rules", () => {
+    const res = sanitize(
+      '{"CardNumber": "4111", "Amount": 5} POSTGRES://u:pw@h ' +
+        "-----BEGIN rsa private key-----\nMIIE\n-----END rsa private key-----",
+    );
+    assert.equal(res.count, 4);
+    assert.doesNotMatch(res.text, /4111/);
+    assert.doesNotMatch(res.text, /pw@h/);
+    assert.doesNotMatch(res.text, /MIIE/);
+  });
+
+  it("masks camelCase variants of snake_case fields", () => {
+    const res = sanitize('{"counterpartyId": "cp-1", "accountNumber": "A100"}');
+    assert.equal(res.count, 2);
+    assert.doesNotMatch(res.text, /cp-1/);
+    assert.doesNotMatch(res.text, /A100/);
+  });
+
+  it("respects extra_fields via sanitize opts", () => {
+    const res = sanitize('{"custom_field": "secret-value", "amount": 1}', { extraFields: ["custom_field"] });
+    assert.equal(res.count, 2);
+    assert.doesNotMatch(res.text, /secret-value/);
+  });
+
+  it("respects extra_uri_schemes via sanitize opts", () => {
+    const res = sanitize("crm://bob:pw@crm.example/resource", { extraUriSchemes: ["crm"] });
+    assert.equal(res.count, 1);
+    assert.doesNotMatch(res.text, /pw@/);
+  });
+
+  it("respects extra_fields/extra_uri_schemes via resolveSanitizeOptions", () => {
+    const whitelist = { patterns: [], extra_fields: ["internal_id"], extra_uri_schemes: ["grpc"] };
+    const opts = resolveSanitizeOptions(whitelist, "haiku");
+    assert.deepEqual(opts.extraFields, ["internal_id"]);
+    assert.deepEqual(opts.extraUriSchemes, ["grpc"]);
+    const res = sanitize('{"internal_id": "sec", "amount": 1}', opts);
+    assert.equal(res.count, 2);
+    assert.doesNotMatch(res.text, /"sec"/);
+  });
+
+  it("respects disabled rule categories via rules", () => {
+    const res = sanitize('POSTGRES_PASSWORD=abc {"amount": 1}', { rules: { env_secret: false } });
+    assert.match(res.text, /POSTGRES_PASSWORD=abc/);
+    assert.match(res.text, /<redacted>/);
+  });
+
+  it("respects by_agent disabled rules via resolveSanitizeOptions", () => {
+    const whitelist = { rules: {}, by_agent: { "code-reviewer": ["data_field"] }, patterns: [] };
+    const opts = resolveSanitizeOptions(whitelist, "code-reviewer");
+    assert.equal(opts.rules.data_field, false);
+    assert.deepEqual(opts.disabledRules, ["data_field"]);
+    const res = sanitize('{"amount": 1, "currency": "USD"}', opts);
+    assert.equal(res.count, 0, "data_field disabled for code-reviewer");
+  });
+
+  it("keeps whitelist patterns intact", () => {
+    const opts = resolveSanitizeOptions({ patterns: ["test-cp-1"] }, "haiku");
+    const res = sanitize('{"counterparty_id": "test-cp-1", "amount": 5}', opts);
+    assert.match(res.text, /test-cp-1/);
+    assert.match(res.text, /<redacted>/);
+  });
+
+  it("returns empty result for empty/non-string input", () => {
+    assert.deepEqual(sanitize(""), { text: "", count: 0 });
+    assert.deepEqual(sanitize(undefined), { text: "", count: 0 });
+  });
+
+  it("loadWhitelist returns {} when file missing", () => {
+    assert.deepEqual(loadWhitelist("/nonexistent/whitelist.json"), {});
+  });
+
+  it("loadWhitelist parses valid JSON file", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-wl-"));
+    try {
+      const file = path.join(dir, "wl.json");
+      fs.writeFileSync(file, JSON.stringify({ patterns: ["x"], rules: { env_secret: false } }));
+      assert.deepEqual(loadWhitelist(file), { patterns: ["x"], rules: { env_secret: false } });
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("maestro-bootstrap sanitizer hook (Level 1 in tool.execute.before)", () => {
+  let dir, hooks, savedLogEnv;
+
+  const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR", "MAESTRO_SANITIZER_WHITELIST"];
+
+  before(async () => {
+    savedLogEnv = {};
+    for (const k of LOG_ENV) {
+      savedLogEnv[k] = process.env[k];
+      delete process.env[k];
+    }
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-sanitize-hook-"));
+    hooks = await MaestroBootstrapPlugin({ directory: dir });
+  });
+
+  after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    for (const k of LOG_ENV) {
+      if (savedLogEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedLogEnv[k];
+    }
+  });
+
+  it("redacts prompt with a secret in task args", async () => {
+    const output = { args: { subagent_type: "haiku", prompt: "Implement with POSTGRES_PASSWORD=topsecret" } };
+    await hooks["tool.execute.before"]({ tool: "task", sessionID: "s", callID: "c-san" }, output);
+    assert.match(output.args.prompt, /POSTGRES_PASSWORD=<redacted>/);
+    assert.doesNotMatch(output.args.prompt, /topsecret/);
+  });
+
+  it("does not modify prompt when nothing sensitive", async () => {
+    const output = { args: { subagent_type: "sonnet", prompt: "Implement a simple endpoint" } };
+    await hooks["tool.execute.before"]({ tool: "task", sessionID: "s", callID: "c-clean" }, output);
+    assert.equal(output.args.prompt, "Implement a simple endpoint");
+  });
+
+  it("leaves non-task tools untouched", async () => {
+    const output = { args: { command: "cat .env" } };
+    await hooks["tool.execute.before"]({ tool: "bash", sessionID: "s", callID: "c-bash" }, output);
+    assert.equal(output.args.command, "cat .env");
+  });
+});
+
+describe("maestro-bootstrap trusted skip (D2/D3)", () => {
+  let dir, hooks, savedLogEnv;
+
+  const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR", "MAESTRO_SANITIZER_WHITELIST", "MAESTRO_ACCESS_POLICY"];
+
+  before(async () => {
+    savedLogEnv = {};
+    for (const k of LOG_ENV) {
+      savedLogEnv[k] = process.env[k];
+      delete process.env[k];
+    }
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-trust-"));
+    // trust-config.json: sanitizer trusted, haiku нет.
+    fs.writeFileSync(path.join(dir, "trust-config.json"), JSON.stringify({ sanitizer: true }));
+    hooks = await MaestroBootstrapPlugin({ directory: dir });
+  });
+
+  after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    for (const k of LOG_ENV) {
+      if (savedLogEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedLogEnv[k];
+    }
+  });
+
+  it("loadTrustConfig returns set of trusted agents", () => {
+    const trusted = loadTrustConfig(path.join(dir, "trust-config.json"));
+    assert.ok(trusted.has("sanitizer"));
+    assert.ok(!trusted.has("haiku"));
+  });
+
+  it("skips sanitize for trusted subagent (sanitizer)", async () => {
+    const output = { args: { subagent_type: "sanitizer", prompt: "Check POSTGRES_PASSWORD=topsecret" } };
+    await hooks["tool.execute.before"]({ tool: "task", sessionID: "s", callID: "c-trusted" }, output);
+    assert.match(output.args.prompt, /topsecret/, "trusted prompt not sanitized");
+  });
+
+  it("sanitizes prompt for untrusted subagent (haiku)", async () => {
+    const output = { args: { subagent_type: "haiku", prompt: "Check POSTGRES_PASSWORD=topsecret" } };
+    await hooks["tool.execute.before"]({ tool: "task", sessionID: "s", callID: "c-untrusted" }, output);
+    assert.doesNotMatch(output.args.prompt, /topsecret/, "untrusted prompt sanitized");
+  });
+});
+
+describe("maestro-bootstrap access policy (file access control)", () => {
+  it("loadAccessPolicy returns exists:false when file missing", () => {
+    const p = loadAccessPolicy("/nonexistent/policy.json");
+    assert.equal(p.exists, false);
+    assert.equal(p.default, "ask");
+  });
+
+  it("loadAccessPolicy parses valid policy file", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-ap-"));
+    try {
+      const file = path.join(dir, "access-policy.json");
+      fs.writeFileSync(file, JSON.stringify({ default: "ask", allow: ["src/**"], ask: ["docs/**"], deny: ["*.env"] }));
+      const p = loadAccessPolicy(file);
+      assert.equal(p.exists, true);
+      assert.deepEqual(p.allow, ["src/**"]);
+      assert.deepEqual(p.ask, ["docs/**"]);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("resolveFileAccess allow-matches code paths", () => {
+    const policy = { default: "ask", allow: ["src/**", "*.{ts,js}"], ask: ["docs/**"], deny: ["*.env"] };
+    assert.equal(resolveFileAccess(policy, "src/app.ts"), "allow");
+    assert.equal(resolveFileAccess(policy, "index.ts"), "allow");
+  });
+
+  it("resolveFileAccess ask-matches protected paths", () => {
+    const policy = { default: "ask", allow: ["src/**"], ask: ["docs/**", "*.config.*"], deny: [] };
+    assert.equal(resolveFileAccess(policy, "docs/architecture.md"), "ask");
+    assert.equal(resolveFileAccess(policy, "webpack.config.js"), "ask");
+  });
+
+  it("resolveFileAccess deny always wins", () => {
+    const policy = { default: "ask", allow: ["src/**"], ask: [], deny: ["src/.env"] };
+    assert.equal(resolveFileAccess(policy, "src/.env"), "deny");
+    assert.equal(resolveFileAccess(policy, "src/other.ts"), "allow");
+  });
+
+  it("resolveFileAccess falls back to default when no pattern matches", () => {
+    const policy = { default: "ask", allow: ["src/**"], ask: [], deny: [] };
+    assert.equal(resolveFileAccess(policy, "misc/readme.txt"), "ask");
+    const allowDefault = { default: "allow", allow: [], ask: ["docs/**"], deny: [] };
+    assert.equal(resolveFileAccess(allowDefault, "anything"), "allow");
+  });
+
+  it("filePathOf extracts target only for read tool", () => {
+    assert.equal(filePathOf("read", { filePath: "a.ts" }), "a.ts");
+    assert.equal(filePathOf("read", {}), undefined);
+    // bash/glob/grep не покрываются access-policy (C1/I4) — возвращают undefined.
+    assert.equal(filePathOf("glob", { pattern: "src/**" }), undefined);
+    assert.equal(filePathOf("bash", { command: "cat docs/x.md" }), undefined);
+    assert.equal(filePathOf("grep", { pattern: "secret" }), undefined);
+    assert.equal(filePathOf("task", { prompt: "x" }), undefined);
+  });
+});
+
+describe("maestro-bootstrap access policy hook", () => {
+  let dir, hooks, savedLogEnv;
+
+  const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR", "MAESTRO_SANITIZER_WHITELIST", "MAESTRO_ACCESS_POLICY"];
+
+  before(async () => {
+    savedLogEnv = {};
+    for (const k of LOG_ENV) {
+      savedLogEnv[k] = process.env[k];
+      delete process.env[k];
+    }
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-ap-hook-"));
+    // Создаём access-policy.json: code allow, docs/config ask.
+    fs.mkdirSync(path.join(dir, ".maestro"), { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, ".maestro", "access-policy.json"),
+      JSON.stringify({ default: "ask", allow: ["src/**", "*.{ts,js}"], ask: ["docs/**", "*.config.*"], deny: ["*.env"] }),
+    );
+    hooks = await MaestroBootstrapPlugin({ directory: dir });
+  });
+
+  after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    for (const k of LOG_ENV) {
+      if (savedLogEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedLogEnv[k];
+    }
+  });
+
+  it("allows code file reads (allow match)", async () => {
+    const output = { args: { filePath: "src/app.ts" } };
+    await hooks["tool.execute.before"]({ tool: "read", sessionID: "s", callID: "c1" }, output);
+    // не должно выбросить ошибку
+    assert.ok(true);
+  });
+
+  it("throws on ask-matched path (docs/config)", async () => {
+    const output = { args: { filePath: "docs/architecture.md" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "s", callID: "c2" }, output),
+      /access-policy:ask/,
+    );
+  });
+
+  it("throws on deny-matched path (.env)", async () => {
+    const output = { args: { filePath: "src/.env" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "s", callID: "c3" }, output),
+      /access-policy:deny/,
+    );
   });
 });
 

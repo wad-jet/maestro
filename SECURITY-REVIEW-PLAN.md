@@ -106,7 +106,7 @@ File access control для untrusted сабагентов не описан во
 ```
 SANITIZER FINDINGS:
 - location: <путь/строка/поле>
-  type: <env_secret | data_field | env_file | db_credential | ledger_entry>
+  type: <env_secret | data_field | env_file | db_credential | ledger_entry | private_key | auth_header>
   reason: <почему чувствительное>
   snippet_hint: <краткая подсказка без содержимого, напр. "POSTGRES_PASSWORD в .env">
 STATUS: CLEAN | FINDINGS_FOUND
@@ -204,9 +204,37 @@ STATUS: CLEAN | FINDINGS_FOUND
 ## Порядок реализации
 
 - **Этап 1** — сделан (PR `c8247b2`): сабагент + правила + гейт + docs.
-- **Уход от агента** — предпосылка: команда `@maestro` (вход), удаление
-  `agents/maestro.md`, перепривязка команд, пересмотр плагина (инжекция/observability).
-- **Этап 2** — sanitizer в плагине + нативные permissions + whitelist + аудит-лог + docs.
+- **Уход от агента** — сделан (PR `cb28173`): команда `@maestro` (вход),
+  удаление `agents/maestro.md`, перепривязка команд, пересмотр плагина.
+- **Этап 2** — сделан: sanitize (Ур.1) в плагине + file access control по
+  `access-policy.json` (перехват file-тулов) + whitelist + генерация
+  access-policy сабагентом `sanitizer` + тесты + docs.
+
+> **Отклонение от плана:** file access control реализован НЕ статичными
+> нативными permissions, а **динамическим перехватом** file-тулов плагином по
+> `access-policy.json` (файл формирует сабагент `sanitizer`, допускается ручная
+> правка). Это согласовано с пользователем (2026-08-18).
+
+### Ревью 2026-08-18 — решения по замечаниям
+
+- **C2 (verify):** обязательная эмпирическая проверка в живом OpenCode, что
+  `tool.execute.before` плагина ловит tool-call'ы **сабагентов** (child-сессии).
+  Без этого file access control может не работать в реальной среде. **Действие
+  перед релизом.**
+- **C1:** access-policy покрывает только `read`. `bash`/`glob`/`grep` НЕ
+  покрываются (bash-пути ненадёжно извлекаются, glob/grep — паттерны) — для них
+  нативные permissions OpenCode.
+- **D1:** HITL-flow при ask-блоке: плагин бросает `[access-policy:ask]`, оркестратор
+  ловит → HITL (разрешить → дописать allow → re-dispatch / запретить / стоп).
+  Документировано в SKILL.md.
+- **D2/D3:** trusted-skip реализован для sanitize промпта (плагин читает
+  `trust-config.json`, skip для trusted subagent_type). File access — для всех
+  (trusted-skip по file access требует C2).
+- **I2:** приоритет `resolveFileAccess` исправлен на deny > ask > allow.
+- **I4:** `filePathOf` возвращает путь только для `read`.
+- **M2:** аудит-лог sanitizer — не отдельный `sanitizer-log.md`, а события
+  `sanitizer.redacted`/`access_policy.blocked` в общем
+  `maestro-bootstrap-<date>.log` (docs синхронизированы).
 
 ## Known gaps Этапа 1 (закрываются на Этапе 2)
 
@@ -222,14 +250,21 @@ STATUS: CLEAN | FINDINGS_FOUND
 
 ## Правила Context Sanitizer (из SKILL.md, основа для пометок/маскирования)
 
-1. **Secrets из окружения** — имена с `SECRET`, `KEY`, `TOKEN`, `PASSWORD`,
-   `CREDENTIAL`, `PASS`, `AUTH` → `<redacted:env.NAME>`.
-2. **Чувствительные поля данных** — `amount`, `currency`, `article_code`,
-   `counterparty_id` → `<redacted>`.
+1. **Secrets из окружения** — имена (case-insensitive) с keywords `SECRET`,
+   `KEY`, `TOKEN`, `PASSWORD`, `CREDENTIAL`, `PASS`, `AUTH`, `DSN`, `CERT`,
+   `SALT`, `SIGNATURE`, `NONCE` → `<redacted:env.NAME>`.
+2. **Чувствительные поля данных** — финансовые (`amount`, `salary`, `iban`,
+   `card_number`, `cvv`, `vat`, `total_amount`, ...) и PII (`phone`, `email`,
+   `inn`, `snils`, `passport`, ...) → `<redacted>`. Суффиксы покрываются;
+   расширяемо через `extra_fields`.
 3. **Файлы .env / .env.\*** → `<redacted:.env file>`.
-4. **SFTP/DB credentials** — `sftp://`, `postgresql://`, `mongodb://` с
-   credentials → `<redacted:connection>`.
-5. **Raw ledger entries** — маскинг полей из п.2.
+4. **SFTP/DB credentials** — URI-схемы (`sftp://`, `postgresql://`, `mysql://`,
+   `ssh://`, `ldap://`, `clickhouse://`, ...) с credentials и connection-string
+   params (`password=...`, `pwd=...`) → `<redacted:connection>`.
+   Расширяемо через `extra_uri_schemes`.
+5. **Private keys** — PEM-блоки `-----BEGIN ... PRIVATE KEY-----` → `<redacted>`.
+6. **Auth headers** — `Authorization: Bearer ...`, `X-API-Key: ...` → `<redacted>`.
+7. **Raw ledger entries** — маскинг полей из п.2.
 
 **НЕ фильтруется:** агрегированные данные, схемы БД без данных, код и конфиги
 (кроме `.env`), имена таблиц/колонок.

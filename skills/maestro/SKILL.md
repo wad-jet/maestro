@@ -131,7 +131,7 @@ Interactive — агент комментирует находки по ходу
       - Реестр закоммичен в git (корень репо, `regression/`) — идентичен из
         любого worktree/клона; трюков с git-common-dir не нужно
       - `.maestro/` в `.gitignore` — только эфемерное (sdd/, last-run,
-        sanitizer-log); реестр в git
+        maestro-bootstrap-*.log); реестр в git
       - Структура (`regression/entries/`, `regression/released/`,
         `regression/cancelled-features.md`) закоммичена через `.gitkeep` —
         каталоги существуют всегда
@@ -664,10 +664,11 @@ pipeline; после завершения переход на шаг 11 (writing
 
 - **Sanitize промпта:** для untrusted — прогон через Security Review (см.
   одноимённую секцию). Для trusted — промпт уходит как есть.
-- **File access control:** untrusted сабагент при попытке Read/Glob/Grep/Bash-read
-  любого файла → HITL: `(a) разрешить` / `(b) запретить`. Trusted — без ограничений.
-  На Этапе 1 (нет плагина) — инструктивно в промпте сабагента; enforcement на
-  Этапе 2 (перехват tools в плагине `maestro-sanitizer`).
+- **File access control:** untrusted сабагент при попытке `read` ask/deny-файла →
+  HITL: `(a) разрешить` / `(b) запретить` (см. Security Review). Trusted — без
+  ограничений. Покрывается только `read`; bash/glob/grep — нативные permissions.
+  Реализовано плагином `maestro-bootstrap` (перехват `read` по
+  `access-policy.json`).
 - **`sanitizer` сабагент — trusted:** единственный, кому разрешено видеть сырые
   данные (чтобы пометить). Его собственный промпт при диспатче **не** санизируется
   (он доверенный) — рекурсии нет.
@@ -805,18 +806,44 @@ task(
 
 ### Что фильтруется
 
-1. **Secrets из окружения:** переменные с именами, содержащими
-   `SECRET`, `KEY`, `TOKEN`, `PASSWORD`, `CREDENTIAL`, `PASS`, `AUTH`
+1. **Secrets из окружения:** переменные (case-insensitive: `API_KEY`,
+   `apiKey`, `api_key`) с keywords `SECRET`, `KEY`, `TOKEN`, `PASSWORD`,
+   `CREDENTIAL`, `PASS`, `AUTH`, `DSN`, `CERT`, `SALT`, `SIGNATURE`, `NONCE`
    — заменяются на `<redacted:env.NAME>`.
 2. **Чувствительные поля данных:** в примерах данных, JSON-samples,
-   test fixtures — поля `amount`, `currency`, `article_code`,
-   `counterparty_id` заменяются на `<redacted>`.
+   test fixtures — финансовые (`amount`, `salary`, `iban`, `card_number`,
+   `cvv`, `vat`, `total_amount`, `balance`, `account_number` и т.д.) и PII
+   (`phone`, `email`, `inn`, `snils`, `passport`, `birth_date` и т.д.) поля
+   заменяются на `<redacted>`. Детект **регистронезависим** (`Amount`,
+   `AMOUNT`); суффиксы (`amountValue`, `amount_value`) и camelCase-варианты
+   snake-полей (`cardNumber`) покрываются автоматически. Список расширяем
+   через `extra_fields` в `sanitizer-whitelist.json`.
 3. **Файлы .env / .env.\*:** если упоминаются в контексте — заменяются
    на `<redacted:.env file>`.
 4. **SFTP/DB credentials:** строки вида `sftp://...`, `postgresql://...`,
-   `mongodb://...` с credentials — заменяются на `<redacted:connection>`.
-5. **Raw ledger entries:** если контекст содержит неанонимизированные
+   `mysql://...`, `ssh://...`, `ldap://...`, `clickhouse://...` с встроенными
+   credentials, а также connection-string params `password=...`, `pwd=...`
+   — заменяются на `<redacted:connection>`. Детект регистронезависим
+   (`POSTGRES://`). Схемы расширяемы через `extra_uri_schemes`.
+5. **Private keys:** PEM-блоки `-----BEGIN ... PRIVATE KEY-----`
+   (регистронезависимо) — заменяются на `<redacted>`.
+6. **Auth headers:** `Authorization: Bearer ...`, `X-API-Key: ...` —
+   заменяются на `<redacted>`.
+7. **Raw ledger entries:** если контекст содержит неанонимизированные
    проводки — применяется маскинг полей из п.2.
+
+### Ограничения детекта (regex-Ур.1)
+
+- Multi-line/heredoc значения (`API_KEY=\nsecret`) не покрываются (I7).
+- CamelCase-префиксы базовых полей без явной записи (например, `netAmount`
+  для поля `amount`) — частично: покрываются только явные префиксные варианты
+  (`total_amount`, `net_amount`, `gross_amount`); остальное ловит Ур.2.
+- Короткие поля (`pan`, `inn`, `ssn`) маскируются только на границах слова —
+  снижает false positives (`company`, `japan` не маскируются).
+- Подход: **false positives > false negatives** — лишняя маскировка безопаснее
+  пропуска; подавляется через `patterns` в whitelist.
+- Entropy-детект (неизвестные форматы токенов) не реализован намеренно —
+  ловит Ур.2 (LLM).
 
 ### Что НЕ фильтруется
 
@@ -848,11 +875,12 @@ Trust-уровень определяется по `trust-config.json` (см. Tr
    (Трактовка Y, см. Security Review)
 3. Оригинальный контекст оркестратора **не изменяется** — санитайзер
    создаёт копию промпта для untrusted сабагента
-4. Аудит-лог: в `.maestro/sanitizer-log.md` записывается:
+4. Аудит-лог: плагин пишет события sanitizer в общий лог
+   `.maestro/maestro-bootstrap-<date>.log` с маркерами `sanitizer.redacted`
+   (что замаскировано, без содержимого) и `access_policy.blocked` (файл-доступ):
    - timestamp
-   - сабагент
-   - что отфильтровано (без содержимого)
-   - размер промпта до/после
+   - сабагент / sessionID
+   - что замаскировано/заблокировано (без содержимого)
 
 ## Security Review
 
@@ -880,7 +908,7 @@ Trust-уровень определяется по `trust-config.json` (см. Tr
          [HITL] (a) вычистить и продолжить / (b) продолжить как есть (принять риск) / (c) стоп
             │
          [FILE ACCESS CONTROL] — во время работы untrusted сабагента:
-            Read/Glob/Grep/Bash-read → HITL: (a) разрешить / (b) запретить
+            `read` ask/deny-файла → блок (HITL решает оркестратор)
 ```
 
 ### Точки встраивания в pipeline
@@ -921,29 +949,47 @@ Trust-уровень определяется по `trust-config.json` (см. Tr
 - Опция (env/конфиг `MAESTRO_SANITIZER_MODE=hybrid`) переключает на гибрид:
   spec review всегда + диспатч только если Уровень 1 что-то нашёл или недоступен.
 
-### File access control (Этап 2 — enforcement в плагине)
+### File access control (реализовано в плагине)
 
-Untrusted сабагент при попытке Read/Glob/Grep/Bash-read любого файла → HITL:
-`(a) разрешить` / `(b) запретить`. Trusted — без ограничений. На Этапе 1 (нет
-плагина) — инструктивно в промпте сабагента (`implementer-prompt.md`).
+Untrusted сабагент при попытке `read` ask/deny-файла → блокировка плагином
+`maestro-bootstrap` по `.maestro/access-policy.json` (`allow` → пропуск, `ask` →
+блок с HITL-сигналом оркестратору, `deny` → жёсткий блок). Trusted — без
+ограничений (skip sanitize промпта; file access — по trust-config.json). Файл
+правил формирует сабагент `sanitizer` (по структуре проекта/стеку) или вручную.
+Если файла нет — плагин не блокирует (fail-open), полагаясь на нативные
+permissions OpenCode.
+
+**Покрываются только `read`.** `bash`/`glob`/`grep` НЕ покрываются access-policy
+(пути из bash-команд ненадёжно извлекаются; glob/grep работают с паттернами) —
+для них используйте нативные permissions OpenCode (`bash: ask` и т.п.).
+
+**HITL-flow при блоке (ask):** плагин бросает ошибку с маркером
+`[access-policy:ask]`. Оркестратор ловит маркер в результате сабагента и
+запрашивает HITL:
+- `(a) разрешить` — дописать путь/паттерн в `allow`-секцию
+  `access-policy.json`, затем **re-dispatch** сабагента;
+- `(b) запретить` — сообщить сабагенту/продолжить без файла;
+- `(c) стоп` — остановить процесс.
+При `deny` — жёсткий блок без HITL (сабагент получает ошибку, оркестратор
+решает по ситуации).
 
 ### Этапность
 
-- **Этап 1 (сейчас):** только сабагент `sanitizer` (Уровень 2) + HITL-гейт +
-  правила + file access control инструктивно. Sanitizer там **primary**.
-- **Этап 2 (потом):** плагин `maestro-sanitizer` (Уровень 1, авто-маскирование) +
-  file access control enforcement (перехват tools) + whitelist
-  (`.maestro/sanitizer-whitelist.json`). Сабагент остаётся доп. слоем.
+- **Этап 1 (сделан):** сабагент `sanitizer` (Уровень 2) + HITL-гейт + правила +
+  file access control инструктивно. Sanitizer там **primary**.
+- **Этап 2 (сделан):** в плагине `maestro-bootstrap` реализованы Уровень 1
+  (авто-маскирование промптов task) + file access control (перехват file-тулов
+  по access-policy.json) + whitelist. Сабагент остаётся доп. слоем (Уровень 2)
+  и генерирует/поддерживает access-policy.json.
 
-### Known gaps Этапа 1
+### Known gaps Этапа 1 (закрыты на Этапе 2)
 
-- **Принцип «минимум данных до trusted sanitizer» не выполняется:** на Этапе 1
-  нет Уровня 1, sanitizer видит все raw-промпты. Закроется плагином на Этапе 2.
-- **Этап 1 модель-зависим:** оркестратор должен вручную диспатчить sanitizer
-  перед каждым untrusted-диспатчем. Модель может забыть/пропустить. Закроется
-  плагином на Этапе 2.
-- **File access control не enforced:** на Этапе 1 — только инструкция в промпте.
-  Enforcement — плагин на Этапе 2.
+- **Принцип «минимум данных до trusted sanitizer»** — закрыт: Уровень 1 (плагин)
+  маскирует промпт до sanitizer-сабагента.
+- **Этап 1 модель-зависим** — закрыт: плагин санизирует промпт автоматически
+  при каждом task-диспатче.
+- **File access control не enforced** — закрыт: плагин перехватывает file-тулы
+  по access-policy.json.
 
 ## Spec Review (опционально)
 
@@ -1039,7 +1085,7 @@ $REGISTRY_DIR = $(git rev-parse --show-toplevel)/regression
 ```
 
 - Реестр закоммичен в git (корень репо). Per-worktree остаются `.maestro/sdd/`,
-  `.maestro/sanitizer-log.md`, `.maestro/last-run.md` (в `.gitignore`)
+  `.maestro/maestro-bootstrap-*.log`, `.maestro/last-run.md` (в `.gitignore`)
 - `1 файл = 1 фича` — sharded append-only: конфликт параллельных pipeline
   невозможен по построению, flock не нужен
 - Параллельные worktree: каждая фича коммитит свой entry в свою ветку;

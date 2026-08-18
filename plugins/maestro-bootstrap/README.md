@@ -1,20 +1,104 @@
 # maestro-bootstrap
 
-Плагин для OpenCode: **глобальная observability** (не привязан к агенту).
-Раньше инжектил bootstrap-директиву в сессии агента `maestro`; после ухода от
-агента (2026-08-18) инжекция удалена — скилл `maestro` вызывается через команду
-`@maestro` в любой primary-сессии. Плагин остаётся для логирования ключевых
-событий и (в перспективе, Этап 2) санитайзинга task-промптов.
+Плагин для OpenCode: **глобальная observability + санитайзинг промптов +
+file access control** (не привязан к агенту). Скилл `maestro` вызывается через
+команду `@maestro` в любой primary-сессии; инжекция директивы в сессии агента
+удалена (уход от агента, 2026-08-18).
 
 ## Что делает
 
-- Логирует вызовы `task`-тула (диспатч субагентов) — ядро observability.
+- **Санитайзинг промптов `task`** (Уровень 1 Security Review): маскирует
+  чувствительные данные (env-secrets, поля данных, `.env`, DB/SFTP credentials,
+  ledger) ДО отправки промпта в сабагента. Авто, без HITL. **Trusted сабагенты
+  (trust-config.json) — skip** (получают промпт как есть).
+- **File access control** (Уровень 3): перехват `read` по правилам
+  `.maestro/access-policy.json`. `allow` → пропуск, `ask` → блокировка (HITL
+  решает оркестратор), `deny` → жёсткий блок. **`bash`/`glob`/`grep` НЕ
+  покрываются** — для них нативные permissions OpenCode.
+- Логирует вызовы `task`-тула (диспатч субагентов) — observability.
 - Логирует ошибки/повторы сессий (`session.error`, `session.status.retry`).
 - Детектит пустой результат субагента (`tool.execute.after.empty_result`).
-- (Этап 2) Санитайзинг промптов `task` — отдельная задача
-  (см. `SECURITY-REVIEW-PLAN.md`).
 
 Плагин **глобальный** — не фильтрует по агенту, работает во всех сессиях.
+
+## Санитайзинг промптов (sanitize)
+
+Правила детекта — Context Sanitizer (см. `skills/maestro/SKILL.md`):
+
+1. **Secrets из окружения** — имена (case-insensitive: `API_KEY`, `apiKey`,
+   `api_key`) с keywords `SECRET`, `KEY`, `TOKEN`, `PASSWORD`, `CREDENTIAL`,
+   `PASS`, `AUTH`, `DSN`, `CERT`, `SALT`, `SIGNATURE`, `NONCE` и их значения →
+   `<redacted>`.
+2. **Чувствительные поля данных** — расширенный список (финансовые: `amount`,
+   `salary`, `iban`, `card_number`, `cvv`, `vat`, `total_amount` и т.д.; PII:
+   `phone`, `email`, `inn`, `snils`, `passport` и т.д.) → `<redacted>`.
+   Детект регистронезависим; `\w*`-суффиксы (`amountValue`, `amount_value`) и
+   camelCase-варианты snake-полей (`cardNumber`) покрываются автоматически.
+3. **Файлы .env / .env.\*** → `<redacted>`.
+4. **SFTP/DB credentials** — URI-схемы (`postgres://`, `mysql://`, `ssh://`,
+   `ldap://`, `clickhouse://` и др., регистронезависимо) с встроенными
+   credentials, а также connection-string params `password=...`, `pwd=...` →
+   `<redacted>`.
+5. **Private keys** — PEM-блоки `-----BEGIN ... PRIVATE KEY-----`
+   (регистронезависимо) → `<redacted>`.
+6. **Auth headers** — `Authorization: Bearer ...`, `X-API-Key: ...` → `<redacted>`.
+7. **Raw ledger entries** — покрываются rule `data_field` (те же поля).
+
+Whitelist (`.maestro/sanitizer-whitelist.json`, env `MAESTRO_SANITIZER_WHITELIST`):
+
+```json
+{
+  "rules": { "env_secret": true, "data_field": true, "env_file": true, "db_credential": true, "ledger_entry": true, "private_key": true, "auth_header": true },
+  "by_agent": { "code-reviewer": [] },
+  "patterns": [],
+  "extra_fields": ["my_custom_field"],
+  "extra_uri_schemes": ["custom-proto"]
+}
+```
+
+- `rules` — включение/выключение категорий детекта.
+- `by_agent` — отключение категорий для конкретных сабагентов.
+- `patterns` — конкретные значения, которые НЕ считаются sensitive (whitelist).
+- `extra_fields` — дополнительные чувствительные поля данных (проект-специфичные),
+  добавляются к дефолтному списку.
+- `extra_uri_schemes` — дополнительные URI-схемы для credentials-детекта.
+
+## File access control (access-policy)
+
+`.maestro/access-policy.json` (env `MAESTRO_ACCESS_POLICY`) определяет, к каким
+файлам сабагенты могут обращаться без запроса через `read`:
+
+```json
+{
+  "version": 1,
+  "default": "ask",
+  "allow": ["src/**", "test/**"],
+  "ask": ["docs/**", "*.config.*"],
+  "deny": ["*.env", "*.{pem,key,cert}"]
+}
+```
+
+- `default` — действие для несовпавших путей: `allow` | `ask`.
+- `allow` — без запроса; `ask` — требует HITL; `deny` — жёсткий блок.
+  Приоритет: `deny` > `ask` > `allow` > `default`.
+- Контролируется **только `read`**. `bash`/`glob`/`grep` НЕ покрываются
+  (bash-пути ненадёжно извлекаются; glob/grep — паттерны) — используйте нативные
+  permissions OpenCode (`bash: ask` и т.п.).
+- Файл формируется сабагентом `sanitizer` (по структуре проекта/стеку) или
+  вручную. Пример — `examples/access-policy.example.json`.
+- Если файла нет — плагин НЕ блокирует (fail-open), полагаясь на нативные
+  permissions OpenCode.
+- Trusted сабагенты (trust-config.json) — file access control применяется для
+  всех; trusted-skip полный требует верификации перехвата child-сессий (C2).
+
+## Аудит-лог
+
+События sanitizer пишутся в `.maestro/maestro-bootstrap-<date>.log` с маркерами
+`sanitizer.redacted` (что замаскировано, без содержимого) и `access_policy.blocked`
+(файл-доступ), наряду с observability-событиями.
+
+Примеры конфигов: `examples/access-policy.example.json`,
+`examples/sanitizer-whitelist.example.json`.
 
 ## Логирование
 
@@ -41,6 +125,8 @@
 - `tool.execute.after.empty_result` — субагент вернул пустой результат (warn)
 - `session.error` — ошибка/прерывание модели (warn)
 - `session.status.retry` — перезапрос модели (warn)
+- `sanitizer.redacted` — замаскировано N чувствительных элементов в промпте task (warn)
+- `access_policy.blocked` — доступ к ask/deny-файлу заблокирован (warn)
 
 Детальное логирование `bash`/`skill`/`read` убрано (сокращение observability).
 
@@ -51,6 +137,8 @@
 | `MAESTRO_BOOTSTRAP_LOG_LEVEL` | `debug` \| `info` \| `warn` \| `error` | `info` |
 | `MAESTRO_BOOTSTRAP_LOG_MASK` | список включённых уровней через запятую | выводится из `LOG_LEVEL` |
 | `MAESTRO_BOOTSTRAP_LOG_DIR` | каталог для лог-файлов | `<project>/.maestro` |
+| `MAESTRO_SANITIZER_WHITELIST` | путь к sanitizer-whitelist | `<project>/.maestro/sanitizer-whitelist.json` |
+| `MAESTRO_ACCESS_POLICY` | путь к access-policy | `<project>/.maestro/access-policy.json` |
 
 `MAESTRO_BOOTSTRAP_LOG_LEVEL` — порог детализации (пишутся уровни `>=`
 заданного). `MAESTRO_BOOTSTRAP_LOG_MASK` — явный список включённых уровней;

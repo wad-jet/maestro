@@ -33,7 +33,10 @@ Trust-статус управляет **двумя** измерениями за
 | Уровень | Sanitize промпта | File access control |
 |---|---|---|
 | **trusted** (`trust-config.json` = `true`) | **skip** | **skip** (без ограничений) |
-| **untrusted** (default) | Security Review (Ур.1 + Ур.2) | HITL на каждый доступ к файлу |
+| **untrusted** (default) | Security Review (Ур.1 + Ур.2) | перехват `read` по access-policy (ask → блок) |
+
+> File access control применяется ко всем сабагентам; trusted-skip для file
+> access — ограничен (требует верификации перехвата child-сессий, C2).
 
 ### trust-config.json
 
@@ -58,24 +61,28 @@ access control. Два уровня + HITL-гейт:
 
 ```
 untrusted диспатч →
-  [Ур.1] maestro-sanitizer (плагин, Этап 2) — авто-маскирование, без HITL
+  [Ур.1] плагин maestro-bootstrap — авто-маскирование промпта, без HITL
   [Ур.2] сабагент sanitizer (trusted, read-only) — пометки, не вычищает
   пометки есть → HITL: (a) вычистить и продолжить / (b) продолжить как есть / (c) стоп
-  → во время работы: file access control (HITL на доступ к файлу)
+  → во время работы: file access control (перехват file-тулов по access-policy.json)
 ```
 
 **Роль сабагента `sanitizer`:** trusted, read-only. Находит и **помечает**
 чувствительные данные (где, что, почему) — не вычищает. Оркестратор вычищает
 по пометкам. Выход — structured-блок `SANITIZER FINDINGS` + `STATUS: CLEAN |
-FINDINGS_FOUND`.
+FINDINGS_FOUND`. Также генерирует/поддерживает `.maestro/access-policy.json`
+(файл правил доступа по структуре проекта/стеку).
 
 **Trusted skip:** если сабагент в `trust-config.json` = `true` — sanitize промпта
 и file access control **не применяются** (данные передаются как есть, доступ к
 файлам свободен).
 
-**File access control:** untrusted сабагент при попытке Read/Glob/Grep/Bash-read
-любого файла → HITL: `(a) разрешить` / `(b) запретить`. На Этапе 1 — инструктивно
-в промпте; enforcement — плагин на Этапе 2.
+**File access control (реализован в плагине):** untrusted сабагент при попытке
+`read` ask/deny-файла → блокировка плагином `maestro-bootstrap` по
+`.maestro/access-policy.json` (`allow` → пропуск, `ask` → блок с HITL-сигналом,
+`deny` → жёсткий блок; приоритет deny > ask > allow). Покрывается только `read`;
+bash/glob/grep — нативные permissions. Файл формирует сабагент `sanitizer` или
+вручную; если файла нет — плагин не блокирует (fail-open).
 
 **Точки встраивания:**
 - **Spec security review** (шаг 8.6) — для фич со spec (сложные/архитектурные),
@@ -83,20 +90,31 @@ FINDINGS_FOUND`.
 - **Перед диспатчем untrusted** (шаги 9/13/16) — всегда.
 
 **Правила детекта (Context Sanitizer):**
-1. **Secrets из окружения** — `SECRET`, `KEY`, `TOKEN`, `PASSWORD`,
-   `CREDENTIAL`, `PASS`, `AUTH` → `<redacted:env.NAME>`.
-2. **Чувствительные поля данных** — `amount`, `currency`, `article_code`,
-   `counterparty_id` → `<redacted>`.
+1. **Secrets из окружения** — имена (любой регистр) с `SECRET`, `KEY`, `TOKEN`,
+   `PASSWORD`, `CREDENTIAL`, `PASS`, `AUTH`, `DSN`, `CERT`, `SALT`,
+   `SIGNATURE`, `NONCE` → `<redacted:env.NAME>`.
+2. **Чувствительные поля данных** — финансовые (`amount`, `salary`, `iban`,
+   `card_number`, `cvv`, `vat`, `total_amount`, ...), PII (`phone`, `email`,
+   `inn`, `snils`, `passport`, ...), бизнес-поля → `<redacted>`. Детект
+   регистронезависим; суффиксы (`amountValue`, `amount_value`) и camelCase-
+   варианты snake-полей (`cardNumber`) покрываются; список расширяем через
+   `extra_fields` в whitelist.
 3. **Файлы .env / .env.\*** → `<redacted:.env file>`.
-4. **SFTP/DB credentials** — `sftp://`, `postgresql://`, `mongodb://` с
-   credentials → `<redacted:connection>`.
-5. **Raw ledger entries** → маскинг полей.
+4. **SFTP/DB credentials** — URI-схемы (`sftp://`, `postgresql://`, `mysql://`,
+   `ssh://`, `ldap://`, `clickhouse://`, ..., регистронезависимо) с credentials
+   и connection-string params (`password=...`, `pwd=...`) →
+   `<redacted:connection>`. Схемы расширяемы через `extra_uri_schemes`.
+5. **Private keys** — PEM-блоки `-----BEGIN ... PRIVATE KEY-----`
+   (регистронезависимо) → `<redacted>`.
+6. **Auth headers** — `Authorization: Bearer ...`, `X-API-Key: ...` → `<redacted>`.
+7. **Raw ledger entries** → маскинг полей из п.2.
 
 Что **не** фильтруется: агрегированные данные, схемы БД без данных, код и
 конфиги (кроме `.env`), имена таблиц/колонок.
 
-**Аудит-лог:** `.maestro/sanitizer-log.md` (что отфильтровано, без содержимого;
-что файл-доступ запрошен/разрешён/запрещён).
+**Аудит-лог:** плагин пишет события sanitizer в
+`.maestro/maestro-bootstrap-<date>.log` с маркерами `sanitizer.redacted`
+(что замаскировано, без содержимого) и `access_policy.blocked` (файл-доступ).
 
 ## 🔗 Связанные разделы
 

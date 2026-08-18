@@ -38,6 +38,39 @@
   - Trusted skip: trusted сабагенты пропускают sanitize и file access control.
   - File access control для untrusted (на Этапе 1 — инструктивно в промпте;
     enforcement — плагин на Этапе 2).
+- **Security Review (Этап 2):** реализация в плагине `maestro-bootstrap`:
+  - **Уровень 1** — санитайзинг промптов `task` (маскирование env-secrets,
+    полей данных, `.env`, DB/SFTP credentials, ledger) по правилам Context
+    Sanitizer + whitelist (`sanitizer-whitelist.json`).
+  - **File access control** — перехват `read` по `.maestro/access-policy.json`
+    (`allow`/`ask`/`deny`; приоритет deny > ask > allow). Файл формирует
+    сабагент `sanitizer` или вручную.
+  - **Trusted skip** — плагин читает `trust-config.json`, trusted сабагенты
+    пропускают sanitize промпта.
+- **Ревью Этапа 2 (2026-08-18):** исправлены замечания ревью — access-policy
+  покрывает только `read` (bash/glob/grep — нативные permissions), приоритет
+  `resolveFileAccess` исправлен (deny > ask > allow), удалён мёртвый код,
+  аудит-лог — в общем bootstrap-логе.
+- **Расширение покрытия sanitize (2026-08-19):** регулярные выражения
+  Уровня 1 закрывают заметно больше кейсов:
+  - `data_field` — расширенный список полей (финансовые + PII + бизнес),
+    суффиксы (`amountValue`, `amount_value`), camelCase-варианты snake-полей
+    (`cardNumber`), расширяемость через `extra_fields` в whitelist;
+  - `db_credential` — больше URI-схем (`ssh`, `ldap`, `clickhouse`, ...) +
+    connection-string params (`password=...`, `pwd=...`), расширяемость через
+    `extra_uri_schemes`;
+  - `env_secret` — case-insensitive (`apiKey`, `api_key`) + keywords
+    (`DSN`, `CERT`, `SALT`, `SIGNATURE`, `NONCE`);
+  - новые правила `private_key` (PEM-блоки) и `auth_header`
+    (`Authorization: Bearer ...`, `X-API-Key: ...`);
+  - `ledger_entry` — маркер (покрывается `data_field`, дублирование убрано);
+  - детект регистронезависим по всем правилам (`Amount`, `POSTGRES://`,
+    `-----BEGIN rsa private key-----`);
+  - документированы ограничения regex-детекта (multi-line, camelCase-префиксы;
+    остальное ловит Ур.2-сабагент).
+- **Команда `@test-sanitizer`:** проверка доступности сабагента `sanitizer` +
+  `agent.sanitizer` из `opencode.json` и trusted-статуса в `trust-config.json`
+  (по аналогии с `@test-code-reviewer`, плюс trusted-проверка).
 - **AGENTS.md:** правило синхронизации `manual_docs/` при изменениях скилла.
 
 ## [2026-08-03]
