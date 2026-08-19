@@ -211,3 +211,15 @@ opencode** (merge), а не только из локального `opencode.jso
 ## Open questions
 
 - Скоуп первого прохода: только ядро (A), или + доки (B), или + применение (C).
+
+## Документация setup-гайда (manual_docs)
+
+**Решение (2026-08-19):** создан пошаговый гайд настройки проекта —
+`manual_docs/tutorials/setup-project.md`. Покрывает оба варианта (новый проект и
+существующий без maestro), механику настройки моделей по тирам (M1/D2) с
+примерами. Обновлены: `run-first-feature.md`, `quick-start.md`, `index.md`,
+`model-selection.md`, `keep-docs-up-to-date.md` (строка в чек-лист),
+`changelog.md` (entry).
+
+**Обоснование:** в manual_docs не было инструкции по setup-фазе (`/maestro-init`/
+`/maestro-design`); quick-start и run-first-feature начинали сразу с `@maestro`.

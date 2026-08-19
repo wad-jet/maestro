@@ -24,6 +24,11 @@
   `.maestro/last-run.md`, `.maestro/maestro-bootstrap-*.log`) вместо всего
   `.maestro/` — в `AGENTS.md` и `plugins/maestro-bootstrap/README.md`.
 
+### Добавлено
+- **Гайд «Настройка проекта для maestro»** (`tutorials/setup-project.md`) —
+  пошаговая подготовка проекта через `/maestro-init` и `/maestro-design`
+  (новый и существующий проект) + настройка моделей по тирам (механика и пример).
+
 ## [2026-08-18]
 
 ### Изменено

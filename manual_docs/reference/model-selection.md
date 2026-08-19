@@ -80,7 +80,11 @@ OpenCode:    task(subagent_type="haiku", prompt="...")
 конфигурации** (global → project → `.opencode`), с merge-приоритетом
 `.opencode` > project > global.
 
+> Подробная пошаговая настройка проекта и моделей — в
+> [Настройке проекта для maestro](../tutorials/setup-project.md).
+
 ## 🔗 Связанные разделы
 
 - [Классификация фич](feature-classification.md)
+- [Настройка проекта для maestro](../tutorials/setup-project.md)
 - [Агенты и модель доверия](../explanation/agents-and-trust.md)

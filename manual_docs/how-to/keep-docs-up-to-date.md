@@ -24,6 +24,7 @@
 | Категории фич / матрица сигналов | `reference/feature-classification.md` |
 | Модели / tier / субагенты | `reference/model-selection.md`, `explanation/agents-and-trust.md` |
 | Команды (`@command`) | `reference/commands.md` |
+| `/maestro-init` / `/maestro-design` (setup, конфиг, модели) | `tutorials/setup-project.md`, `reference/commands.md` |
 | Trust / санитайзер | `explanation/agents-and-trust.md` |
 | Security Review / sanitizer-сабагент / file access control | `explanation/agents-and-trust.md`, `reference/model-selection.md`, `reference/hitl-gates.md` |
 | Реестр регрессии | `how-to/use-regression-registry.md` |
