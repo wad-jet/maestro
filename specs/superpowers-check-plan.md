@@ -13,7 +13,7 @@
 
 ## Постановка
 
-`/maestro-init` (скилл `init`, `skills/init/SKILL.md`) должен проверять наличие
+`/maestro-init` (скилл `maestro-init`, `skills/maestro-init/SKILL.md`) должен проверять наличие
 установленных скилов superpowers (`https://github.com/obra/superpowers`, папка
 `skills`). Если скилы не установлены — предложить установку через HITL.
 
@@ -62,7 +62,7 @@ tool инжектит его полное содержимое в контекс
 формата — fallback на прямую загрузку одного канонического скила
 (`test-driven-development`).
 
-## Flow (новый pre-flight шаг в `skills/init/SKILL.md`)
+## Flow (новый pre-flight шаг в `skills/maestro-init/SKILL.md`)
 
 Расположение: блок «Предусловия (pre-flight)», после «3. Git-состояние»
 (независимо от контекста проекта).
@@ -115,7 +115,7 @@ tool инжектит его полное содержимое в контекс
 
 | # | Файл | Действие |
 |---|---|---|
-| 1 | `skills/init/SKILL.md` | Новый pre-flight шаг «Проверка скилов superpowers»; строка в таблице «Обработка сбоев»; упоминание в «Завершение» (свод) |
+| 1 | `skills/maestro-init/SKILL.md` | Новый pre-flight шаг «Проверка скилов superpowers»; строка в таблице «Обработка сбоев»; упоминание в «Завершение» (свод) |
 | 2 | `commands/maestro-init.md` | Отразить новый шаг в списке действий |
 | 3 | `manual_docs/reference/commands.md` | `/maestro-init` — упомянуть проверку superpowers |
 | 4 | `manual_docs/overview/changelog.md` | Entry: проверка superpowers в `/maestro-init` |

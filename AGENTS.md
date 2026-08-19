@@ -8,7 +8,8 @@ This is the **authoring repo** for the OpenCode `maestro` system (the "maestro" 
 - `agents/*.md` — OpenCode agent configs (`mode`, `permission`, `hidden`, `description` in YAML frontmatter). All are subagents (`design`, `haiku`, `sonnet`, `opus`, `fable`, `code-reviewer`, `sanitizer`). `design` and `sanitizer` are trusted by default (spec formation, security review). There is **no primary `maestro` agent** — entry is via the `@maestro` command (skill).
 - `commands/*.md` — `@command` configs (frontmatter `agent:` field; `@maestro` is the entry point).
 - `skills/maestro/{design-prompt.md,implementer-prompt.md,spec-review-prompt.md,stack-detection.md}` — support files referenced by SKILL.md.
-- `skills/init/{SKILL.md,init-context.md}` — `/maestro-init` skill for bootstrapping new projects (project-context.md 14 categories, architecture design, scaffold, roadmap).
+- `skills/maestro-init/{SKILL.md,init-context.md}` — `/maestro-init` skill for bootstrapping new projects (project-context.md 14 categories, architecture design, scaffold, roadmap).
+- `skills/maestro-design/SKILL.md` — `/maestro-design` skill for design + spec (via `design` agent), code scaffold (TDD), and roadmap.
 - `skills/manual-docs/SKILL.md` — user-docs skill for `manual_docs/` (Diátaxis).
 - `plugins/maestro-bootstrap/` — ESM OpenCode plugin.
 - `specs/*.md` — design specs and implementation plans for work on this repo (kebab-case: `<topic>.md` for spec, `<topic>-plan.md` for plan). **Rule: all feature/bugfix design docs (specs AND plans) must be created in `specs/`, never in the repo root.**

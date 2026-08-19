@@ -1,5 +1,5 @@
 ---
-name: init
+name: maestro-init
 description: Use when bootstrapping a NEW project with maestro — generates docs/project-context.md (14 categories), maestro config (maestro.json, opencode.json, .gitignore), regression/ structure, and verifies prerequisites (AGENTS.md, superpowers, plugin)
 ---
 
@@ -14,7 +14,7 @@ pipeline maestro: есть `docs/project-context.md` (источник конт�
 структура `regression/` и проверенные предусловия (AGENTS.md, superpowers, плагин).
 
 **ВНИМАНИЕ:** `/maestro-init` выполняет **только setup-фазу**. Дизайн, scaffold
-и roadmap — в отдельной команде `/maestro-design` (скилл `design`). Это разделение
+и roadmap — в отдельной команде `/maestro-design` (скилл `maestro-design`). Это разделение
 зафиксировано в `specs/maestro-init-tasks-plan.md`.
 
 **Мы НЕ переопределяем встроенный `/init` opencode** (тот создаёт `AGENTS.md`).

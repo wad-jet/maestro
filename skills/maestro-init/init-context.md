@@ -1,6 +1,6 @@
 # Init Context — Схема `docs/project-context.md` (14 категорий)
 
-Справочный файл скилла `init`. Перечисляет структуру и назначение
+Справочный файл скилла `maestro-init`. Перечисляет структуру и назначение
 `docs/project-context.md`, который создаёт/обновляет `/maestro-init`. Читается
 оркестратором в ходе интерактивного опроса. Формат секции `14. Commands`
 совпадает с тем, что ожидает `skills/maestro/SKILL.md` (шаг 0, §14).
@@ -158,7 +158,7 @@ BUILD_COMMAND: "go build ./..."
 
 ### `opencode.json` → `agent.*` (модели, M1)
 
-- tier-класс per агент (см. `skills/init/SKILL.md`, M1).
+- tier-класс per агент (см. `skills/maestro-init/SKILL.md`, M1).
 - Доступные модели — из `provider.<name>.models` по всем уровням конфигурации
-  (D2), см. `skills/init/SKILL.md`.
+  (D2), см. `skills/maestro-init/SKILL.md`.
 - HITL per агент, плейсхолдеры запрещены.

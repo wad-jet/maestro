@@ -1,7 +1,7 @@
 ---
 description: Дизайн и scaffold проекта после /maestro-init: spec (design агент), каркас кода (TDD), roadmap
 ---
-Загрузи skill `design` (tool: skill) и следуй SKILL.md из `skills/design/`.
+Загрузи skill `maestro-design` (tool: skill) и следуй SKILL.md из `skills/maestro-design/`.
 
 `/maestro-design` — дизайн/архитектура, scaffold и roadmap для проекта, у которого
 уже есть setup (`/maestro-init`). НЕ выполняет setup (контекст/конфиг) — они в

@@ -13,7 +13,7 @@
 - **Разделение `/maestro-init` и `/maestro-design`**: `/maestro-init` — только
   setup (контекст, конфиг `maestro.json`/`opencode.json`/`.gitignore`, каталоги,
   проверки superpowers и плагина). Дизайн, scaffold и roadmap вынесены в новую
-  команду `/maestro-design` (скилл `design`).
+  команду `/maestro-design` (скилл `maestro-design`).
 - **Конфигурация maestro генерируется `/maestro-init`**: `maestro.json`
   (trust/access_policy/sanitizer_whitelist), `opencode.json` (plugin + модели
   агентов M1), `.gitignore` (конкретные пути), `regression/` структура.
@@ -177,7 +177,7 @@
 ## [Ранее]
 
 ### Добавлено
-- Команда `/maestro-init` и скилл `init` (bootstrap новых проектов).
+- Команда `/maestro-init` и скилл `maestro-init` (bootstrap новых проектов).
 - Соглашение об именовании веток (`feature/`, `fix/`, `hotfix/`).
 - Плагин `maestro-bootstrap` (ESM, встраивание bootstrap-директивы).
 - Настройки уровня лога плагина (`MAESTRO_BOOTSTRAP_LOG_LEVEL`,

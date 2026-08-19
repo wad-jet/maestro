@@ -8,7 +8,7 @@
 > **Выполнено:** плагин `maestro-bootstrap` переведён на `maestro.json`
 > (loadMaestroConfig + секции trust/access_policy/sanitizer_whitelist), старые
 > файлы удалены из поддержки, тесты 63/63, пример `maestro.example.json` создан.
-> **Осталось:** шаг 1.5 в `skills/init/SKILL.md`, init-context.md, manual_docs.
+> **Осталось:** шаг 1.5 в `skills/maestro-init/SKILL.md`, init-context.md, manual_docs.
 
 ## Постановка
 
@@ -39,7 +39,7 @@ spec, scaffold и `docs/roadmap.md`. Конфиги, которые мастер
 5. **Merge сохраняет пользовательские правки** — не удаляем ключи, добавленные
    пользователем; показываем diff «желаемое vs текущее».
 
-## Новый шаг в `skills/init/SKILL.md`: «Шаг 1.5. Конфигурация maestro»
+## Новый шаг в `skills/maestro-init/SKILL.md`: «Шаг 1.5. Конфигурация maestro»
 
 Размещается между «Шаг 1. Сбор контекста» и «Шаг (a). Дизайн»:
 - Нужен контекст (14 категорий) для вывода параметров.
@@ -173,8 +173,8 @@ regression/cancelled-features.md   (пустой файл с заголовко�
 
 | # | Файл | Действие |
 |---|---|---|
-| 1 | `skills/init/SKILL.md` | Новый шаг 1.5; обновить предусловие 2 option (a) (C1); таблицу «Артефакты»; «Завершение»; «Обработка сбоев» |
-| 2 | `skills/init/init-context.md` | Раздел «Вывод конфигурации из контекста» — правила для A–G |
+| 1 | `skills/maestro-init/SKILL.md` | Новый шаг 1.5; обновить предусловие 2 option (a) (C1); таблицу «Артефакты»; «Завершение»; «Обработка сбоев» |
+| 2 | `skills/maestro-init/init-context.md` | Раздел «Вывод конфигурации из контекста» — правила для A–G |
 | 3 | `commands/maestro-init.md` | Отразить шаг 1.5 в списке действий |
 | 4 | `plugins/maestro-bootstrap/examples/maestro.example.json` | Эталон консолидированного конфига (создан) |
 | 5 | `AGENTS.md` | Pre-existing fix (C2/M3): `.gitignore` — конкретные пути вместо `.maestro/` |
@@ -189,8 +189,8 @@ regression/cancelled-features.md   (пустой файл с заголовко�
 
 - `node --test plugins/maestro-bootstrap/index.test.js` — 59/59 (плагин не
   меняется; конфиги fail-open совместимы). Проверка регрессии плагина.
-- **Исполняемого теста для скилла `init` нет** (M2) — верификация = ревью доков
-  на когерентность: SKILL.md ↔ init/SKILL.md ↔ init-context.md ↔ manual_docs.
+- **Исполняемого теста для скилла `maestro-init` нет** (M2) — верификация = ревью доков
+  на когерентность: SKILL.md ↔ maestro-init/SKILL.md ↔ init-context.md ↔ manual_docs.
 - HITL-протокол и язык (русский) соблюдены.
 - Идемпотентность: повторный запуск `/maestro-init` — все конфиги «актуальны»
   (skip без HITL, если diff пустой).
@@ -303,7 +303,7 @@ docs/superpowers/plans` (или `design` сабагент делает это с
 
 План говорит «`node --test` — 59/59», но плагин не меняется. Реальная
 проверка — когерентность доков (SKILL.md, init, manual_docs). Исполняемого
-теста для скилла `init` нет. Честно зафиксировать: верификация = ревью доков.
+теста для скилла `maestro-init` нет. Честно зафиксировать: верификация = ревью доков.
 
 #### M3. Pre-existing inconsistency: AGENTS.md vs SKILL.md на `.gitignore`
 

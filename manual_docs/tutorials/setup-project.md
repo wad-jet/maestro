@@ -29,7 +29,7 @@
 
 ### Шаг 1: `/maestro-init`
 
-Запустите `/maestro-init` в любой primary-сессии. Скилл `init` выполнит:
+Запустите `/maestro-init` в любой primary-сессии. Скилл `maestro-init` выполнит:
 
 1. **Предусловие `AGENTS.md`** — если файла нет, предложит выполнить встроенный
    `/init` opencode (создаёт `AGENTS.md`).
@@ -51,7 +51,7 @@
 
 ### Шаг 2: `/maestro-design`
 
-После init запустите `/maestro-design`. Скилл `design` выполнит:
+После init запустите `/maestro-design`. Скилл `maestro-design` выполнит:
 - **(a) Дизайн + spec** — сабагент `design` (trusted) проанализирует контекст и
   напишет `docs/superpowers/specs/YYYY-MM-DD-<project>-design.md`. Опционально —
   Spec Review (`opus`).

@@ -1,5 +1,5 @@
 ---
-name: design
+name: maestro-design
 description: Use to produce design, spec, scaffold and roadmap for a project after /maestro-init setup — generates spec via design agent, code scaffold via TDD, and docs/roadmap.md
 ---
 

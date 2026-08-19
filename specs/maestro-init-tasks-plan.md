@@ -21,7 +21,7 @@
 - **`/maestro-init`** — только setup-фаза (задачи 1–5 ниже): гейт, контекст,
   конфиг, каталоги, проверки.
 - **`/maestro-design`** — отдельная команда: выносит из init шаги (a) дизайн+spec,
-  (b) scaffold, (c) roadmap. Новый скилл `design` + команда `maestro-design`.
+  (b) scaffold, (c) roadmap. Новый скилл `maestro-design` + команда `maestro-design`.
 
 ## Задачи `/maestro-init` (setup-фаза)
 
@@ -130,9 +130,9 @@
 ### Ядро (`maestro-agent/`)
 | # | Файл | Действие |
 |---|------|----------|
-| 1 | `skills/init/SKILL.md` | Убрать (a)/(b)/(c); добавить задачи 3а/4/5 + M1 + trust/tier; обновить «Артефакты»/«Завершение»/«Сбои» |
-| 2 | `skills/init/init-context.md` | Раздел «Вывод конфигурации из контекста» (правила вывода секций из §3/§5/§12) |
-| 3 | `skills/design/SKILL.md` | **новый** — дизайн+spec+scaffold+roadmap (a+b+c) |
+| 1 | `skills/maestro-init/SKILL.md` | Убрать (a)/(b)/(c); добавить задачи 3а/4/5 + M1 + trust/tier; обновить «Артефакты»/«Завершение»/«Сбои» |
+| 2 | `skills/maestro-init/init-context.md` | Раздел «Вывод конфигурации из контекста» (правила вывода секций из §3/§5/§12) |
+| 3 | `skills/maestro-design/SKILL.md` | **новый** — дизайн+spec+scaffold+roadmap (a+b+c) |
 | 4 | `commands/maestro-init.md` | Отразить setup-задачи (1–5, 3а) |
 | 5 | `commands/maestro-design.md` | **новый** |
 
@@ -158,14 +158,14 @@
 ### Применение
 | # | Файл | Действие |
 |---|------|----------|
-| 17 | `.opencode/` зеркала | Синхронизация skills/init, skills/design, commands |
+| 17 | `.opencode/` зеркала | Синхронизация skills/maestro-init, skills/maestro-design, commands |
 | 18 | `maestro`-проект | Применить: `maestro.json`, `.gitignore` (конкретные пути), `regression/cancelled-features.md` |
 
 ## Проверка
 
 - `node --test plugins/maestro-bootstrap/index.test.js` — 63/63 (плагин fail-open
   совместим, не меняется).
-- Верификация = ревью когерентности доков (исполняемого теста для скилла `init`
+- Верификация = ревью когерентности доков (исполняемого теста для скилла `maestro-init`
   нет — см. M2 в `init-idempotency-plan.md`).
 - Ручной прогон `/maestro-init` на чистом тестовом проекте в `/tmp`.
 
