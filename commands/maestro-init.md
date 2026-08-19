@@ -8,7 +8,7 @@ description: Инициализация нового проекта: project-con
 1. Если `AGENTS.md` нет — предложить пользователю сначала выполнить встроенный `/init`.
 2. Предусловия: проверка `docs/project-context.md` + запрос git-решения (без автокоммитов).
 3. Собрать контекст по 14 категориям -> `docs/project-context.md`.
-4. (a) brainstorming -> spec -> `docs/superpowers/specs/YYYY-MM-DD-<project>-design.md`.
+4. (a) dispatch `design` (trusted) -> spec -> `docs/superpowers/specs/YYYY-MM-DD-<project>-design.md`.
 5. (b) scaffold (прототип кода через implementer-prompt.md).
 6. (c) `docs/roadmap.md` (MVP + этапы развития).
 

@@ -15,6 +15,7 @@ control.
 
 | Агент | Роль | Изменяет файлы? |
 |---|---|---|
+| `design` | Spec formation: brainstorming, дизайн-решения, написание spec | да (spec файл) |
 | `haiku` | Механические задачи | да |
 | `sonnet` | Интеграционные задачи | да |
 | `opus` | Архитектурные решения, Spec Review | нет (read-only) |
@@ -26,33 +27,42 @@ control.
 
 Оркестратор работает в сессии дефолтной модели — считается **доверенным**.
 Любой субагент — отдельный инференс/сессия; данные покидают контекст
-оркестратора. Поэтому **по умолчанию все субагенты untrusted** (кроме `sanitizer`).
+оркестратора. Поэтому **по умолчанию все субагенты untrusted** (кроме `design`
+и `sanitizer`).
 
 Trust-статус управляет **двумя** измерениями защиты:
 
 | Уровень | Sanitize промпта | File access control |
 |---|---|---|
-| **trusted** (`trust-config.json` = `true`) | **skip** | **skip** (без ограничений) |
+| **trusted** (`maestro.json` → `trust` = `true`) | **skip** | **skip** (без ограничений) |
 | **untrusted** (default) | Security Review (Ур.1 + Ур.2) | перехват `read` по access-policy (ask → блок) |
 
 > File access control применяется ко всем сабагентам; trusted-skip для file
 > access — ограничен (требует верификации перехвата child-сессий, C2).
 
-### trust-config.json
+### trust-config → maestro.json
 
-Файл в корне проекта (рядом с `opencode.json`). Перечисляет **только trusted**
-сабагентов. Всё, чего нет в файле — untrusted. Если файла нет — все untrusted.
+Файл `maestro.json` в корне проекта (рядом с `opencode.json`) — консолидированный
+конфиг с тремя секциями: `trust`, `access_policy`, `sanitizer_whitelist`. Секция
+`trust` перечисляет **только trusted** сабагентов. Всё, чего нет в файле —
+untrusted. Если файла нет — все untrusted.
 
 ```json
 {
-  "sanitizer": true
+  "trust": {
+    "design": true,
+    "sanitizer": true
+  }
 }
 ```
 
-- Ключ — имя сабагента; значение только `true` = trusted.
+- Ключ в `trust` — имя сабагента; значение только `true` = trusted.
 - Файл коммитится в git — trust-level policy проекта.
 - Оркестратор читает его один раз на шаге 0 и кэширует.
+- `design` — trusted по роли (видит полный контекст для качественного spec).
 - `sanitizer` — trusted по роли (видит сырые данные, чтобы пометить).
+- `maestro.json` — единственный источник конфигурации. Старые `trust-config.json`
+  и отдельные файлы в `.maestro/` больше не читаются плагином.
 
 ## 📖 Security Review (двухуровневая защита)
 
@@ -70,19 +80,19 @@ untrusted диспатч →
 **Роль сабагента `sanitizer`:** trusted, read-only. Находит и **помечает**
 чувствительные данные (где, что, почему) — не вычищает. Оркестратор вычищает
 по пометкам. Выход — structured-блок `SANITIZER FINDINGS` + `STATUS: CLEAN |
-FINDINGS_FOUND`. Также генерирует/поддерживает `.maestro/access-policy.json`
+FINDINGS_FOUND`. Также генерирует/поддерживает секцию `access_policy` в `maestro.json`
 (файл правил доступа по структуре проекта/стеку).
 
-**Trusted skip:** если сабагент в `trust-config.json` = `true` — sanitize промпта
+**Trusted skip:** если сабагент в `maestro.json` → `trust` = `true` — sanitize промпта
 и file access control **не применяются** (данные передаются как есть, доступ к
 файлам свободен).
 
 **File access control (реализован в плагине):** untrusted сабагент при попытке
 `read` ask/deny-файла → блокировка плагином `maestro-bootstrap` по
-`.maestro/access-policy.json` (`allow` → пропуск, `ask` → блок с HITL-сигналом,
+`maestro.json` → `access_policy` (`allow` → пропуск, `ask` → блок с HITL-сигналом,
 `deny` → жёсткий блок; приоритет deny > ask > allow). Покрывается только `read`;
-bash/glob/grep — нативные permissions. Файл формирует сабагент `sanitizer` или
-вручную; если файла нет — плагин не блокирует (fail-open).
+bash/glob/grep — нативные permissions. Файл `maestro.json` (секция `access_policy`)
+формирует сабагент `sanitizer` или вручную; если файла нет — плагин не блокирует (fail-open).
 
 **Точки встраивания:**
 - **Spec security review** (шаг 8.6) — для фич со spec (сложные/архитектурные),

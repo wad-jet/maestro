@@ -17,7 +17,7 @@
  *   MAESTRO_BOOTSTRAP_LOG_LEVEL  (default: info)
  *   MAESTRO_BOOTSTRAP_LOG_MASK   (default: derived from LOG_LEVEL)
  *   MAESTRO_BOOTSTRAP_LOG_DIR    (default: <directory>/.maestro)
- *   MAESTRO_SANITIZER_WHITELIST  (path to .maestro/sanitizer-whitelist.json)
+ *   MAESTRO_CONFIG               (path to maestro.json — consolidated config)
  */
 
 import fs from "node:fs";
@@ -240,23 +240,36 @@ export function sanitize(prompt, opts = {}) {
   return { text, count };
 }
 
+// --- Consolidated config (maestro.json) ------------------------------------
+
 /**
- * Load the sanitizer whitelist from a JSON file.
- * @param {string} [file]  Path to whitelist. Defaults to MAESTRO_SANITIZER_WHITELIST
- *   or `<dir>/.maestro/sanitizer-whitelist.json`.
- * @param {string} [dir]  Project directory for the default path.
- * @returns {{ rules?: object, by_agent?: object, patterns?: string[] }}
+ * Load the maestro config from `maestro.json` (корень проекта) — единственный
+ * источник конфигурации. Sections: `trust`, `access_policy`, `sanitizer_whitelist`.
+ * @param {string} [file]  Explicit path. Defaults to MAESTRO_CONFIG env
+ *   or `<dir>/maestro.json`.
+ * @param {string} [dir]   Project directory.
+ * @returns {object}  Parsed config (empty object if file missing/unreadable).
  */
-export function loadWhitelist(file, dir) {
+export function loadMaestroConfig(file, dir) {
   const resolved =
-    file || process.env.MAESTRO_SANITIZER_WHITELIST ||
-    path.join(dir || process.cwd(), ".maestro", "sanitizer-whitelist.json");
+    file || process.env.MAESTRO_CONFIG ||
+    path.join(dir || process.cwd(), "maestro.json");
   try {
-    const raw = fs.readFileSync(resolved, "utf8");
-    return JSON.parse(raw);
+    return JSON.parse(fs.readFileSync(resolved, "utf8"));
   } catch {
     return {};
   }
+}
+
+/**
+ * Extract the sanitizer whitelist from a parsed maestro config.
+ * @param {object} config  Parsed `maestro.json` (from loadMaestroConfig).
+ * @returns {{ rules?: object, by_agent?: object, patterns?: string[],
+ *   extra_fields?: string[], extra_uri_schemes?: string[] }}
+ */
+export function loadWhitelist(config) {
+  const section = config?.sanitizer_whitelist;
+  return section && typeof section === "object" ? section : {};
 }
 
 /**
@@ -284,55 +297,41 @@ export function resolveSanitizeOptions(whitelist, agent) {
   return { rules, disabledRules, patterns, extraFields, extraUriSchemes };
 }
 
-// --- Trust model (trust-config.json) ---------------------------------------
+// --- Trust model -----------------------------------------------------------
 
 /**
- * Load trusted subagents from `trust-config.json` (корень проекта).
- * @param {string} [file]  Explicit path. Defaults to `<dir>/trust-config.json`.
- * @param {string} [dir]   Project directory.
+ * Extract trusted subagents from a parsed maestro config.
+ * @param {object} config  Parsed `maestro.json` (from loadMaestroConfig).
  * @returns {Set<string>}  Set of trusted subagent names.
  */
-export function loadTrustConfig(file, dir) {
-  const resolved = file || path.join(dir || process.cwd(), "trust-config.json");
-  try {
-    const parsed = JSON.parse(fs.readFileSync(resolved, "utf8"));
-    const trusted = new Set();
-    for (const [name, value] of Object.entries(parsed ?? {})) {
-      if (value === true) trusted.add(name);
-    }
-    return trusted;
-  } catch {
-    return new Set();
+export function loadTrustConfig(config) {
+  const trusted = new Set();
+  for (const [name, value] of Object.entries(config?.trust ?? {})) {
+    if (value === true) trusted.add(name);
   }
+  return trusted;
 }
 
-// --- File access control (access-policy.json) ------------------------------
+// --- File access control ---------------------------------------------------
 
 /**
- * Load the access policy from `.maestro/access-policy.json`.
- * @param {string} [file]  Explicit path. Defaults to MAESTRO_ACCESS_POLICY env
- *   or `<dir>/.maestro/access-policy.json`.
- * @param {string} [dir]  Project directory for the default path.
- * @returns {{ default: string, allow: string[], ask: string[], deny: string[] }}
+ * Extract the access policy from a parsed maestro config.
+ * @param {object} config  Parsed `maestro.json` (from loadMaestroConfig).
+ * @returns {{ exists: boolean, default: string, allow: string[], ask: string[], deny: string[] }}
  */
-export function loadAccessPolicy(file, dir) {
-  const resolved =
-    file || process.env.MAESTRO_ACCESS_POLICY ||
-    path.join(dir || process.cwd(), ".maestro", "access-policy.json");
-  try {
-    const raw = fs.readFileSync(resolved, "utf8");
-    const parsed = JSON.parse(raw);
-    return {
-      exists: true,
-      default: parsed.default === "allow" ? "allow" : "ask",
-      allow: Array.isArray(parsed.allow) ? parsed.allow : [],
-      ask: Array.isArray(parsed.ask) ? parsed.ask : [],
-      deny: Array.isArray(parsed.deny) ? parsed.deny : [],
-    };
-  } catch {
-    // Файла нет (или повреждён) → политика не enforced (fail-open).
+export function loadAccessPolicy(config) {
+  const section = config?.access_policy;
+  if (!section || typeof section !== "object") {
+    // Секции нет → политика не enforced (fail-open).
     return { exists: false, default: "ask", allow: [], ask: [], deny: [] };
   }
+  return {
+    exists: true,
+    default: section.default === "allow" ? "allow" : "ask",
+    allow: Array.isArray(section.allow) ? section.allow : [],
+    ask: Array.isArray(section.ask) ? section.ask : [],
+    deny: Array.isArray(section.deny) ? section.deny : [],
+  };
 }
 
 /**
@@ -493,9 +492,10 @@ export function makeBoundedMap(max = 1024) {
 export const MaestroBootstrapPlugin = async ({ directory }) => {
   const root = directory || process.cwd();
   const log = makeLogger(root);
-  const whitelist = loadWhitelist(undefined, root);
-  const accessPolicy = loadAccessPolicy(undefined, root);
-  const trustedAgents = loadTrustConfig(undefined, root);
+  const config = loadMaestroConfig(undefined, root);
+  const whitelist = loadWhitelist(config);
+  const accessPolicy = loadAccessPolicy(config);
+  const trustedAgents = loadTrustConfig(config);
   log.info("plugin initialized", {
     logDir: log.logDir,
     level: log.level,
@@ -564,7 +564,7 @@ export const MaestroBootstrapPlugin = async ({ directory }) => {
 
         // Санитайзинг промпта task (Уровень 1 Security Review): маскируем
         // чувствительные данные ДО того, как промпт уйдёт в сабагента.
-        // Авто, без HITL. Trusted сабагенты (trust-config.json) — skip
+        // Авто, без HITL. Trusted сабагенты (maestro.json → trust) — skip
         // (доверенный сабагент получает промпт как есть).
         if (input.tool === "task" && output?.args?.prompt) {
           const agent = output.args.subagent_type || output.args.model || "unknown";

@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig } from "./index.js";
+import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig, loadMaestroConfig } from "./index.js";
 
 function readLogs(dir) {
   const logDir = path.join(dir, ".maestro");
@@ -330,26 +330,52 @@ describe("maestro-bootstrap sanitize (Context Sanitizer, Level 1)", () => {
     assert.deepEqual(sanitize(undefined), { text: "", count: 0 });
   });
 
-  it("loadWhitelist returns {} when file missing", () => {
-    assert.deepEqual(loadWhitelist("/nonexistent/whitelist.json"), {});
+  it("loadWhitelist returns {} when no sanitizer_whitelist section", () => {
+    assert.deepEqual(loadWhitelist({}), {});
   });
 
-  it("loadWhitelist parses valid JSON file", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-wl-"));
+  it("loadWhitelist extracts sanitizer_whitelist section from config", () => {
+    assert.deepEqual(
+      loadWhitelist({ sanitizer_whitelist: { patterns: ["x"], rules: { env_secret: false } } }),
+      { patterns: ["x"], rules: { env_secret: false } },
+    );
+  });
+
+  it("loadMaestroConfig returns {} when file missing", () => {
+    assert.deepEqual(loadMaestroConfig("/nonexistent/maestro.json"), {});
+  });
+
+  it("loadMaestroConfig parses valid maestro.json", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-mc-"));
     try {
-      const file = path.join(dir, "wl.json");
-      fs.writeFileSync(file, JSON.stringify({ patterns: ["x"], rules: { env_secret: false } }));
-      assert.deepEqual(loadWhitelist(file), { patterns: ["x"], rules: { env_secret: false } });
+      fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({
+        trust: { design: true, sanitizer: true },
+        access_policy: { default: "ask", allow: ["src/**"] },
+        sanitizer_whitelist: { patterns: ["safe_value"], extra_fields: ["custom_field"] },
+      }));
+      const config = loadMaestroConfig(undefined, dir);
+      assert.deepEqual(config.trust, { design: true, sanitizer: true });
+      assert.deepEqual(config.access_policy.allow, ["src/**"]);
+      assert.deepEqual(config.sanitizer_whitelist.patterns, ["safe_value"]);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("loadWhitelist reads sanitizer_whitelist from maestro.json config", () => {
+    const config = {
+      sanitizer_whitelist: { patterns: ["from_maestro_json"], extra_fields: ["proj_field"] },
+    };
+    const wl = loadWhitelist(config);
+    assert.deepEqual(wl.patterns, ["from_maestro_json"]);
+    assert.deepEqual(wl.extra_fields, ["proj_field"]);
   });
 });
 
 describe("maestro-bootstrap sanitizer hook (Level 1 in tool.execute.before)", () => {
   let dir, hooks, savedLogEnv;
 
-  const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR", "MAESTRO_SANITIZER_WHITELIST"];
+  const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR", "MAESTRO_CONFIG"];
 
   before(async () => {
     savedLogEnv = {};
@@ -392,7 +418,7 @@ describe("maestro-bootstrap sanitizer hook (Level 1 in tool.execute.before)", ()
 describe("maestro-bootstrap trusted skip (D2/D3)", () => {
   let dir, hooks, savedLogEnv;
 
-  const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR", "MAESTRO_SANITIZER_WHITELIST", "MAESTRO_ACCESS_POLICY"];
+  const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR", "MAESTRO_CONFIG"];
 
   before(async () => {
     savedLogEnv = {};
@@ -401,8 +427,10 @@ describe("maestro-bootstrap trusted skip (D2/D3)", () => {
       delete process.env[k];
     }
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-trust-"));
-    // trust-config.json: sanitizer trusted, haiku нет.
-    fs.writeFileSync(path.join(dir, "trust-config.json"), JSON.stringify({ sanitizer: true }));
+    // maestro.json: sanitizer trusted, haiku нет.
+    fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({
+      trust: { sanitizer: true },
+    }));
     hooks = await MaestroBootstrapPlugin({ directory: dir });
   });
 
@@ -414,10 +442,14 @@ describe("maestro-bootstrap trusted skip (D2/D3)", () => {
     }
   });
 
-  it("loadTrustConfig returns set of trusted agents", () => {
-    const trusted = loadTrustConfig(path.join(dir, "trust-config.json"));
+  it("loadTrustConfig extracts trusted agents from config", () => {
+    const trusted = loadTrustConfig({ trust: { sanitizer: true } });
     assert.ok(trusted.has("sanitizer"));
     assert.ok(!trusted.has("haiku"));
+  });
+
+  it("loadTrustConfig returns empty set when trust section absent", () => {
+    assert.equal(loadTrustConfig({}).size, 0);
   });
 
   it("skips sanitize for trusted subagent (sanitizer)", async () => {
@@ -434,24 +466,17 @@ describe("maestro-bootstrap trusted skip (D2/D3)", () => {
 });
 
 describe("maestro-bootstrap access policy (file access control)", () => {
-  it("loadAccessPolicy returns exists:false when file missing", () => {
-    const p = loadAccessPolicy("/nonexistent/policy.json");
+  it("loadAccessPolicy returns exists:false when section absent", () => {
+    const p = loadAccessPolicy({});
     assert.equal(p.exists, false);
     assert.equal(p.default, "ask");
   });
 
-  it("loadAccessPolicy parses valid policy file", () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-ap-"));
-    try {
-      const file = path.join(dir, "access-policy.json");
-      fs.writeFileSync(file, JSON.stringify({ default: "ask", allow: ["src/**"], ask: ["docs/**"], deny: ["*.env"] }));
-      const p = loadAccessPolicy(file);
-      assert.equal(p.exists, true);
-      assert.deepEqual(p.allow, ["src/**"]);
-      assert.deepEqual(p.ask, ["docs/**"]);
-    } finally {
-      fs.rmSync(dir, { recursive: true, force: true });
-    }
+  it("loadAccessPolicy extracts access_policy section from config", () => {
+    const p = loadAccessPolicy({ access_policy: { default: "ask", allow: ["src/**"], ask: ["docs/**"], deny: ["*.env"] } });
+    assert.equal(p.exists, true);
+    assert.deepEqual(p.allow, ["src/**"]);
+    assert.deepEqual(p.ask, ["docs/**"]);
   });
 
   it("resolveFileAccess allow-matches code paths", () => {
@@ -493,7 +518,7 @@ describe("maestro-bootstrap access policy (file access control)", () => {
 describe("maestro-bootstrap access policy hook", () => {
   let dir, hooks, savedLogEnv;
 
-  const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR", "MAESTRO_SANITIZER_WHITELIST", "MAESTRO_ACCESS_POLICY"];
+  const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR", "MAESTRO_CONFIG"];
 
   before(async () => {
     savedLogEnv = {};
@@ -502,11 +527,12 @@ describe("maestro-bootstrap access policy hook", () => {
       delete process.env[k];
     }
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-ap-hook-"));
-    // Создаём access-policy.json: code allow, docs/config ask.
-    fs.mkdirSync(path.join(dir, ".maestro"), { recursive: true });
+    // Создаём maestro.json с access_policy: code allow, docs/config ask.
     fs.writeFileSync(
-      path.join(dir, ".maestro", "access-policy.json"),
-      JSON.stringify({ default: "ask", allow: ["src/**", "*.{ts,js}"], ask: ["docs/**", "*.config.*"], deny: ["*.env"] }),
+      path.join(dir, "maestro.json"),
+      JSON.stringify({
+        access_policy: { default: "ask", allow: ["src/**", "*.{ts,js}"], ask: ["docs/**", "*.config.*"], deny: ["*.env"] },
+      }),
     );
     hooks = await MaestroBootstrapPlugin({ directory: dir });
   });

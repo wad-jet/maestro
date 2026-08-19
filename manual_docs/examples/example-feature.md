@@ -26,7 +26,9 @@
 Шаг 5:  имя ветки -> feature/resource-activation
 Шаг 6:  git checkout -b feature/resource-activation
 Шаг 7:  HITL: фича сложная -> идём на brainstorm
-Шаг 8:  Brainstorming -> Spec (activation flow, idempotency, error handling)
+Шаг 8:  Диспатч design (subagent_type=design, trusted)
+        - design пишет spec (activation flow, idempotency, error handling)
+        - Открытых вопросов нет
 Шаг 9:  HITL: предложен Spec Review (фича сложная) -> подтверждено
         - Диспатч opus-сабагента (subagent_type=opus, mode=spec)
         - Spec Review: verdict "approve"
@@ -61,6 +63,8 @@
 - **Fix-loop** внутри шага 13: Task 2 прошёл BLOCKED → re-dispatch → review-fail →
   fix → re-review.
 - **Три слоя ревью**: spec review (шаг 9) → per-task (шаг 13) → final (шаг 16).
+  Spec **пишет** `design` (trusted, шаг 8), **ревьюит** `opus` (untrusted, шаг 9)
+  — исключает self-review.
 - **Регрессия**: риски зафиксированы на шаге 12, сверены на шаге 13f.
 
 ## 🔗 Связанные разделы

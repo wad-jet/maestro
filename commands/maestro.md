@@ -1,11 +1,11 @@
 ---
-description: Вход в pipeline maestro — сквозная реализация фич/багфиксов (brainstorm → spec → plan → SDD → review → docs)
+description: Вход в pipeline maestro — сквозная реализация фич/багфиксов (design → spec → plan → SDD → review → docs)
 ---
 
 # @maestro
 
 Загрузи skill `maestro` (tool: skill) и следуй pipeline из SKILL.md.
-Координируй субагентов (haiku, sonnet, opus, fable, code-reviewer, sanitizer)
+Координируй субагентов (design, haiku, sonnet, opus, fable, code-reviewer, sanitizer)
 на каждом этапе.
 
 Работает в любой primary-сессии — привязки к конкретному агенту нет.

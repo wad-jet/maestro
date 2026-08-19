@@ -71,6 +71,32 @@
 - **Команда `@test-sanitizer`:** проверка доступности сабагента `sanitizer` +
   `agent.sanitizer` из `opencode.json` и trusted-статуса в `trust-config.json`
   (по аналогии с `@test-code-reviewer`, плюс trusted-проверка).
+- **Сабагент `design` (spec formation, шаг 8):** новый trusted-сабагент,
+  формирующий спецификацию (brainstorming → spec) вместо оркестратора.
+  - `design` — trusted по умолчанию (в `trust-config.json`), видит полный
+    контекст (user story + project context) для качественного spec.
+  - Промпт `design-prompt.md` — self-contained, brainstorming workflow embedded
+    (сабагент НЕ загружает скиллы).
+  - `permission`: `edit: allow` (пишет spec файл), `bash: deny`, `task: deny`.
+  - Шаг 8: оркестратор диспатчит `design` с user story + context + spec_path;
+    `design` возвращает summary + открытые вопросы (HITL → re-dispatch, max 3).
+  - Spec Review (шаг 9) остаётся за `opus` (untrusted, независимый) — исключает
+    self-review. Trust-уровни: `design` (trusted) ≠ `opus` (untrusted).
+  - Команда `@test-design` — проверка `agent.design` + trusted-статуса.
+- **Консолидация конфигов в `maestro.json`:** три отдельных файла
+  (`trust-config.json`, `.maestro/access-policy.json`,
+  `.maestro/sanitizer-whitelist.json`) объединены в один `maestro.json` в корне
+  проекта (секции `trust`, `access_policy`, `sanitizer_whitelist`). Файл
+  коммитится в git; `.maestro/` — только эфемерные файлы (логи, sdd/, last-run).
+  Старые файлы **не поддерживаются** (backward compat удалён).
+  - Новый `loadMaestroConfig()` в плагине — единственный загрузчик; секции
+    извлекаются из него (`loadTrustConfig`/`loadWhitelist`/`loadAccessPolicy`
+    принимают распарсенный config).
+  - Env `MAESTRO_CONFIG` — путь к `maestro.json` (override). Убраны
+    `MAESTRO_SANITIZER_WHITELIST`, `MAESTRO_ACCESS_POLICY` и standalone-примеры
+    `access-policy.example.json`/`sanitizer-whitelist.example.json`.
+  - Пример: `plugins/maestro-bootstrap/examples/maestro.example.json`.
+  - 63/63 теста (переработаны под секции `maestro.json`).
 - **AGENTS.md:** правило синхронизации `manual_docs/` при изменениях скилла.
 
 ## [2026-08-03]

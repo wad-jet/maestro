@@ -14,13 +14,14 @@ tier-правилам.
 |---|---|---|
 | **Haiku** (быстрая/дешёвая) | Механические task-и: 1-2 файла, полный spec, трансляция+тесты | `haiku` |
 | **Sonnet** (средняя/сбалансированная) | Интеграционные task-и: multi-file, pattern matching, debugging | `sonnet` |
-| **Opus** (наиболее мощная) | Архитектура, design judgment, final whole-branch review | `opus` |
+| **Opus** (наиболее мощная) | Архитектура, spec formation, design judgment, final whole-branch review | `design` (spec formation), `opus` (spec review), `code-reviewer` (code review) |
 | **Fable** (креативная) | Примеры, метафоры, аналогии, пояснения в стиле историй | `fable` |
 
 ## 📖 Шаг → Tier
 
 | Шаг | Tier | OpenCode сабагент |
 |---|---|---|
+| `spec_formation` (шаг 8) | opus | `design` (trusted) |
 | `spec_review` (шаг 9) | opus | `opus` |
 | `task_reviewer` (шаг 13, per-task) | sonnet | `sonnet` |
 | `code_review` (шаг 16) | opus | `code-reviewer` |
@@ -39,6 +40,7 @@ tier-правилам.
 
 | Сабагент | Файл | Редактирование | Роль |
 |---|---|---|---|
+| `design` | `agents/design.md` | edit (spec), без bash | Spec formation: brainstorming, дизайн-решения, написание spec (trusted) |
 | `haiku` | `agents/haiku.md` | edit+bash | Механические задачи, юнит-тесты |
 | `sonnet` | `agents/sonnet.md` | edit+bash | Интеграционные, multi-file, отладка |
 | `opus` | `agents/opus.md` | read-only | Spec Review, security audit, архитектура |
@@ -53,7 +55,7 @@ tier-правилам.
 ## 💡 Как диспатч работает в OpenCode
 
 Модель жёстко привязана к именованному сабагенту в `opencode.json`
-(`agent.{haiku,sonnet,opus}.model`). `task` tool не принимает параметр `model` —
+(`agent.{design,haiku,sonnet,opus}.model`). `task` tool не принимает параметр `model` —
 оркестратор выбирает **сабагента** по таблице «Шаг → Tier».
 
 ```

@@ -5,9 +5,9 @@
 This is the **authoring repo** for the OpenCode `maestro` system (the "maestro" skill that orchestrates feature/bugfix implementation in a target application). It is **not** the application repo — there is no application code here.
 
 - `skills/maestro/SKILL.md` — authoritative pipeline spec (feature/bugfix orchestration, HITL gates, regression registry). Read it before touching anything in `skills/`.
-- `agents/*.md` — OpenCode agent configs (`mode`, `permission`, `hidden`, `description` in YAML frontmatter). All are subagents (`haiku`, `sonnet`, `opus`, `fable`, `code-reviewer`, `sanitizer`). `sanitizer` is trusted by default (security review). There is **no primary `maestro` agent** — entry is via the `@maestro` command (skill).
+- `agents/*.md` — OpenCode agent configs (`mode`, `permission`, `hidden`, `description` in YAML frontmatter). All are subagents (`design`, `haiku`, `sonnet`, `opus`, `fable`, `code-reviewer`, `sanitizer`). `design` and `sanitizer` are trusted by default (spec formation, security review). There is **no primary `maestro` agent** — entry is via the `@maestro` command (skill).
 - `commands/*.md` — `@command` configs (frontmatter `agent:` field; `@maestro` is the entry point).
-- `skills/maestro/{implementer-prompt.md,spec-review-prompt.md,stack-detection.md}` — support files referenced by SKILL.md.
+- `skills/maestro/{design-prompt.md,implementer-prompt.md,spec-review-prompt.md,stack-detection.md}` — support files referenced by SKILL.md.
 - `skills/init/{SKILL.md,init-context.md}` — `/maestro-init` skill for bootstrapping new projects (project-context.md 14 categories, architecture design, scaffold, roadmap).
 - `skills/manual-docs/SKILL.md` — user-docs skill for `manual_docs/` (Diátaxis).
 - `plugins/maestro-bootstrap/` — ESM OpenCode plugin.

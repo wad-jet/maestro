@@ -81,15 +81,18 @@ HITL (как в `stack-detection.md`).
 
 Переиспользует brainstorming→spec флоу maestro (НЕ изобретает новый формат):
 
-1. `superpowers:brainstorming` — для нового проекта по умолчанию уровень
-   «архитектурный» (новая кодовая база целиком). Загружается скилл, ведётся
-   дизайн-диалог: цели, ограничения, компоненты, потоки, решения.
+1. **Диспатч `design`** (trusted сабагент maestro, `task` tool c
+   `subagent_type=design`) с промптом `design-prompt.md`. Для нового проекта
+   по умолчанию уровень «архитектурный» (новая кодовая база целиком). `design`
+   анализирует project context (14 категорий, созданный на шаге 0) и ведёт
+   дизайн-работу: цели, ограничения, компоненты, потоки, решения. Brainstorming
+   workflow embedded в `design-prompt.md`.
 2. Вывод — `docs/superpowers/specs/YYYY-MM-DD-<project>-design.md`
-   (формат spec из maestro).
+   (формат spec из maestro), пишется сабагентом `design` напрямую.
 3. **Опциональный Spec Review** (`spec-review-prompt.md`, диспатч `opus`
    через `task` tool), по HITL. Provisional — пользователь решает, нужен ли.
 
-**HITL gate:** «Дизайн утверждён? (a) approve — (b) revise (к brainstorm) — (c) отмена».
+**HITL gate:** «Дизайн утверждён? (a) approve — (b) revise (к design) — (c) отмена».
 
 Дизайн-решения переносятся в `docs/project-context.md` §4 (архитектура) и §5
 (модули), если они уточнились.
@@ -135,4 +138,4 @@ HITL (как в `stack-detection.md`).
 | project-context.md существует, выбран (a) | Пропустить «Шаг 1», перейти к (a)+(c) |
 | Git: выбран (a) без ветки | Писать файлы в текущее дерево |
 | stack-detection не находит команду | HITL: вручную / `none` / отмена (молчаливый skip недопустим) |
-| brainstorm: revise | Вернуться к дизайн-диалогу, повторить |
+| design: revise | Вернуться к дизайн-диалогу (re-dispatch `design`), повторить |

@@ -2,7 +2,7 @@
 
 Authoring-репозиторий системы `maestro` — скилла для OpenCode, который
 оркестрирует сквозную реализацию фич и багфиксов в целевом приложении
-(brainstorm → spec → plan → SDD → review → docs, с HITL-гейтами).
+(design → spec → plan → SDD → review → docs, с HITL-гейтами).
 
 Это репозиторий-**источник** конфигурации: здесь нет кода приложения. OpenCode
 загружает runtime-копии скиллов, агентов и команд из целевого репозитория
@@ -12,13 +12,15 @@ Authoring-репозиторий системы `maestro` — скилла дл�
 
 - `skills/maestro/SKILL.md` — спецификация pipeline (фичи/багфиксы, HITL-гейты,
   реестр регрессии). Читать перед изменениями в `skills/`.
-- `agents/*.md` — конфиги субагентов OpenCode: `haiku`, `sonnet`, `opus`,
-  `fable`, `code-reviewer`, `sanitizer` — вызываются программно через `task`.
-  Отдельного primary-агента `maestro` нет — вход через команду `@maestro`.
+- `agents/*.md` — конфиги субагентов OpenCode: `design`, `haiku`, `sonnet`,
+  `opus`, `fable`, `code-reviewer`, `sanitizer` — вызываются программно через
+  `task`. `design` (spec formation) и `sanitizer` (security review) — trusted
+  по умолчанию. Отдельного primary-агента `maestro` нет — вход через команду
+  `@maestro`.
 - `commands/*.md` — конфиги `@command` (`@maestro` — вход, `@regression`,
   `@maestro-init`, `@test-*`).
-- `skills/maestro/` — вспомогательные файлы: `implementer-prompt.md`,
-  `spec-review-prompt.md`, `stack-detection.md`.
+- `skills/maestro/` — вспомогательные файлы: `design-prompt.md`,
+  `implementer-prompt.md`, `spec-review-prompt.md`, `stack-detection.md`.
 - `skills/manual-docs/SKILL.md` — скилл пользовательской документации
   (`manual_docs/`, Diátaxis).
 - `plugins/maestro-bootstrap/` — ESM-плагин OpenCode: глобальная observability

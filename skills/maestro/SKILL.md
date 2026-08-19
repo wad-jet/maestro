@@ -1,6 +1,6 @@
 ---
 name: maestro
-description: Use when implementing a feature end-to-end — orchestrates brainstorm, spec, plan, implementation, review, and docs with HITL gates
+description: Use when implementing a feature end-to-end — orchestrates brainstorm (via design subagent), spec, plan, implementation, review, and docs with HITL gates
 ---
 
 # Maestro
@@ -14,7 +14,7 @@ description: Use when implementing a feature end-to-end — orchestrates brainst
 на ключевых точках. Spec review — только по запросу.
 
 **Два маршрута на шаге 1:**
-- **Feature** (шаги 0–18) — полный цикл: project context → pre-flight → brainstorm → spec → plan → SDD → docs → review → finish
+- **Feature** (шаги 0–18) — полный цикл: project context → pre-flight → brainstorm (design subagent) → spec → plan → SDD → docs → review → finish
 - **Bugfix** (шаги 0–6 → D1–D7 → шаги 11–18) — project context → pre-flight + branch → debug sub-pipeline: ресеч → гипотеза → probe → откат → plan → SDD → docs → review → finish
 
 **Mode protocol:** Два уровня режимов:
@@ -30,7 +30,7 @@ Interactive — агент комментирует находки по ходу
 в неоднозначных ситуациях. Подробнее — шаг 1.5.
 
 **REQUIRED SUB-SKILLS:**
-- superpowers:brainstorming — для сложных фич (3+ модуля, новая таблица, public API)
+- `design` сабагент (trusted) — для сложных фич (3+ модуля, новая таблица, public API): spec formation (brainstorming workflow embedded в `design-prompt.md`)
 - superpowers:writing-plans — создание implementation plan
 - superpowers:subagent-driven-development — исполнение plan (implementer + reviewer per task)
 - superpowers:test-driven-development — TDD-дисциплина для шага 13 (SDD)
@@ -67,7 +67,7 @@ Interactive — агент комментирует находки по ходу
 ### Критерии — матрица сигналов
 
 Назначение категории происходит на HITL-шаге **braingate: выгрузка контекста**
-(после brainstorm). Оркестратор задаёт пользователю эти вопросы и относит
+(до дизайна на шаге 8). Оркестратор задаёт пользователю эти вопросы и относит
 фичу к категории:
 
 | Сигнал || Простая | Сложная | Архитектурная |
@@ -124,7 +124,7 @@ Interactive — агент комментирует находки по ходу
             — Контекст передаётся всем последующим шагам и субагентам
 
       **Regression registry:** разрешить `REGISTRY_DIR` один раз на шаге 0
-      (как trust-config.json), кэшировать в переменной сессии:
+      (как maestro.json), кэшировать в переменной сессии:
       ```bash
       REGISTRY_DIR="$(git rev-parse --show-toplevel)/regression"
       ```
@@ -192,7 +192,21 @@ Interactive — агент комментирует находки по ходу
         (c) Отмена
       Если (a) → Spec Review РЕКОМЕНДОВАН для сложных, ОБЯЗАТЕЛЕН
       для архитектурных. Оркестратор предложит его на шаге 9.
-🟢  8. [agent] Brainstorming -> Spec (обязательно для сложных фич)
+🟢  8. [agent] Dispatch `design` (trusted) -> Spec (обязательно для сложных фич)
+       — Оркестратор диспатчит сабагент `design` (trusted) через `task` tool
+         с `subagent_type=design` (модель из `agent.design.model`, opus-tier).
+       — `design` trusted → промпт НЕ санизируется (видит полный контекст).
+       — Передать: `{user_story}`, `{context}` (project context + паттерны),
+         `{spec_path}` (см. File Path Conventions), `{feature_category}`.
+       — Промпт: `design-prompt.md` из этого скилла (self-contained,
+         brainstorming workflow embedded — `design` НЕ загружает скиллы).
+       — `design` пишет spec файл напрямую (`edit: allow`), возвращает
+         summary + открытые вопросы.
+       — Если `design` вернул открытые вопросы → HITL: оркестратор показывает
+         их пользователю, получает ответы, **re-dispatch** `design` с ответами.
+         Max 3 re-dispatch цикла; после — HITL: (a) продолжить с текущим spec /
+         (b) упростить scope / (c) стоп.
+       — Запись в лог: `design: spec created at <spec_path>`
 🟢  8.5. [agent] Оценка изменений контекста
        — Оркестратор анализирует spec: появились ли новые категории,
          изменения стека, команды или уточнения для проектного контекста.
@@ -216,6 +230,7 @@ Interactive — агент комментирует находки по ходу
 🟢  9. [HITL] Spec Review на spec:
        - **Spec уже прошёл security review (шаг 8.6)** — opus получает
          очищенный spec; security-проверку не дублирует (см. Security Review).
+         Spec написан сабагентом `design` (trusted, шаг 8).
        - **Для сложных фич: оркестратор ОБЯЗАН предложить Spec Review.
          Шаг 10 (spec gate) не наступает, пока пользователь не ответил
          на предложение (да/нет).**
@@ -227,7 +242,7 @@ Interactive — агент комментирует находки по ходу
          Claude Code — Agent tool с `model=opus` + инструкция ревьюера
        - **Перед диспатчем opus (untrusted) — Точка 2 Security Review:**
          оркестратор прогоняет промпт через sanitize (Ур.1 плагин + Ур.2
-         сабагент sanitizer, см. ниже). Trusted opus (если в trust-config) → skip.
+         сабагент sanitizer, см. ниже). Trusted opus (если в maestro.json) → skip.
        - Промпт ревьюера: `spec-review-prompt.md` из этого скилла
        - Передать: spec + контекст + встроенный чеклист + вопросы
        - Получить: structured review (severity-бакеты + verdict approve/revise/reject)
@@ -576,7 +591,7 @@ pipeline; после завершения переход на шаг 11 (writing
 
 | Фаза | Скилл/Инструмент |
 |---|---|
-| Дизайн | `brainstorming` |
+| Дизайн | `design` сабагент (trusted) — brainstorming workflow embedded в `design-prompt.md` |
 | План | `writing-plans` |
 | Ветка | inline-конвенция `feature/<kebab-case>` / `fix/<kebab-case>` / `hotfix/<kebab-case>` (определяет имя ветки) |
 | Изоляция | `using-git-worktrees` (worktree) / `git checkout -b` (простая ветка) |
@@ -604,13 +619,14 @@ pipeline; после завершения переход на шаг 11 (writing
 |---|---|---|
 | **Haiku** (Быстрая/дешёвая) | Механические task-и: 1-2 файла, полный spec, трансляция+тесты | `haiku` |
 | **Sonnet** (средняя/сбалансированная) | Интеграционные task-и: multi-file, pattern matching, debugging | `sonnet` |
-| **Opus** (наиболее мощная) | Архитектура, design judgment, final whole-branch review | `opus` |
+| **Opus** (наиболее мощная) | Архитектура, spec formation, design judgment, final whole-branch review | `design` (spec formation), `opus` (spec review), `code-reviewer` (code review) |
 | **Fable** (креативная) | Примеры, метафоры, аналогии, пояснения в стиле историй | `fable` |
 
 ### Шаг → Tier (встроенный `step_to_tier`)
 
 | Шаг | Tier | OpenCode сабагент |
 |---|---|---|
+| `spec_formation` (шаг 8) | opus | `design` (trusted) |
 | `spec_review` (шаг 9) | opus | `opus` |
 | `task_reviewer` (шаг 13, per-task) | sonnet | `sonnet` |
 | `code_review` (шаг 16) | opus | `code-reviewer` |
@@ -634,6 +650,7 @@ pipeline; после завершения переход на шаг 11 (writing
 | `haiku` | `.opencode/agents/haiku.md` + `opencode.json → agent.haiku.model` |
 | `sonnet` | `.opencode/agents/sonnet.md` + `opencode.json → agent.sonnet.model` |
 | `opus` | `.opencode/agents/opus.md` + `opencode.json → agent.opus.model` |
+| `design` | `.opencode/agents/design.md` + `opencode.json → agent.design.model` |
 | `code-reviewer` | `.opencode/agents/code-reviewer.md` + `opencode.json → agent.code-reviewer.model` |
 | `fable` | `.opencode/agents/fable.md` + `opencode.json → agent.fable.model` |
 | `sanitizer` | `.opencode/agents/sanitizer.md` + `opencode.json → agent.sanitizer.model` |
@@ -644,22 +661,24 @@ pipeline; после завершения переход на шаг 11 (writing
 - `permission` — `haiku`/`sonnet` могут редактировать файлы и запускать bash
   (имплементация), `opus`/`fable`/`sanitizer` — read-only без bash (ревью,
   объяснения, security-пометки), `code-reviewer` — `bash: allow` (git
-  diff/log/show), `edit: deny` (без мутаций).
+  diff/log/show), `edit: deny` (без мутаций), `design` — `edit: allow` (пишет
+  spec файл), `bash: deny` (без запуска команд), `task: deny` (без вложенных
+  сабагентов).
 - `task: deny` — агенты не диспатчат вложенные под-агенты
   (один уровень вложенности).
 
 **При диспатче:** оркестратор по таблице «Шаг → Tier» определяет нужный tier,
-маппит tier → имя агента (`haiku`/`sonnet`/`opus`/`code-reviewer`/`fable`/`sanitizer`),
+маппит tier → имя агента (`haiku`/`sonnet`/`opus`/`design`/`code-reviewer`/`fable`/`sanitizer`),
 диспатчит через `task` tool с `subagent_type` = имени агента. Доступность модели
 обеспечивает провайдер OpenCode — отдельная проверка не требуется.
 
 **Trust check перед диспатчем (два измерения):** оркестратор проверяет
-`trust-config.json` (загружен на шаге 0). Trust-статус управляет **двумя**
+`maestro.json` (загружен на шаге 0). Trust-статус управляет **двумя**
 измерениями защиты:
 
 | Trust | Sanitize промпта | File access control |
 |---|---|---|
-| **trusted** (`true` в `trust-config.json`) | **skip** | **skip** (без ограничений) |
+| **trusted** (`true` в `maestro.json`) | **skip** | **skip** (без ограничений) |
 | **untrusted** (default) | Уровень 1 + Уровень 2 (см. Security Review) | HITL на каждый доступ к файлу |
 
 - **Sanitize промпта:** для untrusted — прогон через Security Review (см.
@@ -668,7 +687,7 @@ pipeline; после завершения переход на шаг 11 (writing
   HITL: `(a) разрешить` / `(b) запретить` (см. Security Review). Trusted — без
   ограничений. Покрывается только `read`; bash/glob/grep — нативные permissions.
   Реализовано плагином `maestro-bootstrap` (перехват `read` по
-  `access-policy.json`).
+  `maestro.json`).
 - **`sanitizer` сабагент — trusted:** единственный, кому разрешено видеть сырые
   данные (чтобы пометить). Его собственный промпт при диспатче **не** санизируется
   (он доверенный) — рекурсии нет.
@@ -754,8 +773,8 @@ task(
 
 | Уровень | Описание | Контроль |
 |---|---|---|
-| **trusted** | Указан в `trust-config.json` со значением `true` | **Skip** sanitize промпта + **skip** file access control — данные передаются как есть, доступ к файлам без ограничений |
-| **untrusted** | Не указан в `trust-config.json` или значение ≠ `true` | Перед диспатчем — Security Review (sanitizer); во время работы — file access control (HITL на каждый доступ к файлу) |
+| **trusted** | Указан в `maestro.json` со значением `true` | **Skip** sanitize промпта + **skip** file access control — данные передаются как есть, доступ к файлам без ограничений |
+| **untrusted** | Не указан в `maestro.json` или значение ≠ `true` | Перед диспатчем — Security Review (sanitizer); во время работы — file access control (HITL на каждый доступ к файлу) |
 
 ### Subagent Trust Matrix
 
@@ -766,35 +785,46 @@ task(
 | `opus` | untrusted | |
 | `code-reviewer` | untrusted | |
 | `fable` | untrusted | |
-| `sanitizer` | **trusted** | Единственный, кому разрешено видеть сырые данные (чтобы пометить). Его промпт при диспатче не санизируется — рекурсии нет. |
+| `design` | **trusted** | Spec formation (шаг 8): видит полный контекст (user story + project context) для качественного spec. Его промпт при диспатче не санизируется. |
+| `sanitizer` | **trusted** | Security review: единственный, кому разрешено видеть сырые данные (чтобы пометить). Его промпт при диспатче не санизируется — рекурсии нет. |
 
-Значение по умолчанию для любого сабагента — **untrusted**, кроме `sanitizer`
-(trusted по своей роли). Меняется только через `trust-config.json` (см. ниже).
-От модели в `opencode.json` trust не зависит.
+Значение по умолчанию для любого сабагента — **untrusted**, кроме `design` и
+`sanitizer` (trusted по своей роли). Меняется только через `maestro.json`
+(см. ниже). От модели в `opencode.json` trust не зависит.
 
-### Управление: trust-config.json
+### Управление: maestro.json
 
-Файл `trust-config.json` в корне проекта (рядом с `opencode.json`).
-Перечисляет **только trusted** сабагентов. Всё, чего нет в файле — untrusted.
+Файл `maestro.json` в корне проекта (рядом с `opencode.json`) — консолидированный
+конфиг: три секции (`trust`, `access_policy`, `sanitizer_whitelist`). Секция
+`trust` перечисляет **только trusted** сабагентов. Всё, чего нет в секции —
+untrusted.
 
 ```json
 {
-  "haiku": true
+  "trust": {
+    "design": true,
+    "sanitizer": true
+  },
+  "access_policy": { ... },
+  "sanitizer_whitelist": { ... }
 }
 ```
 
-- **Ключ:** имя сабагента (`haiku`, `sonnet`, `opus` и т.д.)
+- **Ключ в `trust`:** имя сабагента (`design`, `sanitizer`, `haiku`, `sonnet`, `opus` и т.д.)
 - **Значение:** только `true` = trusted. Любое другое значение → untrusted
-- Если файла нет → **все сабагенты untrusted** (безопасное значение по умолчанию)
-- Файл коммитится в git — trust-level policy проекта
+- Если файла `maestro.json` нет → **все сабагенты untrusted** (безопасное значение по умолчанию)
+- Файл коммитится в git — trust-level + security policy проекта
+- `maestro.json` — единственный источник конфигурации. Старые `trust-config.json`,
+  `.maestro/access-policy.json`, `.maestro/sanitizer-whitelist.json` больше
+  **не читаются** плагином.
 
 **Как применять:**
 
-1. Оркестратор читает `trust-config.json` **один раз за сессию** — на шаге 0
+1. Оркестратор читает `maestro.json` **один раз за сессию** — на шаге 0
    (Load Project Context), кэширует для всех последующих диспатчей
-2. При каждом диспатче сабагента (шаги 9, 13, 16): проверить кэш. Если
-   сабагент есть в файле с `true` → trusted, иначе → untrusted
-3. Изменения в `trust-config.json` вступают в силу со следующей сессии
+2. При каждом диспатче сабагента (шаги 8, 9, 13, 16): проверить кэш. Если
+   сабагент есть в секции `trust` с `true` → trusted, иначе → untrusted
+3. Изменения в `maestro.json` вступают в силу со следующей сессии
 4. Файл обязателен к проверке — игнорировать его нельзя
 
 ## Context Sanitizer (правила детекта)
@@ -817,7 +847,7 @@ task(
    заменяются на `<redacted>`. Детект **регистронезависим** (`Amount`,
    `AMOUNT`); суффиксы (`amountValue`, `amount_value`) и camelCase-варианты
    snake-полей (`cardNumber`) покрываются автоматически. Список расширяем
-   через `extra_fields` в `sanitizer-whitelist.json`.
+   через `extra_fields` в секции `sanitizer_whitelist` файла `maestro.json`.
 3. **Файлы .env / .env.\*:** если упоминаются в контексте — заменяются
    на `<redacted:.env file>`.
 4. **SFTP/DB credentials:** строки вида `sftp://...`, `postgresql://...`,
@@ -855,17 +885,18 @@ task(
 ### Когда применяется
 
 На всех шагах, где происходит диспатч untrusted сабагента.
-Trust-уровень определяется по `trust-config.json` (см. Trust Model):
+Trust-уровень определяется по `maestro.json` (см. Trust Model):
 
 | Шаг | Сабагент | Security Review |
 |---|---|---|
+| Шаг 8 — Spec Formation | `design` | **Skip** (trusted — видит полный контекст для качественного spec) |
 | Шаг 9 — Spec Review | `opus` | Применяется (untrusted) |
 | Шаг 13 — SDD implementer | `haiku` / `sonnet` | Применяется (untrusted) |
 | Шаг 13 — SDD task-reviewer | `sonnet` | Применяется (untrusted) |
 | Шаг 16 — Code Review | `code-reviewer` | Применяется (untrusted) |
 | (внутри Security Review) | `sanitizer` | **Skip** (trusted — видит сырые данные для пометок) |
 
-Если сабагент отмечен как trusted в `trust-config.json` — sanitize промпта
+Если сабагент отмечен как trusted в `maestro.json` — sanitize промпта
 **не проводится** (риск принят пользователем).
 
 ### Правила применения
@@ -892,7 +923,7 @@ Trust-уровень определяется по `trust-config.json` (см. Tr
 
 ```
 Диспатч в сабагента:
-  trust check (trust-config.json)
+  trust check (maestro.json)
     │
     ├── trusted → SKIP sanitize + SKIP file access control → диспатч как есть
     │
@@ -952,9 +983,9 @@ Trust-уровень определяется по `trust-config.json` (см. Tr
 ### File access control (реализовано в плагине)
 
 Untrusted сабагент при попытке `read` ask/deny-файла → блокировка плагином
-`maestro-bootstrap` по `.maestro/access-policy.json` (`allow` → пропуск, `ask` →
+`maestro-bootstrap` по `maestro.json` → `access_policy` (`allow` → пропуск, `ask` →
 блок с HITL-сигналом оркестратору, `deny` → жёсткий блок). Trusted — без
-ограничений (skip sanitize промпта; file access — по trust-config.json). Файл
+ограничений (skip sanitize промпта; file access — по maestro.json). Файл
 правил формирует сабагент `sanitizer` (по структуре проекта/стеку) или вручную.
 Если файла нет — плагин не блокирует (fail-open), полагаясь на нативные
 permissions OpenCode.
@@ -967,7 +998,7 @@ permissions OpenCode.
 `[access-policy:ask]`. Оркестратор ловит маркер в результате сабагента и
 запрашивает HITL:
 - `(a) разрешить` — дописать путь/паттерн в `allow`-секцию
-  `access-policy.json`, затем **re-dispatch** сабагента;
+  `maestro.json`, затем **re-dispatch** сабагента;
 - `(b) запретить` — сообщить сабагенту/продолжить без файла;
 - `(c) стоп` — остановить процесс.
 При `deny` — жёсткий блок без HITL (сабагент получает ошибку, оркестратор
@@ -979,8 +1010,8 @@ permissions OpenCode.
   file access control инструктивно. Sanitizer там **primary**.
 - **Этап 2 (сделан):** в плагине `maestro-bootstrap` реализованы Уровень 1
   (авто-маскирование промптов task) + file access control (перехват file-тулов
-  по access-policy.json) + whitelist. Сабагент остаётся доп. слоем (Уровень 2)
-  и генерирует/поддерживает access-policy.json.
+  по maestro.json) + whitelist. Сабагент остаётся доп. слоем (Уровень 2)
+  и генерирует/поддерживает maestro.json.
 
 ### Known gaps Этапа 1 (закрыты на Этапе 2)
 
@@ -989,13 +1020,17 @@ permissions OpenCode.
 - **Этап 1 модель-зависим** — закрыт: плагин санизирует промпт автоматически
   при каждом task-диспатче.
 - **File access control не enforced** — закрыт: плагин перехватывает file-тулы
-  по access-policy.json.
+  по maestro.json.
 
 ## Spec Review (опционально)
 
 Диспатчится по HITL **на spec** (шаг 9), до её утверждения. Для сложных фич
 (3+ модуля / новая таблица / public API) оркестратор **предлагает** Spec Review
 на spec-gate; для простых — пропускает. Окончательное решение — за пользователем.
+
+**Вход:** spec, написанный сабагентом `design` (trusted, шаг 8) и очищенный
+`sanitizer` (шаг 8.6). `opus` — независимый ревьюер (untrusted), ревьюит то, что
+создал другой агент — исключает конфликт интересов self-review.
 
 **Режим:** `spec` (единственный) — ревьюит spec: архитектуру, требования, риски
 дизайна. План ещё не существует — ревью предотвращает архитектурные ошибки до
@@ -1033,9 +1068,9 @@ permissions OpenCode.
 |---|---|
 | **HITL pre-flight: отмена (шаг 2b)** | В efficient: STOP — pipeline завершён. В interactive: skip → D1. Никаких cleanup не требуется (ветка ещё не создана). |
 | **HITL шаг 1.5: отмена (1.5c)** | STOP — pipeline завершён. Пользователь отказался от запуска. |
-| **Spec gate: revise (10b)** | Вернуться к шагу 8 (brainstorm), доработать spec, повторный review |
+| **Spec gate: revise (10b)** | Вернуться к шагу 8 (re-dispatch `design`), доработать spec, повторный security review + review |
 | **Plan gate: revise (12b)** | Вернуться к шагу 11 (writing-plans), доработать план |
-| **Spec review: revise** | Вернуться к шагу 8, доработать spec, повторить review (шаг 9) |
+| **Spec review: revise** | Вернуться к шагу 8 (re-dispatch `design`), доработать spec, повторить security review (8.6) + review (шаг 9) |
 | **Spec review: reject** | Эскалация к пользователю: пересмотр требований или отмена фичи |
 | **Gate: отмена (шаги 7c, 10c, 12c, 17c, D7b)** | STOP + cleanup: удалить feature-ветку (`git branch -D <branch>`) и worktree (`git worktree remove <path>`), если создан. Решение оставить в `regression/cancelled-features.md` (в git) для последующей архивации. **Regression cleanup:** если `entries/<YYYY-MM-DD-<feature>>.md` существует → `git mv entries/X.md released/X.md`, `status: cancelled`, `released: <дата>`, дописать решение в `regression/cancelled-features.md` и закоммитить оба файла (`chore(regression): <feature> cancelled`) (только после шага 12a; до 12a entry ещё не создан — no-op). |
 | **Implementer: BLOCKED** | Оркестратор: (1) дать контекст, (2) мощнее модель, (3) разбить задачу, (4) эскалация |
@@ -1268,14 +1303,16 @@ Pipeline не имеет механизма cross-repo координации (�
         -> Пользователь: (b) проще на одной ветке
 Шаг 5:  [agent] имя ветки (inline-конвенция) -> feature/resource-activation
 Шаг 6:  [agent] git checkout -b feature/resource-activation
-Шаг 7:  -- HITL: фича сложная -> идём на brainstorm --
-Шаг 8:  [agent] Brainstorming -> Spec
-         - Спека: activation flow, idempotency, error handling
+Шаг 7:  -- HITL: фича сложная -> идём на дизайн --
+Шаг 8:  [agent] Dispatch design (subagent_type=design, trusted)
+         - Передаёт: user story, project context, spec_path, feature_category
+         - design пишет spec (activation flow, idempotency, error handling)
+         - Открытых вопросов нет
          - Контекст не изменился (нет новых категорий/команд/стека) → шаг 8.5: изменений нет
 Шаг 9:  [HITL] Оркестратор предлагает Spec Review на spec (фича сложная)
-        -> Пользователь подтверждает
-        - [agent] Диспатчит opus-сабагента (subagent_type=opus) с mode=spec
-        - Spec Review: verdict "approve" — архитектура корректна, рисков нет
+         -> Пользователь подтверждает
+         - [agent] Диспатчит opus-сабагента (subagent_type=opus) с mode=spec
+         - Spec Review: verdict "approve" — архитектура корректна, рисков нет
 Шаг 10: -- HITL: spec утверждён (с учётом экспертного ревью) --
 Шаг 11: [agent] writing-plans -> Plan (3 tasks)
         - Task 1: DTO + endpoint handler (механический → haiku)

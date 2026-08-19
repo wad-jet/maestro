@@ -1,0 +1,48 @@
+{
+  "trust": {
+    "design": true,
+    "sanitizer": true
+  },
+  "access_policy": {
+    "version": 1,
+    "default": "ask",
+    "allow": [
+      "src/**",
+      "packages/**",
+      "test/**",
+      "tests/**",
+      "*.{ts,js,tsx,jsx,py,go,rs,java}"
+    ],
+    "ask": [
+      "docs/**",
+      "specs/**",
+      "manual_docs/**",
+      "*.{md,mdx}",
+      "*.config.*",
+      "*.conf.*",
+      "*.{yaml,yml,toml,ini}"
+    ],
+    "deny": [
+      "*.env",
+      "*.env.*",
+      "*.{pem,key,cert,secret}"
+    ]
+  },
+  "sanitizer_whitelist": {
+    "rules": {
+      "env_secret": true,
+      "data_field": true,
+      "env_file": true,
+      "db_credential": true,
+      "ledger_entry": true,
+      "private_key": true,
+      "auth_header": true
+    },
+    "by_agent": {
+      "code-reviewer": []
+    },
+    "patterns": [],
+    "extra_fields": [],
+    "extra_uri_schemes": []
+  }
+}

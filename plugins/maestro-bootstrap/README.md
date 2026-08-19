@@ -10,9 +10,9 @@ file access control** (не привязан к агенту). Скилл `maest
 - **Санитайзинг промптов `task`** (Уровень 1 Security Review): маскирует
   чувствительные данные (env-secrets, поля данных, `.env`, DB/SFTP credentials,
   ledger) ДО отправки промпта в сабагента. Авто, без HITL. **Trusted сабагенты
-  (trust-config.json) — skip** (получают промпт как есть).
+  (maestro.json → `trust`) — skip** (получают промпт как есть).
 - **File access control** (Уровень 3): перехват `read` по правилам
-  `.maestro/access-policy.json`. `allow` → пропуск, `ask` → блокировка (HITL
+  `maestro.json` → `access_policy`. `allow` → пропуск, `ask` → блокировка (HITL
   решает оркестратор), `deny` → жёсткий блок. **`bash`/`glob`/`grep` НЕ
   покрываются** — для них нативные permissions OpenCode.
 - Логирует вызовы `task`-тула (диспатч субагентов) — observability.
@@ -44,7 +44,7 @@ file access control** (не привязан к агенту). Скилл `maest
 6. **Auth headers** — `Authorization: Bearer ...`, `X-API-Key: ...` → `<redacted>`.
 7. **Raw ledger entries** — покрываются rule `data_field` (те же поля).
 
-Whitelist (`.maestro/sanitizer-whitelist.json`, env `MAESTRO_SANITIZER_WHITELIST`):
+Whitelist — секция `sanitizer_whitelist` в `maestro.json` (см. ниже).
 
 ```json
 {
@@ -65,8 +65,8 @@ Whitelist (`.maestro/sanitizer-whitelist.json`, env `MAESTRO_SANITIZER_WHITELIST
 
 ## File access control (access-policy)
 
-`.maestro/access-policy.json` (env `MAESTRO_ACCESS_POLICY`) определяет, к каким
-файлам сабагенты могут обращаться без запроса через `read`:
+Секция `access_policy` в `maestro.json` (см. ниже).
+Определяет, к каким файлам сабагенты могут обращаться без запроса через `read`:
 
 ```json
 {
@@ -84,11 +84,11 @@ Whitelist (`.maestro/sanitizer-whitelist.json`, env `MAESTRO_SANITIZER_WHITELIST
 - Контролируется **только `read`**. `bash`/`glob`/`grep` НЕ покрываются
   (bash-пути ненадёжно извлекаются; glob/grep — паттерны) — используйте нативные
   permissions OpenCode (`bash: ask` и т.п.).
-- Файл формируется сабагентом `sanitizer` (по структуре проекта/стеку) или
-  вручную. Пример — `examples/access-policy.example.json`.
+- Файл `maestro.json` (секция `access_policy`) формируется сабагентом
+  `sanitizer` (по структуре проекта/стеку) или вручную. Пример — `examples/maestro.example.json`.
 - Если файла нет — плагин НЕ блокирует (fail-open), полагаясь на нативные
   permissions OpenCode.
-- Trusted сабагенты (trust-config.json) — file access control применяется для
+- Trusted сабагенты (maestro.json → `trust`) — file access control применяется для
   всех; trusted-skip полный требует верификации перехвата child-сессий (C2).
 
 ## Аудит-лог
@@ -97,8 +97,56 @@ Whitelist (`.maestro/sanitizer-whitelist.json`, env `MAESTRO_SANITIZER_WHITELIST
 `sanitizer.redacted` (что замаскировано, без содержимого) и `access_policy.blocked`
 (файл-доступ), наряду с observability-событиями.
 
-Примеры конфигов: `examples/access-policy.example.json`,
-`examples/sanitizer-whitelist.example.json`.
+Пример конфига: `examples/maestro.example.json`.
+
+## Конфигурация: maestro.json
+
+Единый файл конфигурации в корне проекта (`maestro.json`). Коммитится в git
+(project policy). Содержит три секции:
+
+```json
+{
+  "trust": {
+    "design": true,
+    "sanitizer": true
+  },
+  "access_policy": {
+    "version": 1,
+    "default": "ask",
+    "allow": ["src/**", "test/**"],
+    "ask": ["docs/**", "*.config.*"],
+    "deny": ["*.env", "*.{pem,key,cert}"]
+  },
+  "sanitizer_whitelist": {
+    "rules": { "env_secret": true, "data_field": true, ... },
+    "by_agent": { "code-reviewer": [] },
+    "patterns": [],
+    "extra_fields": [],
+    "extra_uri_schemes": []
+  }
+}
+```
+
+- **`trust`** — trusted-агенты (`true` = trusted). Остальные — untrusted.
+- **`access_policy`** — file access control (см. раздел выше).
+- **`sanitizer_whitelist`** — правила sanitizer (см. раздел выше).
+
+### Разрешение конфигов (resolution order)
+
+`maestro.json` — **единственный** источник конфигурации. Все три секции
+(`trust`, `access_policy`, `sanitizer_whitelist`) читаются из него одним
+загрузчиком `loadMaestroConfig()`.
+
+Порядок разрешения пути к файлу:
+
+1. **Env override** — `MAESTRO_CONFIG` (путь к `maestro.json`).
+2. **По умолчанию** — `<project>/maestro.json`.
+
+Старые файлы `trust-config.json`, `.maestro/access-policy.json`,
+`.maestro/sanitizer-whitelist.json` **не поддерживаются** (не читаются).
+
+Если `maestro.json` отсутствует — плагин работает (fail-open): все агенты
+untrusted, access-policy не enforced, дефолтные sanitizer-правила.
 
 ## Логирование
 
@@ -137,8 +185,7 @@ Whitelist (`.maestro/sanitizer-whitelist.json`, env `MAESTRO_SANITIZER_WHITELIST
 | `MAESTRO_BOOTSTRAP_LOG_LEVEL` | `debug` \| `info` \| `warn` \| `error` | `info` |
 | `MAESTRO_BOOTSTRAP_LOG_MASK` | список включённых уровней через запятую | выводится из `LOG_LEVEL` |
 | `MAESTRO_BOOTSTRAP_LOG_DIR` | каталог для лог-файлов | `<project>/.maestro` |
-| `MAESTRO_SANITIZER_WHITELIST` | путь к sanitizer-whitelist | `<project>/.maestro/sanitizer-whitelist.json` |
-| `MAESTRO_ACCESS_POLICY` | путь к access-policy | `<project>/.maestro/access-policy.json` |
+| `MAESTRO_CONFIG` | путь к maestro.json (консолидированный конфиг) | `<project>/maestro.json` |
 
 `MAESTRO_BOOTSTRAP_LOG_LEVEL` — порог детализации (пишутся уровни `>=`
 заданного). `MAESTRO_BOOTSTRAP_LOG_MASK` — явный список включённых уровней;
