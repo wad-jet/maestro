@@ -17,7 +17,7 @@ This is the **authoring repo** for the OpenCode `maestro` system (the "maestro" 
 
 - **No git repo here.** `git`, `opencode.json`, `docs/project-context.md`, `regression/`, `.opencode/` all belong to the target application repo, not this one. Git commands fail here — don't run the pipeline steps here. **Exception:** `manual_docs/` *does* live here — it documents the maestro skill itself (user-facing docs for developers of the target app); the target app has its own `manual_docs/` for its own product.
 - **`opencode.json` doesn't exist here.** The plugin README says it is registered there; that registration lives in the application repo's `opencode.json`.
-- **Agent was renamed `feature-agent` → `maestro` (2026-08-03).** The application repo must be updated in lockstep: `opencode.json` keys `agent.feature-agent` → `agent.maestro` and plugin path `plugins/feature-agent-bootstrap/index.js` → `plugins/maestro-bootstrap/index.js`, `.opencode/` mirrors (`agents/maestro.md`, `skills/maestro/`), and `.gitignore` entry `.feature-agent/` → `.maestro/`.
+- **Agent was renamed `feature-agent` → `maestro` (2026-08-03).** The application repo must be updated in lockstep: `opencode.json` keys `agent.feature-agent` → `agent.maestro` and plugin path `plugins/feature-agent-bootstrap/index.js` → `plugins/maestro-bootstrap/index.js`, `.opencode/` mirrors (`agents/maestro.md`, `skills/maestro/`), and `.gitignore` entry `.feature-agent/` → **specific paths** (`.maestro/sdd/`, `.maestro/last-run.md`, `.maestro/maestro-bootstrap-*.log` — НЕ весь `.maestro/`, см. `skills/maestro/SKILL.md`).
 - **Russian is the working language.** All HITL gates, user messages, agent descriptions, and docs are in Russian. Match it in new content.
 
 ## Скиллы / Skills (sync rule)

@@ -32,11 +32,20 @@
 
 ### `@maestro-init`
 
-Bootstrap нового проекта: `docs/project-context.md` (14 категорий), дизайн и
-архитектура, scaffold, `docs/roadmap.md` (MVP + этапы). Использует скилл `init`.
-Перед сбором контекста проверяет наличие скилов superpowers
-(`writing-plans`, `subagent-driven-development`, `test-driven-development` и др.);
-если их нет — предлагает установку через HITL (`opencode plugin`).
+Setup-фаза bootstrap нового проекта: `docs/project-context.md` (14 категорий),
+конфигурация maestro (`maestro.json`, `opencode.json` с плагином и моделями,
+`.gitignore`), каталоги pipeline (`.maestro/`, `docs/superpowers/{specs,plans}/`),
+`regression/` структура. Использует скилл `init`.
+Проверяет предусловия: `AGENTS.md` (встроенный `/init`), скилы superpowers
+(предлагает установку через HITL), плагин `maestro-bootstrap` (не блокер).
+
+### `@maestro-design`
+
+Дизайн/архитектура, scaffold и roadmap после `/maestro-init`:
+- (a) spec через сабагент `design` (trusted) → `docs/superpowers/specs/YYYY-MM-DD-<project>-design.md`; опц. spec-review (`opus`).
+- (b) scaffold — каркас кода через `implementer-prompt.md` (TDD), диспатч `haiku`/`sonnet`.
+- (c) `docs/roadmap.md` (MVP + этапы).
+Модели агентов наследуются из `opencode.json` (не переспрашивает).
 
 ### `@test-<agent>`
 

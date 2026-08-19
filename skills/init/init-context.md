@@ -124,3 +124,41 @@ BUILD_COMMAND: "go build ./..."
 Скилл собирает файл из ответов пользователя. Минимально обязательные секции:
 1, 2, 3, 4, 9, 14. Остальные — заполняются по релевантности или помечаются
 `_pending_` (не блокирует создание, обновляется позже).
+
+## Вывод конфигурации из контекста
+
+Задача 3 `/maestro-init` выводит секции `maestro.json` из 14 категорий. Правила
+вывода:
+
+### `maestro.json` → `trust`
+
+- **Всегда** `design: true`, `sanitizer: true` (trusted по роли, см. Trust Model).
+- Остальные агенты (opus, haiku, sonnet, fable, code-reviewer) — **не** добавлять
+  в `trust` (untrusted по умолчанию).
+- Из §12 (безопасность): если пользователь явно хочет доверять ещё кому-то —
+  HITL предложить добавить со значением `true`.
+
+### `maestro.json` → `access_policy`
+
+- **`allow`** — из §3 (стек) + §5 (домены): каталоги исходников (`src/**`,
+  `test/**`, `packages/**`) и расширения языков из §3 (`*.{ts,js,py,go,rs}`).
+- **`ask`** — документация и конфиги: `docs/**`, `specs/**`, `manual_docs/**`,
+  `*.{md,mdx}`, `*.config.*`.
+- **`deny`** — секреты: `*.env`, `*.env.*`, `*.{pem,key,cert,secret}`.
+- `default: "ask"` (безопасное значение).
+- Эталон: `plugins/maestro-bootstrap/examples/maestro.example.json`.
+
+### `maestro.json` → `sanitizer_whitelist`
+
+- `rules` — дефолтные (все категории true), менять по §12.
+- `by_agent` — `code-reviewer: []` (если нужно отключить категории).
+- `patterns` — `[]` (или значения из §12, которые НЕ считаются sensitive).
+- `extra_fields` — кастомные sensitive-поля из §12.
+- `extra_uri_schemes` — URI-схемы из §3 (`redis`, `kafka`, `grpc`).
+
+### `opencode.json` → `agent.*` (модели, M1)
+
+- tier-класс per агент (см. `skills/init/SKILL.md`, M1).
+- Доступные модели — из `provider.<name>.models` по всем уровням конфигурации
+  (D2), см. `skills/init/SKILL.md`.
+- HITL per агент, плейсхолдеры запрещены.

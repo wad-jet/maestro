@@ -63,6 +63,23 @@ SDD-шаблон:  Subagent (general-purpose): model: haiku
 OpenCode:    task(subagent_type="haiku", prompt="...")
 ```
 
+## 💡 Настройка моделей через `/maestro-init`
+
+`/maestro-init` настраивает модели агентов в `opencode.json` (M1):
+
+- **Tier (мощность) и Trust (доверие) — ортогональные оси.** Trusted — атрибут
+  безопасности, не мощность.
+- **Tier:** design→opus, opus→opus, code-reviewer→opus, haiku→haiku, sonnet→sonnet,
+  fable→fable, **sanitizer→своя**.
+- **Trust:** `design` и `sanitizer` — trusted (в `maestro.json`); остальные —
+  untrusted. `design` и `sanitizer` — **разные агенты с разными моделями**.
+
+Выбор моделей — **7 отдельных HITL-вопросов** (по одному на агента), с
+предложением из: текущий `opencode.json` → git-история → tier-подсказка.
+Доступные модели определяются (D2) из `provider.<name>.models` **по всем уровням
+конфигурации** (global → project → `.opencode`), с merge-приоритетом
+`.opencode` > project > global.
+
 ## 🔗 Связанные разделы
 
 - [Классификация фич](feature-classification.md)

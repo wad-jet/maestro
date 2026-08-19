@@ -7,6 +7,23 @@
 > Хронология составлена по истории authoring-репо `maestro-agent`. Даты
 > приблизительные (по коммитам).
 
+## [2026-08-19]
+
+### Изменено
+- **Разделение `/maestro-init` и `/maestro-design`**: `/maestro-init` — только
+  setup (контекст, конфиг `maestro.json`/`opencode.json`/`.gitignore`, каталоги,
+  проверки superpowers и плагина). Дизайн, scaffold и roadmap вынесены в новую
+  команду `/maestro-design` (скилл `design`).
+- **Конфигурация maestro генерируется `/maestro-init`**: `maestro.json`
+  (trust/access_policy/sanitizer_whitelist), `opencode.json` (plugin + модели
+  агентов M1), `.gitignore` (конкретные пути), `regression/` структура.
+- **Модели агентов (M1)**: 7 отдельных HITL-вопросов; оси Tier и Trust
+  ортогональны; `design` и `sanitizer` — trusted, но разные модели. Доступные
+  модели — D2 (из `provider.models` по всем уровням конфигурации).
+- **Fix `.gitignore` (C2/M3)**: конкретные пути (`.maestro/sdd/`,
+  `.maestro/last-run.md`, `.maestro/maestro-bootstrap-*.log`) вместо всего
+  `.maestro/` — в `AGENTS.md` и `plugins/maestro-bootstrap/README.md`.
+
 ## [2026-08-18]
 
 ### Изменено

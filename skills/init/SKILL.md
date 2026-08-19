@@ -1,6 +1,6 @@
 ---
 name: init
-description: Use when bootstrapping a NEW project with maestro — generates docs/project-context.md (14 categories), architecture design via brainstorming→spec, scaffold (prototype), and docs/roadmap.md
+description: Use when bootstrapping a NEW project with maestro — generates docs/project-context.md (14 categories), maestro config (maestro.json, opencode.json, .gitignore), regression/ structure, and verifies prerequisites (AGENTS.md, superpowers, plugin)
 ---
 
 # Init — Bootstrap нового проекта
@@ -8,42 +8,49 @@ description: Use when bootstrapping a NEW project with maestro — generates doc
 ## Overview
 
 Сквозная инициализация нового проекта для maestro. Команда `/maestro-init`
-запускает этот скилл в любой primary-сессии. Цель — довести пустой/новый проект до
-состояния, в котором обычный pipeline maestro может работать: есть
-`docs/project-context.md` (источник контекста шага 0), дизайн/архитектура,
-рабочий каркас кода и `docs/roadmap.md`.
+запускает этот скилл в любой primary-сессии. Цель — подготовить проект к работе
+pipeline maestro: есть `docs/project-context.md` (источник контекста шага 0),
+конфигурация maestro (`maestro.json` + `opencode.json` + `.gitignore`),
+структура `regression/` и проверенные предусловия (AGENTS.md, superpowers, плагин).
+
+**ВНИМАНИЕ:** `/maestro-init` выполняет **только setup-фазу**. Дизайн, scaffold
+и roadmap — в отдельной команде `/maestro-design` (скилл `design`). Это разделение
+зафиксировано в `specs/maestro-init-tasks-plan.md`.
 
 **Мы НЕ переопределяем встроенный `/init` opencode** (тот создаёт `AGENTS.md`).
-`/maestro-init` — отдельная команда. Если `AGENTS.md` ещё нет — предложить
-пользователю сначала выполнить встроенный `/init`.
+`/maestro-init` — отдельная команда.
 
 **Язык:** все HITL-вопросы, варианты и сообщения пользователю — только на русском.
 
 ## Артефакты, которые производит скилл
 
-| Шаг | Выход |
+| Задача | Выход |
 |---|---|
-| Context | `docs/project-context.md` (14 категорий, см. `init-context.md`) |
-| (a) | `docs/superpowers/specs/YYYY-MM-DD-<project>-design.md` (brainstorming→spec) |
-| (b) | каркас кода (scaffold) в дереве проекта |
-| (c) | `docs/roadmap.md` (MVP + этапы развития) |
+| 1. `/init` гейт | `AGENTS.md` (проверка/создание через встроенный `/init`) |
+| 2. Контекст | `docs/project-context.md` (14 категорий, см. `init-context.md`) |
+| 3. Конфиг | `maestro.json` (trust/access_policy/sanitizer_whitelist) + `opencode.json` (plugin + агенты M1) + `.gitignore` + `regression/` |
+| 3а. Каталоги | `.maestro/`, `docs/superpowers/{specs,plans}/` |
+| 4. superpowers | проверка/установка (HITL) |
+| 5. плагин | проверка подключения `maestro-bootstrap` (не блокер) |
+
+> Дизайн/спека, scaffold, roadmap — НЕ здесь. Они в `/maestro-design`.
 
 ## Предусловия (pre-flight)
 
-### 1. Проверка AGENTS.md
+### 1. Проверка AGENTS.md (задача 1)
 
 - Если `AGENTS.md` отсутствует → HITL:
   (a) выполнить встроенный `/init` (системный setup), затем вернуться
   (b) пропустить и продолжить `/maestro-init`
   (c) отмена
 
-### 2. Проверка docs/project-context.md
+### 2. Проверка docs/project-context.md (задача 2)
 
 - Файл существует → HITL:
-  (a) перечитать/восстановить контекст из него и перейти сразу к шагам (a)+(c)
+  (a) перечитать/восстановить контекст из него и перейти к задачам 3–5
   (b) пересоздать/обновить с нуля (полный опрос)
   (c) отмена
-- Файла нет → полный опрос (переход к «Шаг 1. Сбор контекста»).
+- Файла нет → полный опрос (переход к «Задача 2. Сбор контекста»).
 
 ### 3. Git-состояние (HITL перед записью файлов)
 
@@ -56,51 +63,7 @@ description: Use when bootstrapping a NEW project with maestro — generates doc
 
 Автокоммиты НЕ создаём ни в каком варианте — коммит пользователь делает сам.
 
-### 4. Проверка скилов superpowers
-
-Проверить, установлены ли скилы superpowers
-(`https://github.com/obra/superpowers`, папка `skills`) — от них зависят
-SDD-шаги pipeline maestro (план, исполнение, TDD, ревью). Сам init НЕ требует
-superpowers runtime (промпты `design`/`implementer` — self-contained), но
-предупреждение на этом этапе экономит время после bootstrap.
-
-**Пробник** (без загрузки содержимого скилов в контекст):
-
-1. Вызвать `skill` tool с **bogus-именем** (например `__maestro_probe__`).
-2. В тексте ошибки `not found` прочитать полный список доступных скилов
-   (`Available skills: ...`).
-3. Проверить наличие **всех 7 REQUIRED SUB-SKILLS** maestro
-   (`skills/maestro/SKILL.md`):
-   `writing-plans`, `subagent-driven-development`, `test-driven-development`,
-   `using-git-worktrees`, `requesting-code-review`,
-   `finishing-a-development-branch`, `systematic-debugging`.
-
-- **Все найдены** → `superpowers: ok`, перейти к следующему шагу.
-- **Есть недостающие** → HITL:
-
-  Показать список недостающих, команду установки и вопрос:
-  «(a) установить глобально (`-g`) — (b) установить в проект — (c) пропустить».
-  Рекомендация — (a): скил доступен во всех проектах. Примечание: `-g`
-  модифицирует `~/.config/opencode/opencode.json` (глобальный конфиг).
-
-  ```
-  opencode plugin -g superpowers@git+https://github.com/obra/superpowers.git   # (a)
-  opencode plugin superpowers@git+https://github.com/obra/superpowers.git       # (b)
-  ```
-
-  - **(a)/(b)** — оркестратор выполняет команду сам через `bash` (команда
-    показывается и подтверждается HITL), затем **повторный пробник**:
-    - Успех → `superpowers: ok`.
-    - Всё ещё не находит (C1: сессия кэширует список скилов при старте;
-      `opencode plugin` обновляет файлы/конфиг, но работающая сессия может не
-      подхватить изменения без перезапуска) → сообщить: «Установка выполнена.
-      **Перезапустите opencode** для активации скилов, затем повторно запустите
-      `/maestro-init`.» Пометка `superpowers: installed (restart required)`.
-  - **(c) пропустить** — init продолжается; в `.maestro/last-run.md` и своде —
-    пометка «superpowers НЕ установлен — SDD-шаги pipeline maestro (план,
-    исполнение, TDD, ревью) работать не будут» (fail-open, не блокирует init).
-
-## Шаг 1. Сбор контекста по 14 категориям
+## Задача 2. Сбор контекста по 14 категориям
 
 Оркестратор читает `init-context.md` (схему 14 категорий) и проходит категории
 поочерёдно. Для каждой категории:
@@ -111,8 +74,7 @@ superpowers runtime (промпты `design`/`implementer` — self-contained), 
 
 Секция `14. Commands`: после опроса применить `stack-detection.md` для
 автозаполнения команд по артефактам (если проект уже имеет манифесты), либо
-задать явно/`auto`/`none` (см. §14 в `init-context.md`). Неоднозначность →
-HITL (как в `stack-detection.md`).
+задать явно/`auto`/`none` (см. §14 в `init-context.md`). Неоднозначность → HITL.
 
 В конце — показать пользователю готовый черновик `docs/project-context.md`.
 
@@ -121,50 +83,142 @@ HITL (как в `stack-detection.md`).
 
 → создаёт `docs/project-context.md`.
 
-## Шаг (a). План и дизайн проекта (архитектура)
+## Задача 3. Конфигурация maestro
 
-Переиспользует brainstorming→spec флоу maestro (НЕ изобретает новый формат):
+На основе контекста (§3 стек, §5 домены, §12 безопасность) сгенерировать конфиги
+идемпотентно (см. `specs/init-idempotency-plan.md` для деталей).
 
-1. **Диспатч `design`** (trusted сабагент maestro, `task` tool c
-   `subagent_type=design`) с промптом `design-prompt.md`. Для нового проекта
-   по умолчанию уровень «архитектурный» (новая кодовая база целиком). `design`
-   анализирует project context (14 категорий, созданный на шаге 0) и ведёт
-   дизайн-работу: цели, ограничения, компоненты, потоки, решения. Brainstorming
-   workflow embedded в `design-prompt.md`.
-2. Вывод — `docs/superpowers/specs/YYYY-MM-DD-<project>-design.md`
-   (формат spec из maestro), пишется сабагентом `design` напрямую.
-3. **Опциональный Spec Review** (`spec-review-prompt.md`, диспатч `opus`
-   через `task` tool), по HITL. Provisional — пользователь решает, нужен ли.
+### 3а. Подготовка каталогов
 
-**HITL gate:** «Дизайн утверждён? (a) approve — (b) revise (к design) — (c) отмена».
+Перед генерацией конфигов (идемпотентно, `mkdir -p` безопасен):
+- `mkdir -p .maestro/` (для логов плагина и `last-run.md`)
+- `mkdir -p docs/superpowers/specs docs/superpowers/plans` (для `/maestro-design`)
 
-Дизайн-решения переносятся в `docs/project-context.md` §4 (архитектура) и §5
-(модули), если они уточнились.
+### maestro.json (консолидированный конфиг, коммитится в git)
 
-## Шаг (b). Макетирование — scaffold
+Три секции:
 
-На основе §3 (стек) и spec из шага (a) создаётся реальный каркас кода:
+**`trust`** — только trusted сабагенты (`true`):
+```json
+"trust": {
+  "design": true,
+  "sanitizer": true
+}
+```
+- `design` и `sanitizer` — trusted по роли. Остальные — untrusted (default).
+- Идемпотентность: merge сохраняет пользовательские trusted-агенты.
 
-- Структура каталогов, роуты, DTO/модели, конфиги.
-- Минимальные тесты через `implementer-prompt.md` (TDD: RED→GREEN→REFACTOR).
-- Диспатч by tier (§3 стек → `haiku`/`sonnet` через `task` tool).
+**`access_policy`** — из §3 + §5 + §12:
+```json
+"access_policy": {
+  "version": 1,
+  "default": "ask",
+  "allow": ["src/**", "test/**", "packages/**", "*.{ts,js,py,go,rs}"],
+  "ask": ["docs/**", "specs/**", "manual_docs/**", "*.{md,mdx}", "*.config.*"],
+  "deny": ["*.env", "*.env.*", "*.{pem,key,cert,secret}"]
+}
+```
+Эталон: `plugins/maestro-bootstrap/examples/maestro.example.json`.
 
-Цель — минимально работающий skeleton интерфейса, пригодный для итераций.
-Проверка: если в §14 определены BUILD/TEST — выполнить.
+**`sanitizer_whitelist`** — из §3 + §12:
+```json
+"sanitizer_whitelist": {
+  "rules": { "env_secret": true, "data_field": true, "env_file": true, "db_credential": true, "ledger_entry": true, "private_key": true, "auth_header": true },
+  "by_agent": { "code-reviewer": [] },
+  "patterns": [],
+  "extra_fields": [],
+  "extra_uri_schemes": []
+}
+```
 
-**HITL gate:** «Scaffold готов. (a) продолжить к roadmap — (b) доработать — (c) отмена».
+Идемпотентность: при существовании `maestro.json` — diff по секциям; merge
+сохраняет пользовательские правки. Если файла нет — создаётся целиком.
 
-## Шаг (c). Roadmap
+### opencode.json — регистрация плагина + модели агентов
 
-Создаёт `docs/roadmap.md`:
-- **MVP** — минимальный набор на основе scaffold + spec (что запускаем первым).
-- **Этапы развития** — фазы 1/2/3: темы, приоритеты (P0/P1/P2), цель каждой фазы.
-- **Definition of done** по каждой фазе.
-- Ссылки на пользовательскую документацию (`manual_docs/`), если применимо.
+- Регистрация плагина: `"plugin": ["./plugins/maestro-bootstrap/index.js"]`.
+  Если ключа `plugin` нет → добавить; если есть, но путь отсутствует → дописать;
+  если уже есть → skip. **Никогда не перезаписывать существующий контент.**
+- Модели агентов — по M1 (см. ниже). **Плейсхолдеры запрещены.**
 
-**HITL gate** per фаза: «Фаза N сформулирована верно? (a) ok — (b) правки — (c) отмена».
+### M1 — выбор моделей агентов (7 отдельных HITL-вопросов)
 
-→ создаёт `docs/roadmap.md`.
+**Оси Tier и Trust ортогональны.** Trusted — атрибут безопасности, не мощность.
+
+- **Tier (мощность, Ось A):** design→opus, opus→opus, code-reviewer→opus,
+  haiku→haiku, sonnet→sonnet, fable→fable, sanitizer→своя.
+- **Trust (доверие, Ось B):** design ✅ + sanitizer ✅ trusted; остальные untrusted.
+
+`design` и `sanitizer` — **оба trusted**, но **разные агенты с разными моделями**.
+
+Для каждого из 7 агентов:
+1. Определить tier-класс (Ось A).
+2. Сформировать предложение (приоритет): текущий `opencode.json` → git-история →
+   tier-подсказка (design→opus-модель; sanitizer→своя/безопасная).
+3. HITL: «Модель для `<agent>`? (введите ID / `auto` / оставить текущую)».
+4. Записать `agent.<name>.model` только для выбранных; при `auto` — **не писать**.
+
+**D2 — определение доступных моделей.** Список кандидатов для tier-подсказок
+берётся из `provider.<name>.models` **по всем уровням конфигурации** (merge):
+global (`~/.config/opencode/opencode.json`) → project (`opencode.json`) →
+`.opencode/opencode.json`. Приоритет merge: `.opencode` > project > global.
+Локальный конфиг может задать `provider` без `models` — тогда модели наследуются
+из global. Fallback (если `models` нигде нет): HITL-ввод вручную + попытка
+`opencode models <provider>`.
+
+### .gitignore — конкретные пути (не весь `.maestro/`)
+
+Добавить недостающие записи (не дублировать):
+```
+.maestro/sdd/
+.maestro/last-run.md
+.maestro/maestro-bootstrap-*.log
+```
+**НЕ** использовать `.maestro/` (весь каталог) — эфемерные файлы игнорируются
+точечно; конфиги (`maestro.json`) коммитятся в git.
+
+### regression/ — структура каталогов
+
+Создать (идемпотентно):
+```
+regression/entries/.gitkeep
+regression/released/.gitkeep
+regression/cancelled-features.md   (пустой файл с заголовком)
+```
+Не входит в HITL-гейт (структурная необходимость).
+
+**HITL gate по конфигу:** «Конфигурация сформирована. (a) approve — (b) правки —
+(c) отмена». Показать diff-merge для каждого файла перед записью.
+
+## Задача 4. Проверка/установка скилов superpowers
+
+Проверить, установлены ли скилы superpowers (7 REQUIRED SUB-SKILLS maestro).
+
+**Пробник** (без загрузки содержимого скилов в контекст):
+1. Вызвать `skill` tool с **bogus-именем** (например `__maestro_probe__`).
+2. В тексте ошибки `not found` прочитать полный список доступных скилов.
+3. Проверить наличие всех 7: `writing-plans`, `subagent-driven-development`,
+   `test-driven-development`, `using-git-worktrees`, `requesting-code-review`,
+   `finishing-a-development-branch`, `systematic-debugging`.
+
+- **Все найдены** → `superpowers: ok`, к следующему шагу.
+- **Есть недостающие** → HITL:
+  (a) установить глобально (`-g`) — (b) установить в проект — (c) пропустить.
+  ```
+  opencode plugin -g superpowers@git+https://github.com/obra/superpowers.git   # (a)
+  opencode plugin superpowers@git+https://github.com/obra/superpowers.git       # (b)
+  ```
+  При (c) — пометка в `last-run.md` «superpowers НЕ установлен — SDD-шаги не
+  работать будут» (fail-open, не блокирует).
+
+## Задача 5. Проверка плагина `maestro-bootstrap`
+
+Проверить, что плагин `maestro-bootstrap` подключён в `opencode.json` и
+загружается:
+- `"plugin"` содержит `./plugins/maestro-bootstrap/index.js` (или аналог).
+- Файл плагина существует.
+- **Не блокер:** если плагин не подключён/не загружается — НЕ останавливать init.
+  Отметить в своде и `last-run.md`. Пользователь чинит после.
 
 ## Завершение
 
@@ -172,20 +226,20 @@ HITL (как в `stack-detection.md`).
   Напоминание: коммит выполняет пользователь.
 - Записать свод в `.maestro/last-run.md` (перезаписывается, в `.gitignore`).
   Включить статус superpowers (`ok` / `installed (restart required)` /
-  `НЕ установлен`).
-- Сообщить, что pipeline maestro теперь может работать (шаг 0 будет читать
-  `docs/project-context.md`).
+  `НЕ установлен`) и статус плагина.
+- Сообщить, что setup завершён; для дизайна/спеки/scaffold/roadmap запустить
+  `/maestro-design`.
 
 ## Обработка сбоев
 
 | Ситуация | Действие |
 |---|---|
 | AGENTS.md нет и пользователь выбрал (b) | Продолжить, в своде отметить отсутствие AGENTS.md |
-| project-context.md существует, выбран (a) | Пропустить «Шаг 1», перейти к (a)+(c) |
+| project-context.md существует, выбран (a) | Пропустить «Задачу 2», перейти к задачам 3–5 |
 | Git: выбран (a) без ветки | Писать файлы в текущее дерево |
-| superpowers: формат ошибки `skill` tool изменился (нет `Available skills:`) | Fallback: загрузить один канонический скил `test-driven-development` |
+| superpowers: формат ошибки `skill` tool изменился | Fallback: загрузить один канонический скил `test-driven-development` |
 | superpowers: команда установки упала (сеть, git) | HITL: повторить / показать команду для ручного запуска / пропустить |
-| superpowers: пробник после установки не находит (C1) | Сообщить «перезапустите opencode», пометка `installed (restart required)`, продолжить |
 | superpowers: отказ (c) | Продолжить, пометка в last-run.md + своде |
-| stack-detection не находит команду | HITL: вручную / `none` / отмена (молчаливый skip недопустим) |
-| design: revise | Вернуться к дизайн-диалогу (re-dispatch `design`), повторить |
+| stack-detection не находит команду | HITL: вручную / `none` / отмена |
+| Плагин не загружается (задача 5) | Отметить в своде/last-run, не блокировать; пользователь чинит после |
+| models нигде не заданы (D2 fallback) | HITL-ввод вручную + попытка `opencode models <provider>` |
