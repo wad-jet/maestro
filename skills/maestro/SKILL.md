@@ -295,6 +295,8 @@ Interactive — агент комментирует находки по ходу
         (b) Revise — вернуться к шагу 8, доработать spec, **повторить шаг 8.6
             (security review)**, затем повторный review. Подписи становятся
             stale (hash меняется) → 8.6 и 9 перезапускаются автоматически.
+            Перед ре-диспатчем `design` оркестратор вырезает существующие
+            `maestro:*` блоки из spec файла (см. «Подписи spec-файла», правило 5).
         (c) Reject — фича отменяется, STOP
 🟢 11. [agent] writing-plans -> Implementation Plan
       **Fast-track (шаг 7d):** план пишется ИЗ внешнего spec (шаг 8 пропущен).
@@ -443,7 +445,7 @@ Interactive — агент комментирует находки по ходу
             Проверка: `git diff <base-commit>..HEAD | sha256sum` vs probe-diff hash.
           - **Feature (≤2 файла, clean review):** если шаг 16 (requesting-code-review)
             не выявил critical issues — `$TEST_COMMAND` опционален, достаточно coverage.
-          -           **Coverage-тесты** выполняются всегда независимо от прочего.
+          - **Coverage-тесты** выполняются всегда независимо от прочего.
 
           **Compile-time-ассерты в тестах:** если тест-файлы содержат
           статические ассерты (`@ts-expect-error`, `satisfies`, `assert_type`,
