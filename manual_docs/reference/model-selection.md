@@ -41,7 +41,7 @@ tier-правилам.
 | Сабагент | Файл | Редактирование | Роль |
 |---|---|---|---|
 | `design` | `agents/design.md` | edit (spec), без bash | Spec formation: brainstorming, дизайн-решения, написание spec (trusted) |
-| `haiku` | `agents/haiku.md` | edit+bash | Механические задачи, юнит-тесты |
+| `haiku` | `agents/haiku.md` | edit+bash | Механические задачи, юнит-тесты, bash (git, grep, запуск тестов/сборки) |
 | `sonnet` | `agents/sonnet.md` | edit+bash | Интеграционные, multi-file, отладка |
 | `opus` | `agents/opus.md` | read-only | Spec Review, security audit, архитектура |
 | `fable` | `agents/fable.md` | read-only | Примеры, метафоры, пояснения |

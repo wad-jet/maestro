@@ -72,6 +72,7 @@
   в секцию `## Пользовательский фидбек` отчёта (Enter без ввода = пропуск).
 
 ### Изменено
+- **Haiku bash-скрипты:** в `agents/haiku.md` добавлена директива использовать bash для git, grep, запуск тестов/сборки; запрет деструктивных команд (git push, git reset --hard, mass-delete) без явного указания в spec/плане. `describe` обновлён. `manual_docs/` синхронизирован (model-selection, agents-and-trust).
 - **Уход от агента `maestro`**: primary-агент удалён. Вход — команда `@maestro`
   в любой primary-сессии. `@regression`/`@maestro-init` больше не привязаны к
   агенту. Плагин `maestro-bootstrap` — глобальная observability (инжекция
