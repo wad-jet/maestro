@@ -34,6 +34,9 @@
 
 Bootstrap нового проекта: `docs/project-context.md` (14 категорий), дизайн и
 архитектура, scaffold, `docs/roadmap.md` (MVP + этапы). Использует скилл `init`.
+Перед сбором контекста проверяет наличие скилов superpowers
+(`writing-plans`, `subagent-driven-development`, `test-driven-development` и др.);
+если их нет — предлагает установку через HITL (`opencode plugin`).
 
 ### `@test-<agent>`
 

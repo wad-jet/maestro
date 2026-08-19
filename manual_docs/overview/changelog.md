@@ -97,6 +97,13 @@
     `access-policy.example.json`/`sanitizer-whitelist.example.json`.
   - Пример: `plugins/maestro-bootstrap/examples/maestro.example.json`.
   - 63/63 теста (переработаны под секции `maestro.json`).
+- **Проверка скилов superpowers в `/maestro-init`:** новый pre-flight шаг 4 —
+  runtime-пробник через `skill` tool (bogus-name → список доступных скилов).
+  Если все 7 REQUIRED SUB-SKILLS (`writing-plans`, `subagent-driven-development`,
+  `test-driven-development`, `using-git-worktrees`, `requesting-code-review`,
+  `finishing-a-development-branch`, `systematic-debugging`) не найдены —
+  HITL-предложение установки (`opencode plugin ...`, глобально или в проект).
+  При отказе — init продолжается с предупреждением (fail-open).
 - **AGENTS.md:** правило синхронизации `manual_docs/` при изменениях скилла.
 
 ## [2026-08-03]

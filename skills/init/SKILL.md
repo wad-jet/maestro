@@ -56,6 +56,50 @@ description: Use when bootstrapping a NEW project with maestro — generates doc
 
 Автокоммиты НЕ создаём ни в каком варианте — коммит пользователь делает сам.
 
+### 4. Проверка скилов superpowers
+
+Проверить, установлены ли скилы superpowers
+(`https://github.com/obra/superpowers`, папка `skills`) — от них зависят
+SDD-шаги pipeline maestro (план, исполнение, TDD, ревью). Сам init НЕ требует
+superpowers runtime (промпты `design`/`implementer` — self-contained), но
+предупреждение на этом этапе экономит время после bootstrap.
+
+**Пробник** (без загрузки содержимого скилов в контекст):
+
+1. Вызвать `skill` tool с **bogus-именем** (например `__maestro_probe__`).
+2. В тексте ошибки `not found` прочитать полный список доступных скилов
+   (`Available skills: ...`).
+3. Проверить наличие **всех 7 REQUIRED SUB-SKILLS** maestro
+   (`skills/maestro/SKILL.md`):
+   `writing-plans`, `subagent-driven-development`, `test-driven-development`,
+   `using-git-worktrees`, `requesting-code-review`,
+   `finishing-a-development-branch`, `systematic-debugging`.
+
+- **Все найдены** → `superpowers: ok`, перейти к следующему шагу.
+- **Есть недостающие** → HITL:
+
+  Показать список недостающих, команду установки и вопрос:
+  «(a) установить глобально (`-g`) — (b) установить в проект — (c) пропустить».
+  Рекомендация — (a): скил доступен во всех проектах. Примечание: `-g`
+  модифицирует `~/.config/opencode/opencode.json` (глобальный конфиг).
+
+  ```
+  opencode plugin -g superpowers@git+https://github.com/obra/superpowers.git   # (a)
+  opencode plugin superpowers@git+https://github.com/obra/superpowers.git       # (b)
+  ```
+
+  - **(a)/(b)** — оркестратор выполняет команду сам через `bash` (команда
+    показывается и подтверждается HITL), затем **повторный пробник**:
+    - Успех → `superpowers: ok`.
+    - Всё ещё не находит (C1: сессия кэширует список скилов при старте;
+      `opencode plugin` обновляет файлы/конфиг, но работающая сессия может не
+      подхватить изменения без перезапуска) → сообщить: «Установка выполнена.
+      **Перезапустите opencode** для активации скилов, затем повторно запустите
+      `/maestro-init`.» Пометка `superpowers: installed (restart required)`.
+  - **(c) пропустить** — init продолжается; в `.maestro/last-run.md` и своде —
+    пометка «superpowers НЕ установлен — SDD-шаги pipeline maestro (план,
+    исполнение, TDD, ревью) работать не будут» (fail-open, не блокирует init).
+
 ## Шаг 1. Сбор контекста по 14 категориям
 
 Оркестратор читает `init-context.md` (схему 14 категорий) и проходит категории
@@ -127,6 +171,8 @@ HITL (как в `stack-detection.md`).
 - **HITL-свод:** список созданных/изменённых файлов + git-статус (незакоммичено).
   Напоминание: коммит выполняет пользователь.
 - Записать свод в `.maestro/last-run.md` (перезаписывается, в `.gitignore`).
+  Включить статус superpowers (`ok` / `installed (restart required)` /
+  `НЕ установлен`).
 - Сообщить, что pipeline maestro теперь может работать (шаг 0 будет читать
   `docs/project-context.md`).
 
@@ -137,5 +183,9 @@ HITL (как в `stack-detection.md`).
 | AGENTS.md нет и пользователь выбрал (b) | Продолжить, в своде отметить отсутствие AGENTS.md |
 | project-context.md существует, выбран (a) | Пропустить «Шаг 1», перейти к (a)+(c) |
 | Git: выбран (a) без ветки | Писать файлы в текущее дерево |
+| superpowers: формат ошибки `skill` tool изменился (нет `Available skills:`) | Fallback: загрузить один канонический скил `test-driven-development` |
+| superpowers: команда установки упала (сеть, git) | HITL: повторить / показать команду для ручного запуска / пропустить |
+| superpowers: пробник после установки не находит (C1) | Сообщить «перезапустите opencode», пометка `installed (restart required)`, продолжить |
+| superpowers: отказ (c) | Продолжить, пометка в last-run.md + своде |
 | stack-detection не находит команду | HITL: вручную / `none` / отмена (молчаливый skip недопустим) |
 | design: revise | Вернуться к дизайн-диалогу (re-dispatch `design`), повторить |
