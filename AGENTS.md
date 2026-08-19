@@ -11,6 +11,7 @@ This is the **authoring repo** for the OpenCode `maestro` system (the "maestro" 
 - `skills/init/{SKILL.md,init-context.md}` — `/maestro-init` skill for bootstrapping new projects (project-context.md 14 categories, architecture design, scaffold, roadmap).
 - `skills/manual-docs/SKILL.md` — user-docs skill for `manual_docs/` (Diátaxis).
 - `plugins/maestro-bootstrap/` — ESM OpenCode plugin.
+- `specs/*.md` — design specs and implementation plans for work on this repo (kebab-case: `<topic>.md` for spec, `<topic>-plan.md` for plan). **Rule: all feature/bugfix design docs (specs AND plans) must be created in `specs/`, never in the repo root.**
 
 ## Gotchas
 

@@ -83,7 +83,7 @@ primary-сессии. Плагин `maestro-bootstrap` перестаёт фил
   `how-to/customize-maestro.md` (агент удалён), `overview/changelog.md`,
   `explanation/agents-and-trust.md` (роль плагина), `reference/model-selection.md`
   (агент maestro нет), `reference/commands.md` (@maestro команда).
-- `SECURITY-REVIEW-PLAN.md` — отметить, что уход от агента сделан (галочки).
+- `security-review-plan.md` — отметить, что уход от агента сделан (галочки).
 
 Проверка: все относительные ссылки в `manual_docs/` резолвятся; нигде нет
 ссылок на `agents/maestro.md` как на актуальный.
@@ -103,5 +103,5 @@ Task 1→2→3 (вход и удаление) → Task 4 (плагин) → Task
 ## Вне scope
 
 - Sanitizer-функция в плагине (`sanitize` + whitelist + аудит-лог) — Этап 2
-  (см. `SECURITY-REVIEW-PLAN.md`).
+  (см. `security-review-plan.md`).
 - Нативные permissions (file access control) — Этап 2.
