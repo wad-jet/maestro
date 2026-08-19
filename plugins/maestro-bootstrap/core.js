@@ -341,6 +341,37 @@ export function resolveSanitizeOptions(whitelist, agent) {
   return { rules, disabledRules, patterns, extraFields, extraUriSchemes };
 }
 
+/**
+ * SEC-6: выявить whitelist-`patterns`, которые сами матчатся safety-правилами.
+ * Оператор мог случайно занести реальный секрет в `patterns` — тогда он будет
+ * исключён из ВСЕХ правил (footgun).
+ * @param {object} whitelist  Parsed whitelist.
+ * @returns {string[]}  Опасные значения (сами НЕ логируются — могут быть секретами).
+ */
+
+// Значения, которые выглядят как реальные секреты (вне контекста key=value).
+// Используется для SEC-6-детекта footgun-паттернов в whitelist-`patterns`.
+const SECRET_VALUE =
+  /\b(?:sk(?:_live|_test)?_[A-Za-z0-9]+|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+|xox[baprs]-[A-Za-z0-9-]+)\b|-----BEGIN[^-]*PRIVATE KEY-----|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/;
+
+export function detectUnsafePatterns(whitelist) {
+  const patterns = Array.isArray(whitelist?.patterns) ? whitelist.patterns : [];
+  return patterns.filter((p) => SECRET_VALUE.test(String(p)));
+}
+
+/**
+ * SEC-7: выключены ли для агента ВСЕ правила Level-1 (rules + by_agent).
+ * При `hybrid`-mode Level-2 запускается только если Level-1 что-то нашёл,
+ * поэтому полный off создаёт дыру (untrusted проходит без Level-1 и Level-2).
+ * @param {object} opts  Результат resolveSanitizeOptions.
+ * @returns {boolean}
+ */
+export function allRulesDisabled(opts) {
+  if (!opts?.rules) return false;
+  const defined = Object.values(opts.rules);
+  return defined.length > 0 && defined.every((v) => v === false);
+}
+
 // --- Trust model -----------------------------------------------------------
 
 /**
@@ -540,6 +571,15 @@ export const MaestroBootstrapPlugin = async ({ directory }) => {
   const whitelist = loadWhitelist(config);
   const accessPolicy = loadAccessPolicy(config);
   const trustedAgents = loadTrustConfig(config);
+  // SEC-6: если whitelist-`patterns` содержит значения, которые сами матчатся
+  // safety-правилами (оператор занёс реальный секрет) — предупредить.
+  const unsafePatterns = detectUnsafePatterns(whitelist);
+  if (unsafePatterns.length > 0) {
+    log.warn("sanitizer.unsafe_patterns", {
+      // значения НЕ логируем — это могут быть реальные секреты
+      count: unsafePatterns.length,
+    });
+  }
   log.info("plugin initialized", {
     logDir: log.logDir,
     level: log.level,
@@ -618,6 +658,16 @@ export const MaestroBootstrapPlugin = async ({ directory }) => {
           const agent = output.args.subagent_type || output.args.model || "unknown";
           if (!trustedAgents.has(agent)) {
             const opts = resolveSanitizeOptions(whitelist, agent);
+            // SEC-7: для untrusted выключены ВСЕ правила Level-1 (rules+by_agent) —
+            // при hybrid-mode Level-2 тоже не запустится. Предупредить.
+            if (allRulesDisabled(opts)) {
+              log.warn("sanitizer.all_rules_disabled", {
+                sessionID: input.sessionID,
+                callID: input.callID,
+                tool: input.tool,
+                agent,
+              });
+            }
             const res = sanitize(output.args.prompt, opts);
             if (res.count > 0) {
               output.args.prompt = res.text;

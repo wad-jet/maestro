@@ -71,7 +71,7 @@ MUST end with this status block:
 STATUS: DONE | BLOCKED | NEEDS_CONTEXT | DONE_WITH_CONCERNS
 COMMITS: <sha-range>
 FILES_CHANGED: <list>
-TEST_OUTPUT: <pass/fail summary — which test command(s) ran and the result>
+TEST_OUTPUT: <pass/fail summary — command(s) ran, pass/fail counts, failure class. Do NOT include raw stderr/stdout, logs, PII, or config dumps (SEC-8): these land in the progress ledger and later untrusted prompts.>
 CONCERNS: <if DONE_WITH_CONCERNS, list them; else "none">
 BLOCKER: <if BLOCKED, describe; else "none">
 CONTEXT_NEEDED: <if NEEDS_CONTEXT, describe; else "none">
@@ -90,6 +90,10 @@ optional — they are enforced by coverage tests and code review.
 - [ ] All DTO/fields → documented with descriptions per project language
 - [ ] All test names → follow project naming convention
 - [ ] Conventional commit messages (`feat:`, `fix:`, `test:`)
+- [ ] **Secret-scan (SEC-3):** отрицательный grep по своему diff на секреты
+  (`sk-`, `AKIA[0-9A-Z]{16}`, `-----BEGIN`, `client_secret`, `token=`, `key=`,
+  `.env*`, `*.pem/key/cert`). 0 находок в коммиченных файлах; реальные секреты —
+  только через placeholders/`<redacted>`. При сомнении — `DONE_WITH_CONCERNS`.
 
 ## Rules
 

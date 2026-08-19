@@ -93,6 +93,9 @@ Whitelist — секция `sanitizer_whitelist` в `maestro.json` (см. ниж
   `sanitizer` (по структуре проекта/стеку) или вручную. Пример — `examples/maestro.example.json`.
 - Если файла нет — плагин НЕ блокирует (fail-open), полагаясь на нативные
   permissions OpenCode.
+- Плагин **НЕ форсирует** `file_access` OpenCode (не задаёт `config.file_access`)
+  — нативные permissions остаются в силе. Плагин управляет только `read` через
+  `access_policy` (см. выше); `bash`/`glob`/`grep` — нативные permissions.
 - Trusted сабагенты (maestro.json → `trust`) — file access control применяется для
   всех; trusted-skip полный требует верификации перехвата child-сессий (C2).
 
@@ -157,7 +160,8 @@ untrusted, access-policy не enforced, дефолтные sanitizer-прави�
 
 Плагин пишет JSONL-лог в `.maestro/` (каталог создаётся автоматически). В
 `.gitignore` добавляются **конкретные пути**, а не весь `.maestro/`:
-`.maestro/sdd/`, `.maestro/last-run.md`, `.maestro/maestro-bootstrap-*.log`.
+`.maestro/sdd/`, `.maestro/last-run.md`, `.maestro/maestro-bootstrap-*.log`,
+`.maestro/feedback-reports/`.
 Логи **разбиваются по дням** — один файл на дату, что упрощает
 будущую ротацию:
 

@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig, loadMaestroConfig } from "./core.js";
+import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled } from "./core.js";
 
 function readLogs(dir) {
   const logDir = path.join(dir, ".maestro");
@@ -358,6 +358,36 @@ describe("maestro-bootstrap sanitize (Context Sanitizer, Level 1)", () => {
     const res = sanitize('{"internal_id": "sec", "amount": 1}', opts);
     assert.equal(res.count, 2);
     assert.doesNotMatch(res.text, /"sec"/);
+  });
+
+  it("detectUnsafePatterns flags secret-like whitelist patterns, ignores safe (SEC-6)", () => {
+    const whitelist = {
+      patterns: [
+        "safe_value",
+        "test-cp-1",
+        "sk_live_1234567890abcdef",
+        "AKIAIOSFODNN7EXAMPLE",
+        "ghp_abcdef123456",
+        "-----BEGIN RSA PRIVATE KEY-----",
+      ],
+    };
+    const dangerous = detectUnsafePatterns(whitelist);
+    assert.ok(dangerous.includes("sk_live_1234567890abcdef"));
+    assert.ok(dangerous.includes("AKIAIOSFODNN7EXAMPLE"));
+    assert.ok(dangerous.includes("ghp_abcdef123456"));
+    assert.ok(dangerous.includes("-----BEGIN RSA PRIVATE KEY-----"));
+    assert.ok(!dangerous.includes("safe_value"));
+    assert.ok(!dangerous.includes("test-cp-1"));
+  });
+
+  it("allRulesDisabled detects full rule-off for an agent (SEC-7)", () => {
+    const allOff = resolveSanitizeOptions(
+      { rules: { env_secret: false, data_field: false, env_file: false, db_credential: false, ledger_entry: false, private_key: false, auth_header: false } },
+      "haiku",
+    );
+    assert.equal(allRulesDisabled(allOff), true);
+    const defaults = resolveSanitizeOptions({}, "haiku");
+    assert.equal(allRulesDisabled(defaults), false);
   });
 
   it("respects disabled rule categories via rules", () => {

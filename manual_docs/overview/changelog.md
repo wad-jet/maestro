@@ -23,6 +23,23 @@
 - **Fix `.gitignore` (C2/M3)**: конкретные пути (`.maestro/sdd/`,
   `.maestro/last-run.md`, `.maestro/maestro-bootstrap-*.log`) вместо всего
   `.maestro/` — в `AGENTS.md` и `plugins/maestro-bootstrap/README.md`.
+- **Утечка данных (security-хардненинг)**: sanitizer маскирует однословные
+  секрет-keyword (`TOKEN=`/`KEY=`/`SECRET=`/`AUTH=`/`CREDENTIAL=`), colon/JSON-
+  секреты, URI с анонимным user, http(s)/standalone-JWT; санитизация `title`
+  субагента в логах учитывает конфигурацию sanitizer (extra_fields и др.);
+  `access_policy.blocked` логирует только basename; `.maestro/feedback-reports/`
+  в gitignore.
+- **Pipeline (SKILL.md)**: шаг 15 — условный пропуск `$TEST_COMMAND` больше не
+  зависит от шага 16 (решение на шаге 15); «skip → D1» на шаге 2 — только для
+  bugfix (feature → шаг 5); шаг 8.5 явно выполняется на fast-track; secret-scan
+  в чек-лист implementer + scope ревью шага 16 + pre-PR grep (шаг 17);
+  `security_review → sanitizer` добавлен в `step_to_tier`; spec/plan/diff под
+  `ask` для untrusted + Level-1 проверка содержимого spec перед `CLEAN`.
+- **Плагин**: убран `config.file_access:"allow"` (нативные permissions OpenCode
+  сохраняются); предупреждения при whitelist-`patterns`, похожих на секреты
+  (SEC-6), и при полном off правил Level-1 для untrusted (SEC-7).
+- **Переименование скиллов**: `init` → `maestro-init`, `design` → `maestro-design`
+  (одноимённо с командами); обновлены команды, AGENTS.md, manual_docs, specs.
 
 ### Добавлено
 - **Гайд «Настройка проекта для maestro»** (`tutorials/setup-project.md`) —

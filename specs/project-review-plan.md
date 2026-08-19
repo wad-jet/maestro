@@ -1,7 +1,9 @@
 # План: разбор находок полного ревью проекта maestro-agent
 
-> Статус: **зафиксирован (review), исправления не начаты**.
+> Статус: **реализовано (High/Medium закрыты на ветке `feature/security-data-leakage-fixes`)**.
 > Дата: 2026-08-19. Репо: `maestro-agent` (authoring).
+> Прогресс (2026-08-19): H1–H4, SEC-1/2/3/4/5/6/7/8, M1–M14 закрыты; остались LOW
+> (L1–L4, L6–L14) и доп-тесты (index.js adapter, ledger_entry no-op) — см. части 2–4.
 > Метод: полное ревью скилла (SKILL.md), скиллов init/design + команд, плагина
 > maestro-bootstrap, документации manual_docs + AGENTS.md + specs.
 >

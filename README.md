@@ -51,8 +51,9 @@ node --test plugins/maestro-bootstrap/index.test.js
 Агент назывался `feature-agent` и был переименован в `maestro` (2026-08-03).
 Приложение должно быть обновлено в том же шаге: ключи `agent.maestro` и путь
 плагина `plugins/maestro-bootstrap/index.js` в `opencode.json`, зеркала
-`.opencode/` (`agents/maestro.md`, `skills/maestro/`) и запись `.maestro/` в
-`.gitignore`.
+`.opencode/` (`agents/maestro.md`, `skills/maestro/`) и запись в `.gitignore`
+**конкретных путей** `.maestro/` (`.maestro/sdd/`, `.maestro/last-run.md`,
+`.maestro/maestro-bootstrap-*.log`, `.maestro/feedback-reports/` — НЕ весь `.maestro/`).
 
 ## Уход от агента (2026-08-18)
 

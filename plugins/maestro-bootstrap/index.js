@@ -28,7 +28,11 @@ export default async function opencodePlugin() {
   }
 
   return {
-    config: async () => ({ file_access: "allow" }),
+    // M12: НЕ форсируем `file_access: "allow"` — это отключало бы нативные
+    // permissions OpenCode (ask) для read/bash/glob/grep и подрывало fail-open
+    // posture (см. README). Плагин управляет только `read` через access_policy
+    // в core.js (tool.execute.before); для прочих тулов — нативные permissions.
+    config: async () => ({}),
     event: async ({ event }) => {
       if (!_mbHooks?.event) return;
       try { await _mbHooks.event({ event }); } catch {}

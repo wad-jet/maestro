@@ -173,7 +173,9 @@ Interactive — агент комментирует находки по ходу
       baseline-тестов; это последняя точка отмены до изоляции. Реакция нужна,
       чтобы не начинать молча.
       В efficient mode: (a) да — запустить pre-flight и начать — (b) отмена → STOP
-      В interactive mode: (a) да — (b) skip → D1 — (c) отмена
+      В interactive mode (зависит от маршрута шага 1):
+        - bugfix: (a) да — (b) skip → D1 — (c) отмена
+        - feature: (a) да — (b) skip → шаг 5 (без pre-flight) — (c) отмена
 🟡  3. [agent] Pre-flight: диагностика состояния (см. ниже Фазу 1)
 🟡  4. [agent] Pre-flight: запрос действия у пользователя (см. ниже Фазу 2)
 🟡  5. [agent] Имя ветки (inline-конвенция)
@@ -226,6 +228,9 @@ Interactive — агент комментирует находки по ходу
          (b) упростить scope / (c) стоп.
        — Запись в лог: `design: spec created at <spec_path>`
 🟢  8.5. [agent] Оценка изменений контекста
+       — **Fast-track (шаг 7d):** шаг 8.5 выполняется ТАКЖЕ — внешний spec
+         анализируется на изменения контекста/cross-cutting (план на шаге 11
+         зависит от 8.5; fast-track пропускает только шаг 8 «Dispatch design»).
        — Оркестратор анализирует spec: появились ли новые категории,
          изменения стека, команды или уточнения для проектного контекста.
        — Если да — запоминает как pending context changes.
@@ -251,6 +256,14 @@ Interactive — агент комментирует находки по ходу
          (a) вычистить и продолжить — оркестратор вычищает spec по пометкам
          (b) продолжить как есть (принять риск)
          (c) стоп
+       — **SEC-2 (файл-артефакт):** подпись `CLEAN` ставится только если
+         содержимое spec проходит Уровень 1 (regex-санитайзер плагина) с
+         **0 находок** — оркестратор прогоняет содержимое spec-файла через
+         sanitize, а не только промпт диспатча. При `FINDINGS_ACCEPTED`
+         (вариант (b)) spec остаётся под `ask` в access_policy (не `allow`):
+         untrusted ревьюеры (opus/implementer/code-reviewer) читают
+         spec/plan/diff только через file-access gate с HITL — чувствительные
+         данные не уходят молча.
        — После `CLEAN` или (a)/(b) оркестратор **штампует подпись
          `<!-- maestro:sanitize -->`** в конец spec файла (см. «Подписи
          spec-файла»): `status: CLEAN | FINDINGS_ACCEPTED` + date + hash
@@ -443,8 +456,13 @@ Interactive — агент комментирует находки по ходу
           - **Багфикс (probe == fix):** если git diff фикса совпадает с git diff
             probe (D3), то `$TEST_COMMAND` уже выполнен на шаге D4 — не повторять.
             Проверка: `git diff <base-commit>..HEAD | sha256sum` vs probe-diff hash.
-          - **Feature (≤2 файла, clean review):** если шаг 16 (requesting-code-review)
-            не выявил critical issues — `$TEST_COMMAND` опционален, достаточно coverage.
+          - **Feature (≤2 файла, low-risk):** если фича мала (≤2 файла) и план
+            не содержит risk-сценарии (шаг 11, Regression Registry) —
+            `$TEST_COMMAND` опционален, достаточно coverage. Решение принимается
+            на шаге 15 (НЕ зависит от шага 16 — последний выполняется ПОЗЖЕ).
+          - **После шага 16:** если code review (шаг 16) выявил critical issues
+            и фикс-loop (шаг 13) менял код — `$TEST_COMMAND` выполняется заново
+            (условие «low-risk» сбрасывается, пропуск аннулируется).
           - **Coverage-тесты** выполняются всегда независимо от прочего.
 
           **Compile-time-ассерты в тестах:** если тест-файлы содержат
@@ -477,6 +495,10 @@ Interactive — агент комментирует находки по ходу
 🟡 16. [agent] requesting-code-review -> финальное ревью
       — **Точка 2 Security Review:** перед диспатчем code-reviewer (untrusted)
         — прогон промпта через sanitize. Trusted code-reviewer → skip.
+      — **Secret-scan в scope ревью (SEC-3):** code-reviewer проверяет diff
+        ветки на хардкод-секреты (`sk-`, `AKIA[0-9A-Z]{16}`, `-----BEGIN`,
+        `client_secret`, `token=`/`key=`) и на коммит `.env*`/`*.pem/key/cert`.
+        0 находок — иначе критическое issue (блокирует merge).
       — **Трекинг issues:** оркестратор ведёт fix-loop после code review и
         трекает состояние каждого issue: `fixed` / `open (blocking)` /
         `follow-up (non-blocking)`. Follow-up фиксируется отдельно (не
@@ -484,6 +506,10 @@ Interactive — агент комментирует находки по ходу
 🟡 17. -- HITL GATE: pre-PR --
       Оркестратор ПОКАЗЫВАЕТ: git log, test results, coverage status
       **и список открытых issues (open + follow-up) с severity** из шага 16.
+      **Secret-scan pre-PR (SEC-3):** перед гейтом оркестратор прогоняет
+      отрицательный grep по `git diff <base>..HEAD` на секреты
+      (`sk-`, `AKIA[0-9A-Z]{16}`, `-----BEGIN`, `client_secret`, `token=`/`key=`)
+      и на `.env*`/`*.pem/key/cert`; 0 находок — иначе (b) Fix до merge.
       ВАРИАНТЫ:
         (a) Approve merge — переходим к шагу 18 (finishing-a-development-branch)
         (b) Fix — вернуться к шагу 13, исправить issues. Если открытых
@@ -607,8 +633,9 @@ pipeline; после завершения переход на шаг 11 (writing
 > диагностика — следствие «да».
 >
 > **Interactive mode:** pre-flight — опциональная диагностика, не gate.
-> При выборе (b) "skip → D1" pre-flight пропускается, pipeline переходит
-> к D1. В лог записывается: `pre-flight: skipped (interactive mode)`.
+> При выборе (b) "skip" pre-flight пропускается: для bugfix — переход к D1,
+> для feature — к шагу 5 (имя ветки). В лог записывается:
+> `pre-flight: skipped (interactive mode)`.
 > В efficient mode (b) — отмена → STOP.
 
 ### Фаза 1: Диагностика
@@ -704,6 +731,7 @@ pipeline; после завершения переход на шаг 11 (writing
 |---|---|---|
 | `spec_formation` (шаг 8) | opus | `design` (trusted) |
 | `spec_review` (шаг 9) | opus | `opus` |
+| `security_review` (шаг 8.6) | sanitizer | `sanitizer` (trusted) |
 | `task_reviewer` (шаг 13, per-task) | sonnet | `sonnet` |
 | `code_review` (шаг 16) | opus | `code-reviewer` |
 | `implementer_mechanical` (шаг 13, 1-2 файла) | haiku | `haiku` |
@@ -731,8 +759,9 @@ pipeline; после завершения переход на шаг 11 (writing
 | `fable` | `.opencode/agents/fable.md` + `opencode.json → agent.fable.model` |
 | `sanitizer` | `.opencode/agents/sanitizer.md` + `opencode.json → agent.sanitizer.model` |
 
-Все под-агенты `hidden: true` — не показываются в `@`-меню, вызываются только
-программно через `task` tool.
+Все под-агенты, кроме `code-reviewer`, объявлены `hidden: true` — не показываются
+в `@`-меню, вызываются только программно через `task` tool. `code-reviewer`
+(`hidden: false`) виден в `@`-меню — standalone-ревью доступно напрямую.
 
 - `permission` — `haiku`/`sonnet` могут редактировать файлы и запускать bash
   (имплементация), `opus`/`fable`/`sanitizer` — read-only без bash (ревью,
@@ -1194,7 +1223,7 @@ hash: <sha256 содержимого spec без блоков maestro:*>
 
 | Ситуация | Действие |
 |---|---|
-| **HITL шаг 2: отмена старта** | В efficient: STOP — pipeline завершён. В interactive: skip → D1. Никаких cleanup не требуется (ветка ещё не создана). |
+| **HITL шаг 2: skip (interactive)** | Pre-flight пропускается: bugfix → D1; feature → шаг 5 (имя ветки). В efficient (b) — отмена → STOP. Cleanup не требуется (ветка ещё не создана). |
 | **HITL шаг 1.5: отмена (1.5c)** | STOP — pipeline завершён. Пользователь отказался от запуска. |
 | **Spec gate: revise (10b)** | Вернуться к шагу 8 (re-dispatch `design`), доработать spec, повторный security review + review |
 | **Внешний spec невалидный (шаг 7d)** | Пустой / нечитаемый / не содержит требований → HITL: (a) создать заново через `design` (шаг 8) / (b) указать другой путь / (c) отмена |
@@ -1338,8 +1367,8 @@ tree должен быть чистым.
 - **Простые фичи** (шаг 7b — spec не создаётся): если план пишется, коммитить
   его тем же правилом; если и план пропущен (trivial fix) — design-коммита нет,
   SDD стартует от текущего HEAD.
-- **Отмена (10c/12c):** cleanup ветки/worktree по строке 348 — design-коммит
-  уходит вместе с веткой.
+- **Отмена (10c/12c):** cleanup ветки/worktree (см. «Gate: отмена» в таблице
+  «Обработка сбоев») — design-коммит уходит вместе с веткой.
 
 ## Ограничения
 
