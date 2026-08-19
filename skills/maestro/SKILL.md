@@ -230,6 +230,12 @@ Interactive — агент комментирует находки по ходу
          изменения стека, команды или уточнения для проектного контекста.
        — Если да — запоминает как pending context changes.
        — Если нет — ничего не происходит.
+       — **Cross-cutting scan:** если spec меняет конфиг-схему/ключи (удаление,
+         переименование, перенос ключа) — оркестратор выполняет grep по
+         изменённым ключам в `examples/`, конфигах, доках и запоминает
+         найденные файлы как pending cross-cutting changes (вместе с context
+         changes). Они попадают в plan (шаг 11) как задачи на обновление
+         затронутых файлов.
        — **HITL не требуется.** Изменения контекста будут зафиксированы
          в плане (шаг 11) и применены автоматически после аппрува плана
          (шаг 12a).
@@ -305,10 +311,21 @@ Interactive — агент комментирует находки по ходу
         к корню репо или сервис один — поле опускается. Это поле
         используется оркестратором на шаге 13 для резолва команд
         (см. c.1 Pre-dispatch resolution).
+      - **Размер задачи:** если задача затрагивает > ~8–10 файлов — разбить
+        на подзадачи (отдельные диспатчи). Guidance, не жёсткий лимит: крупный
+        рефакторинг с механическими правками может оставаться одной задачей
+        по решению оркестратора с HITL-подтверждением при неоднозначности.
+      - **Дублирование spec:** план ссылается на секции spec по имени
+        (например, «см. spec §3.1»), не переписывает требования дословно.
+        Полное дублирование содержимого spec в плане — дефект качества,
+        исправить до plan-gate.
       - **Если есть pending context changes (шаг 8.5):** добавить в plan
         секцию `## Project Context Changes` — что изменилось, какие
         категории/команды/стек нужно обновить в `docs/project-context.md`.
         Эта секция ревьюится на gates шага 12 вместе с планом.
+      - **Если есть pending cross-cutting changes (шаг 8.5):** добавить
+        задачи на обновление затронутых файлов (examples, конфиги, доки)
+        как отдельные задачи плана.
       - **Regression risk + scenarios (шаг 11, а не 8.5):** оркестратор
         анализирует plan по сигналам матрицы риска (см. секцию
         «Regression Registry»):
@@ -426,7 +443,17 @@ Interactive — агент комментирует находки по ходу
             Проверка: `git diff <base-commit>..HEAD | sha256sum` vs probe-diff hash.
           - **Feature (≤2 файла, clean review):** если шаг 16 (requesting-code-review)
             не выявил critical issues — `$TEST_COMMAND` опционален, достаточно coverage.
-          - **Coverage-тесты** выполняются всегда независимо от прочего.
+          -           **Coverage-тесты** выполняются всегда независимо от прочего.
+
+          **Compile-time-ассерты в тестах:** если тест-файлы содержат
+          статические ассерты (`@ts-expect-error`, `satisfies`, `assert_type`,
+          const-eval, trait-bound checks) И тест-раннер не выполняет статанализ
+          (swc/esbuild/vitest/jest без typecheck) — проверить, что эти файлы
+          в scope инструмента статанализа проекта (tsconfig `include`/`exclude`,
+          mypy config и т.п.). Если исключены — инвариант молча не проверяется;
+          поднять как follow-up задачу (не блокирует), не allow silent pass.
+          Для нетипизированных стеков — no-op. Best-effort: распознаются не
+          все ассерты — acceptable overhead, не enforcement.
 
           **Если команда = `none`** → шаг пропускается без эскалации
           (осознанное решение пользователя).
@@ -448,11 +475,18 @@ Interactive — агент комментирует находки по ходу
 🟡 16. [agent] requesting-code-review -> финальное ревью
       — **Точка 2 Security Review:** перед диспатчем code-reviewer (untrusted)
         — прогон промпта через sanitize. Trusted code-reviewer → skip.
+      — **Трекинг issues:** оркестратор ведёт fix-loop после code review и
+        трекает состояние каждого issue: `fixed` / `open (blocking)` /
+        `follow-up (non-blocking)`. Follow-up фиксируется отдельно (не
+        блокирует merge), не молчаливо.
 🟡 17. -- HITL GATE: pre-PR --
-      Оркестратор ПОКАЗЫВАЕТ: git log, test results, coverage status.
+      Оркестратор ПОКАЗЫВАЕТ: git log, test results, coverage status
+      **и список открытых issues (open + follow-up) с severity** из шага 16.
       ВАРИАНТЫ:
         (a) Approve merge — переходим к шагу 18 (finishing-a-development-branch)
-        (b) Fix — вернуться к шагу 13, исправить issues
+        (b) Fix — вернуться к шагу 13, исправить issues. Если открытых
+            issues нет — вариант помечается: «(b) Fix — нет открытых
+            замечаний (только follow-up, не блокирует)».
         (c) Отмена
 🟢 18. [agent] finishing-a-development-branch
       — При fast-forward merge: `$TEST_COMMAND` на merged результате
@@ -496,7 +530,8 @@ Bugfix:
 1. **Показать контекст:**
    - Шаг 10 (spec gate) — diff правок spec после review
    - Шаг 12 (plan gate) — список task-ов с краткими описаниями
-   - Шаг 17 (pre-PR) — `git log --oneline`, test results, coverage status
+   - Шаг 17 (pre-PR) — `git log --oneline`, test results, coverage status,
+     список открытых issues (open + follow-up) с severity из шага 16
 
 2. **Задать вопрос с вариантами (a)/(b)/(c):**
    - Никогда не спрашивать "Continue?" или "Утверждаешь?" — только structured options

@@ -31,7 +31,7 @@ Decision gates (шаги 10, 12, 17) — явный вопрос с вариан
 | 8.6 | Spec security review (при находке sanitizer) | (a) вычистить и продолжить · (b) продолжить как есть (принять риск) · (c) стоп |
 | 10 | Spec утверждён | (a) Approve · (b) Revise → шаг 8 (повторить security review 8.6) · (c) Reject |
 | 12 | Plan утверждён | (a) Approve · (b) Revise → шаг 11 · (c) отмена |
-| 17 | Pre-PR | (a) Approve merge · (b) Fix → шаг 13 · (c) отмена |
+| 17 | Pre-PR | (a) Approve merge · (b) Fix → шаг 13 · (c) отмена. Gate показывает список открытых issues (open + follow-up) с severity из шага 16; если открытых нет — (b) помечается «только follow-up, не блокирует» |
 
 ## 📖 Security-гейты (помимо feature/bugfix)
 
