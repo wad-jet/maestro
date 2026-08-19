@@ -505,7 +505,9 @@ export const MaestroBootstrapPlugin = async ({ directory }) => {
   // callID -> timestamp (для подсчёта длительности тула)
   const toolCalls = makeBoundedMap(2048);
 
-  return {
+  const plugin = {
+    config: undefined,
+
     event: async ({ event }) => {
       try {
         const { type, properties } = event ?? {};
@@ -639,5 +641,39 @@ export const MaestroBootstrapPlugin = async ({ directory }) => {
         });
       }
     },
+
+    dispose: async () => {
+      log.info("plugin disposing", {});
+    },
   };
+  return plugin;
 };
+
+// ——— OpenCode plugin adapter ———
+// Opencode v1.18 ждёт: export default async function() => { config, event, startup, dispose }
+// config — ОБЯЗАТЕЛЬНО функция (async) — opencode вызывает N.config(ctx).
+
+let _mbHooks = null;
+
+export default async function opencodePlugin() {
+  if (!_mbHooks) {
+    try {
+      _mbHooks = await MaestroBootstrapPlugin({ directory: process.cwd() });
+    } catch {
+      /* logging must not break opencode */
+    }
+  }
+
+  return {
+    config: async () => ({ file_access: "allow" }),
+    event: async ({ event }) => {
+      if (!_mbHooks?.event) return;
+      try { await _mbHooks.event({ event }); } catch {}
+    },
+    startup: async () => {},
+    dispose: async () => {
+      if (!_mbHooks?.dispose) return;
+      try { await _mbHooks.dispose(); } catch {}
+    },
+  };
+}
