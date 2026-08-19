@@ -61,7 +61,7 @@ Interactive — агент комментирует находки по ходу
 |---|---|---|---|---|---|
 | **Trivial fix** (1-2 строки) | Typos, config tweak, rename, single-line bugfix | TDD + commit напрямую; pipeline не запускается | Нет | Нет | — |
 | **Простая фича** | Новый simple endpoint, UI-компонент без стейта, добавление поля к existing DTO | Шаги 2-7 → gate: простая → план (шаги 11-12) → SDD (шаг 13) | Нет (пропускается) | 1-2 task-а без review-package | **Haiku** |
-| **Сложная фича** | Новая сущность с миграцией, multi-step flow, новый публичный endpoint с auth/rate-limiting | Полный pipeline: шаги 2-7 → spec (8) → опц. Spec Review (9) → gate (10) → план (11-12) → SDD (13) | Рекомендован | Multi-task, review-package per task | **Sonnet** (**Opus** для key task) |
+| **Сложная фича** | Новая сущность с миграцией, multi-step flow, новый публичный endpoint с auth/rate-limiting | Полный pipeline: шаги 2-7 → spec (8) → опц. Spec Review (9) → gate (10) → план (11-12) → SDD (13). **Fast-track** (шаг 7d): внешний spec вместо шага 8 | Рекомендован | Multi-task, review-package per task | **Sonnet** (**Opus** для key task) |
 | **Архитектурная фича** | Новая таблица + сервис + контроллер + тесты, новый middleware, breaking change, cross-module refactoring | Полный pipeline + обязательный Spec Review | **Обязателен** | Multi-task, review-package per task, redesign после review если verdict `revise` | **Opus** |
 
 ### Критерии — матрица сигналов
@@ -197,6 +197,19 @@ Interactive — агент комментирует находки по ходу
         (c) Отмена
       Если (a) → Spec Review РЕКОМЕНДОВАН для сложных, ОБЯЗАТЕЛЕН
       для архитектурных. Оркестратор предложит его на шаге 9.
+      Если (a) → **Fast-track (внешний spec)**: оркестратор проверяет
+      `docs/superpowers/specs/*.md` (конвенция `YYYY-MM-DD-<feature>-design.md`).
+      Найден один или несколько → HITL: «Обнаружен spec `<path>`.
+      (d) использовать — fast-track / (e) создать заново (шаг 8)».
+      Несколько файлов → список на выбор. Не найден → пользователь может
+      указать путь вручную; иначе — нормальный путь (шаг 8).
+      После выбора (d) → **проверка подписей** (см. «Подписи spec-файла»):
+        - валидная review-подпись → шаги 9/10 пропускаются без вопроса (auto);
+        - нет/stale → HITL вариант B: «Уже отревьюен извне?
+          (a) пропустить review / (b) прогнать (шаги 9+10)»;
+        - валидная sanitize-подпись (`status: CLEAN`) → шаг 8.6 пропускается;
+          иначе → шаг 8.6 выполняется.
+      Fast-track применим только для сложных/архитектурных фич (шаг 7a).
 🟢  8. [agent] Dispatch `design` (trusted) -> Spec (обязательно для сложных фич)
        — Оркестратор диспатчит сабагент `design` (trusted) через `task` tool
          с `subagent_type=design` (модель из `agent.design.model`, opus-tier).
@@ -222,6 +235,9 @@ Interactive — агент комментирует находки по ходу
          (шаг 12a).
 🟡  8.6. [agent] Spec security review (Точка 1, см. Security Review)
        — Только для фич, где есть spec (сложные/архитектурные).
+       — **Fast-track (шаг 7d):** если в spec есть валидная sanitize-подпись
+         `status: CLEAN` (hash совпадает) → шаг 8.6 пропускается. При
+         `FINDINGS_ACCEPTED`, отсутствии или stale-подписи → выполняется.
        — Оркестратор диспатчит сабагент `sanitizer` (trusted) с spec.
        — Sanitizer помечает чувствительные данные, возвращает structured-блок
          `SANITIZER FINDINGS` + `STATUS: CLEAN | FINDINGS_FOUND`.
@@ -229,13 +245,23 @@ Interactive — агент комментирует находки по ходу
          (a) вычистить и продолжить — оркестратор вычищает spec по пометкам
          (b) продолжить как есть (принять риск)
          (c) стоп
-       — При `CLEAN` или после (a)/(b) → переход к шагу 9.
+       — После `CLEAN` или (a)/(b) оркестратор **штампует подпись
+         `<!-- maestro:sanitize -->`** в конец spec файла (см. «Подписи
+         spec-файла»): `status: CLEAN | FINDINGS_ACCEPTED` + date + hash
+         (sha256 содержимого без `maestro:*` блоков).
        — **Перезапуск на каждый Revise-цикл:** если шаг 10 вернёт Revise →
-         шаг 8 → шаг 8.6 повторяется (spec мог измениться).
+         шаг 8 → шаг 8.6 повторяется (spec мог измениться). Подписи
+         инвалидируются hash'ем (см. «Подписи spec-файла»).
 🟢  9. [HITL] Spec Review на spec:
        - **Spec уже прошёл security review (шаг 8.6)** — opus получает
          очищенный spec; security-проверку не дублирует (см. Security Review).
-         Spec написан сабагентом `design` (trusted, шаг 8).
+         Spec написан сабагентом `design` (trusted, шаг 8) или взят внешним
+         (fast-track, шаг 7d).
+       - **Fast-track (шаг 7d):** валидная review-подпись → шаг пропущен
+         (auto). Нет/stale → уже согласовано на шаге 7 (вариант B):
+         (a) пропустить — шаги 9/10 не выполняются, подпись не ставится;
+         (b) прогнать — выполнить шаг 9 + шаг 10, при Approve поставить
+         review-подпись.
        - **Для сложных фич: оркестратор ОБЯЗАН предложить Spec Review.
          Шаг 10 (spec gate) не наступает, пока пользователь не ответил
          на предложение (да/нет).**
@@ -250,15 +276,22 @@ Interactive — агент комментирует находки по ходу
          сабагент sanitizer, см. ниже). Trusted opus (если в maestro.json) → skip.
        - Промпт ревьюера: `spec-review-prompt.md` из этого скилла
        - Передать: spec + контекст + встроенный чеклист + вопросы
+       - **Opus игнорирует `<!-- maestro:* -->` metadata-блоки** (подписи) —
+         ревьюит только содержимое spec.
        - Получить: structured review (severity-бакеты + verdict approve/revise/reject)
 🟡 10. -- HITL GATE: spec утверждён (с учётом экспертного ревью) --
       Оркестратор ПОКАЗЫВАЕТ diff правок (что изменилось после review).
       ВАРИАНТЫ:
-        (a) Approve — spec готов, переходим к плану (шаг 11)
+        (a) Approve — spec готов, переходим к плану (шаг 11). Оркестратор
+            **штампует подпись `<!-- maestro:review -->`** в конец spec файла
+            (см. «Подписи spec-файла»): reviewer: opus + date + verdict: approve
+            + hash (sha256 содержимого без `maestro:*` блоков).
         (b) Revise — вернуться к шагу 8, доработать spec, **повторить шаг 8.6
-            (security review)**, затем повторный review
+            (security review)**, затем повторный review. Подписи становятся
+            stale (hash меняется) → 8.6 и 9 перезапускаются автоматически.
         (c) Reject — фича отменяется, STOP
 🟢 11. [agent] writing-plans -> Implementation Plan
+      **Fast-track (шаг 7d):** план пишется ИЗ внешнего spec (шаг 8 пропущен).
       After writing, оркестратор ПРОВЕРЯЕТ plan на качество:
       - Meta-commentary в тексте? ("Let me", "Actually", "I think", "Wait —")
       - Placeholders? ("TODO", "FIXME", "TBD")
@@ -442,7 +475,7 @@ Feature:
 - Шаг 1 — выбор маршрута (feature/bugfix/cancel)
 - Шаг 1.5 — выбор режима (efficient/interactive/cancel)
 - Шаг 2 — подтверждение старта + pre-flight (да/отмена/skip в interactive)
-- Шаг 7 — сложность фичи (сложная/простая/отмена)
+- Шаг 7 — сложность фичи (сложная/простая/отмена) + fast-track (d)/(e) + вариант B (внешний review)
 - Шаг 8.6 — spec security review: при `FINDINGS_FOUND` (вычистить и продолжить /
   продолжить как есть (принять риск) / стоп)
 - Шаг 10 — spec утверждён (approve/revise/reject)
@@ -954,6 +987,9 @@ Trust-уровень определяется по `maestro.json` (см. Trust M
   Review) и планирования. Сабагент `sanitizer` проверяет spec на чувствительные
   данные. Только для фич, где есть spec (сложные/архитектурные). **Перезапуск
   на каждый Revise-цикл** (шаг 10 → Revise → шаг 8 → повторный прогон sanitizer).
+  В fast-track (шаг 7d) пропускается только при валидной sanitize-подписи
+  (`status: CLEAN`); после прогона оркестратор штампует подпись
+  `<!-- maestro:sanitize -->` (см. «Подписи spec-файла»).
 - **Точка 2 — Перед диспатчем untrusted:** перед каждой отправкой промпта в
   untrusted субагентов (шаги 9/13/16). Выполняется всегда. Trusted сабагенты
   пропускают (skip sanitize).
@@ -1050,6 +1086,55 @@ permissions OpenCode.
 
 Используйте промпт: `spec-review-prompt.md` из этого скилла.
 
+## Подписи spec-файла
+
+Метаданные о пройденном ревью/санизации, встроенные в spec файл. Используются
+fast-track (шаг 7d) для детекта «внешний spec уже отревьюен/санизирован» и для
+re-entry (повторный запуск `maestro` на том же spec).
+
+**Формат:** HTML-комментарии в конце spec файла — невидимы в рендере, не
+загрязняют markdown-иерархию. **Ставит только оркестратор** (trusted): opus —
+untrusted, sanitizer — read-only (`edit: deny`); ни один из сабагентов писать
+в spec не может.
+
+```markdown
+<!-- maestro:review
+reviewer: opus
+date: 2026-08-19
+verdict: approve
+hash: <sha256 содержимого spec без блоков maestro:*>
+-->
+```
+
+```markdown
+<!-- maestro:sanitize
+status: CLEAN | FINDINGS_ACCEPTED
+date: 2026-08-19
+hash: <sha256 содержимого spec без блоков maestro:*>
+-->
+```
+
+**Правила:**
+
+1. **Hash scope:** sha256 по содержимому spec без блоков `maestro:*` (от
+   `<!-- maestro:` до ближайшего `-->`). Иначе подпись влияет на собственный hash.
+2. **Review-подпись** штампуется на шаге 10 при Approve; `verdict:` всегда
+   `approve`. **Sanitize-подпись** штампуется на шаге 8.6 после `CLEAN` или
+   выбора (a)/(b); `FINDINGS_ACCEPTED` = пользователь осознанно принял риск.
+3. **Stale-детект:** любая правка spec меняет hash → подпись stale →
+   трактуется как отсутствующая.
+4. **`FINDINGS_ACCEPTED` не даёт skip 8.6 при re-entry** — spec содержит
+   sensitive, повторная санизация безопаснее (консервативно).
+5. **Stale-клир:** перед ре-диспатчем `design` (шаг 8, в т.ч. Revise-цикл)
+   оркестратор вырезает существующие `maestro:*` блоки из spec файла
+   (`design-prompt.md` о подписях не знает).
+6. **Revise-loop:** шаг 10 = Revise → spec правится → hash меняется →
+   подписи stale → 8.6 и 9 перезапускаются автоматически.
+7. **Разграничение с Точкой 2:** подпись spec файла НЕ отменяет sanitize
+   промптов на 13d/16 — Точка 2 санизирует сборку промпта, а не файл.
+8. **Forgeability:** блок можно вставить вручную. Принято как конвенция
+   (как sanitizer-блоки); hash гарантирует соответствие подписи содержимому.
+
 ## Границы ревью
 
 В pipeline три ревью — они **не дублируются**: разные артефакты, разное время,
@@ -1075,6 +1160,7 @@ permissions OpenCode.
 | **HITL шаг 2: отмена старта** | В efficient: STOP — pipeline завершён. В interactive: skip → D1. Никаких cleanup не требуется (ветка ещё не создана). |
 | **HITL шаг 1.5: отмена (1.5c)** | STOP — pipeline завершён. Пользователь отказался от запуска. |
 | **Spec gate: revise (10b)** | Вернуться к шагу 8 (re-dispatch `design`), доработать spec, повторный security review + review |
+| **Внешний spec невалидный (шаг 7d)** | Пустой / нечитаемый / не содержит требований → HITL: (a) создать заново через `design` (шаг 8) / (b) указать другой путь / (c) отмена |
 | **Plan gate: revise (12b)** | Вернуться к шагу 11 (writing-plans), доработать план |
 | **Spec review: revise** | Вернуться к шагу 8 (re-dispatch `design`), доработать spec, повторить security review (8.6) + review (шаг 9) |
 | **Spec review: reject** | Эскалация к пользователю: пересмотр требований или отмена фичи |

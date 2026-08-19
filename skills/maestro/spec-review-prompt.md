@@ -77,6 +77,9 @@ Markdown. No JSON, no numeric scores.
 
 - Review the SPEC, not the (nonexistent) plan.
 - Be specific: reference spec sections.
+- **Ignore `<!-- maestro:* -->` HTML-comment blocks at the end of the spec**
+  (signature metadata: `maestro:review` / `maestro:sanitize`). Do not review,
+  reference, or comment on them — they are orchestrator metadata, not spec content.
 - "approve" = spec is ready for planning.
 - "revise" = spec needs changes before planning (list issues).
 - "reject" = spec is fundamentally flawed (explain why).
