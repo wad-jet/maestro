@@ -47,6 +47,15 @@ Setup-фаза bootstrap нового проекта: `docs/project-context.md` 
 - (c) `docs/roadmap.md` (MVP + этапы).
 Модели агентов наследуются из `opencode.json` (не переспрашивает).
 
+### `@maestro-feedback-report`
+
+Сбор фактуры по прошлым процессам maestro **в текущей сессии** для последующей
+ретроспективы (что было хорошо / плохо / с какими проблемами). Отчёт —
+`.maestro/feedback-reports/report-<Session ID>-<YYYY-MM-DD>.md`. Основной
+источник — диалог сессии; дополняется данными из логов плагина
+(`maestro-bootstrap-*.log`) при наличии записей по `sessionID`. Автокоммит не
+требуется.
+
 ### `@test-<agent>`
 
 Проверка доступности субагента и его конфига в `opencode.json`
