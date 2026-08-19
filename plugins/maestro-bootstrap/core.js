@@ -119,7 +119,7 @@ const ENV_FILE = /(\.env(?:\.\w+)?)\b/g;
 // Схемы URI с встроенными credentials: scheme://user:pass@host.
 const DEFAULT_URI_SCHEMES = [
   "sftp", "postgres", "postgresql", "mysql", "mongodb", "redis", "amqp",
-  "https?", "ssh", "ftp", "ftps", "ldap", "ldaps", "grpc",
+  "http", "https", "ssh", "ftp", "ftps", "ldap", "ldaps", "grpc",
   "clickhouse", "mssql", "cassandra",
 ];
 
@@ -666,9 +666,13 @@ export const MaestroBootstrapPlugin = async ({ directory }) => {
         };
         if (startedAt !== undefined) extra.durationMs = Date.now() - startedAt;
         // SEC-4: `title` субагента — untrusted (может содержать секреты в отчёте).
-        // Санитизируем перед записью в лог.
+        // Санитизируем перед записью в лог. Используем те же правила, что и для
+        // промпта (resolveSanitizeOptions), чтобы учесть org-конфигурацию
+        // sanitizer (extra_fields/extra_uri_schemes/patterns/per-agent rules).
         if (output?.title) {
-          extra.title = sanitize(String(output.title)).text;
+          const agent = input.args?.subagent_type || input.args?.model || "unknown";
+          const opts = resolveSanitizeOptions(whitelist, agent);
+          extra.title = sanitize(String(output.title), opts).text;
         }
         const isEmptySubagentResult =
           input.tool === "task" &&

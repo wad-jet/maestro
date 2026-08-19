@@ -100,6 +100,34 @@ describe("maestro-bootstrap global logging", () => {
     assert.match(afterEntry.title, /<redacted>/, "title should contain redaction marker");
   });
 
+  it("should honor configured extra_fields when sanitizing task title (SEC-4 config path)", async () => {
+    const cfgDir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-title-cfg-"));
+    try {
+      fs.writeFileSync(
+        path.join(cfgDir, "maestro.json"),
+        JSON.stringify({
+          sanitizer_whitelist: { extra_fields: ["internal_ssn"] },
+        }),
+      );
+      const cfgHooks = await MaestroBootstrapPlugin({ directory: cfgDir });
+      await cfgHooks["tool.execute.before"](
+        { tool: "task", sessionID: "cfg-session", callID: "c-cfg" },
+        { args: { subagent_type: "haiku", description: "impl" } },
+      );
+      await cfgHooks["tool.execute.after"](
+        { tool: "task", sessionID: "cfg-session", callID: "c-cfg", args: { subagent_type: "haiku", description: "impl" } },
+        { title: 'report: internal_ssn: "123-45-6789"', output: "ok", metadata: {} },
+      );
+
+      const cfgEntry = readLogs(cfgDir).find((e) => e.msg === "tool.execute.after" && e.callID === "c-cfg");
+      assert.ok(cfgEntry, "after entry must exist for configured-whitelist plugin");
+      assert.doesNotMatch(cfgEntry.title, /123-45-6789/, "configured extra_field must be sanitized in title");
+      assert.match(cfgEntry.title, /<redacted>/, "title should contain redaction marker");
+    } finally {
+      fs.rmSync(cfgDir, { recursive: true, force: true });
+    }
+  });
+
   it("should NOT log non-task tools (bash/skill) in detail", async () => {
     const before = readLogs(dir).length;
     await hooks["tool.execute.before"](
@@ -220,6 +248,15 @@ describe("maestro-bootstrap sanitize (Context Sanitizer, Level 1)", () => {
     assert.equal(res.count, 2);
     assert.doesNotMatch(res.text, /pw123/);
     assert.doesNotMatch(res.text, /secret/);
+  });
+
+  it("masks http(s) URI credentials (http:// and https://)", () => {
+    const res = sanitize("a=http://user:pw@h/path b=https://user:sp@h/path");
+    assert.equal(res.count, 2);
+    assert.doesNotMatch(res.text, /pw@/);
+    assert.doesNotMatch(res.text, /sp@/);
+    assert.doesNotMatch(res.text, /:pw/);
+    assert.doesNotMatch(res.text, /:sp/);
   });
 
   it("masks additional DB/SFTP URI schemes (ssh, ldap, clickhouse)", () => {

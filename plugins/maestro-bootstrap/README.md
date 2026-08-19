@@ -39,9 +39,9 @@ file access control** (не привязан к агенту). Скилл `maest
    автоматически. Ловит JSON-ключи `"password": "x"` (SEC-1b).
 3. **Файлы .env / .env.\*** → `<redacted>`.
 4. **SFTP/DB credentials** — URI-схемы (`postgres://`, `mysql://`, `ssh://`,
-   `ldap://`, `clickhouse://` и др., регистронезависимо) с встроенными
-   credentials (в т.ч. анонимный user `postgres://:pass@host`, SEC-1b), а также
-   connection-string params `password=...`, `pwd=...` → `<redacted>`.
+   `ldap://`, `clickhouse://`, `http://`, `https://` и др., регистронезависимо) с
+   встроенными credentials (в т.ч. анонимный user `postgres://:pass@host`, SEC-1b),
+   а также connection-string params `password=...`, `pwd=...` → `<redacted>`.
 5. **Private keys** — PEM-блоки `-----BEGIN ... PRIVATE KEY-----`
    (регистронезависимо) → `<redacted>`.
 6. **Auth headers** — `Authorization: Bearer ...`, `X-API-Key: ...` →
