@@ -82,6 +82,24 @@ describe("maestro-bootstrap global logging", () => {
     assert.equal(afterEntry.title, "DONE");
   });
 
+  it("should sanitize sensitive data in task title before logging (SEC-4)", async () => {
+    await hooks["tool.execute.before"](
+      { tool: "task", sessionID: "sec-session", callID: "c-sec" },
+      { args: { description: "impl" } },
+    );
+    await hooks["tool.execute.after"](
+      { tool: "task", sessionID: "sec-session", callID: "c-sec", args: { description: "impl" } },
+      { title: "report: API_KEY=sk123456 PASSWORD=hunter2", output: "ok", metadata: {} },
+    );
+
+    entries = readLogs(dir);
+    const afterEntry = entries.find((e) => e.msg === "tool.execute.after" && e.callID === "c-sec");
+    assert.ok(afterEntry, "after entry must exist");
+    assert.doesNotMatch(afterEntry.title, /sk123456/, "secret key must be sanitized");
+    assert.doesNotMatch(afterEntry.title, /hunter2/, "password must be sanitized");
+    assert.match(afterEntry.title, /<redacted>/, "title should contain redaction marker");
+  });
+
   it("should NOT log non-task tools (bash/skill) in detail", async () => {
     const before = readLogs(dir).length;
     await hooks["tool.execute.before"](
@@ -214,7 +232,8 @@ describe("maestro-bootstrap sanitize (Context Sanitizer, Level 1)", () => {
 
   it("masks connection-string password params (key=value)", () => {
     const res = sanitize("host=db port=5432 user=admin password=s3cr3t dbname=app");
-    assert.equal(res.count, 1);
+    // count=2: `password=` маскируется и env_secret, и conn_password (defense in depth)
+    assert.equal(res.count, 2);
     assert.doesNotMatch(res.text, /s3cr3t/);
     assert.match(res.text, /host=db/);
   });
@@ -252,7 +271,8 @@ describe("maestro-bootstrap sanitize (Context Sanitizer, Level 1)", () => {
 
   it("masks private key blocks", () => {
     const res = sanitize("key:\n-----BEGIN RSA PRIVATE KEY-----\nMIIE...\n-----END RSA PRIVATE KEY-----");
-    assert.equal(res.count, 1);
+    // count=2: PEM-блок (private_key) + `key:` (SECRET_COLON) — оба маскируют.
+    assert.equal(res.count, 2);
     assert.doesNotMatch(res.text, /MIIE/);
   });
 
@@ -369,6 +389,49 @@ describe("maestro-bootstrap sanitize (Context Sanitizer, Level 1)", () => {
     const wl = loadWhitelist(config);
     assert.deepEqual(wl.patterns, ["from_maestro_json"]);
     assert.deepEqual(wl.extra_fields, ["proj_field"]);
+  });
+
+  // --- SEC-1: однословные секрет-keyword маскируются (регрессия) ---
+  it("masks single-word secret keywords at name start (SEC-1)", () => {
+    for (const s of ["TOKEN=abc", "KEY=abc", "SECRET=abc", "AUTH=abc", "CREDENTIAL=abc"]) {
+      const res = sanitize(s);
+      assert.doesNotMatch(res.text, /=abc/, `${s} value must be masked`);
+    }
+  });
+
+  it("still masks prefixed and camelCase secret keywords (no regression)", () => {
+    const res = sanitize(
+      "API_KEY=abc POSTGRES_PASSWORD=def JWT_SECRET=ghi apiKey=jkl dbPassword=mno",
+    );
+    for (const m of ["abc", "def", "ghi", "jkl", "mno"]) {
+      assert.doesNotMatch(res.text, new RegExp(m), `value ${m} must be masked`);
+    }
+  });
+
+  // --- SEC-1b: colon-стиль, JSON-ключи, URI с анонимным user, JWT ---
+  it("masks colon-style secrets (password: x, API_KEY: x) (SEC-1b)", () => {
+    const res = sanitize("password: supersecret123 API_KEY: 1234567890abcdef");
+    assert.doesNotMatch(res.text, /supersecret123/);
+    assert.doesNotMatch(res.text, /1234567890abcdef/);
+  });
+
+  it("masks JSON secret keys (client_secret, apiKey, password) (SEC-1b)", () => {
+    const res = sanitize('{"client_secret": "s3cr3t", "apiKey": "abcd1234", "password": "p@ss"}');
+    assert.doesNotMatch(res.text, /s3cr3t/);
+    assert.doesNotMatch(res.text, /abcd1234/);
+    assert.doesNotMatch(res.text, /p@ss/);
+  });
+
+  it("masks URI with anonymous user (postgres://:pass@host) (SEC-1b)", () => {
+    const res = sanitize("postgres://:mypass@host:5432/db redis://:mysecret@localhost:6379/0");
+    assert.doesNotMatch(res.text, /mypass/);
+    assert.doesNotMatch(res.text, /mysecret/);
+  });
+
+  it("masks standalone JWT outside Authorization header (SEC-1b)", () => {
+    const jwt = "eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0.signature";
+    const res = sanitize(`Bearer ${jwt} token=${jwt} session=${jwt}`);
+    assert.doesNotMatch(res.text, /eyJhbGci/);
   });
 });
 

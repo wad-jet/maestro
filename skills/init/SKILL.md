@@ -173,9 +173,11 @@ global (`~/.config/opencode/opencode.json`) → project (`opencode.json`) →
 .maestro/sdd/
 .maestro/last-run.md
 .maestro/maestro-bootstrap-*.log
+.maestro/feedback-reports/
 ```
 **НЕ** использовать `.maestro/` (весь каталог) — эфемерные файлы игнорируются
-точечно; конфиги (`maestro.json`) коммитятся в git.
+точечно; конфиги (`maestro.json`) коммитятся в git. `.maestro/feedback-reports/`
+(отчёты `@maestro-feedback-report`) — эфемерное, в gitignore.
 
 ### regression/ — структура каталогов
 

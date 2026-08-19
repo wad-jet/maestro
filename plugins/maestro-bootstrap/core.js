@@ -60,6 +60,9 @@ const DEFAULT_SENSITIVE_FIELDS = [
   "phone", "email", "address", "first_name", "last_name",
   "full_name", "birth_date", "passport", "passport_number",
   "inn", "kpp", "ogrn", "snils", "ssn", "tax_id",
+  // Секреты / credentials (для `"key": value` / `key: value` — SEC-1b)
+  "client_secret", "api_key", "secret_key", "auth_token", "access_key",
+  "refresh_token", "id_token", "password", "secret",
   // Бизнес-поля (существующие)
   "article_code", "counterparty_id",
 ];
@@ -99,8 +102,12 @@ function buildDataFieldsRegex(fields) {
 // в `keyword`), но для security-инструмента безопаснее лишний раз замаскировать.
 const ENV_KEYWORDS =
   "SECRET|KEY|TOKEN|PASSWORD|CREDENTIAL|PASS|AUTH|DSN|CERT|SALT|SIGNATURE|NONCE";
+// Префикс должен быть optional/backtrackable (может быть пустым), иначе keyword
+// в начале имени (`TOKEN=`, `KEY=`, `SECRET=` и т.п.) не маскируется — жадный
+// `[A-Z]` съедал его начало (SEC-1). `[A-Za-z0-9_]*` ловит и camelCase
+// (`apiKey=`, `dbPassword=`) и snake_case (`API_KEY=`, `POSTGRES_PASSWORD=`).
 const ENV_ASSIGN = new RegExp(
-  `\\b[A-Z][A-Z0-9_]*(?:${ENV_KEYWORDS})[A-Z0-9_]*\\s*=\\s*("[^"]*"|'[^']*'|[^\\s;]+)`,
+  `\\b[A-Za-z0-9_]*(?:${ENV_KEYWORDS})[A-Z0-9_]*\\s*=\\s*("[^"]*"|'[^']*'|[^\\s;]+)`,
   "gi",
 );
 
@@ -129,7 +136,11 @@ const escapeScheme = (s) => s.replace(/\?/g, "\\?");
 function buildDbUriRegex(schemes) {
   const alt = schemes.map(escapeScheme).join("|");
   // `i`-флаг — схемы регистронезависимо: `POSTGRES://`, `Postgres://`, `sftp://`.
-  return new RegExp(`\\b(?:${alt}):\\/\\/[^\\s/@:]+:[^\\s/@]+@[^\\s]+`, "gi");
+  // Username опционален: ловит и `user:pass@`, и анонимный `:pass@` (SEC-1b).
+  return new RegExp(
+    `\\b(?:${alt}):\\/\\/(?:[^\\s/@:]+:)?[^\\s/@]+@[^\\s]+`,
+    "gi",
+  );
 }
 
 // --- Private keys (rule `private_key`) -------------------------------------
@@ -144,6 +155,26 @@ const PRIVATE_KEY =
 // Authorization / X-API-Key и т.п.: Bearer/Basic токены.
 const AUTH_HEADER =
   /\b(?:Authorization|X-API-Key|Proxy-Authorization|X-Auth-Token)\s*:\s*(?:Bearer\s+|Basic\s+|Token\s+)?[^\s,;]+/gi;
+
+// --- Colon-separated secrets (SEC-1b) --------------------------------------
+
+// `password: value`, `token: x`, `API_KEY: value`, `client_secret: value` —
+// config-стиль (двоеточие, не `=`). Префикс опционален (`[A-Za-z0-9_]*`), чтобы
+// ловить `API_KEY:` и т.п.
+const SECRET_COLON = new RegExp(
+  `\\b[A-Za-z0-9_]*(?:${ENV_KEYWORDS})\\s*:\\s*("[^"]*"|'[^']*'|[^\\s,;]+)`,
+  "gi",
+);
+
+// --- JWT (SEC-1b) ----------------------------------------------------------
+
+// Одиночный JWT вне Authorization-заголовка: header.payload.signature (base64url).
+const JWT_TOKEN =
+  /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g;
+
+// --- URI с паролем без user (SEC-1b, redis://:pass@host) ------------------
+
+// `scheme://:password@host` — анонимный user. Ловится buildDbUriRegex (user опционален).
 
 // Ledger-проводки покрываются rule `data_field` (те же поля) — отдельная
 // обработка не нужна; `ledger_entry` оставлен как маркер (no-op).
@@ -232,6 +263,19 @@ export function sanitize(prompt, opts = {}) {
 
   if (rules.auth_header) {
     redact(AUTH_HEADER);
+    redact(JWT_TOKEN); // standalone JWT вне заголовка (SEC-1b)
+  }
+
+  // Colon-стиль `key: value` — ПОСЛЕ структурных правил (private_key, auth_header,
+  // db_credential), чтобы SECRET_COLON не съедал `-----BEGIN`, `Bearer` и т.п.
+  if (rules.env_secret) {
+    text = text.replace(SECRET_COLON, (match) => {
+      if (isProtected(match)) return match;
+      const colon = match.indexOf(":");
+      const name = match.slice(0, colon + 1);
+      count += 1;
+      return `${name} <redacted>`;
+    });
   }
 
   // `ledger_entry` — маркер: проводки покрываются rule `data_field` (те же
@@ -547,12 +591,14 @@ export const MaestroBootstrapPlugin = async ({ directory }) => {
           if (target) {
             const action = resolveFileAccess(accessPolicy, target);
             if (action !== "allow") {
+              // SEC-5: в лог — только basename (не раскрывать полную структуру путей);
+              // полный путь остаётся только в ошибке для оркестратора.
               log.warn("access_policy.blocked", {
                 sessionID: input.sessionID,
                 callID: input.callID,
                 tool: input.tool,
                 action,
-                target,
+                target: path.basename(target),
               });
               const err = new Error(
                 `[access-policy:${action}] Доступ к "${target}" требует подтверждения. ` +
@@ -619,7 +665,11 @@ export const MaestroBootstrapPlugin = async ({ directory }) => {
           tool: input.tool,
         };
         if (startedAt !== undefined) extra.durationMs = Date.now() - startedAt;
-        if (output?.title) extra.title = output.title;
+        // SEC-4: `title` субагента — untrusted (может содержать секреты в отчёте).
+        // Санитизируем перед записью в лог.
+        if (output?.title) {
+          extra.title = sanitize(String(output.title)).text;
+        }
         const isEmptySubagentResult =
           input.tool === "task" &&
           (!output?.title || !output?.output) &&

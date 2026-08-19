@@ -28,20 +28,25 @@ file access control** (не привязан к агенту). Скилл `maest
 1. **Secrets из окружения** — имена (case-insensitive: `API_KEY`, `apiKey`,
    `api_key`) с keywords `SECRET`, `KEY`, `TOKEN`, `PASSWORD`, `CREDENTIAL`,
    `PASS`, `AUTH`, `DSN`, `CERT`, `SALT`, `SIGNATURE`, `NONCE` и их значения →
-   `<redacted>`.
+   `<redacted>`. Покрывает однословные (`TOKEN=`, `KEY=`, `SECRET=`) и
+   colon-стиль (`password: x`, `API_KEY: x`) (SEC-1/SEC-1b).
 2. **Чувствительные поля данных** — расширенный список (финансовые: `amount`,
    `salary`, `iban`, `card_number`, `cvv`, `vat`, `total_amount` и т.д.; PII:
-   `phone`, `email`, `inn`, `snils`, `passport` и т.д.) → `<redacted>`.
-   Детект регистронезависим; `\w*`-суффиксы (`amountValue`, `amount_value`) и
-   camelCase-варианты snake-полей (`cardNumber`) покрываются автоматически.
+   `phone`, `email`, `inn`, `snils`, `passport` и т.д.; credentials:
+   `client_secret`, `api_key`, `secret_key`, `password`, `secret` и т.д.) →
+   `<redacted>`. Детект регистронезависим; `\w*`-суффиксы (`amountValue`,
+   `amount_value`) и camelCase-варианты snake-полей (`cardNumber`) покрываются
+   автоматически. Ловит JSON-ключи `"password": "x"` (SEC-1b).
 3. **Файлы .env / .env.\*** → `<redacted>`.
 4. **SFTP/DB credentials** — URI-схемы (`postgres://`, `mysql://`, `ssh://`,
    `ldap://`, `clickhouse://` и др., регистронезависимо) с встроенными
-   credentials, а также connection-string params `password=...`, `pwd=...` →
-   `<redacted>`.
+   credentials (в т.ч. анонимный user `postgres://:pass@host`, SEC-1b), а также
+   connection-string params `password=...`, `pwd=...` → `<redacted>`.
 5. **Private keys** — PEM-блоки `-----BEGIN ... PRIVATE KEY-----`
    (регистронезависимо) → `<redacted>`.
-6. **Auth headers** — `Authorization: Bearer ...`, `X-API-Key: ...` → `<redacted>`.
+6. **Auth headers** — `Authorization: Bearer ...`, `X-API-Key: ...` →
+   `<redacted>`; также standalone JWT (`header.payload.signature`) вне заголовка
+   (SEC-1b).
 7. **Raw ledger entries** — покрываются rule `data_field` (те же поля).
 
 Whitelist — секция `sanitizer_whitelist` в `maestro.json` (см. ниже).
