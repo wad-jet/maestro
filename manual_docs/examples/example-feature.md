@@ -18,7 +18,7 @@
         -> (a) да
 Шаг 1:  HITL: "Что делаем? (f) feature — (b) bugfix"
         -> (f) feature
-Шаг 2:  HITL: "Запустить pre-flight диагностику? (a) да — (b) отмена"
+Шаг 2:  HITL: "Подтверждаем старт? (a) да — pre-flight и старт — (b) отмена"
         -> (a) да
 Шаг 3:  Pre-flight: git clean, на develop, не в worktree
 Шаг 4:  HITL: "Изолировать в worktree? (a) worktree — (b) git checkout -b"

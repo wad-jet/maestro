@@ -166,8 +166,13 @@ Interactive — агент комментирует находки по ходу
       (a) efficient — текущее поведение: агент работает молча, HITL только на gates
       (b) interactive — агент комментирует находки, задаёт уточняющие вопросы по ходу
       (c) отмена → STOP, pipeline завершён
-🟡  2. -- HITL GATE: запустить pre-flight диагностику? (a) да — (b) отмена — (c) skip в interactive --
-      В efficient mode: (a) да — (b) отмена → STOP
+🟡  2. -- HITL GATE: подтверждение старта (pre-flight) --
+      Pre-flight — read-only диагностика состояния (working tree, ветка,
+      worktree, baseline-тесты) перед созданием ветки. Вопрос возник потому,
+      что "да" = фактический старт работы и запуск потенциально долгих
+      baseline-тестов; это последняя точка отмены до изоляции. Реакция нужна,
+      чтобы не начинать молча.
+      В efficient mode: (a) да — запустить pre-flight и начать — (b) отмена → STOP
       В interactive mode: (a) да — (b) skip → D1 — (c) отмена
 🟡  3. [agent] Pre-flight: диагностика состояния (см. ниже Фазу 1)
 🟡  4. [agent] Pre-flight: запрос действия у пользователя (см. ниже Фазу 2)
@@ -436,7 +441,7 @@ Feature:
 - Шаг 0 — загрузка Project Context (загрузить/создать/пропустить/отмена)
 - Шаг 1 — выбор маршрута (feature/bugfix/cancel)
 - Шаг 1.5 — выбор режима (efficient/interactive/cancel)
-- Шаг 2 — запуск pre-flight (да/отмена/skip в interactive)
+- Шаг 2 — подтверждение старта + pre-flight (да/отмена/skip в interactive)
 - Шаг 7 — сложность фичи (сложная/простая/отмена)
 - Шаг 8.6 — spec security review: при `FINDINGS_FOUND` (вычистить и продолжить /
   продолжить как есть (принять риск) / стоп)
@@ -528,12 +533,13 @@ pipeline; после завершения переход на шаг 11 (writing
 Двухфазная проверка перед созданием ветки.
 
 > Модель НЕ запускает pre-flight автоматически. Перед диагностикой (шаг 2
-> pipeline) модель запрашивает подтверждение у пользователя через HITL gate.
+> pipeline) модель запрашивает подтверждение **старта работы** через HITL gate;
+> диагностика — следствие «да».
 >
 > **Interactive mode:** pre-flight — опциональная диагностика, не gate.
 > При выборе (b) "skip → D1" pre-flight пропускается, pipeline переходит
 > к D1. В лог записывается: `pre-flight: skipped (interactive mode)`.
-> В efficient mode (b) — отмена → STOP (как сейчас).
+> В efficient mode (b) — отмена → STOP.
 
 ### Фаза 1: Диагностика
 
@@ -1066,7 +1072,7 @@ permissions OpenCode.
 
 | Ситуация | Действие |
 |---|---|
-| **HITL pre-flight: отмена (шаг 2b)** | В efficient: STOP — pipeline завершён. В interactive: skip → D1. Никаких cleanup не требуется (ветка ещё не создана). |
+| **HITL шаг 2: отмена старта** | В efficient: STOP — pipeline завершён. В interactive: skip → D1. Никаких cleanup не требуется (ветка ещё не создана). |
 | **HITL шаг 1.5: отмена (1.5c)** | STOP — pipeline завершён. Пользователь отказался от запуска. |
 | **Spec gate: revise (10b)** | Вернуться к шагу 8 (re-dispatch `design`), доработать spec, повторный security review + review |
 | **Plan gate: revise (12b)** | Вернуться к шагу 11 (writing-plans), доработать план |
@@ -1292,7 +1298,7 @@ Pipeline не имеет механизма cross-repo координации (�
 Шаг 1:  [agent] Загружает skill maestro
         -> HITL: "Что делаем? (f) feature — (b) bugfix"
         -> Пользователь: (f) feature
-Шаг 2:  [agent] "Запустить pre-flight диагностику? (a) да — (b) отмена"
+Шаг 2:  [agent] "Подтверждаем старт? (a) да — pre-flight и начало — (b) отмена"
         -> Пользователь: (a) да
 Шаг 3:  [agent] Pre-flight — Фаза 1: диагностика
         - git status: clean

@@ -26,7 +26,7 @@ Decision gates (шаги 10, 12, 17) — явный вопрос с вариан
 | 0 | Загрузка Project Context | (a) загрузить/подтвердить · (b) создать/обновить · (c) пропустить · (d) отмена |
 | 1 | Маршрут | (f) feature · (b) bugfix · (c) отмена |
 | 1.5 | Режим | (a) efficient · (b) interactive · (c) отмена |
-| 2 | Pre-flight | (a) да · (b) отмена · (c) skip в interactive |
+| 2 | Подтверждение старта (pre-flight) | (a) да · (b) отмена · (c) skip → D1 в interactive |
 | 7 | Категория фичи | (a) сложная/архитектурная · (b) простая · (c) отмена |
 | 8.6 | Spec security review (при находке sanitizer) | (a) вычистить и продолжить · (b) продолжить как есть (принять риск) · (c) стоп |
 | 10 | Spec утверждён | (a) Approve · (b) Revise → шаг 8 (повторить security review 8.6) · (c) Reject |
