@@ -5,12 +5,13 @@
 > Источник: `.maestro-feedback-18.09.md` (предложения 1 и 2).
 > Решения:
 > - Механизм — авто-детект spec в `docs/superpowers/specs/` + ручной путь
->   (пользователь указывает путь); scope — пропуск spec-цикла (шаги 8, 9, 10),
->   plan (11) пишется maestro из внешнего spec, plan-gate (12) обязателен.
-> - **Подписи `## maestro:review` / `## maestro:sanitize`** — детект
+>   (пользователь указывает путь); scope — шаг 8 пропускается; шаги 8.6/9/10
+>   **условны** (зависят от подписей и варианта B); plan (11) пишется maestro
+>   из внешнего spec, plan-gate (12) обязателен.
+> - **Подписи `<!-- maestro:review -->` / `<!-- maestro:sanitize -->`** — детект
 >   отревьюенности/санизированности внешнего spec (см. «Дизайн подписей»).
 >   Ставит только оркестратор (trusted); hash по содержимому без блоков
->   `## maestro:*`; на Revise — hash-инвалидация → авто-перезапуск 8.6 + 9.
+>   `maestro:*`; на Revise — hash-инвалидация → авто-перезапуск 8.6 + 9.
 
 ## Постановка
 
@@ -41,53 +42,70 @@
 
 **Проверка подписей** (после выбора файла, до старта fast-track):
 
+- **(d)/(e) всегда спрашивается** при найденном spec; подписи влияют только
+  на 8.6/9/10, не на выбор файла.
 - Review-подпись валидна (hash совпадает) → **auto fast-track**: шаги 9/10
   пропускаются без вопроса к пользователю.
 - Review-подпись отсутствует или stale → **вариант B**: HITL «Уже отревьюен
   извне? (a) пропустить review / (b) прогнать (шаги 9+10)».
-- Sanitize-подпись валидна → 8.6 пропускается; отсутствует/stale →
-  8.6 выполняется (см. таблицу ниже).
+  - (a) → 9/10 пропускаются; review-подпись НЕ штампуется (нет доказательства).
+  - (b) → 9 и 10 выполняются; при Approve review-подпись штампуется
+    (для будущего re-entry).
+- Sanitize-подпись со `status: CLEAN` валидна → 8.6 пропускается;
+  `status: FINDINGS_ACCEPTED` / отсутствует / stale → 8.6 выполняется
+  (см. таблицу ниже).
 
 **Применимо только к сложным/архитектурным фичам** (где шаги 8–10 запускаются).
 Для простых фич шаги 8–10 уже пропущены (шаг 7b) — fast-track не релевантен.
 
 ## Дизайн подписей
 
-Два signature-блока в конце spec файла. **Штампует только оркестратор**
-(trusted): opus — untrusted (нельзя давать `edit: allow` на spec), sanitizer —
-trusted, но read-only (`edit: deny`, SKILL.md:963). Ни один из сабагентов
-писать в spec не может.
+Два signature-блока в конце spec файла, **HTML-комментарии** (невидимы в
+рендере, не загрязняют markdown-иерархию; парсятся оркестратором).
+**Штампует только оркестратор** (trusted): opus — untrusted (нельзя давать
+`edit: allow` на spec), sanitizer — trusted, но read-only (`edit: deny`,
+SKILL.md:963). Ни один из сабагентов писать в spec не может.
 
-**`## maestro:review`** — штампуется оркестратором на шаге 10 при `Approve`:
+**`<!-- maestro:review -->`** — штампуется оркестратором на шаге 10 при `Approve`:
 ```
-## maestro:review
+<!-- maestro:review
 reviewer: opus
 date: 2026-08-19
 verdict: approve
-hash: <sha256 содержимого spec без блоков ## maestro:*>
+hash: <sha256 содержимого spec без блоков maestro:*>
+-->
 ```
 
-**`## maestro:sanitize`** — штампуется оркестратором после завершения 8.6
+**`<!-- maestro:sanitize -->`** — штампуется оркестратором после завершения 8.6
 (при `CLEAN` или после выбора (a)/(b)):
 ```
-## maestro:sanitize
+<!-- maestro:sanitize
 status: CLEAN | FINDINGS_ACCEPTED
 date: 2026-08-19
-hash: <sha256 содержимого spec без блоков ## maestro:*>
+hash: <sha256 содержимого spec без блоков maestro:*>
+-->
 ```
+
+`verdict:` в review-подписи всегда `approve` (штампуется только на Approve) —
+поле для audit/будущего расширения.
 
 **Правила:**
 
-1. **Hash scope:** sha256 по содержимому spec **без блоков `## maestro:*`** —
-   иначе подпись влияет на собственный hash (рекурсия).
+1. **Hash scope:** sha256 по содержимому spec **без блоков `maestro:*`**.
+   Вырезаются от `<!-- maestro:` до ближайшего `-->`. Иначе подпись влияет
+   на собственный hash (рекурсия).
 2. **Авторство:** штампует только оркестратор. Opus и sanitizer не пишут в spec.
-3. **`FINDINGS_ACCEPTED`:** если 8.6 = (b) принять риск → `status:
+3. **Stale-клир при Revise:** перед любым ре-диспатчем `design` (шаг 8, в т.ч.
+   Revise-цикл) оркестратор **вырезает все существующие `maestro:*` блоки**
+   из spec файла. `design-prompt.md` о подписях не знает (self-contained) —
+   очистка на оркестраторе защищает от дублей и stale-блоков.
+4. **`FINDINGS_ACCEPTED`:** если 8.6 = (b) принять риск → `status:
    FINDINGS_ACCEPTED` (не `CLEAN`). Downstream видит «пользователь осознанно
-   принял риск»; така␣ подпись НЕ даёт право skip 8.6 при re-entry
-   (spec содержит sensitive — повторная санизация безопаснее).
-4. **Stale-детект:** любая правка spec (ручная, revise-циклом, design) меняет
+   принял риск»; **такая подпись НЕ даёт skip 8.6 при re-entry** (spec содержит
+   sensitive — повторная санизация безопаснее, консервативно).
+5. **Stale-детект:** любая правка spec (ручная, revise-циклом, design) меняет
    hash → подпись stale → трактуется как отсутствующая.
-5. **Revise-loop (enforcement):** шаг 10 = `Revise` → spec правится (шаг 8) →
+6. **Revise-loop (enforcement):** шаг 10 = `Revise` → spec правится (шаг 8) →
    hash меняется → обе подписи stale → 8.6 + 9 перезапускаются автоматически.
    Это механически заменяет инструкцию SKILL.md:233-234 («перезапуск на каждый
    Revise-цикл») — раньше соблюдение было на оркестраторе, теперь enforced hash'ем.
@@ -107,8 +125,8 @@ hash: <sha256 содержимого spec без блоков ## maestro:*>
 | 7 | категория фичи | категория + авто-детект spec + предложение (d)/(e) + проверка подписей + вариант B |
 | 8 | dispatch `design` → spec | **ПРОПУСК** (внешний spec) |
 | 8.5 | оценка изменений контекста | **ОСТАЁТСЯ** — анализирует внешний spec |
-| 8.6 | spec security review + **штамп `## maestro:sanitize`** | **ПРОПУСК только при валидной sanitize-подписи**; иначе **ВЫПОЛНЯЕТСЯ** + штамп |
-| 9 | spec review (opus) + штамп `## maestro:review` при Approve | **ПРОПУСК** при валидной review-подписи (auto) или (a) из варианта B; **ВЫПОЛНЯЕТСЯ** при (b) |
+| 8.6 | spec security review + **штамп `<!-- maestro:sanitize -->`** | **ПРОПУСК только при валидной sanitize-подписи (`status: CLEAN`)**; иначе **ВЫПОЛНЯЕТСЯ** + штамп |
+| 9 | spec review (opus) + штамп `<!-- maestro:review -->` при Approve | **ПРОПУСК** при валидной review-подписи (auto) или (a) из варианта B; **ВЫПОЛНЯЕТСЯ** при (b) |
 | 10 | spec gate | **ПРОПУСК** (если 9 пропущен); gate исполняется, если 9 прогнан |
 | 11 | writing-plans | **ОСТАЁТСЯ** — plan пишется ИЗ внешнего spec |
 | 12 | plan gate | **ОСТАЁТСЯ** — обязателен, пользователь подтверждает план |
@@ -134,11 +152,12 @@ implementer-промпты санируются на Точке 2), внешни
 
 | # | Файл | Действие |
 |---|---|---|
-| 1 | `skills/maestro/SKILL.md` | Шаг 7: вариант (d)/(e) fast-track после выбора категории (сложная/арх) + проверка подписей + вариант B; шаг 8.6: штамп `## maestro:sanitize` (статусы CLEAN/FINDINGS_ACCEPTED, hash) + fast-track-условие skip; шаг 10: штамп `## maestro:review` при Approve; шаг 10 (Revise): заменить инструкцию «повторить 8.6» на hash-enforcement (подписи stale); note «8.5 работает с внешним spec»; таблица «Обработка сбоев» — строка «внешний spec невалидный» |
-| 2 | `manual_docs/reference/hitl-gates.md` | Шаг 7 — вариант (d) fast-track; вариант B (внешний review) |
-| 3 | `manual_docs/explanation/pipeline-overview.md` | Note про fast-track + подписи (гейты spec-цикла опциональны при внешнем spec; штампы `## maestro:*`) |
-| 4 | `manual_docs/tutorials/run-first-feature.md` | Упоминание fast-track на шаге 7 |
-| 5 | `manual_docs/overview/changelog.md` | Entry: fast-track + подписи + закрытие проблемы «много подтверждений» |
+| 1 | `skills/maestro/SKILL.md` | Шаг 7: вариант (d)/(e) fast-track после выбора категории (сложная/арх) + проверка подписей + вариант B; шаг 8.6: штамп `<!-- maestro:sanitize -->` (статусы CLEAN/FINDINGS_ACCEPTED, hash) + fast-track-условие skip + stale-клир перед ре-диспатчем design; шаг 9: note «opus игнорирует `maestro:*` блоки»; шаг 10: штамп `<!-- maestro:review -->` при Approve; шаг 10 (Revise): заменить инструкцию «повторить 8.6» на hash-enforcement (подписи stale); note «8.5 работает с внешним spec»; таблица «Обработка сбоев» — строка «внешний spec невалидный» |
+| 2 | `skills/maestro/spec-review-prompt.md` | Note: игнорировать `<!-- maestro:* -->` metadata-блоки (не ревьюить) |
+| 3 | `manual_docs/reference/hitl-gates.md` | Шаг 7 — вариант (d) fast-track; вариант B (внешний review) |
+| 4 | `manual_docs/explanation/pipeline-overview.md` | Note про fast-track + подписи (гейты spec-цикла опциональны при внешнем spec; штампы `<!-- maestro:* -->`) |
+| 5 | `manual_docs/tutorials/run-first-feature.md` | Упоминание fast-track на шаге 7 |
+| 6 | `manual_docs/overview/changelog.md` | Entry: fast-track + подписи + закрытие проблемы «много подтверждений» |
 
 ## Известные ограничения
 
@@ -156,8 +175,13 @@ implementer-промпты санируются на Точке 2), внешни
   поведение, но может удивить.
 - **`FINDINGS_ACCEPTED` не даёт skip 8.6 при re-entry:** spec содержит
   sensitive — повторная санизация безопаснее (консервативно).
+- **Re-entry с существующим планом:** fast-track покрывает только spec-фазу.
+  Если план уже написан и закоммичен (шаг 12), повторный запуск `@maestro`
+  не пере-планирует — это вне scope данного плана.
 - **Реализация (#3, #4, #5, #6, #7 из фидбека)** — отдельный план
-  (`process-improvements-plan.md`), не смешивать.
+  (`process-improvements-plan.md`), не смешивать. Из #5 (plan ссылается на
+  секции spec) конфликта нет: `maestro:*` блоки — HTML-комментарии, на
+  структуру spec и нумерацию секций не влияют.
 
 ## Верификация
 
@@ -165,8 +189,9 @@ implementer-промпты санируются на Точке 2), внешни
   предлагается (d); при (d): валидная review-подпись → шаги 9/10 пропущены без
   вопроса; без подписи → вариант B (a)/(b); шаг 8 пропущен, 8.5 → 8.6 (если нет
   валидной sanitize-подписи) → 11 → 12.
-- Штампы: после 8.6 в spec файле есть `## maestro:sanitize` (status + hash);
-  после 10-Approve — `## maestro:review`; оба попадают в design-коммит (шаг 12).
+- Штампы: после 8.6 в spec файле есть `<!-- maestro:sanitize -->`
+  (status + hash); после 10-Approve — `<!-- maestro:review -->`;
+  оба попадают в design-коммит (шаг 12).
 - Revise: после правки spec подписи stale → 8.6 и 9 перезапущены.
 - Согласованность: SKILL.md ↔ hitl-gates.md ↔ pipeline-overview ↔ tutorials.
 - Тесты плагина не затронуты (63/63).
