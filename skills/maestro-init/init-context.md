@@ -164,3 +164,5 @@ BUILD_COMMAND: "go build ./..."
 - Доступные модели — из `provider.<name>.models` по всем уровням конфигурации
   (D2), см. `skills/maestro-init/SKILL.md`.
 - HITL per агент, плейсхолдеры запрещены.
+- `temperature` — дефолт по tier (см. таблицу в M1), не перезаписывать
+  существующее значение; записывать вместе с `model` (не при `auto`).

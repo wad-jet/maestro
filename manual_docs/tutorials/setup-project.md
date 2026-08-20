@@ -168,8 +168,12 @@ roadmap, как в Варианте A.
 | `opus` | opus | `akash/zai-org/GLM-5.2` | 0.1 |
 | `code-reviewer` | opus | `akash/deepseek-ai/DeepSeek-V4-Flash-0731` | 0.2 |
 | `fable` | fable | `akash/deepseek-ai/DeepSeek-V4-Flash` | 0.7 |
-| `design` | opus | (модель opus-tier) | — |
-| `sanitizer` | своя | (безопасная/дефолтная) | — |
+| `design` | opus | (модель opus-tier) | 0.1 |
+| `sanitizer` | своя | (безопасная/дефолтная) | 0.0 |
+
+`temperature` — **дефолт по tier**: `/maestro-init` проставляет его, если у агента
+нет собственного значения в `opencode.json` (существующее не перезаписывает).
+Полная таблица дефолтов — в [Выбор моделей](../reference/model-selection.md).
 
 > Модели — **preference пользователя**. `/maestro-init` лишь предлагает кандидатов
 > из доступных (D2) и tier-класса; конкретный выбор — за пользователем.

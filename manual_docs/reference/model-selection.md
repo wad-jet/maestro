@@ -83,6 +83,20 @@ tier-подсказка.
 конфигурации** (global → project → `.opencode`), с merge-приоритетом
 `.opencode` > project > global.
 
+**Temperature** задаётся дефолтом по tier (если у агента нет своего значения),
+существующее значение не перезаписывается; записывается вместе с `model`
+(не при `auto`):
+
+| Агент | Tier | temperature (дефолт) |
+|---|---|---|
+| `haiku` | haiku | 0.0 |
+| `sonnet` | sonnet | 0.1 |
+| `opus` | opus | 0.1 |
+| `code-reviewer` | opus | 0.2 |
+| `fable` | fable | 0.7 |
+| `design` | opus | 0.1 |
+| `sanitizer` | своя | 0.0 |
+
 > Подробная пошаговая настройка проекта и моделей — в
 > [Настройке проекта для maestro](../tutorials/setup-project.md).
 

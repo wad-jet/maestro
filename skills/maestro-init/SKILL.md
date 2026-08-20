@@ -172,6 +172,23 @@ pipeline maestro: есть `docs/project-context.md` (источник конт�
    «свой вариант» (ручной ввод ID модели).
 4. Записать `agent.<name>.model` только для выбранных; при `auto` — **не писать**.
 
+**Temperature задаётся дефолтом по tier** (если у агента ещё нет значения в
+`opencode.json`), пользователь может поправить:
+
+| Агент | Tier | temperature (дефолт) |
+|---|---|---|
+| `haiku` | haiku | 0.0 |
+| `sonnet` | sonnet | 0.1 |
+| `opus` | opus | 0.1 |
+| `code-reviewer` | opus | 0.2 |
+| `fable` | fable | 0.7 |
+| `design` | opus | 0.1 |
+| `sanitizer` | своя | 0.0 |
+
+- Если `agent.<name>.temperature` уже задан — **не перезаписывать** (сохранить
+  пользовательское значение).
+- Записывать `agent.<name>.temperature` только вместе с `model` (не при `auto`).
+
 **D2 — определение доступных моделей.** Список кандидатов для tier-подсказок
 берётся из `provider.<name>.models` **по всем уровням конфигурации** (merge):
 global (`~/.config/opencode/opencode.json`) → project (`opencode.json`) →
