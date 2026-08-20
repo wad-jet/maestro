@@ -80,6 +80,8 @@ dependencies:
       path: skills/maestro-design
     - url: https://github.com/wad-jet/maestro
       path: skills/manual-docs
+    - url: https://github.com/obra/superpowers
+      path: skills
   commands:
     - url: https://github.com/wad-jet/maestro
       path: commands
