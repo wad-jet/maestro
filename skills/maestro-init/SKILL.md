@@ -172,7 +172,7 @@ global (`~/.config/opencode/opencode.json`) → project (`opencode.json`) →
 ```
 .maestro/sdd/
 .maestro/last-run.md
-.maestro/maestro-bootstrap-*.log
+.maestro/logs/
 .maestro/feedback-reports/
 ```
 **НЕ** использовать `.maestro/` (весь каталог) — эфемерные файлы игнорируются

@@ -131,7 +131,7 @@ merge сохраняет пользовательские правки. Если
   ```
   .maestro/sdd/
   .maestro/last-run.md
-  .maestro/maestro-bootstrap-*.log
+.maestro/logs/
   ```
 - **НЕ** использовать `.maestro/` (весь каталог) — эфемерные файлы игнорируются
   точечно; конфиги теперь в `maestro.json` (корень). Соответствует

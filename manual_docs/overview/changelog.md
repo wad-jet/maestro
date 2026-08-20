@@ -21,7 +21,8 @@
   ортогональны; `design` и `sanitizer` — trusted, но разные модели. Доступные
   модели — D2 (из `provider.models` по всем уровням конфигурации).
 - **Fix `.gitignore` (C2/M3)**: конкретные пути (`.maestro/sdd/`,
-  `.maestro/last-run.md`, `.maestro/maestro-bootstrap-*.log`) вместо всего
+  `.maestro/last-run.md`, `.maestro/logs/`) вместо всего `.maestro/`;
+  конкретизация gitignore-указаний в `.maestro/logs` из `.maestro/`
   `.maestro/` — в `AGENTS.md` и `plugins/maestro-bootstrap/README.md`.
 - **Утечка данных (security-хардненинг)**: sanitizer маскирует однословные
   секрет-keyword (`TOKEN=`/`KEY=`/`SECRET=`/`AUTH=`/`CREDENTIAL=`), colon/JSON-

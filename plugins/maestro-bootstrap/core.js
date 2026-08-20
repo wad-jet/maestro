@@ -11,7 +11,7 @@
  *  - Санитайзинг промптов `task` (Уровень 1 Security Review, Этап 2):
  *    маскирование чувствительных данных по правилам Context Sanitizer.
  *
- * Логирование: JSONL to `<project>/.maestro/maestro-bootstrap-<date>.log`
+ * Логирование: JSONL to `<project>/.maestro/logs/maestro-bootstrap-<date>.log`
  * (gitignored), one file per day. Levels: debug / info / warn / error.
  * Config via env:
  *   MAESTRO_BOOTSTRAP_LOG_LEVEL  (default: info)
@@ -495,7 +495,8 @@ export function filePathOf(tool, args) {
 
 export function makeLogger(directory) {
   const logDir =
-    process.env.MAESTRO_BOOTSTRAP_LOG_DIR || path.join(directory, ".maestro");
+    process.env.MAESTRO_BOOTSTRAP_LOG_DIR ||
+    path.join(directory, ".maestro/logs");
   const levelEnv = process.env.MAESTRO_BOOTSTRAP_LOG_LEVEL || "info";
   const threshold = LOG_LEVELS[levelEnv] ?? 10;
   // Явная маска — список уровней через запятую. Если не задана, выводится из

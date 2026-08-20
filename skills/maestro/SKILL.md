@@ -1012,7 +1012,7 @@ Trust-уровень определяется по `maestro.json` (см. Trust M
 3. Оригинальный контекст оркестратора **не изменяется** — санитайзер
    создаёт копию промпта для untrusted сабагента
 4. Аудит-лог: плагин пишет события sanitizer в общий лог
-   `.maestro/maestro-bootstrap-<date>.log` с маркерами `sanitizer.redacted`
+   `.maestro/logs/maestro-bootstrap-<date>.log` с маркерами `sanitizer.redacted`
    (что замаскировано, без содержимого) и `access_policy.blocked` (файл-доступ):
    - timestamp
    - сабагент / sessionID
@@ -1278,7 +1278,7 @@ $REGISTRY_DIR = $(git rev-parse --show-toplevel)/regression
 ```
 
 - Реестр закоммичен в git (корень репо). Per-worktree остаются `.maestro/sdd/`,
-  `.maestro/maestro-bootstrap-*.log`, `.maestro/last-run.md` (в `.gitignore`)
+   `.maestro/logs/`, `.maestro/last-run.md` (в `.gitignore`)
 - `1 файл = 1 фича` — sharded append-only: конфликт параллельных pipeline
   невозможен по построению, flock не нужен
 - Параллельные worktree: каждая фича коммитит свой entry в свою ветку;

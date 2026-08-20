@@ -18,7 +18,7 @@ This is the **authoring repo** for the OpenCode `maestro` system (the "maestro" 
 
 - **This IS a git repo** (authoring). `opencode.json`, `docs/project-context.md`, `regression/`, `.opencode/` belong to the target application repo, not this one. Don't run the maestro pipeline steps (`/maestro-init`, `/maestro-design`, `@maestro`) here — they target the app repo. **Exception:** `manual_docs/` *does* live here — it documents the maestro skill itself (user-facing docs for developers of the target app); the target app has its own `manual_docs/` for its own product.
 - **`opencode.json` doesn't exist here.** The plugin README says it is registered there; that registration lives in the application repo's `opencode.json`.
-- **Agent was renamed `feature-agent` → `maestro` (2026-08-03).** The application repo must be updated in lockstep: `opencode.json` keys `agent.feature-agent` → `agent.maestro` and plugin path `plugins/feature-agent-bootstrap/index.js` → `plugins/maestro-bootstrap/index.js`, `.opencode/` mirrors (`agents/maestro.md`, `skills/maestro/`), and `.gitignore` entry `.feature-agent/` → **specific paths** (`.maestro/sdd/`, `.maestro/last-run.md`, `.maestro/maestro-bootstrap-*.log` — НЕ весь `.maestro/`, см. `skills/maestro/SKILL.md`).
+- **Agent was renamed `feature-agent` → `maestro` (2026-08-03).** The application repo must be updated in lockstep: `opencode.json` keys `agent.feature-agent` → `agent.maestro` and plugin path `plugins/feature-agent-bootstrap/index.js` → `plugins/maestro-bootstrap/index.js`, `.opencode/` mirrors (`agents/maestro.md`, `skills/maestro/`), and `.gitignore` entry `.feature-agent/` → **specific paths** (`.maestro/sdd/`, `.maestro/last-run.md`, `.maestro/logs/maestro-bootstrap-*.log` — НЕ весь `.maestro/`, см. `skills/maestro/SKILL.md`).
 - **Russian is the working language.** All HITL gates, user messages, agent descriptions, and docs are in Russian. Match it in new content.
 
 ## Скиллы / Skills (sync rule)
@@ -42,5 +42,5 @@ node --test plugins/maestro-bootstrap/index.test.js
 ```
 
 - Global observability (not bound to any agent): logs key events for all sessions — `session.error`, `task` dispatch (`tool.execute.before`/`tool.execute.after`, sanitized title), empty subagent result, access-policy blocks. Sanitizes `task` prompts (Level 1 Security Review) before untrusted subagents. The old bootstrap-directive injection via `experimental.chat.messages.transform` was removed — `transform` must stay `undefined`.
-- Logs JSONL to `.maestro/maestro-bootstrap-<date>.log` (one file per day). Env: `MAESTRO_BOOTSTRAP_LOG_LEVEL` (default `info`), `MAESTRO_BOOTSTRAP_LOG_DIR` (default `<project>/.maestro`).
+- Logs JSONL to `.maestro/logs/maestro-bootstrap-<date>.log` (one file per day). Env: `MAESTRO_BOOTSTRAP_LOG_LEVEL` (default `info`), `MAESTRO_BOOTSTRAP_LOG_DIR` (default `<project>/.maestro/logs`).
 - All hooks are `try/catch`-guarded and global (not scoped to `maestro` sessions) — keep that invariant when modifying.

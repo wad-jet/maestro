@@ -264,7 +264,7 @@
   `maestro.json` содержимое и `MAESTRO_CONFIG` путь в лог не попадают. ✅
 - **`MAESTRO_BOOTSTRAP_LOG_LEVEL=debug`/широкий mask** не расширяют утечку (нет
   `log.debug`-вызовов с данными; mask гейтится порогом). ✅
-- `.maestro/maestro-bootstrap-*.log`, `sdd/`, `last-run.md` — в specific-paths
+- `.maestro/logs/maestro-bootstrap-*.log`, `sdd/`, `last-run.md` — в specific-paths
   `.gitignore`. ✅ (но `feedback-reports/` — НЕ покрыт, см. SEC-3/M10.)
 
 ---

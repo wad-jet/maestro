@@ -101,7 +101,7 @@ Whitelist — секция `sanitizer_whitelist` в `maestro.json` (см. ниж
 
 ## Аудит-лог
 
-События sanitizer пишутся в `.maestro/maestro-bootstrap-<date>.log` с маркерами
+События sanitizer пишутся в `.maestro/logs/maestro-bootstrap-<date>.log` с маркерами
 `sanitizer.redacted` (что замаскировано, без содержимого) и `access_policy.blocked`
 (файл-доступ), наряду с observability-событиями.
 
@@ -158,16 +158,15 @@ untrusted, access-policy не enforced, дефолтные sanitizer-прави�
 
 ## Логирование
 
-Плагин пишет JSONL-лог в `.maestro/` (каталог создаётся автоматически). В
+Плагин пишет JSONL-лог в `.maestro/logs/` (каталог создаётся автоматически). В
 `.gitignore` добавляются **конкретные пути**, а не весь `.maestro/`:
-`.maestro/sdd/`, `.maestro/last-run.md`, `.maestro/maestro-bootstrap-*.log`,
+`.maestro/sdd/`, `.maestro/last-run.md`, `.maestro/logs/`,
 `.maestro/feedback-reports/`.
-Логи **разбиваются по дням** — один файл на дату, что упрощает
-будущую ротацию:
+Логи **разбиваются по дням** — один файл на дату:
 
 ```
-.maestro/maestro-bootstrap-2026-08-01.log
-.maestro/maestro-bootstrap-2026-08-02.log
+.maestro/logs/maestro-bootstrap-2026-08-01.log
+.maestro/logs/maestro-bootstrap-2026-08-02.log
 ```
 
 Формат строки:
@@ -195,7 +194,7 @@ untrusted, access-policy не enforced, дефолтные sanitizer-прави�
 |---|---|---|
 | `MAESTRO_BOOTSTRAP_LOG_LEVEL` | `debug` \| `info` \| `warn` \| `error` | `info` |
 | `MAESTRO_BOOTSTRAP_LOG_MASK` | список включённых уровней через запятую | выводится из `LOG_LEVEL` |
-| `MAESTRO_BOOTSTRAP_LOG_DIR` | каталог для лог-файлов | `<project>/.maestro` |
+| `MAESTRO_BOOTSTRAP_LOG_DIR` | каталог для лог-файлов (по умолчанию `<project>/.maestro/logs`) | `<project>/.maestro/logs` |
 | `MAESTRO_CONFIG` | путь к maestro.json (консолидированный конфиг) | `<project>/maestro.json` |
 
 `MAESTRO_BOOTSTRAP_LOG_LEVEL` — порог детализации (пишутся уровни `>=`
@@ -218,7 +217,7 @@ untrusted, access-policy не enforced, дефолтные sanitizer-прави�
 Пример чтения свежего лога:
 
 ```bash
-tail -f .maestro/maestro-bootstrap-$(date +%F).log | jq -r '.ts + " " + .level + " " + .msg'
+tail -f .maestro/logs/maestro-bootstrap-$(date +%F).log | jq -r ...'
 ```
 
 ## Тесты

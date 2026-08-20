@@ -6,7 +6,7 @@ import path from "node:path";
 import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled } from "./core.js";
 
 function readLogs(dir) {
-  const logDir = path.join(dir, ".maestro");
+  const logDir = path.join(dir, ".maestro/logs");
   const files = fs.existsSync(logDir) ? fs.readdirSync(logDir) : [];
   const out = [];
   for (const f of files) {

@@ -127,7 +127,7 @@ bash/glob/grep — нативные permissions. Файл `maestro.json` (сек
 конфиги (кроме `.env`), имена таблиц/колонок.
 
 **Аудит-лог:** плагин пишет события sanitizer в
-`.maestro/maestro-bootstrap-<date>.log` с маркерами `sanitizer.redacted`
+`.maestro/logs/maestro-bootstrap-<date>.log` с маркерами `sanitizer.redacted`
 (что замаскировано, без содержимого) и `access_policy.blocked` (файл-доступ).
 
 ## 🔗 Связанные разделы
