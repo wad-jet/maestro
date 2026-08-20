@@ -58,16 +58,20 @@ Setup-фаза bootstrap нового проекта: `docs/project-context.md` 
 отчёта — HITL-гейт: пользователь может оставить комментарии/рекомендации, которые
 записываются в секцию `## Пользовательский фидбек` отчёта. Автокоммит не требуется.
 
-### `/test-<agent>`
+### `/test-agents`
 
-Проверка доступности субагента и его конфига в `opencode.json`
-(`agent.<name>.model`). Доступны: `/test-design`, `/test-haiku`, `/test-sonnet`,
-`/test-opus`, `/test-fable`, `/test-code-reviewer`, `/test-sanitizer`.
+Проверка всех сабагентов maestro одним прогоном: доступность и конфиг в
+`opencode.json` (`agent.<name>.model`, `temperature`) для всех 7 агентов
+(`design`, `haiku`, `sonnet`, `opus`, `fable`, `code-reviewer`, `sanitizer`),
+плюс trusted-статус в `maestro.json` для `design` и `sanitizer`. Возвращает
+сводную таблицу.
 
 ## 💡 Примечания
 
 - Все HITL-вопросы и сообщения пользователю — только на русском.
-- Поле `agent:` в команде указывает, какой агент её исполняет.
+- Команды, привязанные к конкретному агенту, указывают его в поле `agent:`
+  (например `/maestro-design` → `design`). `/test-agents` — общая команда,
+  привязки к агенту нет.
 
 ## 🔗 Связанные разделы
 

@@ -16,7 +16,7 @@
 | **Команда `/maestro`** | Точка входа — загружает скилл и стартует pipeline |
 | **Субагенты** | `design`, `haiku`, `sonnet`, `opus`, `fable`, `code-reviewer`, `sanitizer` |
 | **Плагин** | `maestro-bootstrap` — санитайзинг промптов, file access control, audit-логи |
-| **Команды** | `/maestro`, `/maestro-init`, `/maestro-design`, `/regression`, `/test-*` |
+| **Команды** | `/maestro`, `/maestro-init`, `/maestro-design`, `/regression`, `/test-agents` |
 
 ## Maestro vs superpowers напрямую
 
@@ -188,7 +188,7 @@ opencode plugin maestro-bootstrap
 
 ```
 agents/          — конфиги субагентов (design, haiku, sonnet, opus, fable, code-reviewer, sanitizer)
-commands/        — @command конфиги (/maestro, /maestro-init, /regression, /test-*)
+commands/        — @command конфиги (/maestro, /maestro-init, /regression, /test-agents)
 plugins/         — maestro-bootstrap (ESM-плагин: sanitize, access_policy, observability)
 skills/          — скиллы (maestro, maestro-init, maestro-design, manual-docs)
 specs/           — дизайн-спеки и план-ы этого репо (never in root!)
