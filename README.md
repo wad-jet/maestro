@@ -50,7 +50,61 @@
 
 ### 1. Настройте проект
 
-Скопируйте `.opencode/`, `skills/`, `commands/` и плагин в **целевой проект**. Затем:
+Установить `maestro` в целевой проект можно двумя способами: через **agpack**
+(рекомендуется) или **вручную**.
+
+#### Вариант A — через [agpack](https://github.com/PhilippTh/agpack)
+
+`agpack` — пакетный менеджер для AI-кодинг-тулов: объявил зависимости в
+`agpack.yml`, запустил `agpack sync` — и скилы/команды/агенты разворачиваются
+сами в `.opencode/` целевого проекта.
+
+```bash
+pipx install agpack            # или: uv tool install agpack
+agpack init                    # создаёт agpack.yml
+```
+
+Минимальный `agpack.yml` для `maestro` (замените `<owner>` на владельца этого репо):
+
+```yaml
+targets:
+  - opencode
+
+dependencies:
+  skills:
+    - url: https://github.com/<owner>/maestro-agent
+      path: skills/maestro
+    - url: https://github.com/<owner>/maestro-agent
+      path: skills/maestro-init
+    - url: https://github.com/<owner>/maestro-agent
+      path: skills/maestro-design
+    - url: https://github.com/<owner>/maestro-agent
+      path: skills/manual-docs
+  commands:
+    - url: https://github.com/<owner>/maestro-agent
+      path: commands
+  agents:
+    - url: https://github.com/<owner>/maestro-agent
+      path: agents
+```
+
+Затем:
+
+```bash
+agpack sync                    # разворачивает skills/commands/agents в .opencode/
+```
+
+> **Примечание:** плагин `maestro-bootstrap` (санitize, file access control) и
+> конфиги (`maestro.json`, `opencode.json`, `.gitignore`, `regression/`) agpack
+> не покрывает — их создаёт `/maestro-init`.
+
+#### Вариант B — вручную
+
+Скопируйте `.opencode/`, `skills/`, `commands/` и плагин в **целевой проект**.
+
+> В обоих вариантах подробности — [Настройка проекта](manual_docs/tutorials/setup-project.md).
+
+Затем:
 
 | Шаг | Что сделать |
 |---|---|
@@ -61,8 +115,6 @@
 
 - **Новый проект:** `/maestro-init` → `/maestro-design` → `/maestro`
 - **Существующий:** `/maestro-init` сам детектирует context и merge-ит конфиги
-
-Или собрать вручную — см. [Настройка проекта](manual_docs/tutorials/setup-project.md) за подробностями.
 
 ### 2. Запустите pipeline
 
