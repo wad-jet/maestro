@@ -16,7 +16,7 @@ description: Проверить все сабагенты maestro — досту
 
 | Агент | model | temperature | trusted |
 |---|---|---|---|
-| design | <значение agent.design.model> | <значение agent.design.temperature> | <true | false | MISSING> |
+| design | <модель> | <temp> | <true | false | MISSING> |
 | haiku | ... | ... | — |
 | sonnet | ... | ... | — |
 | opus | ... | ... | — |
@@ -24,6 +24,12 @@ description: Проверить все сабагенты maestro — досту
 | code-reviewer | ... | ... | — |
 | sanitizer | ... | ... | <true | false | MISSING> |
 
-- `trusted` заполняется только для `design` и `sanitizer`; для остальных — «—».
-- `MISSING` — если агент не указан в секции `trust` maestro.json (design/sanitizer)
-  или отсутствует ключ `agent.<name>` в opencode.json.
+Правила заполнения:
+
+- Значения `model` и `temperature` берутся из `agent.<name>.model` и
+  `agent.<name>.temperature` в `opencode.json`. Если ключа нет (например,
+  агент выбран на `auto` и ключ не пишется) — ставь **`MISSING`**, а не пусто.
+- `trusted` заполняется только для `design` и `sanitizer` (из `maestro.json →
+  trust`); для остальных агентов — «—».
+- `MISSING` для `trusted` — если агент не указан в секции `trust` maestro.json
+  (design/sanitizer).
