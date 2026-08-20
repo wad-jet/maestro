@@ -158,6 +158,8 @@ opencode plugin maestro-bootstrap
 | `/maestro-init` | Новый и существующий | Создаёт `project-context.md`, `maestro.json`, `.gitignore`, каталоги `.maestro/`, `regression/`; для существующего — детектит context и merge-ит конфиги |
 | `/maestro-design` | Новый (опционально) | Дизайн + spec + scaffold + roadmap |
 
+На этапе `/maestro-init` также настраиваются **модели агентов** (M1 — 7 HITL-вопросов, по одному на агента) и записываются в `opencode.json`. Trusted по роли: `design` + `sanitizer` — подготовкой/изучением проекта занимаются именно они.
+
 - **Новый проект:** `/maestro-init` → `/maestro-design` → `/maestro`
 - **Существующий:** `/maestro-init` → `/maestro`
 
