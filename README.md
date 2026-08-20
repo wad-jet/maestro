@@ -128,7 +128,7 @@ agpack sync                    # разворачивает skills/commands/agen
 
 ### 2. Подключите плагин
 
-Плагин `maestro-bootstrap` (санitize, file access control, audit-логи)
+Плагин `maestro-bootstrap` (санитайзинг промптов, file access control, audit-логи)
 подключается **до** запуска пайплайна. Он опубликован в npm.
 
 #### Из npm (рекомендуется)
