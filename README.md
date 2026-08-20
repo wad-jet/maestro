@@ -64,7 +64,7 @@ pipx install agpack            # или: uv tool install agpack
 agpack init                    # создаёт agpack.yml
 ```
 
-Минимальный `agpack.yml` для `maestro` (замените `<owner>` на владельца этого репо):
+Минимальный `agpack.yml` для `maestro`:
 
 ```yaml
 targets:
@@ -72,19 +72,19 @@ targets:
 
 dependencies:
   skills:
-    - url: https://github.com/<owner>/maestro-agent
+    - url: https://github.com/wad-jet/maestro
       path: skills/maestro
-    - url: https://github.com/<owner>/maestro-agent
+    - url: https://github.com/wad-jet/maestro
       path: skills/maestro-init
-    - url: https://github.com/<owner>/maestro-agent
+    - url: https://github.com/wad-jet/maestro
       path: skills/maestro-design
-    - url: https://github.com/<owner>/maestro-agent
+    - url: https://github.com/wad-jet/maestro
       path: skills/manual-docs
   commands:
-    - url: https://github.com/<owner>/maestro-agent
+    - url: https://github.com/wad-jet/maestro
       path: commands
   agents:
-    - url: https://github.com/<owner>/maestro-agent
+    - url: https://github.com/wad-jet/maestro
       path: agents
 ```
 
