@@ -1,35 +1,37 @@
 ---
-description: Проверить все сабагенты maestro — доступность, agent.<name> из opencode.json, trusted-статус design/sanitizer в maestro.json
+description: Проверить всех сабагентов maestro реальным диспатчем — каждой модели даётся тестовая задача
 ---
-Проверь все 7 сабагентов maestro: `design`, `haiku`, `sonnet`, `opus`, `fable`,
-`code-reviewer`, `sanitizer`.
+Проверь все 7 сабагентов maestro **реальным диспатчем**: `design`, `haiku`,
+`sonnet`, `opus`, `fable`, `code-reviewer`, `sanitizer`.
 
 Для каждого агента:
 
-1. Прочитай opencode.json в корне проекта. Найди ключ `agent.<name>`.
+1. Диспатчь сабагент через `task` tool с `subagent_type="<name>"`.
+2. Дай одинаковую тривиальную тестовую задачу:
 
-2. Для `design` и `sanitizer` дополнительно прочитай maestro.json в корне
-   проекта. Проверь, что агент отмечен как trusted (в секции `trust` ключ со
-   значением `true`).
+   «Верни ровно одно слово OK и своё имя агента. Не используй инструменты.»
 
-Верни ТОЛЬКО сводную таблицу для всех 7 агентов:
+3. Зафиксируй результат.
 
-| Агент | model | temperature | trusted |
-|---|---|---|---|
-| design | <модель> | <temp> | <true | false | MISSING> |
-| haiku | ... | ... | — |
-| sonnet | ... | ... | — |
-| opus | ... | ... | — |
-| fable | ... | ... | — |
-| code-reviewer | ... | ... | — |
-| sanitizer | ... | ... | <true | false | MISSING> |
+Не читай конфиги (`opencode.json`, `maestro.json`) и не сверяйся с ними —
+проверяется только реальная работа модели через диспатч.
+
+Верни ТОЛЬКО сводную таблицу статусов:
+
+| Агент | Статус | Причина |
+|---|---|---|
+| design | OK / FAIL | <—> |
+| haiku | OK / FAIL | <—> |
+| sonnet | OK / FAIL | <—> |
+| opus | OK / FAIL | <—> |
+| fable | OK / FAIL | <—> |
+| code-reviewer | OK / FAIL | <—> |
+| sanitizer | OK / FAIL | <—> |
 
 Правила заполнения:
 
-- Значения `model` и `temperature` берутся из `agent.<name>.model` и
-  `agent.<name>.temperature` в `opencode.json`. Если ключа нет (например,
-  агент выбран на `auto` и ключ не пишется) — ставь **`MISSING`**, а не пусто.
-- `trusted` заполняется только для `design` и `sanitizer` (из `maestro.json →
-  trust`); для остальных агентов — «—».
-- `MISSING` для `trusted` — если агент не указан в секции `trust` maestro.json
-  (design/sanitizer).
+- **OK** — диспатч успешен, сабагент вернул ответ.
+- **FAIL** — диспатч упал (недоступна/невалидная модель, ошибка провайдера,
+  таймаут). В колонке «Причина» укажи текст ошибки диспатча.
+- Если диспатч не удалось выполнить ни для одного агента — верни только
+  таблицу с FAIL и причиной для каждого.

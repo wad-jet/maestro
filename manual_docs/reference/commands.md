@@ -60,11 +60,12 @@ Setup-фаза bootstrap нового проекта: `docs/project-context.md` 
 
 ### `/test-agents`
 
-Проверка всех сабагентов maestro одним прогоном: доступность и конфиг в
-`opencode.json` (`agent.<name>.model`, `temperature`) для всех 7 агентов
-(`design`, `haiku`, `sonnet`, `opus`, `fable`, `code-reviewer`, `sanitizer`),
-плюс trusted-статус в `maestro.json` для `design` и `sanitizer`. Возвращает
-сводную таблицу.
+Проверка всех сабагентов maestro **реальным диспатчем**: каждой из 7 моделей
+(`design`, `haiku`, `sonnet`, `opus`, `fable`, `code-reviewer`, `sanitizer`)
+даётся одинаковая тривиальная тестовая задача через `task` tool. Возвращает
+сводную таблицу статусов (OK/FAIL с причиной). Конфиги не читаются — проверяется
+реальная работа модели: невалидное имя модели или недоступный провайдер
+проявятся как FAIL при диспатче.
 
 ## 💡 Примечания
 
