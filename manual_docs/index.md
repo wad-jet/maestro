@@ -5,10 +5,6 @@
 SDD → review → docs, с HITL-гейтами). Вход — команда `/maestro` в любой
 primary-сессии.
 
-> **Источник контента:** спецификация pipeline — `skills/maestro/SKILL.md`.
-> При изменении скилла обновляйте эту документацию (см.
-> [Как поддерживать доку в актуальном состоянии](how-to/keep-docs-up-to-date.md)).
-
 ## Быстрый старт
 
 Новичку начните с [Что такое maestro](overview/what-is-maestro.md) и
@@ -43,10 +39,9 @@ primary-сессии.
 
 ## Explanation (пояснения)
 
-- [Устройство pipeline](explanation/pipeline-overview.md) — почему так устроен
+- [Всё: pipeline — Feature и Bugfix](explanation/pipeline-overview.md) — полный flow: Feature 0→18 и Bugfix D1→D7
 - [Агенты и модель доверия](explanation/agents-and-trust.md) — trust, sanitizer, роли
 - [Project Context (14 категорий)](explanation/project-context.md) — формат `docs/project-context.md`
-- [Всё: pipeline — Feature и Bugfix](explanation/pipeline-overview.md) — полный flow: Feature 0→18 и Bugfix D1→D7
 
 ## Примеры
 
