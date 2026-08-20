@@ -104,9 +104,9 @@ dependencies:
 agpack sync                    # разворачивает skills/commands/agents в .opencode/
 ```
 
-> **Примечание:** плагин `maestro-bootstrap` (санitize, file access control) и
-> конфиги (`maestro.json`, `opencode.json`, `.gitignore`, `regression/`) agpack
-> не покрывает — их создаёт `/maestro-init`.
+> **Примечание:** agpack не покрывает плагин `maestro-bootstrap` (он ставится
+> из npm — см. шаг [2. Подключите плагин](#2-подключите-плагин)) и конфиги
+> (`maestro.json`, `opencode.json`, `.gitignore`, `regression/`) — их создаёт `/maestro-init`.
 
 #### Вариант B — вручную
 
@@ -126,7 +126,42 @@ agpack sync                    # разворачивает skills/commands/agen
 - **Новый проект:** `/maestro-init` → `/maestro-design` → `/maestro`
 - **Существующий:** `/maestro-init` сам детектирует context и merge-ит конфиги
 
-### 2. Запустите pipeline
+### 2. Подключите плагин
+
+Плагин `maestro-bootstrap` (санitize, file access control, audit-логи)
+подключается **до** запуска пайплайна. Он опубликован в npm.
+
+#### Из npm (рекомендуется)
+
+```jsonc
+// .opencode/opencode.json или opencode.json
+{
+  "plugin": [
+    "maestro-bootstrap"
+  ]
+}
+```
+
+или через CLI:
+
+```bash
+opencode plugin maestro-bootstrap
+```
+
+#### Локально (из исходников)
+
+```jsonc
+// .opencode/opencode.json или opencode.json
+{
+  "plugin": [
+    "./plugins/maestro-bootstrap/index.js"
+  ]
+}
+```
+
+Перезапустите OpenCode — плагин создаст `.maestro/` с JSONL-логами.
+
+### 3. Запустите pipeline
 
 В любой сессии OpenCode:
 
@@ -140,21 +175,6 @@ agpack sync                    # разворачивает skills/commands/agen
 
 Для небольших задач на 1-2 файла spec можно пропустить: категория **простая**
 → маршрут `0→6→7(b)→11→13→16→18`.
-
-## Подключение плагина
-
-В `opencode.json` целевого проекта:
-
-```jsonc
-// .opencode/opencode.json или opencode.json
-{
-  "plugin": [
-    "./plugins/maestro-bootstrap/index.js"
-  ]
-}
-```
-
-Перезапустите OpenCode. Плагин создаст `.maestro/` с JSONL-логами.
 
 ## Docs
 
