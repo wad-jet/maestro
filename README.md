@@ -114,18 +114,6 @@ agpack sync                    # разворачивает skills/commands/agen
 
 > В обоих вариантах подробности — [Настройка проекта](manual_docs/tutorials/setup-project.md).
 
-Затем:
-
-| Шаг | Что сделать |
-|---|---|
-| `/maestro-init` | Создаёт `project-context.md`, `maestro.json`, `.gitignore`, каталоги `.maestro/`, `regression/` |
-| `/maestro-design` | Дизайн + spec + scaffold + roadmap (для новых проектов) |
-
-**Варианты:**
-
-- **Новый проект:** `/maestro-init` → `/maestro-design` → `/maestro`
-- **Существующий:** `/maestro-init` сам детектирует context и merge-ит конфиги
-
 ### 2. Подключите плагин
 
 Плагин `maestro-bootstrap` (санитайзинг промптов, file access control, audit-логи)
@@ -161,7 +149,21 @@ opencode plugin maestro-bootstrap
 
 Перезапустите OpenCode — плагин создаст `.maestro/` с JSONL-логами.
 
-### 3. Запустите pipeline
+### 3. Инициализируйте проект
+
+В целевой сессии OpenCode:
+
+| Команда | Для кого | Что делает |
+|---|---|---|
+| `/maestro-init` | Новый и существующий | Создаёт `project-context.md`, `maestro.json`, `.gitignore`, каталоги `.maestro/`, `regression/`; для существующего — детектит context и merge-ит конфиги |
+| `/maestro-design` | Новый (опционально) | Дизайн + spec + scaffold + roadmap |
+
+- **Новый проект:** `/maestro-init` → `/maestro-design` → `/maestro`
+- **Существующий:** `/maestro-init` → `/maestro`
+
+Подробности — [Настройка проекта](manual_docs/tutorials/setup-project.md).
+
+### 4. Запустите pipeline
 
 В любой сессии OpenCode:
 
