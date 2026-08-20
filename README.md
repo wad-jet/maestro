@@ -18,6 +18,34 @@
 | **Плагин** | `maestro-bootstrap` — санитайзинг промптов, file access control, audit-логи |
 | **Команды** | `/maestro`, `/maestro-init`, `/maestro-design`, `/regression`, `/test-*` |
 
+## Maestro vs superpowers напрямую
+
+`maestro` — **оркестратор поверх скилов [superpowers](https://github.com/obra/superpowers)**: он связывает их в один
+конвейер с HITL-гейтами, не заменяя сами скилы. Выбор между `maestro` и
+использованием superpowers напрямую — это выбор между «всё включено» и «ручной
+сборкой».
+
+| Аспект | Maestro (`/maestro`) | Superpowers напрямую |
+|---|---|---|
+| **Scope** | Полный цикл фичи: design → spec → plan → SDD → review → docs | Отдельный этап (план, реализация, ревью и т.д.) |
+| **Оркестрация** | Автоматическая: orchestrator сам диспатчит субагентов по маршруту | Ручная: вы решаете, какой скил и когда вызвать |
+| **HITL-гейты** | Встроены на ключевых точках (категория, spec, plan, pre-PR) | Нет — каждый скил работает по своей схеме |
+| **Spec / Spec Review** | Автоматически для сложных/архитектурных фич | Вызываете вручную (`brainstorming`, `writing-plans`) |
+| **Безопасность** | Встроенный sanitizer + file access control | Нет (полагаетесь на permissions OpenCode) |
+| **Регрессия** | Реестр рисков + `/regression` | Нет |
+| **Когда использовать** | Сквозная фича/багфикс от начала до конца | Один конкретный шаг, ручной контроль каждого шага |
+
+**Пример superpowers напрямую** — реализовать план без остального pipeline:
+
+```
+/brainstorming  →  /writing-plans  →  subagent-driven-development  →  /requesting-code-review
+```
+
+Внутри `maestro` используются те же скилы: `writing-plans`,
+`subagent-driven-development`, `test-driven-development`, `using-git-worktrees`,
+`requesting-code-review`, `finishing-a-development-branch`, `systematic-debugging` —
+но оркестратор связывает их в один управляемый процесс.
+
 ## Быстрый старт
 
 ### 1. Настройте проект
