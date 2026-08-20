@@ -18,7 +18,7 @@
   (`skills/`, `agents/`, `commands/`, `plugins/`).
 - **Runtime** — OpenCode загружает копии из целевого репозитория в `.opencode/`
   (`agents/`, `skills/maestro/`, `commands/`).
-- **Точка входа** — команда `@maestro` в любой primary-сессии загружает скилл и
+- **Точка входа** — команда `/maestro` в любой primary-сессии загружает скилл и
   следует pipeline. Отдельного primary-агента `maestro` нет — только скилл и
   команда.
 - **Плагин** `maestro-bootstrap` — глобальная observability (логирование

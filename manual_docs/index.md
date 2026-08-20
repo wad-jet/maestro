@@ -2,7 +2,7 @@
 
 Документация по использованию скилла `maestro` — оркестратора сквозной
 реализации фич и багфиксов в целевом приложении (design → spec → plan →
-SDD → review → docs, с HITL-гейтами). Вход — команда `@maestro` в любой
+SDD → review → docs, с HITL-гейтами). Вход — команда `/maestro` в любой
 primary-сессии.
 
 > **Источник контента:** спецификация pipeline — `skills/maestro/SKILL.md`.
@@ -29,7 +29,7 @@ primary-сессии.
 ## How-to (инструкции)
 
 - [Запуск багфикса](how-to/run-a-bugfix.md) — debug sub-pipeline
-- [Работа с реестром регрессии](how-to/use-regression-registry.md) — `@regression`
+- [Работа с реестром регрессии](how-to/use-regression-registry.md) — `/regression`
 - [Кастомизация скилла](how-to/customize-maestro.md) — правка и синхронизация
 - [Поддержание документации в актуальном состоянии](how-to/keep-docs-up-to-date.md)
 

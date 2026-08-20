@@ -9,28 +9,28 @@
 
 ## 📖 Команды
 
-### `@maestro`
+### `/maestro`
 
 Вход в pipeline: загружает скилл `maestro` и следует pipeline из SKILL.md.
 Работает в любой primary-сессии (привязки к агенту нет).
 
-### `@regression`
+### `/regression`
 
 Регрессионный прогон по реестру рисков (`regression/`, в git). Standalone —
 **не** часть pipeline шага 15. Подробнее — [Работа с реестром регрессии](../how-to/use-regression-registry.md).
 
 ```
-@regression smoke                    # HIGH: active + verified, статусы не меняет
-@regression smoke active             # HIGH: только active
-@regression full                     # всё: active + verified
-@regression full active              # всё: только active
-@regression full --timeout 300       # глобальный timeout (дефолт 120с)
-@regression release                  # ВСЕ verified → released (строгий гейт)
-@regression purge [days=30]          # ротация архива (HITL)
-@regression purge preview            # предпросмотр удаляемого
+/regression smoke                    # HIGH: active + verified, статусы не меняет
+/regression smoke active             # HIGH: только active
+/regression full                     # всё: active + verified
+/regression full active              # всё: только active
+/regression full --timeout 300       # глобальный timeout (дефолт 120с)
+/regression release                  # ВСЕ verified → released (строгий гейт)
+/regression purge [days=30]          # ротация архива (HITL)
+/regression purge preview            # предпросмотр удаляемого
 ```
 
-### `@maestro-init`
+### `/maestro-init`
 
 Setup-фаза bootstrap нового проекта: `docs/project-context.md` (14 категорий),
 конфигурация maestro (`maestro.json`, `opencode.json` с плагином и моделями,
@@ -39,7 +39,7 @@ Setup-фаза bootstrap нового проекта: `docs/project-context.md` 
 Проверяет предусловия: `AGENTS.md` (встроенный `/init`), скилы superpowers
 (предлагает установку через HITL), плагин `maestro-bootstrap` (не блокер).
 
-### `@maestro-design`
+### `/maestro-design`
 
 Дизайн/архитектура, scaffold и roadmap после `/maestro-init`:
 - (a) spec через сабагент `design` (trusted) → `docs/superpowers/specs/YYYY-MM-DD-<project>-design.md`; опц. spec-review (`opus`).
@@ -47,7 +47,7 @@ Setup-фаза bootstrap нового проекта: `docs/project-context.md` 
 - (c) `docs/roadmap.md` (MVP + этапы).
 Модели агентов наследуются из `opencode.json` (не переспрашивает).
 
-### `@maestro-feedback-report`
+### `/maestro-feedback-report`
 
 Сбор фактуры по прошлым процессам maestro **в текущей сессии** для последующей
 ретроспективы (что было хорошо / плохо / с какими проблемами). Использует скилл
@@ -58,11 +58,11 @@ Setup-фаза bootstrap нового проекта: `docs/project-context.md` 
 отчёта — HITL-гейт: пользователь может оставить комментарии/рекомендации, которые
 записываются в секцию `## Пользовательский фидбек` отчёта. Автокоммит не требуется.
 
-### `@test-<agent>`
+### `/test-<agent>`
 
 Проверка доступности субагента и его конфига в `opencode.json`
-(`agent.<name>.model`). Доступны: `@test-design`, `@test-haiku`, `@test-sonnet`,
-`@test-opus`, `@test-fable`, `@test-code-reviewer`, `@test-sanitizer`.
+(`agent.<name>.model`). Доступны: `/test-design`, `/test-haiku`, `/test-sonnet`,
+`/test-opus`, `/test-fable`, `/test-code-reviewer`, `/test-sanitizer`.
 
 ## 💡 Примечания
 

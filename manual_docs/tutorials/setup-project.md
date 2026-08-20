@@ -8,7 +8,7 @@
 
 ## 🎯 Что вы изучите
 
-- Разницу между командами setup: `/maestro-init`, `/maestro-design` и `@maestro`.
+- Разницу между командами setup: `/maestro-init`, `/maestro-design` и `/maestro`.
 - Как подготовить контекст и конфигурацию проекта.
 - Как настроить модели агентов по тирам (и как их определяет `/maestro-init`).
 - Как перейти к работе над фичами.
@@ -19,9 +19,9 @@
 |---|---|---|
 | `/maestro-init` | Setup: `project-context.md` (14 категорий), конфигурация (`maestro.json`, `opencode.json`, `.gitignore`), каталоги, проверки | Первый шаг — настроить проект |
 | `/maestro-design` | Дизайн + spec, scaffold (каркас кода), roadmap | После init — спроектировать архитектуру |
-| `@maestro` | Оркестрация фич/багфиксов (design → spec → plan → SDD → review) | Когда проект готов |
+| `/maestro` | Оркестрация фич/багфиксов (design → spec → plan → SDD → review) | Когда проект готов |
 
-**Порядок:** `/maestro-init` → `/maestro-design` (для нового проекта) → `@maestro`.
+**Порядок:** `/maestro-init` → `/maestro-design` (для нового проекта) → `/maestro`.
 
 ---
 
@@ -59,9 +59,9 @@
   конфиги) через `implementer-prompt.md` (TDD) с диспатчем `haiku`/`sonnet`.
 - **(c) Roadmap** — создаст `docs/roadmap.md` (MVP + этапы развития).
 
-### Шаг 3: `@maestro`
+### Шаг 3: `/maestro`
 
-Теперь проект готов. Используйте `@maestro` для фич/багфиксов (см.
+Теперь проект готов. Используйте `/maestro` для фич/багфиксов (см.
 [Быстрый старт](../overview/quick-start.md) и
 [Запуск первой фичи](run-first-feature.md)).
 
@@ -101,9 +101,9 @@
 выполнялся — предложит выполнить его сначала. Затем — дизайн + spec + scaffold +
 roadmap, как в Варианте A.
 
-### Шаг 3: `@maestro`
+### Шаг 3: `/maestro`
 
-Проект готов. Используйте `@maestro`.
+Проект готов. Используйте `/maestro`.
 
 ---
 

@@ -6,7 +6,7 @@
 
 Реестр регрессии (`regression/`) фиксирует, какие модули под риском при
 изменении кодовой базы и какими сценариями это проверяется. Это cross-feature
-агрегация рисков — см. команду `@regression`.
+агрегация рисков — см. команду `/regression`.
 
 ## 📖 Структура реестра
 
@@ -33,21 +33,21 @@ $REGISTRY_DIR = $(git rev-parse --show-toplevel)/regression
 - Cross-layer (≥3) / Public API → MEDIUM
 - Ни один сигнал → entry не создаётся
 
-## 📖 Команды `@regression`
+## 📖 Команды `/regression`
 
 | Команда | Назначение |
 |---|---|
-| `@regression smoke` | Быстрый прогон (статусы не меняет) |
-| `@regression full` | Полный прогон — единственный авторитет для статуса `verified` |
-| `@regression release` | Перевод verified-фич в `released/` |
-| `@regression purge [days]` | Удаление старых `released/`-записей |
-| `@regression purge preview` | Предпросмотр того, что будет удалено |
+| `/regression smoke` | Быстрый прогон (статусы не меняет) |
+| `/regression full` | Полный прогон — единственный авторитет для статуса `verified` |
+| `/regression release` | Перевод verified-фич в `released/` |
+| `/regression purge [days]` | Удаление старых `released/`-записей |
+| `/regression purge preview` | Предпросмотр того, что будет удалено |
 
 **Жизненный цикл статусов:**
 ```
 active ── full, все pass ──→ verified   (остаётся в entries/)
 verified ── full, любой fail ──→ active  (демоция)
-verified ── @regression release ──→ released
+verified ── /regression release ──→ released
 ```
 
 ## 💡 Формат entry
@@ -67,7 +67,7 @@ verified ── @regression release ──→ released
 
 - `[Manual]` — ручная проверка, автоматически не выполняется.
 - Регрессия **не** запускается автоматически на шаге 15 — только standalone
-  по явному запросу `@regression`.
+  по явному запросу `/regression`.
 
 ## 🔗 Связанные разделы
 
