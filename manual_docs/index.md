@@ -46,18 +46,3 @@ primary-сессии.
 ## Примеры
 
 - [Сквозной пример фичи](examples/example-feature.md)
-
----
-
-## Связь источников
-
-```
-skills/maestro/SKILL.md  ──→  manual_docs/          (описывает pipeline)
-commands/*.md            ──→  reference/commands.md
-agents/*.md              ──→  reference/model-selection.md,
-                              explanation/agents-and-trust.md
-git log / CHANGELOG      ──→  overview/changelog.md
-```
-
-Полная техническая спецификация pipeline — в [`skills/maestro/SKILL.md`](../skills/maestro/SKILL.md)
-(документация для разработчиков, не дублируется здесь).
