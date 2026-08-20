@@ -39,27 +39,14 @@ primary-сессии.
 - [Классификация фич](reference/feature-classification.md) — категории и матрица сигналов
 - [Выбор моделей](reference/model-selection.md) — tier и субагенты
 - [Команды](reference/commands.md) — доступные `@command`
+- [Конфигурация](reference/config.md) — maestro.json, opencode.json, env vars
 
 ## Explanation (пояснения)
 
 - [Устройство pipeline](explanation/pipeline-overview.md) — почему так устроен
 - [Агенты и модель доверия](explanation/agents-and-trust.md) — trust, sanitizer, роли
 - [Project Context (14 категорий)](explanation/project-context.md) — формат `docs/project-context.md`
-- Пошаговые шаги pipeline:
-  - [Step 0 — Project Context](explanation/step-0-project-context.md)
-  - [Step 1 — Выбор маршрута](explanation/step-1-route-selection.md)
-  - [Step 1.5 — Режим работы](explanation/step-15-interaction-mode.md)
-  - [Steps 2–6 — Pre-flight и изоляция](explanation/step-2-6-preflight-isolation.md)
-  - [Step 7 — Категория фичи](explanation/step-7-feature-classification.md)
-  - [Step 8 — Spec Formation](explanation/step-8-spec-formation.md)
-  - [Step 9 — Spec Review](explanation/step-9-spec-review.md)
-  - [Step 11 — Implementation Plan](explanation/step-11-implementation-plan.md)
-  - [Step 13 — SDD](explanation/step-13-sdd.md)
-  - [Step 14 — Documentation](explanation/step-14-documentation.md)
-  - [Steps 15–15a — Checks и Build](explanation/step-15-checks.md)
-  - [Step 16 — Code Review](explanation/step-16-code-review.md)
-  - [Step 18 — Merge](explanation/step-18-merge.md)
-- [Debug sub-pipeline (D1–D7)](explanation/debug-sub-pipeline.md)
+- [Всё: pipeline — Feature и Bugfix](explanation/pipeline-overview.md) — полный flow: Feature 0→18 и Bugfix D1→D7
 
 ## Примеры
 
