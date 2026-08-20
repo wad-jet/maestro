@@ -64,6 +64,14 @@ pipx install agpack            # или: uv tool install agpack
 agpack init                    # создаёт agpack.yml
 ```
 
+> **macOS (pipx):** после установки `agpack` может не находиться в новых
+> консольных сессиях — pipx кладёт бинари в `~/.local/bin`, который не всегда
+> в `PATH`. Исправьте:
+> ```bash
+> pipx ensurepath    # добавляет ~/.local/bin в PATH (перезапустите консоль)
+> # или временно:  export PATH="$HOME/.local/bin:$PATH"
+> ```
+
 Минимальный `agpack.yml` для `maestro`:
 
 ```yaml
