@@ -7,6 +7,24 @@
 > Хронология составлена по истории authoring-репо `maestro-agent`. Даты
 > приблизительные (по коммитам).
 
+## [2026-08-21]
+
+### Добавлено
+- **Отдельный аудит-лог** `.maestro/logs/maestro-audit-<дата>.log`:
+  security-фактура доступа к confidential (`confidential.access`, allow/deny с
+  именем trusted-агента) и блокировок `access_policy` (`access_policy.blocked`).
+  В записи — только `basename` пути (SEC-5), без содержимого confidential-данных.
+- **Без дублирования логов**: security-события пишутся **только** в аудит-лог;
+  `confidential.blocked` удалён, `access_policy.blocked` больше не пишется в
+  bootstrap-лог (тот — чисто observability).
+- **Аудит-лог всегда активен**: не подчиняется `MAESTRO_BOOTSTRAP_LOG_MASK`/
+  `LOG_LEVEL`. Каталог — `MAESTRO_AUDIT_LOG_DIR`. Сбой записи аудита логируется
+  в `console.error`.
+- **Имя trusted-агента** резолвится из сообщений сессии (`resolveIsTrustedSubagent`
+  возвращает `{ trusted, agent }`) и фиксируется в аудит-записи.
+- **Документация формата/структуры записей** всех логов (bootstrap + audit) — в
+  `manual_docs/reference/config.md` («Логи плагина»).
+
 ## [2026-08-19]
 
 ### Изменено

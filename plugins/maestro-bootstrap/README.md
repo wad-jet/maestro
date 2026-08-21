@@ -111,9 +111,29 @@ deny; trusted читает по умолчанию (`trusted.read: allow`), пи
 
 ## Аудит-лог
 
-События sanitizer пишутся в `.maestro/logs/maestro-bootstrap-<date>.log` с маркерами
-`sanitizer.redacted` (что замаскировано, без содержимого) и `access_policy.blocked`
-(файл-доступ), наряду с observability-событиями.
+Security-фактура по доступу пишется в **отдельный аудит-лог**
+`.maestro/logs/maestro-audit-<date>.log` (JSONL, один файл на день):
+
+- `confidential.access` — доступ к confidential-путям: `action: "allow"` (trusted-
+  субагент читал/писал, уровень `info`) или `action: "deny"` (блокировка для
+  untrusted/primary, уровень `warn`). Включает `agent` (имя trusted-агента) и
+  `target` (только `basename`, SEC-5).
+- `access_policy.blocked` — блокировка файла по `access_policy` (`ask`/`deny`),
+  уровень `warn`.
+
+Структура записи (JSON):
+
+```json
+{"ts":"<ISO>","level":"info|warn","msg":"confidential.access|access_policy.blocked","sessionID":"...","callID":"...","tool":"read|write|edit","action":"allow|deny","agent":"<trusted-агент>|null","target":"<basename>"}
+```
+
+**Security-события живут ТОЛЬКО в аудит-логе** — bootstrap-лог их не дублирует
+(bootstrap-лог — observability: `sanitizer.redacted`, task, session.error и т.п.).
+
+**Аудит-лог пишется всегда** и **не зависит** от `MAESTRO_BOOTSTRAP_LOG_MASK`/
+`MAESTRO_BOOTSTRAP_LOG_LEVEL`. Каталог задаётся `MAESTRO_AUDIT_LOG_DIR`
+(по умолчанию `<project>/.maestro/logs`). Сбой записи аудита логируется в
+`console.error` (не ломая сессию).
 
 Пример конфига: `examples/maestro.example.json`.
 
@@ -175,11 +195,13 @@ untrusted, access-policy не enforced, дефолтные sanitizer-прави�
 Логи **разбиваются по дням** — один файл на дату:
 
 ```
-.maestro/logs/maestro-bootstrap-2026-08-01.log
+.maestro/logs/maestro-bootstrap-2026-08-01.log   # observability
 .maestro/logs/maestro-bootstrap-2026-08-02.log
+.maestro/logs/maestro-audit-2026-08-01.log       # security-фактура
+.maestro/logs/maestro-audit-2026-08-02.log
 ```
 
-Формат строки:
+Формат строки (bootstrap-лог):
 
 ```json
 {"ts":"<ISO>","level":"info|debug|warn|error","msg":"...", "sessionID":"...", "callID":"..."}
@@ -194,7 +216,9 @@ untrusted, access-policy не enforced, дефолтные sanitizer-прави�
 - `session.error` — ошибка/прерывание модели (warn)
 - `session.status.retry` — перезапрос модели (warn)
 - `sanitizer.redacted` — замаскировано N чувствительных элементов в промпте task (warn)
-- `access_policy.blocked` — доступ к ask/deny-файлу заблокирован (warn)
+
+Security-события доступа (`confidential.access`, `access_policy.blocked`) в
+bootstrap-лог **не пишутся** — они только в аудит-логе (см. раздел «Аудит-лог»).
 
 Детальное логирование `bash`/`skill`/`read` убрано (сокращение observability).
 
@@ -205,12 +229,15 @@ untrusted, access-policy не enforced, дефолтные sanitizer-прави�
 | `MAESTRO_BOOTSTRAP_LOG_LEVEL` | `debug` \| `info` \| `warn` \| `error` | `info` |
 | `MAESTRO_BOOTSTRAP_LOG_MASK` | список включённых уровней через запятую | выводится из `LOG_LEVEL` |
 | `MAESTRO_BOOTSTRAP_LOG_DIR` | каталог для лог-файлов (по умолчанию `<project>/.maestro/logs`) | `<project>/.maestro/logs` |
+| `MAESTRO_AUDIT_LOG_DIR` | каталог для аудит-лога `maestro-audit-*.log` | `<project>/.maestro/logs` |
 | `MAESTRO_CONFIG` | путь к maestro.json (консолидированный конфиг) | `<project>/maestro.json` |
 
 `MAESTRO_BOOTSTRAP_LOG_LEVEL` — порог детализации (пишутся уровни `>=`
 заданного). `MAESTRO_BOOTSTRAP_LOG_MASK` — явный список включённых уровней;
 позволяет включать/выключать каждый тип **независимо**. Запись пишется при
 **пересечении** двух условий: уровень входит в маску **и** не ниже порога.
+Эти настройки применяются **только** к bootstrap-логу. **Аудит-лог от них не
+зависит** — он пишется всегда.
 
 Если `MAESTRO_BOOTSTRAP_LOG_MASK` не задан — он выводится из порога: маска =
 все уровни `>= MAESTRO_BOOTSTRAP_LOG_LEVEL`. Поэтому поведение порога

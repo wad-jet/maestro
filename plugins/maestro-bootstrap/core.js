@@ -491,22 +491,22 @@ function agentNameFromMessages(messages) {
  * @returns {Promise<boolean>}
  */
 export async function resolveIsTrustedSubagent(client, trustedAgents, sessionID) {
-  if (!client?.session?.get) return false;
+  if (!client?.session?.get) return { trusted: false, agent: undefined };
   let session;
   try {
     const resp = await client.session.get({ path: { id: sessionID } });
     session = resp?.data ?? resp;
   } catch {
-    return false;
+    return { trusted: false, agent: undefined };
   }
-  if (!session?.parentID) return false; // root/primary
+  if (!session?.parentID) return { trusted: false, agent: undefined }; // root/primary
   try {
     const mresp = await client.session.messages({ path: { id: sessionID } });
     const messages = mresp?.data ?? mresp;
     const agent = agentNameFromMessages(Array.isArray(messages) ? messages : []);
-    return Boolean(agent && trustedAgents.has(agent));
+    return { trusted: Boolean(agent && trustedAgents.has(agent)), agent };
   } catch {
-    return false;
+    return { trusted: false, agent: undefined };
   }
 }
 
@@ -651,21 +651,35 @@ export function filePathOf(tool, args) {
   return undefined;
 }
 
-export function makeLogger(directory) {
+export function makeLogger(directory, {
+  filePrefix = "maestro-bootstrap",
+  logDirEnv = "MAESTRO_BOOTSTRAP_LOG_DIR",
+  filterEnv = "MAESTRO_BOOTSTRAP",
+} = {}) {
   const logDir =
-    process.env.MAESTRO_BOOTSTRAP_LOG_DIR ||
+    process.env[logDirEnv] ||
     path.join(directory, ".maestro/logs");
-  const levelEnv = process.env.MAESTRO_BOOTSTRAP_LOG_LEVEL || "info";
-  const threshold = LOG_LEVELS[levelEnv] ?? 10;
-  // Явная маска — список уровней через запятую. Если не задана, выводится из
-  // порога: все уровни >= LOG_LEVEL. Чтобы «и порог, и маска» давали единое
-  // поведение, они применяются как пересечение.
-  const maskEnv = process.env.MAESTRO_BOOTSTRAP_LOG_MASK;
-  const enabled = new Set(
-    maskEnv
-      ? maskEnv.split(",").map((s) => s.trim()).filter(Boolean).filter((l) => l in LOG_LEVELS)
-      : Object.keys(LOG_LEVELS).filter((l) => LOG_LEVELS[l] >= threshold),
-  );
+
+  // Маска/порог. Для аудит-лога (filterEnv === null) фильтрация отключена —
+  // пишется всё (security-фактура не должна зависеть от bootstrap-маски).
+  // Для bootstrap-лога читаются MAESTRO_BOOTSTRAP_LOG_LEVEL / _LOG_MASK.
+  let enabled;
+  let threshold = 10;
+  let levelEnv = "debug";
+  if (filterEnv !== null) {
+    const levelKey = `${filterEnv}_LOG_LEVEL`;
+    const maskKey = `${filterEnv}_LOG_MASK`;
+    levelEnv = process.env[levelKey] || "info";
+    threshold = LOG_LEVELS[levelEnv] ?? 10;
+    const maskEnv = process.env[maskKey];
+    enabled = new Set(
+      maskEnv
+        ? maskEnv.split(",").map((s) => s.trim()).filter(Boolean).filter((l) => l in LOG_LEVELS)
+        : Object.keys(LOG_LEVELS).filter((l) => LOG_LEVELS[l] >= threshold),
+    );
+  } else {
+    enabled = new Set(Object.keys(LOG_LEVELS));
+  }
 
   try {
     fs.mkdirSync(logDir, { recursive: true });
@@ -674,11 +688,11 @@ export function makeLogger(directory) {
   }
 
   const logFileFor = (date) =>
-    path.join(logDir, `maestro-bootstrap-${date}.log`);
+    path.join(logDir, `${filePrefix}-${date}.log`);
 
   const write = (level, msg, extra) => {
     if (!enabled.has(level)) return;
-    if (LOG_LEVELS[level] < threshold) return;
+    if (filterEnv !== null && LOG_LEVELS[level] < threshold) return;
     const now = new Date();
     const date = now.toISOString().slice(0, 10);
     const entry = JSON.stringify({
@@ -689,15 +703,20 @@ export function makeLogger(directory) {
     });
     try {
       fs.appendFileSync(logFileFor(date), entry + "\n");
-    } catch {
-      /* logging must never break the session */
+    } catch (err) {
+      // Аудит-запись не должна теряться молча: сбой пишем в console.error
+      // (не ломая сессию), чтобы не было тихого пропуска security-фактуры.
+      if (filePrefix === "maestro-audit") {
+        console.error("[maestro-bootstrap] audit write failed:", err instanceof Error ? err.message : err);
+      }
     }
   };
 
   return {
     logDir,
+    filePrefix,
     level: levelEnv,
-    mask: [...enabled].join(","),
+    mask: filterEnv === null ? "all" : [...enabled].join(","),
     debug: (msg, extra) => write("debug", msg, extra),
     info: (msg, extra) => write("info", msg, extra),
     warn: (msg, extra) => write("warn", msg, extra),
@@ -762,6 +781,14 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
   const root = directory || process.cwd();
   const version = readPluginVersion();
   const log = makeLogger(root);
+  // Аудит-лог — отдельный файл `maestro-audit-<date>.log`, security-фактура.
+  // filterEnv: null → НЕ зависит от MAESTRO_BOOTSTRAP_LOG_MASK/LOG_LEVEL
+  // (аудит пишется всегда). Каталог — MAESTRO_AUDIT_LOG_DIR.
+  const auditLog = makeLogger(root, {
+    filePrefix: "maestro-audit",
+    logDirEnv: "MAESTRO_AUDIT_LOG_DIR",
+    filterEnv: null,
+  });
   const config = loadMaestroConfig(undefined, root);
   const whitelist = loadWhitelist(config);
   const accessPolicy = loadAccessPolicy(config);
@@ -832,20 +859,25 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
           const target = filePathOf(input.tool, output?.args);
           if (target && !isPluginMetaFile(root, target) && isConfidentialTarget(root, confidential.paths, target)) {
             wasConfidential = true;
-            let isTrustedSubagent = sessionTrustCache.get(input.sessionID);
-            if (isTrustedSubagent === undefined) {
-              isTrustedSubagent = await resolveIsTrustedSubagent(client, trustedAgents, input.sessionID);
-              sessionTrustCache.set(input.sessionID, isTrustedSubagent);
+            let trustInfo = sessionTrustCache.get(input.sessionID);
+            if (trustInfo === undefined) {
+              trustInfo = await resolveIsTrustedSubagent(client, trustedAgents, input.sessionID);
+              sessionTrustCache.set(input.sessionID, trustInfo);
             }
-            const action = resolveConfidentialAction(confidential, input.tool, isTrustedSubagent);
-            if (action !== "allow") {
-              log.warn("confidential.blocked", {
-                sessionID: input.sessionID,
-                callID: input.callID,
-                tool: input.tool,
-                action,
-                target: path.basename(target),
-              });
+            const action = resolveConfidentialAction(confidential, input.tool, trustInfo.trusted);
+            const base = {
+              sessionID: input.sessionID,
+              callID: input.callID,
+              tool: input.tool,
+              action,
+              agent: trustInfo.agent,        // имя trusted-агента (undefined для root/unresolved)
+              target: path.basename(target), // SEC-5: только basename, без содержимого
+            };
+            // Security-события — ТОЛЬКО в audit-лог (без дублей в bootstrap).
+            if (action === "allow") {
+              auditLog.info("confidential.access", base);
+            } else {
+              auditLog.warn("confidential.access", base);
               const err = new Error(
                 `[confidential:deny] Доступ к "${target}" запрещён. ` +
                   `Доступ к confidential-путям разрешён только trusted-субагентам.`,
@@ -871,7 +903,8 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
             if (action !== "allow") {
               // SEC-5: в лог — только basename (не раскрывать полную структуру путей);
               // полный путь остаётся только в ошибке для оркестратора.
-              log.warn("access_policy.blocked", {
+              // Security-событие — ТОЛЬКО в audit-лог (без дублей в bootstrap).
+              auditLog.warn("access_policy.blocked", {
                 sessionID: input.sessionID,
                 callID: input.callID,
                 tool: input.tool,
