@@ -290,4 +290,5 @@ OpenCode установит плагин автоматически (Bun) при
 ## Требования
 
 - OpenCode с поддержкой hooks `tool.execute.before/after`, `event`.
-- Файл подключается как ESM (`"type": "module"` в `package.json`).
+- Плагин грузится как ESM — корневой `package.json` репозитория задаёт
+  `"type": "module"` (плагин ставится из git через `main` → `plugins/maestro-bootstrap/index.js`).
