@@ -651,21 +651,35 @@ export function filePathOf(tool, args) {
   return undefined;
 }
 
-export function makeLogger(directory) {
+export function makeLogger(directory, {
+  filePrefix = "maestro-bootstrap",
+  logDirEnv = "MAESTRO_BOOTSTRAP_LOG_DIR",
+  filterEnv = "MAESTRO_BOOTSTRAP",
+} = {}) {
   const logDir =
-    process.env.MAESTRO_BOOTSTRAP_LOG_DIR ||
+    process.env[logDirEnv] ||
     path.join(directory, ".maestro/logs");
-  const levelEnv = process.env.MAESTRO_BOOTSTRAP_LOG_LEVEL || "info";
-  const threshold = LOG_LEVELS[levelEnv] ?? 10;
-  // Явная маска — список уровней через запятую. Если не задана, выводится из
-  // порога: все уровни >= LOG_LEVEL. Чтобы «и порог, и маска» давали единое
-  // поведение, они применяются как пересечение.
-  const maskEnv = process.env.MAESTRO_BOOTSTRAP_LOG_MASK;
-  const enabled = new Set(
-    maskEnv
-      ? maskEnv.split(",").map((s) => s.trim()).filter(Boolean).filter((l) => l in LOG_LEVELS)
-      : Object.keys(LOG_LEVELS).filter((l) => LOG_LEVELS[l] >= threshold),
-  );
+
+  // Маска/порог. Для аудит-лога (filterEnv === null) фильтрация отключена —
+  // пишется всё (security-фактура не должна зависеть от bootstrap-маски).
+  // Для bootstrap-лога читаются MAESTRO_BOOTSTRAP_LOG_LEVEL / _LOG_MASK.
+  let enabled;
+  let threshold = 10;
+  let levelEnv = "debug";
+  if (filterEnv !== null) {
+    const levelKey = `${filterEnv}_LOG_LEVEL`;
+    const maskKey = `${filterEnv}_LOG_MASK`;
+    levelEnv = process.env[levelKey] || "info";
+    threshold = LOG_LEVELS[levelEnv] ?? 10;
+    const maskEnv = process.env[maskKey];
+    enabled = new Set(
+      maskEnv
+        ? maskEnv.split(",").map((s) => s.trim()).filter(Boolean).filter((l) => l in LOG_LEVELS)
+        : Object.keys(LOG_LEVELS).filter((l) => LOG_LEVELS[l] >= threshold),
+    );
+  } else {
+    enabled = new Set(Object.keys(LOG_LEVELS));
+  }
 
   try {
     fs.mkdirSync(logDir, { recursive: true });
@@ -674,11 +688,11 @@ export function makeLogger(directory) {
   }
 
   const logFileFor = (date) =>
-    path.join(logDir, `maestro-bootstrap-${date}.log`);
+    path.join(logDir, `${filePrefix}-${date}.log`);
 
   const write = (level, msg, extra) => {
     if (!enabled.has(level)) return;
-    if (LOG_LEVELS[level] < threshold) return;
+    if (filterEnv !== null && LOG_LEVELS[level] < threshold) return;
     const now = new Date();
     const date = now.toISOString().slice(0, 10);
     const entry = JSON.stringify({
@@ -689,15 +703,20 @@ export function makeLogger(directory) {
     });
     try {
       fs.appendFileSync(logFileFor(date), entry + "\n");
-    } catch {
-      /* logging must never break the session */
+    } catch (err) {
+      // Аудит-запись не должна теряться молча: сбой пишем в console.error
+      // (не ломая сессию), чтобы не было тихого пропуска security-фактуры.
+      if (filePrefix === "maestro-audit") {
+        console.error("[maestro-bootstrap] audit write failed:", err instanceof Error ? err.message : err);
+      }
     }
   };
 
   return {
     logDir,
+    filePrefix,
     level: levelEnv,
-    mask: [...enabled].join(","),
+    mask: filterEnv === null ? "all" : [...enabled].join(","),
     debug: (msg, extra) => write("debug", msg, extra),
     info: (msg, extra) => write("info", msg, extra),
     warn: (msg, extra) => write("warn", msg, extra),

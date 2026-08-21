@@ -5,12 +5,12 @@ import os from "node:os";
 import path from "node:path";
 import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, readPluginVersion, writePluginVersionFile, isPluginMetaFile } from "./core.js";
 
-function readLogs(dir) {
+function readLogs(dir, filePrefix = "maestro-bootstrap") {
   const logDir = path.join(dir, ".maestro/logs");
   const files = fs.existsSync(logDir) ? fs.readdirSync(logDir) : [];
   const out = [];
   for (const f of files) {
-    if (!f.endsWith(".log")) continue;
+    if (!f.endsWith(".log") || !f.includes(filePrefix)) continue;
     for (const line of fs.readFileSync(path.join(logDir, f), "utf8").split("\n")) {
       if (line.trim()) out.push(JSON.parse(line));
     }
@@ -1398,5 +1398,45 @@ describe("maestro-bootstrap plugin version file access", () => {
       hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c-blocked" }, out),
       /access-policy:ask/,
     );
+  });
+});
+
+describe("maestro-bootstrap audit logger", () => {
+  it("writes to a separate file when filePrefix set", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-audit-logger-"));
+    try {
+      const log = makeLogger(dir, { filePrefix: "maestro-audit", filterEnv: null });
+      log.info("confidential.access", { action: "allow" });
+      const auditFiles = fs.readdirSync(path.join(dir, ".maestro/logs")).filter((f) => f.includes("maestro-audit"));
+      assert.equal(auditFiles.length, 1, "audit file created");
+      const entries = readLogs(dir, "maestro-audit");
+      const e = entries.find((x) => x.msg === "confidential.access");
+      assert.ok(e, "audit entry exists");
+      assert.equal(e.action, "allow");
+      const bootstrap = readLogs(dir, "maestro-bootstrap");
+      assert.equal(bootstrap.find((x) => x.msg === "confidential.access"), undefined);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("audit logger is NOT suppressed by MAESTRO_BOOTSTRAP_LOG_MASK/LOG_LEVEL (security invariant)", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-audit-filter-"));
+    const savedMask = process.env.MAESTRO_BOOTSTRAP_LOG_MASK;
+    const savedLevel = process.env.MAESTRO_BOOTSTRAP_LOG_LEVEL;
+    try {
+      process.env.MAESTRO_BOOTSTRAP_LOG_MASK = "off";
+      process.env.MAESTRO_BOOTSTRAP_LOG_LEVEL = "error";
+      const log = makeLogger(dir, { filePrefix: "maestro-audit", filterEnv: null });
+      log.warn("confidential.access", { action: "deny" });
+      const e = readLogs(dir, "maestro-audit").find((x) => x.msg === "confidential.access");
+      assert.ok(e, "audit entry must be written even when bootstrap mask is off");
+    } finally {
+      if (savedMask === undefined) delete process.env.MAESTRO_BOOTSTRAP_LOG_MASK;
+      else process.env.MAESTRO_BOOTSTRAP_LOG_MASK = savedMask;
+      if (savedLevel === undefined) delete process.env.MAESTRO_BOOTSTRAP_LOG_LEVEL;
+      else process.env.MAESTRO_BOOTSTRAP_LOG_LEVEL = savedLevel;
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
