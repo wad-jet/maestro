@@ -318,6 +318,10 @@ opencode plugin maestro-bootstrap
 Приоритет merge: `.opencode` > project > global. Если `models` не задан ни
 на одном уровне — HITL-ввод вручную + попытка `opencode models <provider>`.
 
+> **Агенты (`agent.*`)** также наследуются из global через merge — `model` и
+> `temperature` агентов, настроенные глобально, применяются ко всем проектам;
+> project `opencode.json` переопределяет global при необходимости.
+
 #### Pлейсхолдеры запрещены
 
 Модель должна быть конкретным ID. Значения вроде `"{{MODEL}}"`, `"<model>"` или

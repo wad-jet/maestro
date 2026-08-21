@@ -157,6 +157,38 @@ roadmap, как в Варианте A.
   модели.
 - **`auto`** — ключ `model` не пишется (наследуется дефолт сессии).
 - **Плейсхолдеры запрещены** (`<...>` невалидны, сломают загрузку агента).
+- **Учёт global-агентов.** М1 читает `agent.<name>.model` в merge-представлении:
+  project `opencode.json` → global (`~/.config/opencode/opencode.json`).
+  «Оставить текущую» — «из проекта» или «из global» в зависимости от источника.
+  При «оставить из global» в проект ничего не пишется.
+
+#### Вариант: глобальная настройка по тирам (рекомендуется)
+
+Настроить `agent.{design,haiku,sonnet,opus,fable,code-reviewer,sanitizer}`
+(model + temperature) один раз в `~/.config/opencode/opencode.json` — новые
+проекты наследуют значения через merge-конфигурацию OpenCode.
+
+```jsonc
+// ~/.config/opencode/opencode.json
+{
+  "agent": {
+    "haiku": { "model": "akash/Qwen/Qwen3.6-35B-A3B", "temperature": 0.0 },
+    "sonnet": { "model": "akash/deepseek-ai/DeepSeek-V4-Flash", "temperature": 0.1 },
+    "opus": { "model": "akash/zai-org/GLM-5.2", "temperature": 0.1 },
+    "code-reviewer": { "model": "akash/deepseek-ai/DeepSeek-V4-Flash-0731", "temperature": 0.2 },
+    "fable": { "model": "akash/deepseek-ai/DeepSeek-V4-Flash", "temperature": 0.7 },
+    "design": { "model": "akash/Qwen/Qwen3.6-35B-A3B", "temperature": 0.1 },
+    "sanitizer": { "model": "akash/Qwen/Qwen3.6-35B-A3B", "temperature": 0.0 }
+  }
+}
+```
+
+При `/maestro-init` новый проект (без локальных моделей) получит «оставить
+текущую (из global)» первым вариантом — наследование без вопросов. Project
+`opencode.json` переопределяет global (merge-приоритет `.opencode` > project >
+global), если нужен индивидуальный набор.
+
+---
 
 ### Пример mapping tier → модель
 
