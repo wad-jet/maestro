@@ -1,6 +1,6 @@
 {
   "name": "maestro-bootstrap",
-  "version": "1.0.1",
+  "version": "1.1.0",
   "description": "OpenCode plugin: global observability, prompt sanitizing and file access control for the maestro skill",
   "type": "module",
   "main": "index.js",
