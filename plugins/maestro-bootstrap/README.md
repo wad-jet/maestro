@@ -99,6 +99,16 @@ Whitelist — секция `sanitizer_whitelist` в `maestro.json` (см. ниж
 - Trusted сабагенты (maestro.json → `trust`) — file access control применяется для
   всех; trusted-skip полный требует верификации перехвата child-сессий (C2).
 
+### Секция `confidential`
+
+Закрывает конфиденциальные пути (дефолт `docs/confidential/**`) для `read`/
+`write`/`edit` от всех, кроме trusted-субагентов. Primary и untrusted — жёсткий
+deny; trusted читает по умолчанию (`trusted.read: allow`), пишет по явному
+`trusted.write`/`trusted.edit: allow`. Строже `access_policy` и имеет приоритет.
+Идентичность отправителя определяется через `client.session.get` +
+`session.messages` (детект по `parentID` и имени агента). Подробнее —
+`manual_docs/reference/config.md`.
+
 ## Аудит-лог
 
 События sanitizer пишутся в `.maestro/logs/maestro-bootstrap-<date>.log` с маркерами
