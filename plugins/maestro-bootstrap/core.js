@@ -22,6 +22,7 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { fileURLToPath } from "node:url";
 
 const LOG_LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
 
@@ -698,7 +699,7 @@ export function makeLogger(directory) {
  */
 export function readPluginVersion() {
   try {
-    const pkgPath = path.join(path.dirname(new URL(import.meta.url).pathname), "package.json");
+    const pkgPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "package.json");
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
     return typeof pkg.version === "string" && pkg.version ? pkg.version : undefined;
   } catch {
