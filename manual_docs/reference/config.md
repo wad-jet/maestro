@@ -465,6 +465,7 @@ MAESTRO_BOOTSTRAP_LOG_DIR="/var/log/maestro"
 | `.maestro/last-run.md` | Свод запуска | Нет |
 | `.maestro/logs/maestro-bootstrap-*.log` | Логи плагина | Нет |
 | `.maestro/feedback-reports/*.md` | Отчёты фидбэка | Нет |
+| `.maestro/plugin-version` | Версия загруженного плагина | Нет |
 
 ## 🔗 Связанные разделы
 

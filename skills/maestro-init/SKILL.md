@@ -232,6 +232,7 @@ global (`~/.config/opencode/opencode.json`) → project (`opencode.json`) →
 .maestro/last-run.md
 .maestro/logs/
 .maestro/feedback-reports/
+.maestro/plugin-version
 ```
 **НЕ** использовать `.maestro/` (весь каталог) — эфемерные файлы игнорируются
 точечно; конфиги (`maestro.json`) коммитятся в git. `.maestro/feedback-reports/`
