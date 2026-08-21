@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget } from "./core.js";
+import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget } from "./core.js";
 
 function readLogs(dir) {
   const logDir = path.join(dir, ".maestro/logs");
@@ -1189,5 +1189,38 @@ describe("maestro-bootstrap confidential path normalization", () => {
   it("returns empty string for empty target", () => {
     assert.equal(normalizeTarget(root, ""), "");
     assert.equal(normalizeTarget(root, undefined), "");
+  });
+});
+
+describe("maestro-bootstrap isConfidentialTarget", () => {
+  const root = "/proj";
+  const patterns = ["docs/confidential/**"];
+
+  it("blocks file under pattern (relative)", () => {
+    assert.equal(isConfidentialTarget(root, patterns, "docs/confidential/x.md"), true);
+  });
+  it("blocks file under pattern (absolute)", () => {
+    assert.equal(isConfidentialTarget(root, patterns, "/proj/docs/confidential/x.md"), true);
+  });
+  it("blocks file under pattern (dot-prefixed)", () => {
+    assert.equal(isConfidentialTarget(root, patterns, "./docs/confidential/x.md"), true);
+  });
+  it("blocks case-variant path (case-insensitive boundary)", () => {
+    assert.equal(isConfidentialTarget(root, patterns, "docs/Confidential/X.MD"), true);
+  });
+  it("blocks the directory itself (C2)", () => {
+    assert.equal(isConfidentialTarget(root, patterns, "docs/confidential"), true);
+    assert.equal(isConfidentialTarget(root, patterns, "/proj/docs/confidential"), true);
+  });
+  it("blocks subdirectory listing under pattern", () => {
+    assert.equal(isConfidentialTarget(root, patterns, "docs/confidential/subdir"), true);
+  });
+  it("does not block non-confidential paths", () => {
+    assert.equal(isConfidentialTarget(root, patterns, "src/app.ts"), false);
+    assert.equal(isConfidentialTarget(root, patterns, "docs/readme.md"), false);
+    assert.equal(isConfidentialTarget(root, patterns, "docs/confidentialx.md"), false);
+  });
+  it("does not block .. traversal that escapes the pattern prefix", () => {
+    assert.equal(isConfidentialTarget(root, patterns, "docs/confidential/../../src/app.ts"), false);
   });
 });
