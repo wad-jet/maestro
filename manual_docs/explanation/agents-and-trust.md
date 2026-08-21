@@ -34,8 +34,8 @@ Trust-статус управляет **двумя** измерениями за
 
 | Уровень | Sanitize промпта | File access control |
 |---|---|---|
-| **trusted** (`maestro.json` → `trust` = `true`) | **skip** | **skip** (без ограничений) |
-| **untrusted** (default) | Security Review (Ур.1 + Ур.2) | перехват `read` по access-policy (ask → блок) |
+| **trusted** (`maestro.json` → `trust` = `true`) | **skip** | **skip** (без ограничений по `access_policy`); доступ к `confidential` — по `confidential.trusted.<tool>` |
+| **untrusted** (default) | Security Review (Ур.1 + Ур.2) | перехват `read` по access-policy (ask → блок); доступ к `confidential` — **всегда deny** |
 
 > File access control применяется ко всем сабагентам; trusted-skip для file
 > access — ограничен (требует верификации перехвата child-сессий, C2).
@@ -43,7 +43,8 @@ Trust-статус управляет **двумя** измерениями за
 ### trust-config → maestro.json
 
 Файл `maestro.json` в корне проекта (рядом с `opencode.json`) — консолидированный
-конфиг с тремя секциями: `trust`, `access_policy`, `sanitizer_whitelist`. Секция
+конфиг с четырьмя секциями: `trust`, `access_policy`, `confidential`,
+`sanitizer_whitelist`. Секция
 `trust` перечисляет **только trusted** сабагентов. Всё, чего нет в файле —
 untrusted. Если файла нет — все untrusted.
 
@@ -97,6 +98,75 @@ FINDINGS_FOUND`. Также генерирует/поддерживает сек
 `deny` → жёсткий блок; приоритет deny > ask > allow). Покрывается только `read`;
 bash/glob/grep — нативные permissions. Файл `maestro.json` (секция `access_policy`)
 формирует сабагент `sanitizer` или вручную; если файла нет — плагин не блокирует (fail-open).
+
+### Защищённая папка `docs/confidential`
+
+Секция `confidential` в `maestro.json` закрывает конфиденциальные пути
+(по умолчанию `docs/confidential/**`) для чтения и записи всем, кроме trusted-
+субагентов (имена из секции `trust`). Primary-сессия и untrusted-субагенты —
+жёсткий `deny` (не конфигурируется). Trusted-субагент читает по умолчанию
+(`trusted.read: allow`), а запись/редактирование по умолчанию запрещены
+(`trusted.write`/`trusted.edit: deny`) и выдаются явно.
+
+**Известное ограничение (риск обхода):** плагин перехватывает только
+`read`/`write`/`edit`. Содержимое confidential можно вытащить через
+`bash cat`, `grep -r`, `glob` — эти тулы плагином не покрываются (пути из
+bash-команд ненадёжно извлекаются).
+
+**Рекомендуемый 2-й эшелон защиты — нативные permissions OpenCode**
+(`opencode.json`), чтобы закрыть `bash`/`glob`/`grep` для confidential-путей:
+
+```json
+{
+  "permission": {
+    "bash": {
+      "*cat*confidential*": "deny",
+      "*grep*confidential*": "deny",
+      "*ls*confidential*": "deny",
+      "*glob*confidential*": "deny"
+    }
+  }
+}
+```
+
+Два слоя работают независимо: плагин закрывает `read/write/edit`, native
+permissions OpenCode закрывают `bash/glob/grep`. При настройке вынесите
+`docs/confidential/**` из `access_policy.allow`, чтобы избежать путаницы
+(confidential технически выигрывает, но явная настройка читается яснее).
+
+**Прочее:**
+- **Смена `maestro.json`** — требует рестарта opencode (конфиг читается при
+  старте плагина).
+- **Trust не наследуется** вложенными субагентами: даже если trusted-субагент
+  диспатчит вложенного, вложенный оценивается по своему имени и получает deny,
+  если не в `trust`.
+- **Абсолютные пути** в `read`/`write`/`edit` (`/abs/docs/confidential/x.md`)
+  матчатся как есть; для относительных используется рабочий путь инструмента.
+
+> **⚠️ Риск: данные confidential открыты при отключённом плагине.** Вся защита
+> `confidential` (как и `access_policy` и sanitizer) реализована в плагине
+> `maestro-bootstrap` и **не является файловой защитой ОС (не chmod/ACL)**. Это
+> fail-open: при отключённом или незагруженном плагине `read`/`write`/`edit` в
+> `docs/confidential/**` выполняются без ограничений. Если данные в
+> `docs/confidential/` действительно конфиденциальны и их раскрытие недопустимо
+> даже без плагина — это **не** достаточный барьер: дополнительно ограничьте
+> права каталога средствами ОС (read-only / владелец) или репозитория (git-crypt,
+> отдельный приватный submodule/remote). Confidential — это защита от untrusted-
+> агентов **при работающем плагине**, не универсальная защита данных.
+
+**⚠️ Чего делать НЕ надо — НЕ добавлять рабочие spec/plan пути в `paths`.**
+Каталоги `docs/superpowers/specs/**` и `docs/superpowers/plans/**` являются
+**двухролевыми**: генерируются trusted `design` (пишет spec/plan) и читаются
+trusted `sanitizer`, но **потребляются untrusted**-субагентами — `opus` (spec
+review, шаг 9), implementer (`haiku`/`sonnet`, шаг 13), `code-reviewer` (шаг 16).
+Если добавить эти пути в `confidential.paths`, untrusted-субагенты и primary
+получат жёсткий deny на чтение spec/plan, и **процесс планирования/реализации
+остановится** (untrusted не смогут читать исходники для своей работы). Защита
+confidential-ДАННЫХ обеспечивается иначе: spec/plan **очищаются** sanitizer
+(шаг 8.6 pipeline, «Подписи spec-файла») и лежат **вне** `docs/confidential/`;
+untrusted работают по очищенным артефактам, а доступ к исходным confidential-
+файлам им закрыт. Confidential покрывает **исходные данные**, а не очищенные
+артефакты на их основе.
 
 **Точки встраивания:**
 - **Spec security review** (шаг 8.6) — для фич со spec (сложные/архитектурные),
