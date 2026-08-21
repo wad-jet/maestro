@@ -690,6 +690,39 @@ export function makeLogger(directory) {
   };
 }
 
+/**
+ * Read the plugin version from its own package.json.
+ * package.json лежит рядом с core.js (и при npm-установке, и при локальном пути),
+ * поэтому путь резолвится относительно import.meta.url.
+ * @returns {string|undefined}  Version string, or undefined on any error (fail-soft).
+ */
+export function readPluginVersion() {
+  try {
+    const pkgPath = path.join(path.dirname(new URL(import.meta.url).pathname), "package.json");
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+    return typeof pkg.version === "string" && pkg.version ? pkg.version : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
+ * Write the plugin version to `<dir>/.maestro/plugin-version`.
+ * Перезаписывается при каждом init → отражает загруженную версию.
+ * Провал записи молча игнорируется (fail-soft) — версия не критична.
+ * @param {string} dir      Project directory.
+ * @param {string|undefined} version  Version to write (skips if undefined).
+ */
+export function writePluginVersionFile(dir, version) {
+  if (typeof version !== "string" || !version) return;
+  try {
+    fs.mkdirSync(path.join(dir, ".maestro"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".maestro/plugin-version"), version + "\n", "utf8");
+  } catch {
+    /* version file is best-effort; never break the session */
+  }
+}
+
 // Ограниченная карта: при переполнении вытесняет самую старую запись по
 // порядку вставки — защита от неограниченного роста в долгоживущем процессе.
 export function makeBoundedMap(max = 1024) {

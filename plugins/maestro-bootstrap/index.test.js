@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget } from "./core.js";
+import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, readPluginVersion, writePluginVersionFile } from "./core.js";
 
 function readLogs(dir) {
   const logDir = path.join(dir, ".maestro/logs");
@@ -1302,5 +1302,37 @@ describe("maestro-bootstrap confidential path bypass closure", () => {
     const out = { args: { filePath: "src/app.ts" } };
     await hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c5" }, out);
     assert.ok(true);
+  });
+});
+
+describe("maestro-bootstrap plugin version", () => {
+  it("readPluginVersion returns the version from package.json", () => {
+    const version = readPluginVersion();
+    assert.equal(typeof version, "string");
+    assert.match(version, /^\d+\.\d+\.\d+$/);
+  });
+
+  it("writePluginVersionFile writes version to .maestro/plugin-version", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-ver-"));
+    try {
+      writePluginVersionFile(dir, "1.2.3");
+      const file = path.join(dir, ".maestro/plugin-version");
+      assert.ok(fs.existsSync(file), "plugin-version file must be created");
+      assert.equal(fs.readFileSync(file, "utf8").trim(), "1.2.3");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("writePluginVersionFile does not throw when write fails (fail-soft)", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-ver-fail-"));
+    try {
+      // `.maestro` занят файлом → mkdirSync бросает ENOTDIR/EEXIST → write должен молча не упасть
+      fs.writeFileSync(path.join(dir, ".maestro"), "occupied");
+      assert.doesNotThrow(() => writePluginVersionFile(dir, "1.2.3"));
+      assert.equal(fs.existsSync(path.join(dir, ".maestro/plugin-version")), false);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
   });
 });
