@@ -547,6 +547,47 @@ function globMatch(pattern, value) {
 }
 
 /**
+ * Normalize a target path to a canonical project-relative form (posix separators).
+ * Сводит absolute / relative / `./` / `..` к единому виду для glob-матчинга.
+ * @param {string} root    Project root (absolute).
+ * @param {string} target  Raw path from tool args.
+ * @returns {string}  Project-relative path with `/` separators ("" if invalid).
+ */
+export function normalizeTarget(root, target) {
+  if (typeof target !== "string" || !target) return "";
+  const abs = path.isAbsolute(target) ? target : path.resolve(root, target);
+  const rel = path.relative(root, abs);
+  return rel.split(path.sep).join("/");
+}
+
+/**
+ * Check whether a target path falls within any confidential pattern.
+ * Confidential — security-граница: матчинг case-insensitive (APFS/NTFS могут
+ * резолвить case-варианты в тот же файл) и блокирует как файлы под паттерном,
+ * так и саму директорию/поддиректории (листинг — C2).
+ * @param {string} root      Project root (absolute).
+ * @param {string[]} patterns  Confidential path globs (e.g. `docs/confidential/**`).
+ * @param {string} target    Raw path from tool args.
+ * @returns {boolean}
+ */
+export function isConfidentialTarget(root, patterns, target) {
+  const rel = normalizeTarget(root, target);
+  if (!rel) return false;
+  const lower = rel.toLowerCase();
+  for (const p of patterns ?? []) {
+    if (typeof p !== "string" || !p) continue;
+    const pat = p.toLowerCase();
+    if (globMatch(pat, lower)) return true; // файл под паттерном
+    if (pat.endsWith("/**")) {
+      const prefix = pat.slice(0, -3); // убрать `/**`
+      if (lower === prefix) return true; // сама директория
+      if (lower.startsWith(prefix + "/")) return true; // поддиректория (листинг глубже)
+    }
+  }
+  return false;
+}
+
+/**
  * Resolve access action for a path against the policy. Priority:
  * deny > ask > allow > default (наиболее строгое выигрывает).
  * @param {object} policy  Parsed access policy.

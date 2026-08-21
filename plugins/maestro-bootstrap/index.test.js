@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent } from "./core.js";
+import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget } from "./core.js";
 
 function readLogs(dir) {
   const logDir = path.join(dir, ".maestro/logs");
@@ -1167,5 +1167,27 @@ describe("maestro-bootstrap confidential enforcement", () => {
     } finally {
       fs.rmSync(dir3, { recursive: true, force: true });
     }
+  });
+});
+
+describe("maestro-bootstrap confidential path normalization", () => {
+  const root = "/proj";
+
+  it("normalizes absolute path to project-relative", () => {
+    assert.equal(normalizeTarget(root, "/proj/docs/confidential/x.md"), "docs/confidential/x.md");
+  });
+
+  it("normalizes relative and dot-prefixed to project-relative", () => {
+    assert.equal(normalizeTarget(root, "docs/confidential/x.md"), "docs/confidential/x.md");
+    assert.equal(normalizeTarget(root, "./docs/confidential/x.md"), "docs/confidential/x.md");
+  });
+
+  it("collapses .. traversal to project-relative (escapes confidential prefix)", () => {
+    assert.equal(normalizeTarget(root, "docs/confidential/../../etc/passwd"), "etc/passwd");
+  });
+
+  it("returns empty string for empty target", () => {
+    assert.equal(normalizeTarget(root, ""), "");
+    assert.equal(normalizeTarget(root, undefined), "");
   });
 });
