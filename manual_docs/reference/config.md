@@ -12,7 +12,7 @@
 
 Консолидированный конфиг в корне проекта (рядом с `opencode.json`). Коммитится
 в git — он описывает security-политику и trust-модель проекта. Файл состоит из
-трёх секций: `trust`, `access_policy`, `sanitizer_whitelist`.
+четырёх секций: `trust`, `access_policy`, `confidential`, `sanitizer_whitelist`.
 
 Путь к файлу resolves в таком порядке:
 1. Переменная окружения `MAESTRO_CONFIG`
@@ -101,6 +101,64 @@ File access control: определяет, к каким файлам untrusted 
 
 > Приоритет работает на уровне паттернов, не файлов. Если файл совпадает с
 > паттернами в `allow` и `deny`, — `deny` побеждает.
+
+### Секция `confidential`
+
+Защита конфиденциальных путей: жёсткий deny чтения и записи для всех, кроме
+**trusted-субагентов**. Строже `access_policy` — если путь попал в `paths`,
+применяется правило `confidential`, `access_policy` для него игнорируется.
+
+**Инвариант (не конфигурируется):** любое обращение к `paths` через
+`read`/`write`/`edit` от НЕ trusted (primary/root-сессия, untrusted-субагент) →
+жёсткий `deny` по всем трём инструментам.
+
+**Конфигурируется только** политика для **trusted** по каждому инструменту
+(`allow` | `deny`). Дефолт: `read: allow`, `write: deny`, `edit: deny` (читать
+можно, менять — нельзя).
+
+```json
+{
+  "confidential": {
+    "version": 1,
+    "paths": ["docs/confidential/**"],
+    "trusted": {
+      "read": "allow",
+      "write": "deny",
+      "edit": "deny"
+    }
+  }
+}
+```
+
+| Ключ | Тип | Обязательно | Описание |
+|---|---|---|---|
+| `version` | `number` | нет | Версия схемы (сейчас всегда `1`) |
+| `paths` | `string[]` | нет | Glob-шаблоны confidential-путей. По умолчанию `["docs/confidential/**"]` |
+| `trusted.read` | `"allow"` \| `"deny"` | нет | Чтение trusted-субагентом (дефолт `allow`) |
+| `trusted.write` | `"allow"` \| `"deny"` | нет | Запись trusted-субагентом (дефолт `deny`) |
+| `trusted.edit` | `"allow"` \| `"deny"` | нет | Редактирование trusted-субагентом (дефолт `deny`) |
+
+**Кто считается trusted-субагентом:** вызов `read`/`write`/`edit` к
+confidential-пути, выполненный внутри дочерней сессии субагента, чьё имя есть в
+секции `trust` (`maestro.json`). Primary-сессия (нет родительской сессии) всегда
+deny. Trust не наследуется вложенными субагентами — каждый субагент оценивается
+по своему имени.
+
+> **⚠️ Риск: данные confidential открыты при отключённом плагине.** Защита
+> `confidential` реализована **внутри плагина `maestro-bootstrap`** (перехват
+> `tool.execute.before`) и **не является файловой защитой на уровне ОС**
+> (не chmod/ACL, не шифрование). Это полноценный **fail-open**: если плагин не
+> подключён в `opencode.json` (`plugin` без `maestro-bootstrap`), не загрузился,
+> деактивирован или opencode запущен без него — `read`/`write`/`edit` в
+> `docs/confidential/**` выполняются **как обычные** (без каких-либо ограничений).
+> То же касается `access_policy` и sanitizer (все — в плагине): отключение
+> плагина снимает ВСЮ file-политику. **Не полагайтесь на confidential как на
+> единственный барьер** — при отключённом плагине данные доступны любому
+> (primary и untrusted). Для гарантированного барьера на уровне ОС ограничьте
+> права каталога средствами ОС/репозитория (read-only для не-нужного,
+> git-криптография и т.п.). `/maestro-init` задача 5 лишь проверяет подключение
+> плагина и **не блокирует** init при его отсутствии — плагин может быть не
+> поднят, а confidential-данные уже созданы.
 
 ### Секция `sanitizer_whitelist`
 
@@ -380,7 +438,7 @@ MAESTRO_BOOTSTRAP_LOG_DIR="/var/log/maestro"
 
 | Путь | Назначение | В git? |
 |---|---|---|
-| `maestro.json` | Консолидированный конфиг (trust, access_policy, sanitizer_whitelist) | Да |
+| `maestro.json` | Консолидированный конфиг (trust, access_policy, confidential, sanitizer_whitelist) | Да |
 | `opencode.json` | Регистрация плагина + модели сабагентов | Да |
 | `docs/project-context.md` | Проектовый контекст шага 0 (14 категорий) | Да |
 | `docs/superpowers/specs/*.md` | Spec-файлы | Да |
