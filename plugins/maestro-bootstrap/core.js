@@ -565,6 +565,8 @@ export function normalizeTarget(root, target) {
  * Whether a target path is the plugin's own version metadata file.
  * `.maestro/plugin-version` — внутренний diagnostic-файл плагина; не подпадает
  * под access_policy/confidential (должен быть всегда читаем для /maestro-version).
+ * Содержимое — только semver (не чувствительно). Сопоставление case-sensitive:
+ * плагин пишет каноническое имя; несовпадение = fail-closed (файл блокируется).
  * @param {string} root    Project root (absolute).
  * @param {string} target  Raw path from tool args.
  * @returns {boolean}
@@ -821,6 +823,9 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
         // Покрывает read/write/edit. bash/glob/grep — нативные permissions.
         const CONF_TOOLS = new Set(["read", "write", "edit"]);
         let wasConfidential = false;
+        // `.maestro/plugin-version` (isPluginMetaFile) исключён из confidential
+        // и для write/edit тоже — намеренно: файл нечувствителен (semver),
+        // перезаписывается плагином при каждом init. Не «закрывать» read обратно.
         if (confidential.exists && CONF_TOOLS.has(input.tool)) {
           const target = filePathOf(input.tool, output?.args);
           if (target && !isPluginMetaFile(root, target) && isConfidentialTarget(root, confidential.paths, target)) {
