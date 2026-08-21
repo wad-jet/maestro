@@ -160,6 +160,76 @@ deny. Trust не наследуется вложенными субагента�
 > плагина и **не блокирует** init при его отсутствии — плагин может быть не
 > поднят, а confidential-данные уже созданы.
 
+#### Логи плагина: формат и структура записей
+
+Плагин `maestro-bootstrap` пишет JSONL-логи в `.maestro/logs/` (gitignored,
+разбивка по дням) — **два** лога с разным назначением:
+
+- `maestro-bootstrap-<дата>.log` — **observability**: task-диспатчи, ошибки/повторы
+  сессий, sanitizer. Подчиняется `MAESTRO_BOOTSTRAP_LOG_MASK`/`LOG_LEVEL`.
+- `maestro-audit-<дата>.log` — **security-фактура**: доступ к confidential
+  (`allow`/`deny`) и блокировки `access_policy`. Пишется **всегда**, не зависит
+  от bootstrap-маски/порога.
+
+**Security-события живут ТОЛЬКО в аудит-логе** — bootstrap-лог их не дублирует.
+
+Общий JSONL-формат строки:
+
+```json
+{"ts":"<ISO>","level":"debug|info|warn|error","msg":"<событие>","sessionID":"...","callID":"...","tool":"...","...прочие поля по событию"}
+```
+
+Общие поля: `ts` (ISO-время), `level`, `msg` (тип события), `sessionID`,
+`callID`, `tool`. Дополнительные поля — по типу события.
+
+**События bootstrap-лога:**
+
+| `msg` | Уровень | Доп. поля |
+|---|---|---|
+| `plugin initialized` | info | `version`, `logDir`, `level`, `mask` |
+| `tool.execute.before` | info | `tool` (=task) |
+| `tool.execute.after` | info | `tool`, `durationMs`, `title` (санитизирован, SEC-4) |
+| `tool.execute.after.empty_result` | warn | `tool` |
+| `session.error` | warn | `errorType`, `errorMessage` |
+| `session.status.retry` | warn | `attempt`, `message` |
+| `sanitizer.redacted` | warn | `tool`, `agent`, `redacted` |
+| `sanitizer.all_rules_disabled` | warn | `tool`, `agent` |
+| `sanitizer.unsafe_patterns` | warn | `count` |
+
+**События аудит-лога** (формат строки ниже):
+
+| `msg` | Уровень | Доп. поля |
+|---|---|---|
+| `confidential.access` | info (allow) / warn (deny) | `tool`, `action`, `agent`, `target` |
+| `access_policy.blocked` | warn | `tool`, `action`, `target` |
+
+Структура записи аудит-лога (JSON):
+
+```json
+{"ts":"<ISO>","level":"info|warn","msg":"confidential.access|access_policy.blocked","sessionID":"...","callID":"...","tool":"read|write|edit","action":"allow|deny","agent":"<trusted-агент>|null","target":"<basename>"}
+```
+
+| Поле | Тип | Описание |
+|---|---|---|
+| `level` | `info` \| `warn` | `info` — allow, `warn` — deny/block |
+| `msg` | `confidential.access` \| `access_policy.blocked` | Тип события |
+| `tool` | `read` \| `write` \| `edit` | Инструмент (для `access_policy.blocked` — всегда `read`) |
+| `action` | `allow` \| `deny` | Исход проверки |
+| `agent` | `string` \| `null` | Имя trusted-субагента (из `trust`), если определено; `null` для root/primary |
+| `target` | `string` | `basename` файла (без пути, SEC-5) |
+
+События аудит-лога:
+
+- `confidential.access` — доступ к confidential-пути. `action: "allow"` — trusted-
+  субагент читал/писал (уровень `info`); `action: "deny"` — заблокировано для
+  untrusted/primary или trusted с `trusted.<tool>: deny` (уровень `warn`).
+- `access_policy.blocked` — блокировка файла по `access_policy` (`ask`/`deny`),
+  уровень `warn`.
+
+Каталоги логов задаются env: bootstrap — `MAESTRO_BOOTSTRAP_LOG_DIR`, аудит —
+`MAESTRO_AUDIT_LOG_DIR` (по умолчанию оба `<project>/.maestro/logs`). Сбой записи
+аудита логируется в `console.error` (не ломая сессию).
+
 ### Секция `sanitizer_whitelist`
 
 Правила санитайзера для маскирования чувствительных данных в промптах перед
