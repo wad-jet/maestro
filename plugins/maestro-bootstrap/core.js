@@ -744,6 +744,7 @@ export function makeBoundedMap(max = 1024) {
 
 export const MaestroBootstrapPlugin = async ({ directory, client }) => {
   const root = directory || process.cwd();
+  const version = readPluginVersion();
   const log = makeLogger(root);
   const config = loadMaestroConfig(undefined, root);
   const whitelist = loadWhitelist(config);
@@ -759,7 +760,9 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
       count: unsafePatterns.length,
     });
   }
+  writePluginVersionFile(root, version);
   log.info("plugin initialized", {
+    version,
     logDir: log.logDir,
     level: log.level,
     mask: log.mask,

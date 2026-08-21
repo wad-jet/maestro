@@ -1335,4 +1335,17 @@ describe("maestro-bootstrap plugin version", () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("plugin initialized log entry includes the version field", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-ver-log-"));
+    try {
+      await MaestroBootstrapPlugin({ directory: dir });
+      const entries = readLogs(dir);
+      const init = entries.find((e) => e.msg === "plugin initialized");
+      assert.ok(init, "plugin initialized entry must exist");
+      assert.match(init.version, /^\d+\.\d+\.\d+$/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
