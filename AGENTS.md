@@ -38,7 +38,7 @@ Test (Node built-in test runner, no deps):
 
 ```bash
 node --test plugins/maestro-bootstrap/index.test.js
-# or: cd plugins/maestro-bootstrap && npm test
+# or: npm test
 ```
 
 - Global observability (not bound to any agent): logs key events for all sessions — `session.error`, `task` dispatch (`tool.execute.before`/`tool.execute.after`, sanitized title), empty subagent result, access-policy blocks. Sanitizes `task` prompts (Level 1 Security Review) before untrusted subagents. The old bootstrap-directive injection via `experimental.chat.messages.transform` was removed — `transform` must stay `undefined`.

@@ -210,8 +210,8 @@ commands/maestro.md       →  .opencode/commands/maestro.md
 
 ```bash
 node --test plugins/maestro-bootstrap/index.test.js
-# или из каталога:
-cd plugins/maestro-bootstrap && npm test
+# или:
+npm test
 ```
 
 ---

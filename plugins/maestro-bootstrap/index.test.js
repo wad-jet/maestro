@@ -1306,10 +1306,16 @@ describe("maestro-bootstrap confidential path bypass closure", () => {
 });
 
 describe("maestro-bootstrap plugin version", () => {
-  it("readPluginVersion returns the version from package.json", () => {
+  it("readPluginVersion returns the version from the repo root package.json", () => {
+    const rootPkgPath = path.resolve(
+      path.dirname(new URL(import.meta.url).pathname),
+      "../../package.json"
+    );
+    const expected = JSON.parse(fs.readFileSync(rootPkgPath, "utf8")).version;
     const version = readPluginVersion();
     assert.equal(typeof version, "string");
     assert.match(version, /^\d+\.\d+\.\d+$/);
+    assert.equal(version, expected, "version must come from the single root package.json");
   });
 
   it("writePluginVersionFile writes version to .maestro/plugin-version", () => {

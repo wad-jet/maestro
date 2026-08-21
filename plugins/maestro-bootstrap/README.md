@@ -232,13 +232,14 @@ tail -f .maestro/logs/maestro-bootstrap-$(date +%F).log | jq -r ...'
 
 ## Тесты
 
-Тесты плагина запускаются встроенным runner-ом Node:
+Тесты плагина запускаются встроенным runner-ом Node из **корня репозитория**
+(единственный `package.json` — корневой):
 
 ```bash
 node --test plugins/maestro-bootstrap/index.test.js
 ```
 
-или из каталога плагина:
+или:
 
 ```bash
 npm test
