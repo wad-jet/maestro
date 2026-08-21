@@ -66,6 +66,16 @@
 ## [Unreleased]
 
 ### Добавлено
+- **Защищённая папка `docs/confidential`**: секция `confidential` в `maestro.json`
+  закрывает конфиденциальные пути (дефолт `docs/confidential/**`) для
+  `read`/`write`/`edit` от всех, кроме trusted-субагентов. Primary/untrusted —
+  жёсткий deny; trusted читает (по умолчанию), пишет только по явному
+  `trusted.write`/`trusted.edit: allow`. Плагин определяет отправителя через
+  `client.session.get` + `session.messages` (детект по `parentID` и имени агента).
+  `/maestro-init` создаёт `docs/confidential/` и секцию `confidential`.
+  Ограничение: `bash`/`glob`/`grep` не покрываются — рекомендован 2-й эшелон
+  через native permissions OpenCode (`permission.bash`); при отключённом плагине
+  защита не действует (fail-open).
 - **`@maestro-feedback-report`: пользовательский фидбек**: выделена логика
   генерации отчёта в скилл `skills/maestro-feedback-report/SKILL.md`
   (переиспользование в сабэджентах без HITL). Команда `@maestro-feedback-report`
