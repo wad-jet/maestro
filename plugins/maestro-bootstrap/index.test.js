@@ -1045,3 +1045,127 @@ describe("maestro-bootstrap filePathOf for confidential tools", () => {
     assert.equal(filePathOf("read", {}), undefined);
   });
 });
+
+describe("maestro-bootstrap confidential enforcement", () => {
+  let dir, hooks, savedLogEnv;
+  const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR"];
+
+  function makeClient(sessions) {
+    return {
+      session: {
+        get: async ({ path }) => {
+          const rec = sessions[path.id];
+          if (!rec) throw new Error("not found");
+          return { data: rec.session };
+        },
+        messages: async ({ path }) => {
+          const rec = sessions[path.id];
+          if (!rec) return { data: [] };
+          return { data: rec.messages };
+        },
+      },
+    };
+  }
+
+  const rootSessions = {
+    root: { session: { id: "root" }, messages: [] },
+    childTrusted: {
+      session: { id: "childTrusted", parentID: "root" },
+      messages: [{ info: { role: "assistant", mode: "design" }, parts: [] }],
+    },
+    childUntrusted: {
+      session: { id: "childUntrusted", parentID: "root" },
+      messages: [{ info: { role: "assistant", mode: "haiku" }, parts: [] }],
+    },
+  };
+
+  before(async () => {
+    savedLogEnv = {};
+    for (const k of LOG_ENV) { savedLogEnv[k] = process.env[k]; delete process.env[k]; }
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-conf-"));
+    fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({
+      trust: { design: true },
+      confidential: { paths: ["docs/confidential/**"], trusted: { read: "allow", write: "deny", edit: "deny" } },
+    }));
+    hooks = await MaestroBootstrapPlugin({ directory: dir, client: makeClient(rootSessions) });
+  });
+
+  after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    for (const k of LOG_ENV) {
+      if (savedLogEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedLogEnv[k];
+    }
+  });
+
+  it("allows trusted subagent read of confidential", async () => {
+    const out = { args: { filePath: "docs/confidential/secrets.md" } };
+    await hooks["tool.execute.before"]({ tool: "read", sessionID: "childTrusted", callID: "c1" }, out);
+    assert.ok(true);
+  });
+
+  it("denies trusted subagent write to confidential (write=deny)", async () => {
+    const out = { args: { filePath: "docs/confidential/x.md", content: "hi" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "write", sessionID: "childTrusted", callID: "c2" }, out),
+      /confidential:deny/,
+    );
+  });
+
+  it("denies untrusted subagent read of confidential", async () => {
+    const out = { args: { filePath: "docs/confidential/secrets.md" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "childUntrusted", callID: "c3" }, out),
+      /confidential:deny/,
+    );
+  });
+
+  it("denies primary/root read of confidential", async () => {
+    const out = { args: { filePath: "docs/confidential/secrets.md" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c4" }, out),
+      /confidential:deny/,
+    );
+  });
+
+  it("denies root session when no client provided (fail-closed)", async () => {
+    const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), "fab-conf2-"));
+    fs.writeFileSync(path.join(dir2, "maestro.json"), JSON.stringify({
+      confidential: { paths: ["docs/confidential/**"] },
+    }));
+    const h2 = await MaestroBootstrapPlugin({ directory: dir2 });
+    try {
+      const out = { args: { filePath: "docs/confidential/secrets.md" } };
+      await assert.rejects(
+        h2["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c5" }, out),
+        /confidential:deny/,
+      );
+    } finally {
+      fs.rmSync(dir2, { recursive: true, force: true });
+    }
+  });
+
+  it("does not apply confidential to non-confidential paths (passes to access_policy)", async () => {
+    const out = { args: { filePath: "src/app.ts" } };
+    await hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c6" }, out);
+    assert.ok(true);
+  });
+
+  it("ignores access_policy.allow on confidential path (confidential wins)", async () => {
+    const dir3 = fs.mkdtempSync(path.join(os.tmpdir(), "fab-conf3-"));
+    fs.writeFileSync(path.join(dir3, "maestro.json"), JSON.stringify({
+      access_policy: { default: "allow", allow: ["docs/confidential/**"] },
+      confidential: { paths: ["docs/confidential/**"] },
+    }));
+    const h3 = await MaestroBootstrapPlugin({ directory: dir3 });
+    try {
+      const out = { args: { filePath: "docs/confidential/secrets.md" } };
+      await assert.rejects(
+        h3["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c7" }, out),
+        /confidential:deny/,
+      );
+    } finally {
+      fs.rmSync(dir3, { recursive: true, force: true });
+    }
+  });
+});

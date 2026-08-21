@@ -667,12 +667,13 @@ export function makeBoundedMap(max = 1024) {
   };
 }
 
-export const MaestroBootstrapPlugin = async ({ directory }) => {
+export const MaestroBootstrapPlugin = async ({ directory, client }) => {
   const root = directory || process.cwd();
   const log = makeLogger(root);
   const config = loadMaestroConfig(undefined, root);
   const whitelist = loadWhitelist(config);
   const accessPolicy = loadAccessPolicy(config);
+  const confidential = loadConfidentialConfig(config);
   const trustedAgents = loadTrustConfig(config);
   // SEC-6: если whitelist-`patterns` содержит значения, которые сами матчатся
   // safety-правилами (оператор занёс реальный секрет) — предупредить.
@@ -691,6 +692,9 @@ export const MaestroBootstrapPlugin = async ({ directory }) => {
 
   // callID -> timestamp (для подсчёта длительности тула)
   const toolCalls = makeBoundedMap(2048);
+
+  // sessionID -> trusted-статус субагента (кэш для confidential-контроля)
+  const sessionTrustCache = makeBoundedMap(2048);
 
   const plugin = {
     config: undefined,
@@ -721,6 +725,38 @@ export const MaestroBootstrapPlugin = async ({ directory }) => {
 
     "tool.execute.before": async (input, output) => {
       try {
+        // Confidential control (Уровень 3+): жёсткий deny для не-trusted по
+        // `confidential.paths`. Строже access_policy: если путь confidential —
+        // access_policy для него не применяется (confidential выигрывает).
+        // Покрывает read/write/edit. bash/glob/grep — нативные permissions.
+        const CONF_TOOLS = new Set(["read", "write", "edit"]);
+        if (confidential.exists && CONF_TOOLS.has(input.tool)) {
+          const target = filePathOf(input.tool, output?.args);
+          if (target && confidential.paths.some((p) => globMatch(p, target))) {
+            let isTrustedSubagent = sessionTrustCache.get(input.sessionID);
+            if (isTrustedSubagent === undefined) {
+              isTrustedSubagent = await resolveIsTrustedSubagent(client, trustedAgents, input.sessionID);
+              sessionTrustCache.set(input.sessionID, isTrustedSubagent);
+            }
+            const action = resolveConfidentialAction(confidential, input.tool, isTrustedSubagent);
+            if (action !== "allow") {
+              log.warn("confidential.blocked", {
+                sessionID: input.sessionID,
+                callID: input.callID,
+                tool: input.tool,
+                action,
+                target: path.basename(target),
+              });
+              const err = new Error(
+                `[confidential:deny] Доступ к "${target}" запрещён. ` +
+                  `Доступ к confidential-путям разрешён только trusted-субагентам.`,
+              );
+              err.confidential = true;
+              throw err;
+            }
+          }
+        }
+
         // File access control (Уровень 3): перехват file-тулов по
         // access-policy.json. `allow` → пропускаем, `ask` → блокируем с
         // сообщением (HITL решает оркестратор), `deny` → жёсткий блок.
@@ -796,9 +832,9 @@ export const MaestroBootstrapPlugin = async ({ directory }) => {
           });
         }
       } catch (err) {
-        if (err?.accessPolicy) {
-          // Access-policy-нарушение — обязано дойти до OpenCode (реальный блок),
-          // не замалчиваться логгером.
+        if (err?.accessPolicy || err?.confidential) {
+          // Access/confidential-нарушение — обязано дойти до OpenCode (реальный
+          // блок), не замалчиваться логгером.
           throw err;
         }
         log.error("tool.execute.before: error", {
