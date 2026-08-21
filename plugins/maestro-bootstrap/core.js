@@ -562,6 +562,18 @@ export function normalizeTarget(root, target) {
 }
 
 /**
+ * Whether a target path is the plugin's own version metadata file.
+ * `.maestro/plugin-version` — внутренний diagnostic-файл плагина; не подпадает
+ * под access_policy/confidential (должен быть всегда читаем для /maestro-version).
+ * @param {string} root    Project root (absolute).
+ * @param {string} target  Raw path from tool args.
+ * @returns {boolean}
+ */
+export function isPluginMetaFile(root, target) {
+  return normalizeTarget(root, target) === ".maestro/plugin-version";
+}
+
+/**
  * Check whether a target path falls within any confidential pattern.
  * Confidential — security-граница: матчинг case-insensitive (APFS/NTFS могут
  * резолвить case-варианты в тот же файл) и блокирует как файлы под паттерном,
@@ -811,7 +823,7 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
         let wasConfidential = false;
         if (confidential.exists && CONF_TOOLS.has(input.tool)) {
           const target = filePathOf(input.tool, output?.args);
-          if (target && isConfidentialTarget(root, confidential.paths, target)) {
+          if (target && !isPluginMetaFile(root, target) && isConfidentialTarget(root, confidential.paths, target)) {
             wasConfidential = true;
             let isTrustedSubagent = sessionTrustCache.get(input.sessionID);
             if (isTrustedSubagent === undefined) {
@@ -847,7 +859,7 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
         const FILE_TOOLS = new Set(["read"]);
         if (accessPolicy.exists && FILE_TOOLS.has(input.tool) && !wasConfidential) {
           const target = filePathOf(input.tool, output?.args);
-          if (target) {
+          if (target && !isPluginMetaFile(root, target)) {
             const action = resolveFileAccess(accessPolicy, target);
             if (action !== "allow") {
               // SEC-5: в лог — только basename (не раскрывать полную структуру путей);

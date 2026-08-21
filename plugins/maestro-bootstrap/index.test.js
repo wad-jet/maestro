@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, readPluginVersion, writePluginVersionFile } from "./core.js";
+import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, readPluginVersion, writePluginVersionFile, isPluginMetaFile } from "./core.js";
 
 function readLogs(dir) {
   const logDir = path.join(dir, ".maestro/logs");
@@ -1347,5 +1347,50 @@ describe("maestro-bootstrap plugin version", () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("maestro-bootstrap plugin version file access", () => {
+  let dir, hooks, savedLogEnv;
+  const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR"];
+
+  before(async () => {
+    savedLogEnv = {};
+    for (const k of LOG_ENV) { savedLogEnv[k] = process.env[k]; delete process.env[k]; }
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-ver-access-"));
+    // Строгий access_policy: всё — ask (default), ничего не allow.
+    fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({
+      access_policy: { default: "ask", allow: [], ask: [], deny: [] },
+    }));
+    hooks = await MaestroBootstrapPlugin({ directory: dir });
+  });
+
+  after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    for (const k of LOG_ENV) {
+      if (savedLogEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedLogEnv[k];
+    }
+  });
+
+  it("isPluginMetaFile identifies .maestro/plugin-version", () => {
+    assert.equal(isPluginMetaFile(dir, ".maestro/plugin-version"), true);
+    assert.equal(isPluginMetaFile(dir, "src/app.ts"), false);
+    assert.equal(isPluginMetaFile(dir, ".maestro/logs/x.log"), false);
+  });
+
+  it("read of .maestro/plugin-version is NOT blocked by restrictive access_policy", async () => {
+    const out = { args: { filePath: ".maestro/plugin-version" } };
+    // не должно выбросить [access-policy:ask]
+    await hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c-ver" }, out);
+    assert.ok(true, "plugin version read must not be blocked");
+  });
+
+  it("read of a normal file still blocked by restrictive access_policy", async () => {
+    const out = { args: { filePath: "docs/readme.md" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c-blocked" }, out),
+      /access-policy:ask/,
+    );
   });
 });
