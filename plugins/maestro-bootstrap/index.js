@@ -18,10 +18,13 @@ import { MaestroBootstrapPlugin } from "./core.js";
 
 let _mbHooks = null;
 
-export default async function opencodePlugin() {
+export default async function opencodePlugin(input) {
   if (!_mbHooks) {
     try {
-      _mbHooks = await MaestroBootstrapPlugin({ directory: process.cwd() });
+      _mbHooks = await MaestroBootstrapPlugin({
+        directory: process.cwd(),
+        client: input?.client,
+      });
     } catch {
       /* logging must not break opencode */
     }
