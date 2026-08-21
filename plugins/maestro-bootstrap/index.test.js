@@ -634,9 +634,11 @@ describe("maestro-bootstrap access policy (file access control)", () => {
     assert.equal(resolveFileAccess(allowDefault, "anything"), "allow");
   });
 
-  it("filePathOf extracts target only for read tool", () => {
+  it("filePathOf extracts target for read/write/edit, not bash/glob/grep", () => {
     assert.equal(filePathOf("read", { filePath: "a.ts" }), "a.ts");
     assert.equal(filePathOf("read", {}), undefined);
+    assert.equal(filePathOf("write", { filePath: "docs/confidential/x.md", content: "hi" }), "docs/confidential/x.md");
+    assert.equal(filePathOf("edit", { filePath: "docs/confidential/y.md", oldString: "a", newString: "b" }), "docs/confidential/y.md");
     // bash/glob/grep не покрываются access-policy (C1/I4) — возвращают undefined.
     assert.equal(filePathOf("glob", { pattern: "src/**" }), undefined);
     assert.equal(filePathOf("bash", { command: "cat docs/x.md" }), undefined);
@@ -1025,5 +1027,21 @@ describe("maestro-bootstrap confidential subagent identity", () => {
   it("denies on session lookup error (fail-closed)", async () => {
     const client = mockClient({ session: { id: "missing" } });
     assert.equal(await resolveIsTrustedSubagent(client, new Set(["design"]), "missing"), false);
+  });
+});
+
+describe("maestro-bootstrap filePathOf for confidential tools", () => {
+  it("extracts filePath from read", () => {
+    assert.equal(filePathOf("read", { filePath: "src/a.ts" }), "src/a.ts");
+  });
+  it("extracts filePath from write", () => {
+    assert.equal(filePathOf("write", { filePath: "docs/confidential/x.md", content: "hi" }), "docs/confidential/x.md");
+  });
+  it("extracts filePath from edit", () => {
+    assert.equal(filePathOf("edit", { filePath: "docs/confidential/y.md", oldString: "a", newString: "b" }), "docs/confidential/y.md");
+  });
+  it("returns undefined for non-file tools", () => {
+    assert.equal(filePathOf("bash", { command: "ls" }), undefined);
+    assert.equal(filePathOf("read", {}), undefined);
   });
 });

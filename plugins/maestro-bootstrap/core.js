@@ -581,13 +581,15 @@ export function resolveFileAccess(policy, filePath) {
  * Extract a target file path from a file tool's args for access-policy checks.
  * access-policy контролирует только `read` (чёткий filePath); bash/glob/grep
  * не покрываются (bash-пути ненадёжно извлекаются, glob/grep — паттерны).
- * @param {string} tool  Tool name (read).
+ * Confidential-контроль распространяет `filePathOf` на `write`/`edit`
+ * (у всех трёх тулов аргумент `filePath`).
+ * @param {string} tool  Tool name (read|write|edit).
  * @param {object} args  Tool args.
  * @returns {string|undefined}  Path to match, if any.
  */
 export function filePathOf(tool, args) {
   if (!args) return undefined;
-  if (tool === "read" && typeof args.filePath === "string") {
+  if ((tool === "read" || tool === "write" || tool === "edit") && typeof args.filePath === "string") {
     return args.filePath;
   }
   return undefined;
