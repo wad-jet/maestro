@@ -461,6 +461,55 @@ export function resolveConfidentialAction(conf, tool, isTrustedSubagent) {
 }
 
 /**
+ * Extract the agent name from a session's messages (defensive).
+ * Возвращает первое найденное имя: AssistantMessage.mode / UserMessage.agent /
+ * AgentPart.name / SubtaskPart.agent.
+ * @param {Array} messages  Response from client.session.messages (array of {info, parts}).
+ * @returns {string|undefined}
+ */
+function agentNameFromMessages(messages) {
+  for (const m of messages ?? []) {
+    const info = m?.info ?? {};
+    if (typeof info.agent === "string" && info.agent) return info.agent;
+    if (typeof info.mode === "string" && info.mode) return info.mode;
+    for (const part of m?.parts ?? []) {
+      if (part?.type === "agent" && typeof part.name === "string" && part.name) return part.name;
+      if (part?.type === "subtask" && typeof part.agent === "string" && part.agent) return part.agent;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Determine whether a tool call originates from a trusted subagent.
+ * Fail-closed: без client, без parentID (primary), не резолвится агент, ошибка
+ * lookup — всё трактуется как untrusted → deny.
+ * @param {object|undefined} client  OpenCode SDK client (from plugin closure).
+ * @param {Set<string>} trustedAgents  Trusted subagent names.
+ * @param {string} sessionID  Session that made the tool call.
+ * @returns {Promise<boolean>}
+ */
+export async function resolveIsTrustedSubagent(client, trustedAgents, sessionID) {
+  if (!client?.session?.get) return false;
+  let session;
+  try {
+    const resp = await client.session.get({ path: { id: sessionID } });
+    session = resp?.data ?? resp;
+  } catch {
+    return false;
+  }
+  if (!session?.parentID) return false; // root/primary
+  try {
+    const mresp = await client.session.messages({ path: { id: sessionID } });
+    const messages = mresp?.data ?? mresp;
+    const agent = agentNameFromMessages(Array.isArray(messages) ? messages : []);
+    return Boolean(agent && trustedAgents.has(agent));
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Simple glob→boolean matcher. Supports `*` (any chars), `?` (one char),
  * and `{a,b,c}` brace alternation.
  * @param {string} pattern  Glob pattern.

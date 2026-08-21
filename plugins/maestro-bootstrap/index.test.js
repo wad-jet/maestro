@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig } from "./core.js";
+import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent } from "./core.js";
 
 function readLogs(dir) {
   const logDir = path.join(dir, ".maestro/logs");
@@ -957,5 +957,73 @@ describe("maestro-bootstrap confidential config", () => {
     assert.equal(c.trusted.read, "deny");
     assert.equal(c.trusted.write, "allow");
     assert.equal(c.trusted.edit, "allow");
+  });
+});
+
+describe("maestro-bootstrap confidential subagent identity", () => {
+  function mockClient({ session = {}, messages = [] } = {}) {
+    return {
+      session: {
+        get: async ({ path }) => {
+          if (session.id === "missing") throw new Error("not found");
+          return { data: session };
+        },
+        messages: async () => ({ data: messages }),
+      },
+    };
+  }
+
+  it("denies when no client (fail-closed)", async () => {
+    assert.equal(await resolveIsTrustedSubagent(undefined, new Set(["design"]), "s1"), false);
+  });
+
+  it("denies root/primary session (no parentID)", async () => {
+    const client = mockClient({ session: { id: "root" } });
+    assert.equal(await resolveIsTrustedSubagent(client, new Set(["design"]), "root"), false);
+  });
+
+  it("allows trusted subagent by AssistantMessage.mode", async () => {
+    const client = mockClient({
+      session: { id: "child", parentID: "root" },
+      messages: [{ info: { role: "assistant", mode: "design" }, parts: [] }],
+    });
+    assert.equal(await resolveIsTrustedSubagent(client, new Set(["design"]), "child"), true);
+  });
+
+  it("denies untrusted subagent", async () => {
+    const client = mockClient({
+      session: { id: "child", parentID: "root" },
+      messages: [{ info: { role: "assistant", mode: "haiku" }, parts: [] }],
+    });
+    assert.equal(await resolveIsTrustedSubagent(client, new Set(["design"]), "child"), false);
+  });
+
+  it("allows by UserMessage.agent", async () => {
+    const client = mockClient({
+      session: { id: "child", parentID: "root" },
+      messages: [{ info: { role: "user", agent: "sanitizer" }, parts: [] }],
+    });
+    assert.equal(await resolveIsTrustedSubagent(client, new Set(["sanitizer"]), "child"), true);
+  });
+
+  it("allows by SubtaskPart.agent in parts", async () => {
+    const client = mockClient({
+      session: { id: "child", parentID: "root" },
+      messages: [{ info: { role: "assistant" }, parts: [{ type: "subtask", agent: "design" }] }],
+    });
+    assert.equal(await resolveIsTrustedSubagent(client, new Set(["design"]), "child"), true);
+  });
+
+  it("denies when agent not resolvable", async () => {
+    const client = mockClient({
+      session: { id: "child", parentID: "root" },
+      messages: [{ info: { role: "assistant" }, parts: [] }],
+    });
+    assert.equal(await resolveIsTrustedSubagent(client, new Set(["design"]), "child"), false);
+  });
+
+  it("denies on session lookup error (fail-closed)", async () => {
+    const client = mockClient({ session: { id: "missing" } });
+    assert.equal(await resolveIsTrustedSubagent(client, new Set(["design"]), "missing"), false);
   });
 });
