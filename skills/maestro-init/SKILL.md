@@ -28,8 +28,8 @@ pipeline maestro: есть `docs/project-context.md` (источник конт�
 |---|---|
 | 1. `/init` гейт | `AGENTS.md` (проверка/создание через встроенный `/init`) |
 | 2. Контекст | `docs/project-context.md` (14 категорий, см. `init-context.md`) |
-| 3. Конфиг | `maestro.json` (trust/access_policy/sanitizer_whitelist) + `opencode.json` (plugin + агенты M1) + `.gitignore` + `regression/` |
-| 3а. Каталоги | `.maestro/`, `docs/superpowers/{specs,plans}/` |
+| 3. Конфиг | `maestro.json` (trust/access_policy/confidential/sanitizer_whitelist) + `opencode.json` (plugin + агенты M1) + `.gitignore` + `regression/` |
+| 3а. Каталоги | `.maestro/`, `docs/superpowers/{specs,plans}/`, `docs/confidential/` |
 | 4. superpowers | проверка/установка (HITL) |
 | 5. плагин | проверка подключения `maestro-bootstrap` (не блокер) |
 
@@ -104,10 +104,11 @@ pipeline maestro: есть `docs/project-context.md` (источник конт�
 Перед генерацией конфигов (идемпотентно, `mkdir -p` безопасен):
 - `mkdir -p .maestro/` (для логов плагина и `last-run.md`)
 - `mkdir -p docs/superpowers/specs docs/superpowers/plans` (для `/maestro-design`)
+- `mkdir -p docs/confidential` (защищённая папка, см. `confidential` в `maestro.json`)
 
 ### maestro.json (консолидированный конфиг, коммитится в git)
 
-Три секции:
+Четыре секции:
 
 **`trust`** — только trusted сабагенты (`true`):
 ```json
@@ -130,6 +131,19 @@ pipeline maestro: есть `docs/project-context.md` (источник конт�
 }
 ```
 Эталон: `plugins/maestro-bootstrap/examples/maestro.example.json`.
+
+**`confidential`** — защита конфиденциальных путей (строже `access_policy`):
+```json
+"confidential": {
+  "version": 1,
+  "paths": ["docs/confidential/**"],
+  "trusted": { "read": "allow", "write": "deny", "edit": "deny" }
+}
+```
+- Дефолт: `paths: ["docs/confidential/**"]`; trusted читает, запись/редактирование —
+  deny (выдаются явно). Untrusted/primary — всегда deny.
+- Идемпотентность: при существующем `confidential` merge сохраняет правки; если
+  секции нет — добавляется дефолтная.
 
 **`sanitizer_whitelist`** — из §3 + §12:
 ```json
