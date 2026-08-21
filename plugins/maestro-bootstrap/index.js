@@ -25,8 +25,12 @@ export default async function opencodePlugin(input) {
         directory: process.cwd(),
         client: input?.client,
       });
-    } catch {
-      /* logging must not break opencode */
+    } catch (err) {
+      // I2: проглоченный сбой init тихо отключает ВСЕ хуки (confidential,
+      // sanitizer, access_policy) → fail-open. Логируем, чтобы не было тихого
+      // отключения защиты. Плагин не кэшируется — следующая инвокация повторит.
+      console.error("[maestro-bootstrap] init failed:", err instanceof Error ? err.message : err);
+      _mbHooks = null;
     }
   }
 
