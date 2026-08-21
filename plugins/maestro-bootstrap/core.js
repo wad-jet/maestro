@@ -706,14 +706,16 @@ export function makeLogger(directory) {
 }
 
 /**
- * Read the plugin version from its own package.json.
- * package.json лежит рядом с core.js (и при npm-установке, и при локальном пути),
- * поэтому путь резолвится относительно import.meta.url.
+ * Read the plugin version from the repo root package.json.
+ * Плагин живёт в `plugins/maestro-bootstrap/` внутри репозитория `wad-jet/maestro`;
+ * единственный источник версии — корневой `package.json` (git-установка читает его
+ * через `main` → `plugins/maestro-bootstrap/index.js`). Путь резолвится относительно
+ * `core.js`: `../../package.json` (фиксированная глубина макета репо).
  * @returns {string|undefined}  Version string, or undefined on any error (fail-soft).
  */
 export function readPluginVersion() {
   try {
-    const pkgPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "package.json");
+    const pkgPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../package.json");
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
     return typeof pkg.version === "string" && pkg.version ? pkg.version : undefined;
   } catch {

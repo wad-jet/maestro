@@ -18,7 +18,7 @@
 - `manual_docs/reference/config.md` — описание секции `confidential`.
 - `manual_docs/explanation/agents-and-trust.md` — модель доступа к confidential + эшелонирование (риск bash/glob/grep).
 - `manual_docs/overview/changelog.md` — запись изменения.
-- `plugins/maestro-bootstrap/package.json` — bump версии до `1.1.0`.
+- `package.json` (корневой) — bump версии до `1.1.0` (единый источник версии).
 - `plugins/maestro-bootstrap/README.md` — краткое описание новой секции (опционально, по наличию раздела file access control).
 - `skills/maestro-init/SKILL.md` — создание `docs/confidential/` + секция `confidential` в генерируемом `maestro.json`.
 
@@ -725,11 +725,11 @@ git commit -m "feat(maestro-init): create docs/confidential dir and confidential
 ### Task 7: Bump plugin version to 1.1.0
 
 **Files:**
-- Modify: `plugins/maestro-bootstrap/package.json`
+- Modify: `package.json` (корневой)
 
 - [ ] **Step 1: Update version**
 
-В `package.json` строку `"version": "1.0.1"` замени на `"version": "1.1.0"`.
+В корневом `package.json` строку `"version": "1.0.1"` замени на `"version": "1.1.0"`.
 
 - [ ] **Step 2: Run full test suite**
 
@@ -739,7 +739,7 @@ Expected: PASS (все тесты зелёные).
 - [ ] **Step 3: Commit**
 
 ```bash
-git add plugins/maestro-bootstrap/package.json
+git add package.json
 git commit -m "chore(bootstrap): bump version to 1.1.0"
 ```
 

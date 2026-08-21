@@ -12,8 +12,9 @@ description: Use when implementing a feature end-to-end — orchestrates brainst
    НЕТ — проект не под maestro, гейт пропускается, работаем как обычно.
 
 2. **Плагин заявлен в конфиге.** Проверь `opencode.json` → `plugin`: там должна
-   быть запись, указывающая на `maestro-bootstrap` (путь `./plugins/maestro-bootstrap/index.js`
-   или npm-имя `maestro-bootstrap`). Нет → перейти к шагу 4 (стоп).
+   быть запись, указывающая на `maestro-bootstrap` (git-spec
+   `maestro-bootstrap@git+https://github.com/wad-jet/maestro.git` или локальный путь
+   `./plugins/maestro-bootstrap/index.js`). Нет → перейти к шагу 4 (стоп).
 
 3. **Плагин реально работал.** Открой самый свежий файл
    `.maestro/logs/maestro-bootstrap-<дата>.log` (по имени-дате). Найди строку
@@ -30,7 +31,8 @@ description: Use when implementing a feature end-to-end — orchestrates brainst
    > Продолжение работы запрещено. Единственный способ продолжить — подключить
    > плагин и перезапустить opencode:
    > ```
-   > opencode plugin maestro-bootstrap   # или добавить путь в opencode.json
+   > opencode plugin "maestro-bootstrap@git+https://github.com/wad-jet/maestro.git"
+   > # или добавить spec в opencode.json
    > ```
    >
    > (a) Подключить плагин и перезапустить opencode — затем повторить команду

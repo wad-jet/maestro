@@ -4,7 +4,7 @@
 
 **Goal:** Expose the loaded `maestro-bootstrap` plugin version at runtime — via a `.maestro/plugin-version` file, the `plugin initialized` audit-log line, and a `/maestro-version` command.
 
-**Architecture:** A single `readPluginVersion()` reads `version` from the plugin's own `package.json` (resolved relative to `core.js`, reliable for both npm and local installs). At `init`, `writePluginVersionFile()` writes that version to `<project>/.maestro/plugin-version`, and the `plugin initialized` log line gains a `version` field. The new `/maestro-version` command tells an agent to read the version file (with an explicit "not initialized" path when the file is absent). All write/read errors fail soft.
+**Architecture:** A single `readPluginVersion()` reads `version` from the repo root `package.json` (resolved relative to `core.js`, `plugins/maestro-bootstrap/` → `../../package.json`; the plugin is installed from git via the root `package.json`'s `main`). At `init`, `writePluginVersionFile()` writes that version to `<project>/.maestro/plugin-version`, and the `plugin initialized` log line gains a `version` field. The new `/maestro-version` command tells an agent to read the version file (with an explicit "not initialized" path when the file is absent). All write/read errors fail soft.
 
 **Tech Stack:** Node.js (built-in `node:test`, ESM), OpenCode plugin/command system, JSONL logging.
 
@@ -77,7 +77,7 @@ describe("maestro-bootstrap plugin version", () => {
 
 - [ ] **Step 3: Run test to verify it fails**
 
-Run: `cd plugins/maestro-bootstrap && npm test`
+Run: `npm test`
 Expected: FAIL with `readPluginVersion is not a function` (and `writePluginVersionFile is not defined`).
 
 - [ ] **Step 4: Write minimal implementation**
@@ -86,14 +86,15 @@ Add to `core.js` (after the `makeLogger` function, before `makeBoundedMap`):
 
 ```js
 /**
- * Read the plugin version from its own package.json.
- * package.json лежит рядом с core.js (и при npm-установке, и при локальном пути),
- * поэтому путь резолвится относительно import.meta.url.
+ * Read the plugin version from the repo root package.json.
+ * Плагин живёт в `plugins/maestro-bootstrap/` внутри репозитория `wad-jet/maestro`;
+ * единственный источник версии — корневой `package.json`. Путь резолвится
+ * относительно `core.js`: `../../package.json` (фиксированная глубина макета репо).
  * @returns {string|undefined}  Version string, or undefined on any error (fail-soft).
  */
 export function readPluginVersion() {
   try {
-    const pkgPath = path.join(path.dirname(new URL(import.meta.url).pathname), "package.json");
+    const pkgPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../package.json");
     const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
     return typeof pkg.version === "string" && pkg.version ? pkg.version : undefined;
   } catch {
@@ -121,7 +122,7 @@ export function writePluginVersionFile(dir, version) {
 
 - [ ] **Step 5: Run test to verify it passes**
 
-Run: `cd plugins/maestro-bootstrap && npm test`
+Run: `npm test`
 Expected: PASS for all new tests (existing tests also pass).
 
 - [ ] **Step 6: Commit**
@@ -180,7 +181,7 @@ it("plugin initialized log entry includes the version field", async () => {
 
 - [ ] **Step 3: Run tests**
 
-Run: `cd plugins/maestro-bootstrap && npm test`
+Run: `npm test`
 Expected: PASS.
 
 - [ ] **Step 4: Commit**
@@ -323,7 +324,7 @@ git commit -m "chore(init): gitignore .maestro/plugin-version in new projects"
 
 - [ ] **Step 1: Run the full plugin test suite**
 
-Run: `cd plugins/maestro-bootstrap && npm test`
+Run: `npm test`
 Expected: all tests pass (new + existing).
 
 - [ ] **Step 2: Manual smoke test**

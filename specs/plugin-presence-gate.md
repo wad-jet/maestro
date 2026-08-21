@@ -49,7 +49,8 @@ maestro в управляемых проектах: если плагин не �
 
 1. **Плагин заявлен в конфиге** (как `/status`):
    `opencode.json` → `plugin` содержит запись, указывающую на `maestro-bootstrap`
-   (путь `./plugins/maestro-bootstrap/index.js` или npm-имя `maestro-bootstrap`).
+   (git-spec `maestro-bootstrap@git+https://github.com/wad-jet/maestro.git`
+   или локальный путь `./plugins/maestro-bootstrap/index.js`).
 
 2. **Плагин реально работал** (факт инициализации):
    в самом свежем `.maestro/logs/maestro-bootstrap-<дата>.log` есть запись
@@ -70,7 +71,8 @@ maestro в управляемых проектах: если плагин не �
 > Продолжение работы запрещено. Единственный способ продолжить — подключить
 > плагин и перезапустить opencode:
 > ```
-> opencode plugin maestro-bootstrap   # или добавить путь в opencode.json
+> opencode plugin "maestro-bootstrap@git+https://github.com/wad-jet/maestro.git"
+> # или добавить spec в opencode.json
 > ```
 >
 > (a) Подключить плагин и перезапустить opencode — затем повторить команду
