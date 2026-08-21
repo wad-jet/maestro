@@ -66,6 +66,22 @@
 ## [Unreleased]
 
 ### Добавлено
+- **Защищённая папка `docs/confidential`**: секция `confidential` в `maestro.json`
+  закрывает конфиденциальные пути (дефолт `docs/confidential/**`) для
+  `read`/`write`/`edit` от всех, кроме trusted-субагентов. Primary/untrusted —
+  жёсткий deny; trusted читает (по умолчанию), пишет только по явному
+  `trusted.write`/`trusted.edit: allow`. Плагин определяет отправителя через
+  `client.session.get` + `session.messages` (детект по `parentID` и имени агента).
+  `/maestro-init` создаёт `docs/confidential/` и секцию `confidential`.
+  Ограничение: `bash`/`glob`/`grep` не покрываются — рекомендован 2-й эшелон
+  через native permissions OpenCode (`permission.bash`); при отключённом плагине
+  защита не действует (fail-open).
+- **Жёсткий гейт «плагин maestro-bootstrap работает»**: `@maestro`,
+  `@maestro-design`, `@maestro-feedback-report` в maestro-проекте (`maestro.json`
+  есть) при старте проверяют наличие `maestro-bootstrap` в `opencode.json` →
+  `plugin` И свежую запись `plugin initialized` в логе плагина; при невыполнении —
+  жёсткий STOP без «продолжить» (защита `docs/confidential/**` не действует при
+  отключённом плагине). `@maestro-init` и `@regression` не гейтятся.
 - **`@maestro-feedback-report`: пользовательский фидбек**: выделена логика
   генерации отчёта в скилл `skills/maestro-feedback-report/SKILL.md`
   (переиспользование в сабэджентах без HITL). Команда `@maestro-feedback-report`

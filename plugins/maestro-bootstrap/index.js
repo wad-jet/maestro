@@ -18,12 +18,19 @@ import { MaestroBootstrapPlugin } from "./core.js";
 
 let _mbHooks = null;
 
-export default async function opencodePlugin() {
+export default async function opencodePlugin(input) {
   if (!_mbHooks) {
     try {
-      _mbHooks = await MaestroBootstrapPlugin({ directory: process.cwd() });
-    } catch {
-      /* logging must not break opencode */
+      _mbHooks = await MaestroBootstrapPlugin({
+        directory: process.cwd(),
+        client: input?.client,
+      });
+    } catch (err) {
+      // I2: проглоченный сбой init тихо отключает ВСЕ хуки (confidential,
+      // sanitizer, access_policy) → fail-open. Логируем, чтобы не было тихого
+      // отключения защиты. Плагин не кэшируется — следующая инвокация повторит.
+      console.error("[maestro-bootstrap] init failed:", err instanceof Error ? err.message : err);
+      _mbHooks = null;
     }
   }
 

@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled } from "./core.js";
+import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget } from "./core.js";
 
 function readLogs(dir) {
   const logDir = path.join(dir, ".maestro/logs");
@@ -634,9 +634,11 @@ describe("maestro-bootstrap access policy (file access control)", () => {
     assert.equal(resolveFileAccess(allowDefault, "anything"), "allow");
   });
 
-  it("filePathOf extracts target only for read tool", () => {
+  it("filePathOf extracts target for read/write/edit, not bash/glob/grep", () => {
     assert.equal(filePathOf("read", { filePath: "a.ts" }), "a.ts");
     assert.equal(filePathOf("read", {}), undefined);
+    assert.equal(filePathOf("write", { filePath: "docs/confidential/x.md", content: "hi" }), "docs/confidential/x.md");
+    assert.equal(filePathOf("edit", { filePath: "docs/confidential/y.md", oldString: "a", newString: "b" }), "docs/confidential/y.md");
     // bash/glob/grep не покрываются access-policy (C1/I4) — возвращают undefined.
     assert.equal(filePathOf("glob", { pattern: "src/**" }), undefined);
     assert.equal(filePathOf("bash", { command: "cat docs/x.md" }), undefined);
@@ -920,5 +922,385 @@ describe("maestro-bootstrap makeBoundedMap", () => {
     assert.equal(m.size(), 2, "re-set does not grow size");
     assert.equal(m.get("a"), 10);
     assert.equal(m.get("b"), 2);
+  });
+});
+
+describe("maestro-bootstrap confidential config", () => {
+  it("returns defaults when section missing", () => {
+    const c = loadConfidentialConfig({});
+    assert.equal(c.exists, false);
+    assert.deepEqual(c.paths, ["docs/confidential/**"]);
+    assert.deepEqual(c.trusted, { read: "allow", write: "deny", edit: "deny" });
+  });
+
+  it("returns default trusted when section present but empty", () => {
+    const c = loadConfidentialConfig({ confidential: {} });
+    assert.equal(c.exists, true);
+    assert.deepEqual(c.paths, ["docs/confidential/**"]);
+    assert.deepEqual(c.trusted, { read: "allow", write: "deny", edit: "deny" });
+  });
+
+  it("parses paths and trusted map", () => {
+    const c = loadConfidentialConfig({
+      confidential: {
+        paths: ["docs/confidential/**", "secrets/internals/**"],
+        trusted: { read: "deny", write: "allow", edit: "allow" },
+      },
+    });
+    assert.equal(c.exists, true);
+    assert.deepEqual(c.paths, ["docs/confidential/**", "secrets/internals/**"]);
+    assert.deepEqual(c.trusted, { read: "deny", write: "allow", edit: "allow" });
+  });
+
+  it("clamps invalid trusted values to deny", () => {
+    const c = loadConfidentialConfig({
+      confidential: { trusted: { read: "banana", write: "allow", edit: "allow" } },
+    });
+    assert.equal(c.trusted.read, "deny");
+    assert.equal(c.trusted.write, "allow");
+    assert.equal(c.trusted.edit, "allow");
+  });
+});
+
+describe("maestro-bootstrap confidential subagent identity", () => {
+  function mockClient({ session = {}, messages = [] } = {}) {
+    return {
+      session: {
+        get: async ({ path }) => {
+          if (session.id === "missing") throw new Error("not found");
+          return { data: session };
+        },
+        messages: async () => ({ data: messages }),
+      },
+    };
+  }
+
+  it("denies when no client (fail-closed)", async () => {
+    assert.equal(await resolveIsTrustedSubagent(undefined, new Set(["design"]), "s1"), false);
+  });
+
+  it("denies root/primary session (no parentID)", async () => {
+    const client = mockClient({ session: { id: "root" } });
+    assert.equal(await resolveIsTrustedSubagent(client, new Set(["design"]), "root"), false);
+  });
+
+  it("allows trusted subagent by AssistantMessage.mode", async () => {
+    const client = mockClient({
+      session: { id: "child", parentID: "root" },
+      messages: [{ info: { role: "assistant", mode: "design" }, parts: [] }],
+    });
+    assert.equal(await resolveIsTrustedSubagent(client, new Set(["design"]), "child"), true);
+  });
+
+  it("denies untrusted subagent", async () => {
+    const client = mockClient({
+      session: { id: "child", parentID: "root" },
+      messages: [{ info: { role: "assistant", mode: "haiku" }, parts: [] }],
+    });
+    assert.equal(await resolveIsTrustedSubagent(client, new Set(["design"]), "child"), false);
+  });
+
+  it("allows by UserMessage.agent", async () => {
+    const client = mockClient({
+      session: { id: "child", parentID: "root" },
+      messages: [{ info: { role: "user", agent: "sanitizer" }, parts: [] }],
+    });
+    assert.equal(await resolveIsTrustedSubagent(client, new Set(["sanitizer"]), "child"), true);
+  });
+
+  it("allows by SubtaskPart.agent in parts", async () => {
+    const client = mockClient({
+      session: { id: "child", parentID: "root" },
+      messages: [{ info: { role: "assistant" }, parts: [{ type: "subtask", agent: "design" }] }],
+    });
+    assert.equal(await resolveIsTrustedSubagent(client, new Set(["design"]), "child"), true);
+  });
+
+  it("denies when agent not resolvable", async () => {
+    const client = mockClient({
+      session: { id: "child", parentID: "root" },
+      messages: [{ info: { role: "assistant" }, parts: [] }],
+    });
+    assert.equal(await resolveIsTrustedSubagent(client, new Set(["design"]), "child"), false);
+  });
+
+  it("denies on session lookup error (fail-closed)", async () => {
+    const client = mockClient({ session: { id: "missing" } });
+    assert.equal(await resolveIsTrustedSubagent(client, new Set(["design"]), "missing"), false);
+  });
+});
+
+describe("maestro-bootstrap filePathOf for confidential tools", () => {
+  it("extracts filePath from read", () => {
+    assert.equal(filePathOf("read", { filePath: "src/a.ts" }), "src/a.ts");
+  });
+  it("extracts filePath from write", () => {
+    assert.equal(filePathOf("write", { filePath: "docs/confidential/x.md", content: "hi" }), "docs/confidential/x.md");
+  });
+  it("extracts filePath from edit", () => {
+    assert.equal(filePathOf("edit", { filePath: "docs/confidential/y.md", oldString: "a", newString: "b" }), "docs/confidential/y.md");
+  });
+  it("returns undefined for non-file tools", () => {
+    assert.equal(filePathOf("bash", { command: "ls" }), undefined);
+    assert.equal(filePathOf("read", {}), undefined);
+  });
+});
+
+describe("maestro-bootstrap confidential enforcement", () => {
+  let dir, hooks, savedLogEnv;
+  const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR"];
+
+  function makeClient(sessions) {
+    return {
+      session: {
+        get: async ({ path }) => {
+          const rec = sessions[path.id];
+          if (!rec) throw new Error("not found");
+          return { data: rec.session };
+        },
+        messages: async ({ path }) => {
+          const rec = sessions[path.id];
+          if (!rec) return { data: [] };
+          return { data: rec.messages };
+        },
+      },
+    };
+  }
+
+  const rootSessions = {
+    root: { session: { id: "root" }, messages: [] },
+    childTrusted: {
+      session: { id: "childTrusted", parentID: "root" },
+      messages: [{ info: { role: "assistant", mode: "design" }, parts: [] }],
+    },
+    childUntrusted: {
+      session: { id: "childUntrusted", parentID: "root" },
+      messages: [{ info: { role: "assistant", mode: "haiku" }, parts: [] }],
+    },
+  };
+
+  before(async () => {
+    savedLogEnv = {};
+    for (const k of LOG_ENV) { savedLogEnv[k] = process.env[k]; delete process.env[k]; }
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-conf-"));
+    fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({
+      trust: { design: true },
+      confidential: { paths: ["docs/confidential/**"], trusted: { read: "allow", write: "deny", edit: "deny" } },
+    }));
+    hooks = await MaestroBootstrapPlugin({ directory: dir, client: makeClient(rootSessions) });
+  });
+
+  after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    for (const k of LOG_ENV) {
+      if (savedLogEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedLogEnv[k];
+    }
+  });
+
+  it("allows trusted subagent read of confidential", async () => {
+    const out = { args: { filePath: "docs/confidential/secrets.md" } };
+    await hooks["tool.execute.before"]({ tool: "read", sessionID: "childTrusted", callID: "c1" }, out);
+    assert.ok(true);
+  });
+
+  it("denies trusted subagent write to confidential (write=deny)", async () => {
+    const out = { args: { filePath: "docs/confidential/x.md", content: "hi" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "write", sessionID: "childTrusted", callID: "c2" }, out),
+      /confidential:deny/,
+    );
+  });
+
+  it("denies untrusted subagent read of confidential", async () => {
+    const out = { args: { filePath: "docs/confidential/secrets.md" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "childUntrusted", callID: "c3" }, out),
+      /confidential:deny/,
+    );
+  });
+
+  it("denies primary/root read of confidential", async () => {
+    const out = { args: { filePath: "docs/confidential/secrets.md" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c4" }, out),
+      /confidential:deny/,
+    );
+  });
+
+  it("denies root session when no client provided (fail-closed)", async () => {
+    const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), "fab-conf2-"));
+    fs.writeFileSync(path.join(dir2, "maestro.json"), JSON.stringify({
+      confidential: { paths: ["docs/confidential/**"] },
+    }));
+    const h2 = await MaestroBootstrapPlugin({ directory: dir2 });
+    try {
+      const out = { args: { filePath: "docs/confidential/secrets.md" } };
+      await assert.rejects(
+        h2["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c5" }, out),
+        /confidential:deny/,
+      );
+    } finally {
+      fs.rmSync(dir2, { recursive: true, force: true });
+    }
+  });
+
+  it("does not apply confidential to non-confidential paths (passes to access_policy)", async () => {
+    const out = { args: { filePath: "src/app.ts" } };
+    await hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c6" }, out);
+    assert.ok(true);
+  });
+
+  it("ignores access_policy.allow on confidential path (confidential wins)", async () => {
+    const dir3 = fs.mkdtempSync(path.join(os.tmpdir(), "fab-conf3-"));
+    fs.writeFileSync(path.join(dir3, "maestro.json"), JSON.stringify({
+      access_policy: { default: "allow", allow: ["docs/confidential/**"] },
+      confidential: { paths: ["docs/confidential/**"] },
+    }));
+    const h3 = await MaestroBootstrapPlugin({ directory: dir3 });
+    try {
+      const out = { args: { filePath: "docs/confidential/secrets.md" } };
+      await assert.rejects(
+        h3["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c7" }, out),
+        /confidential:deny/,
+      );
+    } finally {
+      fs.rmSync(dir3, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("maestro-bootstrap confidential path normalization", () => {
+  const root = "/proj";
+
+  it("normalizes absolute path to project-relative", () => {
+    assert.equal(normalizeTarget(root, "/proj/docs/confidential/x.md"), "docs/confidential/x.md");
+  });
+
+  it("normalizes relative and dot-prefixed to project-relative", () => {
+    assert.equal(normalizeTarget(root, "docs/confidential/x.md"), "docs/confidential/x.md");
+    assert.equal(normalizeTarget(root, "./docs/confidential/x.md"), "docs/confidential/x.md");
+  });
+
+  it("collapses .. traversal to project-relative (escapes confidential prefix)", () => {
+    assert.equal(normalizeTarget(root, "docs/confidential/../../etc/passwd"), "etc/passwd");
+  });
+
+  it("returns empty string for empty target", () => {
+    assert.equal(normalizeTarget(root, ""), "");
+    assert.equal(normalizeTarget(root, undefined), "");
+  });
+});
+
+describe("maestro-bootstrap isConfidentialTarget", () => {
+  const root = "/proj";
+  const patterns = ["docs/confidential/**"];
+
+  it("blocks file under pattern (relative)", () => {
+    assert.equal(isConfidentialTarget(root, patterns, "docs/confidential/x.md"), true);
+  });
+  it("blocks file under pattern (absolute)", () => {
+    assert.equal(isConfidentialTarget(root, patterns, "/proj/docs/confidential/x.md"), true);
+  });
+  it("blocks file under pattern (dot-prefixed)", () => {
+    assert.equal(isConfidentialTarget(root, patterns, "./docs/confidential/x.md"), true);
+  });
+  it("blocks case-variant path (case-insensitive boundary)", () => {
+    assert.equal(isConfidentialTarget(root, patterns, "docs/Confidential/X.MD"), true);
+  });
+  it("blocks the directory itself (C2)", () => {
+    assert.equal(isConfidentialTarget(root, patterns, "docs/confidential"), true);
+    assert.equal(isConfidentialTarget(root, patterns, "/proj/docs/confidential"), true);
+  });
+  it("blocks subdirectory listing under pattern", () => {
+    assert.equal(isConfidentialTarget(root, patterns, "docs/confidential/subdir"), true);
+  });
+  it("does not block non-confidential paths", () => {
+    assert.equal(isConfidentialTarget(root, patterns, "src/app.ts"), false);
+    assert.equal(isConfidentialTarget(root, patterns, "docs/readme.md"), false);
+    assert.equal(isConfidentialTarget(root, patterns, "docs/confidentialx.md"), false);
+  });
+  it("does not block .. traversal that escapes the pattern prefix", () => {
+    assert.equal(isConfidentialTarget(root, patterns, "docs/confidential/../../src/app.ts"), false);
+  });
+});
+
+describe("maestro-bootstrap confidential path bypass closure", () => {
+  let dir, hooks, savedLogEnv;
+  const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR"];
+
+  function makeClient() {
+    return {
+      session: {
+        get: async ({ path }) => {
+          if (path.id === "root") return { data: { id: "root" } };
+          if (path.id === "childUntrusted") return { data: { id: "childUntrusted", parentID: "root" } };
+          throw new Error("not found");
+        },
+        messages: async ({ path }) => {
+          if (path.id === "childUntrusted") {
+            return { data: [{ info: { role: "assistant", mode: "haiku" }, parts: [] }] };
+          }
+          return { data: [] };
+        },
+      },
+    };
+  }
+
+  before(async () => {
+    savedLogEnv = {};
+    for (const k of LOG_ENV) { savedLogEnv[k] = process.env[k]; delete process.env[k]; }
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-cfix-"));
+    fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({
+      confidential: { paths: ["docs/confidential/**"] },
+    }));
+    hooks = await MaestroBootstrapPlugin({ directory: dir, client: makeClient() });
+  });
+
+  after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    for (const k of LOG_ENV) {
+      if (savedLogEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedLogEnv[k];
+    }
+  });
+
+  it("denies absolute-path read of confidential (C1)", async () => {
+    const abs = path.join(dir, "docs/confidential/secrets.md");
+    const out = { args: { filePath: abs } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c1" }, out),
+      /confidential:deny/,
+    );
+  });
+
+  it("denies dot-prefixed read of confidential (C1)", async () => {
+    const out = { args: { filePath: "./docs/confidential/secrets.md" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c2" }, out),
+      /confidential:deny/,
+    );
+  });
+
+  it("denies case-variant read of confidential (C1)", async () => {
+    const out = { args: { filePath: "docs/Confidential/secrets.md" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c3" }, out),
+      /confidential:deny/,
+    );
+  });
+
+  it("denies directory listing of confidential (C2)", async () => {
+    const out = { args: { filePath: "docs/confidential" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c4" }, out),
+      /confidential:deny/,
+    );
+  });
+
+  it("does not break non-confidential paths", async () => {
+    const out = { args: { filePath: "src/app.ts" } };
+    await hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c5" }, out);
+    assert.ok(true);
   });
 });

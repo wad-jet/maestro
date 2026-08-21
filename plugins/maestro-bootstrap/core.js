@@ -409,6 +409,106 @@ export function loadAccessPolicy(config) {
   };
 }
 
+// --- Confidential access control ------------------------------------------
+
+// Допустимые значения политики trusted для инструмента.
+const CONF_TRUSTED_ACTIONS = new Set(["allow", "deny"]);
+
+/**
+ * Extract the confidential access policy from a parsed maestro config.
+ * Секция `confidential` — строже access_policy и применяется к read/write/edit
+ * по путям из `paths`. Для untrusted/primary — всегда deny (инвариант, не
+ * конфигурируется). Для trusted-субагентов действие задаётся мапой `trusted`.
+ * @param {object} config  Parsed `maestro.json`.
+ * @returns {{ exists: boolean, paths: string[], trusted: {read:string, write:string, edit:string} }}
+ */
+export function loadConfidentialConfig(config) {
+  const section = config?.confidential;
+  const defaults = {
+    paths: ["docs/confidential/**"],
+    trusted: { read: "allow", write: "deny", edit: "deny" },
+  };
+  if (!section || typeof section !== "object") {
+    return { exists: false, ...defaults };
+  }
+  const paths = Array.isArray(section.paths) && section.paths.length > 0
+    ? section.paths
+    : defaults.paths;
+  const trusted = {};
+  const provided = section.trusted && typeof section.trusted === "object" ? section.trusted : {};
+  for (const tool of ["read", "write", "edit"]) {
+    if (!(tool in provided)) {
+      trusted[tool] = defaults.trusted[tool];
+    } else {
+      // Явно заданное значение: допустимо только allow|deny, иначе — deny.
+      trusted[tool] = CONF_TRUSTED_ACTIONS.has(provided[tool]) ? provided[tool] : "deny";
+    }
+  }
+  return { exists: true, paths, trusted };
+}
+
+/**
+ * Resolve the confidential action for a tool call.
+ * Инвариант: не trusted-субагент → всегда deny. Trusted → по `conf.trusted[tool]`.
+ * @param {{ trusted: {read:string,write:string,edit:string} }} conf  Loaded confidential config.
+ * @param {string} tool  Tool name (read|write|edit).
+ * @param {boolean} isTrustedSubagent  Whether the call originates from a trusted subagent.
+ * @returns {"allow"|"deny"}
+ */
+export function resolveConfidentialAction(conf, tool, isTrustedSubagent) {
+  if (!isTrustedSubagent) return "deny";
+  return conf?.trusted?.[tool] === "allow" ? "allow" : "deny";
+}
+
+/**
+ * Extract the agent name from a session's messages (defensive).
+ * Возвращает первое найденное имя: AssistantMessage.mode / UserMessage.agent /
+ * AgentPart.name / SubtaskPart.agent.
+ * @param {Array} messages  Response from client.session.messages (array of {info, parts}).
+ * @returns {string|undefined}
+ */
+function agentNameFromMessages(messages) {
+  for (const m of messages ?? []) {
+    const info = m?.info ?? {};
+    if (typeof info.agent === "string" && info.agent) return info.agent;
+    if (typeof info.mode === "string" && info.mode) return info.mode;
+    for (const part of m?.parts ?? []) {
+      if (part?.type === "agent" && typeof part.name === "string" && part.name) return part.name;
+      if (part?.type === "subtask" && typeof part.agent === "string" && part.agent) return part.agent;
+    }
+  }
+  return undefined;
+}
+
+/**
+ * Determine whether a tool call originates from a trusted subagent.
+ * Fail-closed: без client, без parentID (primary), не резолвится агент, ошибка
+ * lookup — всё трактуется как untrusted → deny.
+ * @param {object|undefined} client  OpenCode SDK client (from plugin closure).
+ * @param {Set<string>} trustedAgents  Trusted subagent names.
+ * @param {string} sessionID  Session that made the tool call.
+ * @returns {Promise<boolean>}
+ */
+export async function resolveIsTrustedSubagent(client, trustedAgents, sessionID) {
+  if (!client?.session?.get) return false;
+  let session;
+  try {
+    const resp = await client.session.get({ path: { id: sessionID } });
+    session = resp?.data ?? resp;
+  } catch {
+    return false;
+  }
+  if (!session?.parentID) return false; // root/primary
+  try {
+    const mresp = await client.session.messages({ path: { id: sessionID } });
+    const messages = mresp?.data ?? mresp;
+    const agent = agentNameFromMessages(Array.isArray(messages) ? messages : []);
+    return Boolean(agent && trustedAgents.has(agent));
+  } catch {
+    return false;
+  }
+}
+
 /**
  * Simple glob→boolean matcher. Supports `*` (any chars), `?` (one char),
  * and `{a,b,c}` brace alternation.
@@ -447,6 +547,47 @@ function globMatch(pattern, value) {
 }
 
 /**
+ * Normalize a target path to a canonical project-relative form (posix separators).
+ * Сводит absolute / relative / `./` / `..` к единому виду для glob-матчинга.
+ * @param {string} root    Project root (absolute).
+ * @param {string} target  Raw path from tool args.
+ * @returns {string}  Project-relative path with `/` separators ("" if invalid).
+ */
+export function normalizeTarget(root, target) {
+  if (typeof target !== "string" || !target) return "";
+  const abs = path.isAbsolute(target) ? target : path.resolve(root, target);
+  const rel = path.relative(root, abs);
+  return rel.split(path.sep).join("/");
+}
+
+/**
+ * Check whether a target path falls within any confidential pattern.
+ * Confidential — security-граница: матчинг case-insensitive (APFS/NTFS могут
+ * резолвить case-варианты в тот же файл) и блокирует как файлы под паттерном,
+ * так и саму директорию/поддиректории (листинг — C2).
+ * @param {string} root      Project root (absolute).
+ * @param {string[]} patterns  Confidential path globs (e.g. `docs/confidential/**`).
+ * @param {string} target    Raw path from tool args.
+ * @returns {boolean}
+ */
+export function isConfidentialTarget(root, patterns, target) {
+  const rel = normalizeTarget(root, target);
+  if (!rel) return false;
+  const lower = rel.toLowerCase();
+  for (const p of patterns ?? []) {
+    if (typeof p !== "string" || !p) continue;
+    const pat = p.toLowerCase();
+    if (globMatch(pat, lower)) return true; // файл под паттерном
+    if (pat.endsWith("/**")) {
+      const prefix = pat.slice(0, -3); // убрать `/**`
+      if (lower === prefix) return true; // сама директория
+      if (lower.startsWith(prefix + "/")) return true; // поддиректория (листинг глубже)
+    }
+  }
+  return false;
+}
+
+/**
  * Resolve access action for a path against the policy. Priority:
  * deny > ask > allow > default (наиболее строгое выигрывает).
  * @param {object} policy  Parsed access policy.
@@ -481,13 +622,15 @@ export function resolveFileAccess(policy, filePath) {
  * Extract a target file path from a file tool's args for access-policy checks.
  * access-policy контролирует только `read` (чёткий filePath); bash/glob/grep
  * не покрываются (bash-пути ненадёжно извлекаются, glob/grep — паттерны).
- * @param {string} tool  Tool name (read).
+ * Confidential-контроль распространяет `filePathOf` на `write`/`edit`
+ * (у всех трёх тулов аргумент `filePath`).
+ * @param {string} tool  Tool name (read|write|edit).
  * @param {object} args  Tool args.
  * @returns {string|undefined}  Path to match, if any.
  */
 export function filePathOf(tool, args) {
   if (!args) return undefined;
-  if (tool === "read" && typeof args.filePath === "string") {
+  if ((tool === "read" || tool === "write" || tool === "edit") && typeof args.filePath === "string") {
     return args.filePath;
   }
   return undefined;
@@ -565,12 +708,13 @@ export function makeBoundedMap(max = 1024) {
   };
 }
 
-export const MaestroBootstrapPlugin = async ({ directory }) => {
+export const MaestroBootstrapPlugin = async ({ directory, client }) => {
   const root = directory || process.cwd();
   const log = makeLogger(root);
   const config = loadMaestroConfig(undefined, root);
   const whitelist = loadWhitelist(config);
   const accessPolicy = loadAccessPolicy(config);
+  const confidential = loadConfidentialConfig(config);
   const trustedAgents = loadTrustConfig(config);
   // SEC-6: если whitelist-`patterns` содержит значения, которые сами матчатся
   // safety-правилами (оператор занёс реальный секрет) — предупредить.
@@ -589,6 +733,9 @@ export const MaestroBootstrapPlugin = async ({ directory }) => {
 
   // callID -> timestamp (для подсчёта длительности тула)
   const toolCalls = makeBoundedMap(2048);
+
+  // sessionID -> trusted-статус субагента (кэш для confidential-контроля)
+  const sessionTrustCache = makeBoundedMap(2048);
 
   const plugin = {
     config: undefined,
@@ -619,6 +766,40 @@ export const MaestroBootstrapPlugin = async ({ directory }) => {
 
     "tool.execute.before": async (input, output) => {
       try {
+        // Confidential control (Уровень 3+): жёсткий deny для не-trusted по
+        // `confidential.paths`. Строже access_policy: если путь confidential —
+        // access_policy для него не применяется (confidential выигрывает).
+        // Покрывает read/write/edit. bash/glob/grep — нативные permissions.
+        const CONF_TOOLS = new Set(["read", "write", "edit"]);
+        let wasConfidential = false;
+        if (confidential.exists && CONF_TOOLS.has(input.tool)) {
+          const target = filePathOf(input.tool, output?.args);
+          if (target && isConfidentialTarget(root, confidential.paths, target)) {
+            wasConfidential = true;
+            let isTrustedSubagent = sessionTrustCache.get(input.sessionID);
+            if (isTrustedSubagent === undefined) {
+              isTrustedSubagent = await resolveIsTrustedSubagent(client, trustedAgents, input.sessionID);
+              sessionTrustCache.set(input.sessionID, isTrustedSubagent);
+            }
+            const action = resolveConfidentialAction(confidential, input.tool, isTrustedSubagent);
+            if (action !== "allow") {
+              log.warn("confidential.blocked", {
+                sessionID: input.sessionID,
+                callID: input.callID,
+                tool: input.tool,
+                action,
+                target: path.basename(target),
+              });
+              const err = new Error(
+                `[confidential:deny] Доступ к "${target}" запрещён. ` +
+                  `Доступ к confidential-путям разрешён только trusted-субагентам.`,
+              );
+              err.confidential = true;
+              throw err;
+            }
+          }
+        }
+
         // File access control (Уровень 3): перехват file-тулов по
         // access-policy.json. `allow` → пропускаем, `ask` → блокируем с
         // сообщением (HITL решает оркестратор), `deny` → жёсткий блок.
@@ -627,7 +808,7 @@ export const MaestroBootstrapPlugin = async ({ directory }) => {
         // glob/grep работают с паттернами, не путями) — для них используйте
         // нативные permissions OpenCode (bash: ask и т.п.).
         const FILE_TOOLS = new Set(["read"]);
-        if (accessPolicy.exists && FILE_TOOLS.has(input.tool)) {
+        if (accessPolicy.exists && FILE_TOOLS.has(input.tool) && !wasConfidential) {
           const target = filePathOf(input.tool, output?.args);
           if (target) {
             const action = resolveFileAccess(accessPolicy, target);
@@ -694,9 +875,9 @@ export const MaestroBootstrapPlugin = async ({ directory }) => {
           });
         }
       } catch (err) {
-        if (err?.accessPolicy) {
-          // Access-policy-нарушение — обязано дойти до OpenCode (реальный блок),
-          // не замалчиваться логгером.
+        if (err?.accessPolicy || err?.confidential) {
+          // Access/confidential-нарушение — обязано дойти до OpenCode (реальный
+          // блок), не замалчиваться логгером.
           throw err;
         }
         log.error("tool.execute.before: error", {

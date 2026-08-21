@@ -3,6 +3,43 @@ name: maestro-design
 description: Use to produce design, spec, scaffold and roadmap for a project after /maestro-init setup — generates spec via design agent, code scaffold via TDD, and docs/roadmap.md
 ---
 
+## Гейт 0 — Проверка плагина maestro-bootstrap (обязательный)
+
+**Язык HITL:** русский.
+
+1. **Маркер проекта.** Если в корне проекта есть `maestro.json` — это проект под
+   управлением maestro, выполняется проверка плагина (шаги 2–3). Если `maestro.json`
+   НЕТ — проект не под maestro, гейт пропускается, работаем как обычно.
+
+2. **Плагин заявлен в конфиге.** Проверь `opencode.json` → `plugin`: там должна
+   быть запись, указывающая на `maestro-bootstrap` (путь `./plugins/maestro-bootstrap/index.js`
+   или npm-имя `maestro-bootstrap`). Нет → перейти к шагу 4 (стоп).
+
+3. **Плагин реально работал.** Открой самый свежий файл
+   `.maestro/logs/maestro-bootstrap-<дата>.log` (по имени-дате). Найди строку
+   `plugin initialized`. Если есть И её ISO-`ts` не старше 24 часов от текущего
+   момента — плагин работает, продолжить работу. Иначе → шаг 4 (стоп).
+
+4. **Жёсткий STOP (без «продолжить»).** Останови работу и покажи HITL:
+
+   > **Плагин `maestro-bootstrap` не подключён или не загружен.**
+   > Защита `docs/confidential/**` НЕ действует: confidential-данные могут быть
+   > доступны untrusted-агентам и primary-сессии. `access_policy` и sanitizer тоже
+   > не работают (все — в плагине `maestro-bootstrap`).
+   >
+   > Продолжение работы запрещено. Единственный способ продолжить — подключить
+   > плагин и перезапустить opencode:
+   > ```
+   > opencode plugin maestro-bootstrap   # или добавить путь в opencode.json
+   > ```
+   >
+   > (a) Подключить плагин и перезапустить opencode — затем повторить команду
+   > (c) Отмена / стоп
+
+   Допустимы ТОЛЬКО исходы (a) и (c). Варианта «продолжить как есть» НЕТ.
+   При (a): объяснить, что нужно перезапустить opencode и повторить команду,
+   НЕ продолжать pipeline в текущей сессии. При (c): завершить работу.
+
 # Design — Проектирование и scaffold
 
 ## Overview
