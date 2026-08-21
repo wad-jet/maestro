@@ -282,6 +282,20 @@ opencode plugin maestro-bootstrap
 
 Перезапуск opencode обязателен после добавления плагина.
 
+### Гейт «плагин подключён» для runtime-команд
+
+В maestro-проекте (есть `maestro.json`) команды `@maestro`, `@maestro-design`,
+`@maestro-feedback-report` при старте выполняют жёсткий гейт:
+
+1. `opencode.json → plugin` должен содержать `maestro-bootstrap`;
+2. самый свежий `.maestro/logs/maestro-bootstrap-<дата>.log` должен содержать
+   запись `plugin initialized` с timestamp не старше 24 часов.
+
+Если любое условие не выполнено — жёсткий STOP без «продолжить»: только
+«(a) подключить плагин и перезапустить» / «(c) стоп». Причина: без плагина
+защита `docs/confidential/**` и sanitize не действуют (fail-open), confidential-
+данные доступны untrusted-агентам. `@maestro-init` и `@regression` не гейтятся.
+
 ### Агенты: модели
 
 Каждый сабагент имеет модель в `opencode.json`:
