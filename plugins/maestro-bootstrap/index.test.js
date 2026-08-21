@@ -1224,3 +1224,83 @@ describe("maestro-bootstrap isConfidentialTarget", () => {
     assert.equal(isConfidentialTarget(root, patterns, "docs/confidential/../../src/app.ts"), false);
   });
 });
+
+describe("maestro-bootstrap confidential path bypass closure", () => {
+  let dir, hooks, savedLogEnv;
+  const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR"];
+
+  function makeClient() {
+    return {
+      session: {
+        get: async ({ path }) => {
+          if (path.id === "root") return { data: { id: "root" } };
+          if (path.id === "childUntrusted") return { data: { id: "childUntrusted", parentID: "root" } };
+          throw new Error("not found");
+        },
+        messages: async ({ path }) => {
+          if (path.id === "childUntrusted") {
+            return { data: [{ info: { role: "assistant", mode: "haiku" }, parts: [] }] };
+          }
+          return { data: [] };
+        },
+      },
+    };
+  }
+
+  before(async () => {
+    savedLogEnv = {};
+    for (const k of LOG_ENV) { savedLogEnv[k] = process.env[k]; delete process.env[k]; }
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-cfix-"));
+    fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({
+      confidential: { paths: ["docs/confidential/**"] },
+    }));
+    hooks = await MaestroBootstrapPlugin({ directory: dir, client: makeClient() });
+  });
+
+  after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    for (const k of LOG_ENV) {
+      if (savedLogEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedLogEnv[k];
+    }
+  });
+
+  it("denies absolute-path read of confidential (C1)", async () => {
+    const abs = path.join(dir, "docs/confidential/secrets.md");
+    const out = { args: { filePath: abs } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c1" }, out),
+      /confidential:deny/,
+    );
+  });
+
+  it("denies dot-prefixed read of confidential (C1)", async () => {
+    const out = { args: { filePath: "./docs/confidential/secrets.md" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c2" }, out),
+      /confidential:deny/,
+    );
+  });
+
+  it("denies case-variant read of confidential (C1)", async () => {
+    const out = { args: { filePath: "docs/Confidential/secrets.md" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c3" }, out),
+      /confidential:deny/,
+    );
+  });
+
+  it("denies directory listing of confidential (C2)", async () => {
+    const out = { args: { filePath: "docs/confidential" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c4" }, out),
+      /confidential:deny/,
+    );
+  });
+
+  it("does not break non-confidential paths", async () => {
+    const out = { args: { filePath: "src/app.ts" } };
+    await hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c5" }, out);
+    assert.ok(true);
+  });
+});

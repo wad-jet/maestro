@@ -771,9 +771,11 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
         // access_policy для него не применяется (confidential выигрывает).
         // Покрывает read/write/edit. bash/glob/grep — нативные permissions.
         const CONF_TOOLS = new Set(["read", "write", "edit"]);
+        let wasConfidential = false;
         if (confidential.exists && CONF_TOOLS.has(input.tool)) {
           const target = filePathOf(input.tool, output?.args);
-          if (target && confidential.paths.some((p) => globMatch(p, target))) {
+          if (target && isConfidentialTarget(root, confidential.paths, target)) {
+            wasConfidential = true;
             let isTrustedSubagent = sessionTrustCache.get(input.sessionID);
             if (isTrustedSubagent === undefined) {
               isTrustedSubagent = await resolveIsTrustedSubagent(client, trustedAgents, input.sessionID);
@@ -806,7 +808,7 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
         // glob/grep работают с паттернами, не путями) — для них используйте
         // нативные permissions OpenCode (bash: ask и т.п.).
         const FILE_TOOLS = new Set(["read"]);
-        if (accessPolicy.exists && FILE_TOOLS.has(input.tool)) {
+        if (accessPolicy.exists && FILE_TOOLS.has(input.tool) && !wasConfidential) {
           const target = filePathOf(input.tool, output?.args);
           if (target) {
             const action = resolveFileAccess(accessPolicy, target);
