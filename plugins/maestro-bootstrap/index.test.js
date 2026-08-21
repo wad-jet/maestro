@@ -976,12 +976,16 @@ describe("maestro-bootstrap confidential subagent identity", () => {
   }
 
   it("denies when no client (fail-closed)", async () => {
-    assert.equal(await resolveIsTrustedSubagent(undefined, new Set(["design"]), "s1"), false);
+    const res = await resolveIsTrustedSubagent(undefined, new Set(["design"]), "s1");
+    assert.equal(res.trusted, false);
+    assert.equal(res.agent, undefined);
   });
 
   it("denies root/primary session (no parentID)", async () => {
     const client = mockClient({ session: { id: "root" } });
-    assert.equal(await resolveIsTrustedSubagent(client, new Set(["design"]), "root"), false);
+    const res = await resolveIsTrustedSubagent(client, new Set(["design"]), "root");
+    assert.equal(res.trusted, false);
+    assert.equal(res.agent, undefined);
   });
 
   it("allows trusted subagent by AssistantMessage.mode", async () => {
@@ -989,7 +993,9 @@ describe("maestro-bootstrap confidential subagent identity", () => {
       session: { id: "child", parentID: "root" },
       messages: [{ info: { role: "assistant", mode: "design" }, parts: [] }],
     });
-    assert.equal(await resolveIsTrustedSubagent(client, new Set(["design"]), "child"), true);
+    const res = await resolveIsTrustedSubagent(client, new Set(["design"]), "child");
+    assert.equal(res.trusted, true);
+    assert.equal(res.agent, "design");
   });
 
   it("denies untrusted subagent", async () => {
@@ -997,7 +1003,9 @@ describe("maestro-bootstrap confidential subagent identity", () => {
       session: { id: "child", parentID: "root" },
       messages: [{ info: { role: "assistant", mode: "haiku" }, parts: [] }],
     });
-    assert.equal(await resolveIsTrustedSubagent(client, new Set(["design"]), "child"), false);
+    const res = await resolveIsTrustedSubagent(client, new Set(["design"]), "child");
+    assert.equal(res.trusted, false);
+    assert.equal(res.agent, "haiku");
   });
 
   it("allows by UserMessage.agent", async () => {
@@ -1005,7 +1013,9 @@ describe("maestro-bootstrap confidential subagent identity", () => {
       session: { id: "child", parentID: "root" },
       messages: [{ info: { role: "user", agent: "sanitizer" }, parts: [] }],
     });
-    assert.equal(await resolveIsTrustedSubagent(client, new Set(["sanitizer"]), "child"), true);
+    const res = await resolveIsTrustedSubagent(client, new Set(["sanitizer"]), "child");
+    assert.equal(res.trusted, true);
+    assert.equal(res.agent, "sanitizer");
   });
 
   it("allows by SubtaskPart.agent in parts", async () => {
@@ -1013,7 +1023,9 @@ describe("maestro-bootstrap confidential subagent identity", () => {
       session: { id: "child", parentID: "root" },
       messages: [{ info: { role: "assistant" }, parts: [{ type: "subtask", agent: "design" }] }],
     });
-    assert.equal(await resolveIsTrustedSubagent(client, new Set(["design"]), "child"), true);
+    const res = await resolveIsTrustedSubagent(client, new Set(["design"]), "child");
+    assert.equal(res.trusted, true);
+    assert.equal(res.agent, "design");
   });
 
   it("denies when agent not resolvable", async () => {
@@ -1021,12 +1033,16 @@ describe("maestro-bootstrap confidential subagent identity", () => {
       session: { id: "child", parentID: "root" },
       messages: [{ info: { role: "assistant" }, parts: [] }],
     });
-    assert.equal(await resolveIsTrustedSubagent(client, new Set(["design"]), "child"), false);
+    const res = await resolveIsTrustedSubagent(client, new Set(["design"]), "child");
+    assert.equal(res.trusted, false);
+    assert.equal(res.agent, undefined);
   });
 
   it("denies on session lookup error (fail-closed)", async () => {
     const client = mockClient({ session: { id: "missing" } });
-    assert.equal(await resolveIsTrustedSubagent(client, new Set(["design"]), "missing"), false);
+    const res = await resolveIsTrustedSubagent(client, new Set(["design"]), "missing");
+    assert.equal(res.trusted, false);
+    assert.equal(res.agent, undefined);
   });
 });
 
@@ -1438,5 +1454,122 @@ describe("maestro-bootstrap audit logger", () => {
       else process.env.MAESTRO_BOOTSTRAP_LOG_LEVEL = savedLevel;
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe("maestro-bootstrap confidential audit log", () => {
+  let dir, hooks, savedLogEnv;
+  const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR", "MAESTRO_AUDIT_LOG_DIR"];
+
+  function makeClient(sessions) {
+    return {
+      session: {
+        get: async ({ path }) => {
+          const rec = sessions[path.id];
+          if (!rec) throw new Error("not found");
+          return { data: rec.session };
+        },
+        messages: async ({ path }) => {
+          const rec = sessions[path.id];
+          if (!rec) return { data: [] };
+          return { data: rec.messages };
+        },
+      },
+    };
+  }
+
+  const rootSessions = {
+    childTrusted: {
+      session: { id: "childTrusted", parentID: "root" },
+      messages: [{ info: { role: "assistant", mode: "design" }, parts: [] }],
+    },
+    childUntrusted: {
+      session: { id: "childUntrusted", parentID: "root" },
+      messages: [{ info: { role: "assistant", mode: "haiku" }, parts: [] }],
+    },
+  };
+
+  before(async () => {
+    savedLogEnv = {};
+    for (const k of LOG_ENV) { savedLogEnv[k] = process.env[k]; delete process.env[k]; }
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-audit-enf-"));
+    fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({
+      trust: { design: true },
+      confidential: { paths: ["docs/confidential/**"], trusted: { read: "allow", write: "deny", edit: "deny" } },
+    }));
+    hooks = await MaestroBootstrapPlugin({ directory: dir, client: makeClient(rootSessions) });
+  });
+
+  after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    for (const k of LOG_ENV) {
+      if (savedLogEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedLogEnv[k];
+    }
+  });
+
+  it("logs allow with agent when trusted subagent reads confidential", async () => {
+    const out = { args: { filePath: "docs/confidential/secrets.md" } };
+    await hooks["tool.execute.before"]({ tool: "read", sessionID: "childTrusted", callID: "c-a1" }, out);
+    const e = readLogs(dir, "maestro-audit").find((x) => x.callID === "c-a1");
+    assert.ok(e, "audit entry exists");
+    assert.equal(e.msg, "confidential.access");
+    assert.equal(e.action, "allow");
+    assert.equal(e.agent, "design");
+    assert.equal(e.tool, "read");
+    assert.equal(e.target, "secrets.md");
+  });
+
+  it("logs deny with agent for untrusted subagent read of confidential", async () => {
+    const out = { args: { filePath: "docs/confidential/secrets.md" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "childUntrusted", callID: "c-a2" }, out),
+      /confidential:deny/,
+    );
+    const e = readLogs(dir, "maestro-audit").find((x) => x.callID === "c-a2");
+    assert.ok(e, "audit deny entry exists");
+    assert.equal(e.action, "deny");
+    assert.equal(e.agent, "haiku");
+  });
+
+  it("does not duplicate security events in bootstrap log", async () => {
+    const out = { args: { filePath: "docs/confidential/secrets.md" } };
+    await hooks["tool.execute.before"]({ tool: "read", sessionID: "childTrusted", callID: "c-a4" }, out);
+    const bootstrap = readLogs(dir, "maestro-bootstrap");
+    assert.equal(
+      bootstrap.find((x) => x.msg === "confidential.access" || x.msg === "confidential.blocked" || x.msg === "access_policy.blocked"),
+      undefined,
+      "security events must NOT appear in bootstrap log",
+    );
+  });
+
+  it("logs access_policy.blocked only in audit log", async () => {
+    const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), "fab-audit-ap-"));
+    try {
+      fs.writeFileSync(path.join(dir2, "maestro.json"), JSON.stringify({
+        access_policy: { default: "ask", allow: [], ask: ["docs/**"], deny: [] },
+      }));
+      const h2 = await MaestroBootstrapPlugin({ directory: dir2 });
+      const out = { args: { filePath: "docs/architecture.md" } };
+      await assert.rejects(
+        h2["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c-ap1" }, out),
+        /access-policy:ask/,
+      );
+      const audit = readLogs(dir2, "maestro-audit").find((x) => x.callID === "c-ap1");
+      assert.ok(audit, "access_policy.blocked in audit log");
+      assert.equal(audit.msg, "access_policy.blocked");
+      assert.equal(audit.target, "architecture.md");
+      const bootstrap = readLogs(dir2, "maestro-bootstrap");
+      assert.equal(bootstrap.find((x) => x.msg === "access_policy.blocked"), undefined, "not duplicated in bootstrap");
+    } finally {
+      fs.rmSync(dir2, { recursive: true, force: true });
+    }
+  });
+
+  it("does not log non-confidential paths to audit log", async () => {
+    const before = readLogs(dir, "maestro-audit").length;
+    const out = { args: { filePath: "src/app.ts" } };
+    await hooks["tool.execute.before"]({ tool: "read", sessionID: "childTrusted", callID: "c-a3" }, out);
+    assert.equal(readLogs(dir, "maestro-audit").length, before, "no audit entry for non-confidential read");
   });
 });

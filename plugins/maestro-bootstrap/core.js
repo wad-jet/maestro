@@ -491,22 +491,22 @@ function agentNameFromMessages(messages) {
  * @returns {Promise<boolean>}
  */
 export async function resolveIsTrustedSubagent(client, trustedAgents, sessionID) {
-  if (!client?.session?.get) return false;
+  if (!client?.session?.get) return { trusted: false, agent: undefined };
   let session;
   try {
     const resp = await client.session.get({ path: { id: sessionID } });
     session = resp?.data ?? resp;
   } catch {
-    return false;
+    return { trusted: false, agent: undefined };
   }
-  if (!session?.parentID) return false; // root/primary
+  if (!session?.parentID) return { trusted: false, agent: undefined }; // root/primary
   try {
     const mresp = await client.session.messages({ path: { id: sessionID } });
     const messages = mresp?.data ?? mresp;
     const agent = agentNameFromMessages(Array.isArray(messages) ? messages : []);
-    return Boolean(agent && trustedAgents.has(agent));
+    return { trusted: Boolean(agent && trustedAgents.has(agent)), agent };
   } catch {
-    return false;
+    return { trusted: false, agent: undefined };
   }
 }
 
@@ -781,6 +781,14 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
   const root = directory || process.cwd();
   const version = readPluginVersion();
   const log = makeLogger(root);
+  // Аудит-лог — отдельный файл `maestro-audit-<date>.log`, security-фактура.
+  // filterEnv: null → НЕ зависит от MAESTRO_BOOTSTRAP_LOG_MASK/LOG_LEVEL
+  // (аудит пишется всегда). Каталог — MAESTRO_AUDIT_LOG_DIR.
+  const auditLog = makeLogger(root, {
+    filePrefix: "maestro-audit",
+    logDirEnv: "MAESTRO_AUDIT_LOG_DIR",
+    filterEnv: null,
+  });
   const config = loadMaestroConfig(undefined, root);
   const whitelist = loadWhitelist(config);
   const accessPolicy = loadAccessPolicy(config);
@@ -851,20 +859,25 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
           const target = filePathOf(input.tool, output?.args);
           if (target && !isPluginMetaFile(root, target) && isConfidentialTarget(root, confidential.paths, target)) {
             wasConfidential = true;
-            let isTrustedSubagent = sessionTrustCache.get(input.sessionID);
-            if (isTrustedSubagent === undefined) {
-              isTrustedSubagent = await resolveIsTrustedSubagent(client, trustedAgents, input.sessionID);
-              sessionTrustCache.set(input.sessionID, isTrustedSubagent);
+            let trustInfo = sessionTrustCache.get(input.sessionID);
+            if (trustInfo === undefined) {
+              trustInfo = await resolveIsTrustedSubagent(client, trustedAgents, input.sessionID);
+              sessionTrustCache.set(input.sessionID, trustInfo);
             }
-            const action = resolveConfidentialAction(confidential, input.tool, isTrustedSubagent);
-            if (action !== "allow") {
-              log.warn("confidential.blocked", {
-                sessionID: input.sessionID,
-                callID: input.callID,
-                tool: input.tool,
-                action,
-                target: path.basename(target),
-              });
+            const action = resolveConfidentialAction(confidential, input.tool, trustInfo.trusted);
+            const base = {
+              sessionID: input.sessionID,
+              callID: input.callID,
+              tool: input.tool,
+              action,
+              agent: trustInfo.agent,        // имя trusted-агента (undefined для root/unresolved)
+              target: path.basename(target), // SEC-5: только basename, без содержимого
+            };
+            // Security-события — ТОЛЬКО в audit-лог (без дублей в bootstrap).
+            if (action === "allow") {
+              auditLog.info("confidential.access", base);
+            } else {
+              auditLog.warn("confidential.access", base);
               const err = new Error(
                 `[confidential:deny] Доступ к "${target}" запрещён. ` +
                   `Доступ к confidential-путям разрешён только trusted-субагентам.`,
@@ -890,7 +903,8 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
             if (action !== "allow") {
               // SEC-5: в лог — только basename (не раскрывать полную структуру путей);
               // полный путь остаётся только в ошибке для оркестратора.
-              log.warn("access_policy.blocked", {
+              // Security-событие — ТОЛЬКО в audit-лог (без дублей в bootstrap).
+              auditLog.warn("access_policy.blocked", {
                 sessionID: input.sessionID,
                 callID: input.callID,
                 tool: input.tool,
