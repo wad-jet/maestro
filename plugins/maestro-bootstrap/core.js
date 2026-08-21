@@ -409,6 +409,57 @@ export function loadAccessPolicy(config) {
   };
 }
 
+// --- Confidential access control ------------------------------------------
+
+// Допустимые значения политики trusted для инструмента.
+const CONF_TRUSTED_ACTIONS = new Set(["allow", "deny"]);
+
+/**
+ * Extract the confidential access policy from a parsed maestro config.
+ * Секция `confidential` — строже access_policy и применяется к read/write/edit
+ * по путям из `paths`. Для untrusted/primary — всегда deny (инвариант, не
+ * конфигурируется). Для trusted-субагентов действие задаётся мапой `trusted`.
+ * @param {object} config  Parsed `maestro.json`.
+ * @returns {{ exists: boolean, paths: string[], trusted: {read:string, write:string, edit:string} }}
+ */
+export function loadConfidentialConfig(config) {
+  const section = config?.confidential;
+  const defaults = {
+    paths: ["docs/confidential/**"],
+    trusted: { read: "allow", write: "deny", edit: "deny" },
+  };
+  if (!section || typeof section !== "object") {
+    return { exists: false, ...defaults };
+  }
+  const paths = Array.isArray(section.paths) && section.paths.length > 0
+    ? section.paths
+    : defaults.paths;
+  const trusted = {};
+  const provided = section.trusted && typeof section.trusted === "object" ? section.trusted : {};
+  for (const tool of ["read", "write", "edit"]) {
+    if (!(tool in provided)) {
+      trusted[tool] = defaults.trusted[tool];
+    } else {
+      // Явно заданное значение: допустимо только allow|deny, иначе — deny.
+      trusted[tool] = CONF_TRUSTED_ACTIONS.has(provided[tool]) ? provided[tool] : "deny";
+    }
+  }
+  return { exists: true, paths, trusted };
+}
+
+/**
+ * Resolve the confidential action for a tool call.
+ * Инвариант: не trusted-субагент → всегда deny. Trusted → по `conf.trusted[tool]`.
+ * @param {{ trusted: {read:string,write:string,edit:string} }} conf  Loaded confidential config.
+ * @param {string} tool  Tool name (read|write|edit).
+ * @param {boolean} isTrustedSubagent  Whether the call originates from a trusted subagent.
+ * @returns {"allow"|"deny"}
+ */
+export function resolveConfidentialAction(conf, tool, isTrustedSubagent) {
+  if (!isTrustedSubagent) return "deny";
+  return conf?.trusted?.[tool] === "allow" ? "allow" : "deny";
+}
+
 /**
  * Simple glob→boolean matcher. Supports `*` (any chars), `?` (one char),
  * and `{a,b,c}` brace alternation.

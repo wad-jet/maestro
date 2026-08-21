@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled } from "./core.js";
+import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig } from "./core.js";
 
 function readLogs(dir) {
   const logDir = path.join(dir, ".maestro/logs");
@@ -920,5 +920,42 @@ describe("maestro-bootstrap makeBoundedMap", () => {
     assert.equal(m.size(), 2, "re-set does not grow size");
     assert.equal(m.get("a"), 10);
     assert.equal(m.get("b"), 2);
+  });
+});
+
+describe("maestro-bootstrap confidential config", () => {
+  it("returns defaults when section missing", () => {
+    const c = loadConfidentialConfig({});
+    assert.equal(c.exists, false);
+    assert.deepEqual(c.paths, ["docs/confidential/**"]);
+    assert.deepEqual(c.trusted, { read: "allow", write: "deny", edit: "deny" });
+  });
+
+  it("returns default trusted when section present but empty", () => {
+    const c = loadConfidentialConfig({ confidential: {} });
+    assert.equal(c.exists, true);
+    assert.deepEqual(c.paths, ["docs/confidential/**"]);
+    assert.deepEqual(c.trusted, { read: "allow", write: "deny", edit: "deny" });
+  });
+
+  it("parses paths and trusted map", () => {
+    const c = loadConfidentialConfig({
+      confidential: {
+        paths: ["docs/confidential/**", "secrets/internals/**"],
+        trusted: { read: "deny", write: "allow", edit: "allow" },
+      },
+    });
+    assert.equal(c.exists, true);
+    assert.deepEqual(c.paths, ["docs/confidential/**", "secrets/internals/**"]);
+    assert.deepEqual(c.trusted, { read: "deny", write: "allow", edit: "allow" });
+  });
+
+  it("clamps invalid trusted values to deny", () => {
+    const c = loadConfidentialConfig({
+      confidential: { trusted: { read: "banana", write: "allow", edit: "allow" } },
+    });
+    assert.equal(c.trusted.read, "deny");
+    assert.equal(c.trusted.write, "allow");
+    assert.equal(c.trusted.edit, "allow");
   });
 });
