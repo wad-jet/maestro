@@ -161,9 +161,10 @@ pipeline maestro: есть `docs/project-context.md` (источник конт�
 
 ### opencode.json — регистрация плагина + модели агентов
 
-- Регистрация плагина: `"plugin": ["./plugins/maestro-bootstrap/index.js"]`.
-  Если ключа `plugin` нет → добавить; если есть, но путь отсутствует → дописать;
+- Регистрация плагина: `"plugin": ["maestro-bootstrap@git+https://github.com/wad-jet/maestro.git"]`.
+  Если ключа `plugin` нет → добавить; если есть, но spec отсутствует → дописать;
   если уже есть → skip. **Никогда не перезаписывать существующий контент.**
+  Для локального клона репозитория допустим путь `./plugins/maestro-bootstrap/index.js`.
 - Модели агентов — по M1 (см. ниже). **Плейсхолдеры запрещены.**
 
 ### M1 — выбор моделей агентов (7 отдельных HITL-вопросов)
@@ -276,7 +277,8 @@ regression/cancelled-features.md   (пустой файл с заголовко�
 
 Проверить, что плагин `maestro-bootstrap` подключён в `opencode.json` и
 загружается:
-- `"plugin"` содержит `./plugins/maestro-bootstrap/index.js` (или аналог).
+- `"plugin"` содержит git-spec `maestro-bootstrap@git+https://github.com/wad-jet/maestro.git`
+  (или аналог, например локальный путь `./plugins/maestro-bootstrap/index.js`).
 - Файл плагина существует.
 - **Не блокер:** если плагин не подключён/не загружается — НЕ останавливать init.
   Отметить в своде и `last-run.md`. Пользователь чинит после.

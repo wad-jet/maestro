@@ -105,7 +105,7 @@ agpack sync                    # разворачивает skills/commands/agen
 ```
 
 > **Примечание:** agpack не покрывает плагин `maestro-bootstrap` (он ставится
-> из npm — см. шаг [2. Подключите плагин](#2-подключите-плагин)) и конфиги
+> из git — см. шаг [2. Подключите плагин](#2-подключите-плагин)) и конфиги
 > (`maestro.json`, `opencode.json`, `.gitignore`, `regression/`) — их создаёт `/maestro-init`.
 
 #### Вариант B — вручную
@@ -117,24 +117,21 @@ agpack sync                    # разворачивает skills/commands/agen
 ### 2. Подключите плагин
 
 Плагин `maestro-bootstrap` (санитайзинг промптов, file access control, audit-логи)
-подключается **до** запуска пайплайна. Он опубликован в npm.
+подключается **до** запуска пайплайна. Он поставляется из git-репозитория `wad-jet/maestro`
+(публикация в npm не используется).
 
-#### Из npm (рекомендуется)
+#### Из git (рекомендуется)
 
 ```jsonc
 // .opencode/opencode.json или opencode.json
 {
   "plugin": [
-    "maestro-bootstrap"
+    "maestro-bootstrap@git+https://github.com/wad-jet/maestro.git"
   ]
 }
 ```
 
-или через CLI:
-
-```bash
-opencode plugin maestro-bootstrap
-```
+OpenCode установит плагин автоматически (Bun) при старте.
 
 #### Локально (из исходников)
 

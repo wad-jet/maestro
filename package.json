@@ -1,0 +1,15 @@
+{
+  "name": "maestro",
+  "version": "1.1.0",
+  "description": "Maestro skill system for OpenCode: skills, commands, agents and the maestro-bootstrap plugin",
+  "type": "module",
+  "main": "./plugins/maestro-bootstrap/index.js",
+  "license": "Apache-2.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/wad-jet/maestro.git"
+  },
+  "scripts": {
+    "test": "node --test plugins/maestro-bootstrap/index.test.js"
+  }
+}

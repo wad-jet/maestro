@@ -246,25 +246,31 @@ npm test
 
 ## Установка
 
-### Из npm (рекомендуется)
+### Из git-репозитория (рекомендуется)
 
-Плагин опубликован как npm-пакет `maestro-bootstrap`. Добавьте его в `opencode.json`:
+Плагин поставляется из git-репозитория `wad-jet/maestro` (публикация в npm не используется).
+Добавьте spec в `opencode.json`:
 
 ```json
 {
   "plugin": [
-    "maestro-bootstrap"
+    "maestro-bootstrap@git+https://github.com/wad-jet/maestro.git"
   ]
 }
 ```
 
-Или через CLI:
+OpenCode установит плагин автоматически (Bun) при старте, клонируя репозиторий и
+загружая entry из корневого `package.json` (`main` → `plugins/maestro-bootstrap/index.js`).
 
-```bash
-opencode plugin maestro-bootstrap
+При необходимости можно зафиксировать конкретный коммит через fragment:
+
+```json
+{
+  "plugin": [
+    "maestro-bootstrap@git+https://github.com/wad-jet/maestro.git#<commit-sha>"
+  ]
+}
 ```
-
-OpenCode установит пакет автоматически (Bun) при старте.
 
 ### Локально (из исходников)
 

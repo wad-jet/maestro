@@ -248,23 +248,21 @@ deny. Trust не наследуется вложенными субагента�
 
 ### Плагин
 
-Плагин `maestro-bootstrap` опубликован в npm. Подключается до запуска пайплайна.
+Плагин `maestro-bootstrap` поставляется из git-репозитория `wad-jet/maestro`
+(публикация в npm не используется). Подключается до запуска пайплайна.
 
-**Из npm (рекомендуется):**
+**Из git (рекомендуется):**
 
 ```json
 {
   "plugin": [
-    "maestro-bootstrap"
+    "maestro-bootstrap@git+https://github.com/wad-jet/maestro.git"
   ]
 }
 ```
 
-или через CLI:
-
-```bash
-opencode plugin maestro-bootstrap
-```
+При необходимости зафиксировать конкретный коммит — через fragment `#<commit-sha>`
+в конце spec.
 
 **Локально (из исходников):**
 
