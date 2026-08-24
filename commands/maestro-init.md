@@ -10,8 +10,8 @@ opencode (тот создаёт AGENTS.md). НЕ выполняет дизайн
 2. Проверка `docs/project-context.md` + запрос git-решения (без автокоммитов).
 3. Собрать контекст по 14 категориям -> `docs/project-context.md`.
 4. Конфигурация: `maestro.json` (trust/access_policy/confidential/sanitizer_whitelist),
-   `opencode.json` (plugin + модели агентов по M1), `.gitignore` (конкретные
-   пути), `regression/` структура. Каталоги: `.maestro/`,
+   `opencode.json` (plugin + модели агентов по M1), `.gitignore` (весь `.maestro/`),
+   `regression/` структура. Каталоги: `.maestro/`,
    `docs/superpowers/{specs,plans}/`. **Задача 3 требует скилл `maestro-assistant`
    (жёсткий gate): если его нет — установить и продолжить, иначе прерывание.**
    Правила/канон конфига — из `skills/maestro-assistant/SKILL.md`.
