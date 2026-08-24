@@ -167,4 +167,4 @@ description: Сбор фактуры по прошлым процессам maes
 ## Завершение
 
 - Сообщи: «Отчёт сохранён в `<путь>`».
-- **Автокоммит НЕ требуется:** `.maestro/feedback-reports/` — эфемерное (в `.gitignore`, see `skills/maestro-init/SKILL.md`). Коммит отчёта — на усмотрение пользователя.
+- **Автокоммит НЕ требуется:** `.maestro/feedback-reports/` — эфемерное (весь `.maestro/` в `.gitignore`, see `skills/maestro-init/SKILL.md`). Коммит отчёта — на усмотрение пользователя.
