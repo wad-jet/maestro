@@ -34,6 +34,7 @@
 | `/maestro-assistant` (конфиг/структура/контекст) | `reference/commands.md`, `reference/config.md`, `explanation/agents-and-trust.md` |
 | `/maestro-init` / `/maestro-design` (setup, конфиг, модели) | `tutorials/setup-project.md`, `reference/commands.md` |
 | Trust / санитайзер | `explanation/agents-and-trust.md` |
+| Обновление/доставка до версии (skills + plugin, контроль) | `how-to/update-maestro.md` |
 | Security Review / sanitizer-сабагент / file access control | `explanation/agents-and-trust.md`, `reference/model-selection.md`, `reference/hitl-gates.md` |
 | Реестр регрессии | `how-to/use-regression-registry.md` |
 | Шаг 14 (docs: diff-сверка, HITL при расхождении) | `explanation/pipeline-overview.md`, `tutorials/run-first-feature.md` |

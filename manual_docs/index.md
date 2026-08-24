@@ -27,6 +27,7 @@ primary-сессии.
 - [Запуск багфикса](how-to/run-a-bugfix.md) — debug sub-pipeline
 - [Работа с реестром регрессии](how-to/use-regression-registry.md) — `/regression`
 - [Кастомизация скилла](how-to/customize-maestro.md) — правка и синхронизация
+- [Обновление maestro](how-to/update-maestro.md) — доставка новой версии скиллов и плагина, контроль версии
 - [Поддержание документации в актуальном состоянии](how-to/keep-docs-up-to-date.md)
 
 ## Reference (справочник)
