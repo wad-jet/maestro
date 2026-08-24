@@ -1144,6 +1144,16 @@ describe("maestro-bootstrap confidential enforcement", () => {
     );
   });
 
+  it("trusted allow does not persist state — root remains denied after trusted read (per-call)", async () => {
+    const trusted = { args: { filePath: "docs/confidential/secrets.md" } };
+    const root = { args: { filePath: "docs/confidential/secrets.md" } };
+    await hooks["tool.execute.before"]({ tool: "read", sessionID: "childTrusted", callID: "c-trust" }, trusted);
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c-root" }, root),
+      /confidential:deny/,
+    );
+  });
+
   it("denies root session when no client provided (fail-closed)", async () => {
     const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), "fab-conf2-"));
     fs.writeFileSync(path.join(dir2, "maestro.json"), JSON.stringify({
