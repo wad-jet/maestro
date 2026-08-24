@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, readPluginVersion, writePluginVersionFile, isPluginMetaFile } from "./core.js";
+import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile } from "./core.js";
 
 function readLogs(dir, filePrefix = "maestro-bootstrap") {
   const logDir = path.join(dir, ".maestro/logs");
@@ -1571,5 +1571,49 @@ describe("maestro-bootstrap confidential audit log", () => {
     const out = { args: { filePath: "src/app.ts" } };
     await hooks["tool.execute.before"]({ tool: "read", sessionID: "childTrusted", callID: "c-a3" }, out);
     assert.equal(readLogs(dir, "maestro-audit").length, before, "no audit entry for non-confidential read");
+  });
+});
+
+describe("maestro-bootstrap confGlobMatch (segment-aware, confidential-only)", () => {
+  it("full filename matches only root-level", () => {
+    assert.equal(confGlobMatch("maestro.json", "maestro.json"), true);
+    assert.equal(confGlobMatch("maestro.json", "src/maestro.json"), false);
+    assert.equal(confGlobMatch("maestro.json", "maestro.jsonx"), false);
+  });
+  it("dotfile full name matches", () => {
+    assert.equal(confGlobMatch(".maestro.json", ".maestro.json"), true);
+  });
+  it("bare mask matches only root (does not cross /)", () => {
+    assert.equal(confGlobMatch("*.env", "prod.env"), true);
+    assert.equal(confGlobMatch("*.env", "config/prod.env"), false);
+  });
+  it("recursive ** covers root and nested", () => {
+    assert.equal(confGlobMatch("**/*.pem", "app.pem"), true);
+    assert.equal(confGlobMatch("**/*.pem", "certs/app.pem"), true);
+    assert.equal(confGlobMatch("**/*.pem", "certs/nested/app.pem"), true);
+    assert.equal(confGlobMatch("**/*.pem", "app.pemx"), false);
+  });
+  it("nested mask with slash matches within that segment", () => {
+    assert.equal(confGlobMatch("configs/*.env", "configs/prod.env"), true);
+    assert.equal(confGlobMatch("configs/*.env", "prod.env"), false);
+    assert.equal(confGlobMatch("configs/*.env", "configs/deep/prod.env"), false);
+  });
+  it("brace alternation within a segment", () => {
+    assert.equal(confGlobMatch("*.{env,local}", "prod.env"), true);
+    assert.equal(confGlobMatch("*.{env,local}", "prod.local"), true);
+    assert.equal(confGlobMatch("*.{env,local}", "prod.yml"), false);
+  });
+  it("trailing /** matches directory, subdir and file inside", () => {
+    assert.equal(confGlobMatch("docs/confidential/**", "docs/confidential"), true);
+    assert.equal(confGlobMatch("docs/confidential/**", "docs/confidential/x.md"), true);
+    assert.equal(confGlobMatch("docs/confidential/**", "docs/confidential/subdir"), true);
+  });
+  it("single ? matches one char within a segment", () => {
+    assert.equal(confGlobMatch("?.env", "a.env"), true);
+    assert.equal(confGlobMatch("?.env", "ab.env"), false);
+  });
+  it("returns false for empty pattern or value (defensive guard)", () => {
+    assert.equal(confGlobMatch("", "prod.env"), false);
+    assert.equal(confGlobMatch("*.env", ""), false);
   });
 });
