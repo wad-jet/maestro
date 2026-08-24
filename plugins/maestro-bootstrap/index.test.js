@@ -1617,3 +1617,42 @@ describe("maestro-bootstrap confGlobMatch (segment-aware, confidential-only)", (
     assert.equal(confGlobMatch("*.env", ""), false);
   });
 });
+
+describe("maestro-bootstrap isConfidentialTarget (single-file & mask)", () => {
+  const root = "/proj";
+
+  it("full filename at root is confidential", () => {
+    assert.equal(isConfidentialTarget(root, ["maestro.json"], "maestro.json"), true);
+    assert.equal(isConfidentialTarget(root, ["maestro.json"], "maestro.jsonx"), false);
+    assert.equal(isConfidentialTarget(root, ["maestro.json"], "src/maestro.json"), false);
+  });
+  it("dotfile full name at root is confidential", () => {
+    assert.equal(isConfidentialTarget(root, [".maestro.json"], ".maestro.json"), true);
+  });
+  it("bare mask blocks root but not nested", () => {
+    assert.equal(isConfidentialTarget(root, ["*.env"], "prod.env"), true);
+    assert.equal(isConfidentialTarget(root, ["*.env"], "config/prod.env"), false);
+  });
+  it("recursive mask covers root and nested", () => {
+    assert.equal(isConfidentialTarget(root, ["**/*.pem"], "app.pem"), true);
+    assert.equal(isConfidentialTarget(root, ["**/*.pem"], "certs/app.pem"), true);
+    assert.equal(isConfidentialTarget(root, ["**/*.env"], "prod.env"), true);
+  });
+  it("nested mask with slash blocks within that segment", () => {
+    assert.equal(isConfidentialTarget(root, ["configs/*.env"], "configs/prod.env"), true);
+    assert.equal(isConfidentialTarget(root, ["configs/*.env"], "prod.env"), false);
+  });
+  it("case-variant of full filename still blocked (case-insensitive)", () => {
+    assert.equal(isConfidentialTarget(root, ["Maestro.json"], "maestro.JSON"), true);
+  });
+  it("docs/confidential/** still blocks file, dir and subdir (regression)", () => {
+    const p = ["docs/confidential/**"];
+    assert.equal(isConfidentialTarget(root, p, "docs/confidential/x.md"), true);
+    assert.equal(isConfidentialTarget(root, p, "docs/confidential"), true);
+    assert.equal(isConfidentialTarget(root, p, "docs/confidential/subdir"), true);
+  });
+  it("does not block non-confidential paths", () => {
+    assert.equal(isConfidentialTarget(root, ["*.env", "**/*.pem"], "src/app.ts"), false);
+    assert.equal(isConfidentialTarget(root, ["*.env", "**/*.pem"], "docs/readme.md"), false);
+  });
+});

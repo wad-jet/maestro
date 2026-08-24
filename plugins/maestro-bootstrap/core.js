@@ -654,6 +654,8 @@ export function isPluginMetaFile(root, target) {
  * Confidential — security-граница: матчинг case-insensitive (APFS/NTFS могут
  * резолвить case-варианты в тот же файл) и блокирует как файлы под паттерном,
  * так и саму директорию/поддиректории (листинг — C2).
+ * Сегментная семантика `confGlobMatch`: `**` покрывает корень и вложенные,
+ * `*`/`?` — в пределах одного сегмента; маска без `/` — только корневые файлы.
  * @param {string} root      Project root (absolute).
  * @param {string[]} patterns  Confidential path globs (e.g. `docs/confidential/**`).
  * @param {string} target    Raw path from tool args.
@@ -666,12 +668,10 @@ export function isConfidentialTarget(root, patterns, target) {
   for (const p of patterns ?? []) {
     if (typeof p !== "string" || !p) continue;
     const pat = p.toLowerCase();
-    if (globMatch(pat, lower)) return true; // файл под паттерном
-    if (pat.endsWith("/**")) {
-      const prefix = pat.slice(0, -3); // убрать `/**`
-      if (lower === prefix) return true; // сама директория
-      if (lower.startsWith(prefix + "/")) return true; // поддиректория (листинг глубже)
-    }
+    // Confidential-граница: сегментный матчинг (confGlobMatch). Директория,
+    // поддиректории и файлы под `dir/**` покрываются самим матчером
+    // (`**` матчит 0+ сегментов), поэтому отдельный префикс не нужен.
+    if (confGlobMatch(pat, lower)) return true;
   }
   return false;
 }
