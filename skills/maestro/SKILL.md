@@ -169,8 +169,8 @@ Interactive — агент комментирует находки по ходу
       ```
       - Реестр закоммичен в git (корень репо, `regression/`) — идентичен из
         любого worktree/клона; трюков с git-common-dir не нужно
-      - `.maestro/` в `.gitignore` — только эфемерное (sdd/, last-run,
-        maestro-bootstrap-*.log); реестр в git
+      - `.maestro/` целиком в `.gitignore` (только эфемерное: sdd/, last-run,
+        logs/, feedback-reports/, plugin-version); реестр в git
       - Структура (`regression/entries/`, `regression/released/`,
         `regression/cancelled-features.md`) закоммичена через `.gitkeep` —
         каталоги существуют всегда
@@ -410,7 +410,7 @@ Interactive — агент комментирует находки по ходу
         (b) Revise — вернуться к шагу 11, доработать план
         (c) Отмена
 🟢 13. [agent] subagent-driven-development:
-      a. **Pre-clean:** удалить `.maestro/sdd/*.md` (кроме `.gitkeep`).
+      a. **Pre-clean:** очистить `.maestro/sdd/` от файлов прошлых фич.
          Предотвращает смешивание контекста между фичами — stale файлы
          прошлых фич сбивают субагентов.
       b. Читает plan, создаёт todos для всех tasks
@@ -1353,8 +1353,8 @@ $REGISTRY_DIR = $(git rev-parse --show-toplevel)/regression
 └── released/YYYY-MM-DD-<feature>.md    ← released/cancelled (архив)
 ```
 
-- Реестр закоммичен в git (корень репо). Per-worktree остаются `.maestro/sdd/`,
-   `.maestro/logs/`, `.maestro/last-run.md` (в `.gitignore`)
+- Реестр закоммичен в git (корень репо). Per-worktree остаётся `.maestro/`
+   (в `.gitignore` целиком)
 - `1 файл = 1 фича` — sharded append-only: конфликт параллельных pipeline
   невозможен по построению, flock не нужен
 - Параллельные worktree: каждая фича коммитит свой entry в свою ветку;
@@ -1419,7 +1419,7 @@ active ── отмена (Gate: отмена) ──→ released (status: canc
 - Plan файлы: `docs/superpowers/plans/YYYY-MM-DD-<feature-name>-plan.md`
 - Roadmap: `docs/roadmap.md` (MVP + этапы развития; создаётся `/maestro-init`
   для новых проектов) — вход для планирования спринтов
-- SDD progress: `.maestro/sdd/progress.md` (в gitignore)
+- SDD progress: `.maestro/sdd/progress.md` (в `.gitignore`, весь `.maestro/`)
 - Regression registry: `regression/entries/YYYY-MM-DD-<feature-name>.md`
   (в git, см. секцию «Regression Registry»)
 
