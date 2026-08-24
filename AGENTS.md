@@ -10,6 +10,7 @@ This is the **authoring repo** for the OpenCode `maestro` system (the "maestro" 
 - `skills/maestro/{design-prompt.md,implementer-prompt.md,spec-review-prompt.md,stack-detection.md}` — support files referenced by SKILL.md.
 - `skills/maestro-init/{SKILL.md,init-context.md}` — `/maestro-init` skill for bootstrapping new projects (project-context.md 14 categories, architecture design, scaffold, roadmap).
 - `skills/maestro-design/SKILL.md` — `/maestro-design` skill for design + spec (via `design` agent), code scaffold (TDD), and roadmap.
+- `skills/maestro-assistant/SKILL.md` — `/maestro-assistant` skill: consultation & config/structure/context organization for maestro (single source of config rules). Self-contained; loaded by init (tasks 2/3/3a) and maestro (pipeline config questions).
 - `skills/manual-docs/SKILL.md` — user-docs skill for `manual_docs/` (Diátaxis).
 - `plugins/maestro-bootstrap/` — ESM OpenCode plugin.
 - `specs/*.md` — design specs and implementation plans for work on this repo (kebab-case: `<topic>.md` for spec, `<topic>-plan.md` for plan). **Rule: all feature/bugfix design docs (specs AND plans) must be created in `specs/`, never in the repo root.**
@@ -21,13 +22,10 @@ This is the **authoring repo** for the OpenCode `maestro` system (the "maestro" 
 - **Agent was renamed `feature-agent` → `maestro` (2026-08-03).** The application repo must be updated in lockstep: `opencode.json` keys `agent.feature-agent` → `agent.maestro` and plugin path `plugins/feature-agent-bootstrap/index.js` → `plugins/maestro-bootstrap/index.js`, `.opencode/` mirrors (`agents/maestro.md`, `skills/maestro/`), and `.gitignore` entry `.feature-agent/` → **specific paths** (`.maestro/sdd/`, `.maestro/last-run.md`, `.maestro/logs/maestro-bootstrap-*.log` — НЕ весь `.maestro/`, см. `skills/maestro/SKILL.md`).
 - **Russian is the working language.** All HITL gates, user messages, agent descriptions, and docs are in Russian. Match it in new content.
 
-## Скиллы / Skills (sync rule)
+## Скиллы / Skills (доставка в целевое приложение)
 
-`skills/` here is the source of truth; OpenCode loads runtime copies from the application repo. When you edit a source file, update the runtime copy too:
+`skills/` here is the source of truth. OpenCode loads skills/commands/agents from the **target application** repo (`.opencode/`). Delivery of changes to the target application is done via the **standard mechanism**: manually from the remote repository or through `agpack`. **Separate `.opencode/`-mirroring is NOT required** — the authoring repo is the single copy, published to the target application via repo/`agpack`.
 
-- `agents/*.md` → `.opencode/agents/*.md`
-- `commands/*.md` → `.opencode/commands/*.md`
-- any skill under `skills/` → `.opencode/skills/<name>/SKILL.md` (see `skills/manual-docs/SKILL.md` → Правило 5)
 - **Changes to `skills/maestro/SKILL.md`, `commands/*.md` or `agents/*.md` must also be reflected in `manual_docs/`** (user-facing docs for the maestro skill). Keeping `manual_docs/` in sync is part of the acceptance criteria for skill changes — see `manual_docs/how-to/keep-docs-up-to-date.md`.
 
 SKILL.md files are read by the orchestrator agent; `implementer-prompt.md` is self-contained and must stay loadable without the `skill` tool.

@@ -84,6 +84,14 @@
 ## [Unreleased]
 
 ### Добавлено
+- **Команда и скилл `/maestro-assistant`**: консультации и настройка maestro-конфигурации
+  (`maestro.json`, `opencode.json`), структуры каталогов и `project-context.md` в течение жизни
+  проекта. Общий источник правил конфигурации (self-contained канон в `skills/maestro-assistant/SKILL.md`),
+  доступный init (задачи 2/3/3а), maestro (по ходу pipeline) и HITL-консультациям. Плагин-гейт
+  не требуется; доступ к `docs/confidential/**` закрыт (primary deny); правка `confidential.paths`
+  — жёсткий контроль (снятие с защиты — блок по умолчанию, merge — консервативное дополнение).
+  После правки `maestro.json` — уведомление о необходимости перезапуска opencode (изменения
+  вступают в силу при старте плагина).
 - **Защищённая папка `docs/confidential`**: секция `confidential` в `maestro.json`
   закрывает конфиденциальные пути (дефолт `docs/confidential/**`) для
   `read`/`write`/`edit` от всех, кроме trusted-субагентов. Primary/untrusted —
@@ -107,6 +115,11 @@
   в секцию `## Пользовательский фидбек` отчёта (Enter без ввода = пропуск).
 
 ### Изменено
+- **Снятие требований `.opencode/`-зеркалирования**: скиллы/команды/агенты доставляются
+  в целевое приложение штатным механизмом (вручную из удалённого репозитория или через
+  `agpack`); отдельное `.opencode/`-зеркалирование не требуется. Обновлены AGENTS.md
+  (правило доставки), `skills/manual-docs/SKILL.md` (Правило 5), `skills/maestro/SKILL.md`,
+  `manual_docs/` (customize-maestro, what-is-maestro, quick-start, commands).
 - **Haiku bash-скрипты:** в `agents/haiku.md` добавлена директива использовать bash для git, grep, запуск тестов/сборки; запрет деструктивных команд (git push, git reset --hard, mass-delete) без явного указания в spec/плане. `describe` обновлён. `manual_docs/` синхронизирован (model-selection, agents-and-trust).
 - **Уход от агента `maestro`**: primary-агент удалён. Вход — команда `@maestro`
   в любой primary-сессии. `@regression`/`@maestro-init` больше не привязаны к

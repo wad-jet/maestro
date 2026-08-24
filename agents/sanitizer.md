@@ -121,6 +121,6 @@ STATUS: FINDINGS_FOUND
   - секреты (`.env*`, `*.{pem,key,cert,secret}`) → `deny`.
 - Если сомневаешься, добавлять ли правило — **уточни у HITL** (варианты a/b/c).
 - Файл может быть также сформирован при инициализации проекта (`/maestro-init`).
-- Файл может корректироваться вручную по правилам, описанным в документации
-  (`plugins/maestro-bootstrap/examples/maestro.example.json`).
+- Файл может корректироваться вручную по правилам, описанным в скилле
+  `maestro-assistant` (`skills/maestro-assistant/SKILL.md`).
 - Файл исполняется плагином `maestro-bootstrap` (динамический перехват file-тулов).

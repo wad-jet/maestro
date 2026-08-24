@@ -26,17 +26,12 @@ plugins/maestro-bootstrap/     ← ESM-плагин OpenCode
 Правьте файлы в authoring-репо. Например, чтобы изменить поведение pipeline —
 правьте `skills/maestro/SKILL.md`.
 
-### Шаг 3: Синхронизируйте runtime-копии
+### Шаг 3: Доставьте изменения в целевое приложение
 
-OpenCode загружает скиллы/агентов/команды из целевого приложения (`.opencode/`).
-После правки источника обновите и копию:
-
-| Источник | Runtime-копия |
-|---|---|
-| `agents/*.md` | `.opencode/agents/*.md` |
-| `commands/*.md` | `.opencode/commands/*.md` |
-| любой скилл в `skills/` | `.opencode/skills/<name>/SKILL.md` |
-| `skills/manual-docs/SKILL.md` | `.opencode/skills/manual-docs/SKILL.md` |
+Скиллы/агенты/команды доставляются в целевое приложение **штатным механизмом** — вручную
+из удалённого репозитория или через `agpack`. OpenCode загружает их из `.opencode/` целевого
+приложения. Отдельное `.opencode/`-зеркалирование не требуется: источник (authoring-репо)
+является единственной копией, публикуемой в целевое приложение через репо/`agpack`.
 
 ### Шаг 4: Обновите пользовательскую документацию
 
@@ -45,10 +40,12 @@ OpenCode загружает скиллы/агентов/команды из це
 
 ## 💡 Примеры
 
-- **Изменить описание субагента:** `agents/haiku.md` → `.opencode/agents/haiku.md`.
-- **Изменить команду входа:** `commands/maestro.md` → `.opencode/commands/maestro.md`.
-- **Добавить команду:** `commands/foo.md` → `.opencode/commands/foo.md`.
-- **Изменить pipeline:** `skills/maestro/SKILL.md` → `.opencode/skills/maestro/SKILL.md`.
+- **Изменить описание субагента:** правьте `agents/haiku.md`, доставьте через репо/`agpack`.
+- **Изменить команду входа:** правьте `commands/maestro.md`, доставьте через репо/`agpack`.
+- **Добавить команду:** создайте `commands/foo.md`, доставьте через репо/`agpack`.
+- **Изменить pipeline:** правьте `skills/maestro/SKILL.md`, доставьте через репо/`agpack`.
+- **Настроить конфигурацию/структуру/контекст проекта:** используйте `/maestro-assistant` —
+  консультативная точка для maestro-настройки в течение жизни проекта.
 
 ## ⚠️ Известные ограничения
 

@@ -24,11 +24,17 @@
 | Категории фич / матрица сигналов | `reference/feature-classification.md` |
 | Модели / tier / субагенты | `reference/model-selection.md`, `explanation/agents-and-trust.md` |
 | Команды (`@command`) | `reference/commands.md` |
+| `/maestro-assistant` (конфиг/структура/контекст) | `reference/commands.md`, `reference/config.md`, `explanation/agents-and-trust.md` |
 | `/maestro-init` / `/maestro-design` (setup, конфиг, модели) | `tutorials/setup-project.md`, `reference/commands.md` |
 | Trust / санитайзер | `explanation/agents-and-trust.md` |
 | Security Review / sanitizer-сабагент / file access control | `explanation/agents-and-trust.md`, `reference/model-selection.md`, `reference/hitl-gates.md` |
 | Реестр регрессии | `how-to/use-regression-registry.md` |
 | Любое изменение поведения | `overview/changelog.md` |
+
+> **Синк канона ↔ производные:** полный JSON-канон `maestro.json` живёт в
+> `skills/maestro-assistant/SKILL.md`. При его правке — обновить производные
+> (`manual_docs/reference/config.md` таблицы, README плагина), держа синхронно с
+> правилами парсинга плагина (`loadMaestroConfig` и др.).
 
 ## 💡 Как найти, что изменилось
 

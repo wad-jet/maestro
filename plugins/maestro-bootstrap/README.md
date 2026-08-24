@@ -90,7 +90,8 @@ Whitelist — секция `sanitizer_whitelist` в `maestro.json` (см. ниж
   (bash-пути ненадёжно извлекаются; glob/grep — паттерны) — используйте нативные
   permissions OpenCode (`bash: ask` и т.п.).
 - Файл `maestro.json` (секция `access_policy`) формируется сабагентом
-  `sanitizer` (по структуре проекта/стеку) или вручную. Пример — `examples/maestro.example.json`.
+  `sanitizer` (по структуре проекта/стеку) или вручную. Полный JSON-канон и правила — в
+  скилле `maestro-assistant` (`skills/maestro-assistant/SKILL.md`).
 - Если файла нет — плагин НЕ блокирует (fail-open), полагаясь на нативные
   permissions OpenCode.
 - Плагин **НЕ форсирует** `file_access` OpenCode (не задаёт `config.file_access`)
@@ -135,7 +136,8 @@ Security-фактура по доступу пишется в **отдельны
 (по умолчанию `<project>/.maestro/logs`). Сбой записи аудита логируется в
 `console.error` (не ломая сессию).
 
-Пример конфига: `examples/maestro.example.json`.
+Канон конфига `maestro.json` и правила вывода секций — в скилле `maestro-assistant`
+(`skills/maestro-assistant/SKILL.md`).
 
 ## Конфигурация: maestro.json
 
