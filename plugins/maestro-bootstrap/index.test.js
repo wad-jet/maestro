@@ -1655,6 +1655,19 @@ describe("maestro-bootstrap isConfidentialTarget (single-file & mask)", () => {
     assert.equal(isConfidentialTarget(root, ["*.env", "**/*.pem"], "src/app.ts"), false);
     assert.equal(isConfidentialTarget(root, ["*.env", "**/*.pem"], "docs/readme.md"), false);
   });
+  it("single ? wildcard at root via isConfidentialTarget", () => {
+    assert.equal(isConfidentialTarget(root, ["?.env"], "a.env"), true);
+    assert.equal(isConfidentialTarget(root, ["?.env"], "ab.env"), false);
+    assert.equal(isConfidentialTarget(root, ["?.env"], "sub/a.env"), false);
+  });
+  it("brace alternation at root via isConfidentialTarget", () => {
+    assert.equal(isConfidentialTarget(root, ["*.{env,local}"], "prod.env"), true);
+    assert.equal(isConfidentialTarget(root, ["*.{env,local}"], "prod.local"), true);
+    assert.equal(isConfidentialTarget(root, ["*.{env,local}"], "prod.yml"), false);
+  });
+  it("matcher would catch .maestro/plugin-version under .maestro/** (exemption is separate)", () => {
+    assert.equal(isConfidentialTarget(root, [".maestro/**"], ".maestro/plugin-version"), true);
+  });
 });
 
 describe("maestro-bootstrap confidential enforcement by mask/filename", () => {
@@ -1687,7 +1700,7 @@ describe("maestro-bootstrap confidential enforcement by mask/filename", () => {
     for (const k of LOG_ENV) { savedLogEnv[k] = process.env[k]; delete process.env[k]; }
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-fmask-"));
     fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({
-      confidential: { paths: ["*.env", "**/*.pem", "maestro.json"] },
+      confidential: { paths: ["*.env", "**/*.pem", "maestro.json", ".maestro/**"] },
     }));
     hooks = await MaestroBootstrapPlugin({ directory: dir, client: makeClient(rootSessions) });
   });
@@ -1732,5 +1745,10 @@ describe("maestro-bootstrap confidential enforcement by mask/filename", () => {
       hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "m5" }, out),
       /confidential:deny/,
     );
+  });
+  it("does not block .maestro/plugin-version even under .maestro/** confidential", async () => {
+    const out = { args: { filePath: ".maestro/plugin-version" } };
+    await hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "m6" }, out);
+    assert.ok(true, "plugin version read must not be blocked by .maestro/** confidential");
   });
 });
