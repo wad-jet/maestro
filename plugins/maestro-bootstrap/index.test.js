@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, readPluginVersion, writePluginVersionFile, isPluginMetaFile } from "./core.js";
+import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile } from "./core.js";
 
 function readLogs(dir, filePrefix = "maestro-bootstrap") {
   const logDir = path.join(dir, ".maestro/logs");
@@ -1571,5 +1571,184 @@ describe("maestro-bootstrap confidential audit log", () => {
     const out = { args: { filePath: "src/app.ts" } };
     await hooks["tool.execute.before"]({ tool: "read", sessionID: "childTrusted", callID: "c-a3" }, out);
     assert.equal(readLogs(dir, "maestro-audit").length, before, "no audit entry for non-confidential read");
+  });
+});
+
+describe("maestro-bootstrap confGlobMatch (segment-aware, confidential-only)", () => {
+  it("full filename matches only root-level", () => {
+    assert.equal(confGlobMatch("maestro.json", "maestro.json"), true);
+    assert.equal(confGlobMatch("maestro.json", "src/maestro.json"), false);
+    assert.equal(confGlobMatch("maestro.json", "maestro.jsonx"), false);
+  });
+  it("dotfile full name matches", () => {
+    assert.equal(confGlobMatch(".maestro.json", ".maestro.json"), true);
+  });
+  it("bare mask matches only root (does not cross /)", () => {
+    assert.equal(confGlobMatch("*.env", "prod.env"), true);
+    assert.equal(confGlobMatch("*.env", "config/prod.env"), false);
+  });
+  it("recursive ** covers root and nested", () => {
+    assert.equal(confGlobMatch("**/*.pem", "app.pem"), true);
+    assert.equal(confGlobMatch("**/*.pem", "certs/app.pem"), true);
+    assert.equal(confGlobMatch("**/*.pem", "certs/nested/app.pem"), true);
+    assert.equal(confGlobMatch("**/*.pem", "app.pemx"), false);
+  });
+  it("nested mask with slash matches within that segment", () => {
+    assert.equal(confGlobMatch("configs/*.env", "configs/prod.env"), true);
+    assert.equal(confGlobMatch("configs/*.env", "prod.env"), false);
+    assert.equal(confGlobMatch("configs/*.env", "configs/deep/prod.env"), false);
+  });
+  it("brace alternation within a segment", () => {
+    assert.equal(confGlobMatch("*.{env,local}", "prod.env"), true);
+    assert.equal(confGlobMatch("*.{env,local}", "prod.local"), true);
+    assert.equal(confGlobMatch("*.{env,local}", "prod.yml"), false);
+  });
+  it("trailing /** matches directory, subdir and file inside", () => {
+    assert.equal(confGlobMatch("docs/confidential/**", "docs/confidential"), true);
+    assert.equal(confGlobMatch("docs/confidential/**", "docs/confidential/x.md"), true);
+    assert.equal(confGlobMatch("docs/confidential/**", "docs/confidential/subdir"), true);
+  });
+  it("single ? matches one char within a segment", () => {
+    assert.equal(confGlobMatch("?.env", "a.env"), true);
+    assert.equal(confGlobMatch("?.env", "ab.env"), false);
+  });
+  it("returns false for empty pattern or value (defensive guard)", () => {
+    assert.equal(confGlobMatch("", "prod.env"), false);
+    assert.equal(confGlobMatch("*.env", ""), false);
+  });
+});
+
+describe("maestro-bootstrap isConfidentialTarget (single-file & mask)", () => {
+  const root = "/proj";
+
+  it("full filename at root is confidential", () => {
+    assert.equal(isConfidentialTarget(root, ["maestro.json"], "maestro.json"), true);
+    assert.equal(isConfidentialTarget(root, ["maestro.json"], "maestro.jsonx"), false);
+    assert.equal(isConfidentialTarget(root, ["maestro.json"], "src/maestro.json"), false);
+  });
+  it("dotfile full name at root is confidential", () => {
+    assert.equal(isConfidentialTarget(root, [".maestro.json"], ".maestro.json"), true);
+  });
+  it("bare mask blocks root but not nested", () => {
+    assert.equal(isConfidentialTarget(root, ["*.env"], "prod.env"), true);
+    assert.equal(isConfidentialTarget(root, ["*.env"], "config/prod.env"), false);
+  });
+  it("recursive mask covers root and nested", () => {
+    assert.equal(isConfidentialTarget(root, ["**/*.pem"], "app.pem"), true);
+    assert.equal(isConfidentialTarget(root, ["**/*.pem"], "certs/app.pem"), true);
+    assert.equal(isConfidentialTarget(root, ["**/*.env"], "prod.env"), true);
+  });
+  it("nested mask with slash blocks within that segment", () => {
+    assert.equal(isConfidentialTarget(root, ["configs/*.env"], "configs/prod.env"), true);
+    assert.equal(isConfidentialTarget(root, ["configs/*.env"], "prod.env"), false);
+  });
+  it("case-variant of full filename still blocked (case-insensitive)", () => {
+    assert.equal(isConfidentialTarget(root, ["Maestro.json"], "maestro.JSON"), true);
+  });
+  it("docs/confidential/** still blocks file, dir and subdir (regression)", () => {
+    const p = ["docs/confidential/**"];
+    assert.equal(isConfidentialTarget(root, p, "docs/confidential/x.md"), true);
+    assert.equal(isConfidentialTarget(root, p, "docs/confidential"), true);
+    assert.equal(isConfidentialTarget(root, p, "docs/confidential/subdir"), true);
+  });
+  it("does not block non-confidential paths", () => {
+    assert.equal(isConfidentialTarget(root, ["*.env", "**/*.pem"], "src/app.ts"), false);
+    assert.equal(isConfidentialTarget(root, ["*.env", "**/*.pem"], "docs/readme.md"), false);
+  });
+  it("single ? wildcard at root via isConfidentialTarget", () => {
+    assert.equal(isConfidentialTarget(root, ["?.env"], "a.env"), true);
+    assert.equal(isConfidentialTarget(root, ["?.env"], "ab.env"), false);
+    assert.equal(isConfidentialTarget(root, ["?.env"], "sub/a.env"), false);
+  });
+  it("brace alternation at root via isConfidentialTarget", () => {
+    assert.equal(isConfidentialTarget(root, ["*.{env,local}"], "prod.env"), true);
+    assert.equal(isConfidentialTarget(root, ["*.{env,local}"], "prod.local"), true);
+    assert.equal(isConfidentialTarget(root, ["*.{env,local}"], "prod.yml"), false);
+  });
+  it("matcher would catch .maestro/plugin-version under .maestro/** (exemption is separate)", () => {
+    assert.equal(isConfidentialTarget(root, [".maestro/**"], ".maestro/plugin-version"), true);
+  });
+});
+
+describe("maestro-bootstrap confidential enforcement by mask/filename", () => {
+  let dir, hooks, savedLogEnv;
+  const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR"];
+
+  function makeClient(sessions) {
+    return {
+      session: {
+        get: async ({ path }) => {
+          const rec = sessions[path.id];
+          if (!rec) throw new Error("not found");
+          return { data: rec.session };
+        },
+        messages: async ({ path }) => {
+          const rec = sessions[path.id];
+          if (!rec) return { data: [] };
+          return { data: rec.messages };
+        },
+      },
+    };
+  }
+
+  const rootSessions = {
+    root: { session: { id: "root" }, messages: [] },
+  };
+
+  before(async () => {
+    savedLogEnv = {};
+    for (const k of LOG_ENV) { savedLogEnv[k] = process.env[k]; delete process.env[k]; }
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-fmask-"));
+    fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({
+      confidential: { paths: ["*.env", "**/*.pem", "maestro.json", ".maestro/**"] },
+    }));
+    hooks = await MaestroBootstrapPlugin({ directory: dir, client: makeClient(rootSessions) });
+  });
+
+  after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    for (const k of LOG_ENV) {
+      if (savedLogEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedLogEnv[k];
+    }
+  });
+
+  it("denies read of root-level mask file", async () => {
+    const out = { args: { filePath: "prod.env" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "m1" }, out),
+      /confidential:deny/,
+    );
+  });
+  it("does not deny read of nested file not matching root mask", async () => {
+    const out = { args: { filePath: "config/prod.env" } };
+    await hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "m2" }, out);
+    assert.ok(true);
+  });
+  it("denies read of recursive-mask file at root", async () => {
+    const out = { args: { filePath: "app.pem" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "m3" }, out),
+      /confidential:deny/,
+    );
+  });
+  it("denies read of recursive-mask file nested", async () => {
+    const out = { args: { filePath: "certs/app.pem" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "m4" }, out),
+      /confidential:deny/,
+    );
+  });
+  it("denies read of full filename at root", async () => {
+    const out = { args: { filePath: "maestro.json" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "m5" }, out),
+      /confidential:deny/,
+    );
+  });
+  it("does not block .maestro/plugin-version even under .maestro/** confidential", async () => {
+    const out = { args: { filePath: ".maestro/plugin-version" } };
+    await hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "m6" }, out);
+    assert.ok(true, "plugin version read must not be blocked by .maestro/** confidential");
   });
 });

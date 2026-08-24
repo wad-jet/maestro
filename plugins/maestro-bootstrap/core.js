@@ -548,6 +548,80 @@ function globMatch(pattern, value) {
 }
 
 /**
+ * Segment-aware glob matcher for confidential paths ONLY.
+ * Confidential-граница использует более строгую семантику, чем общий
+ * `globMatch` (который оставлен для access_policy, где `*` пересекает `/`):
+ *  - `**`  — 0+ сегментов (0 включительно ⇒ покрывает корень);
+ *  - `*`   — любые символы в пределах ОДНОГО сегмента (не пересекает `/`);
+ *  - `?`   — один символ в пределах одного сегмента;
+ *  - `{a,b}` — чередование внутри сегмента.
+ * Паттерн без `/` и без `**` (напр. `*.env`) матчит только корневые файлы.
+ * Оба аргумента ожидаются в нижнем регистре (case-insensitive граница).
+ * Пустой pattern/value → `false` (защитный guard от `("**","")` / `("*","")`).
+ * @param {string} pattern  Glob pattern (lowercased).
+ * @param {string} value    Project-relative path (lowercased).
+ * @returns {boolean}
+ */
+export function confGlobMatch(pattern, value) {
+  if (typeof pattern !== "string" || !pattern) return false;
+  if (typeof value !== "string" || !value) return false;
+  const patSegs = pattern.split("/");
+  const valSegs = value.split("/");
+
+  // regex для отдельного сегмента паттерна (без `**`).
+  const segRe = (seg) => {
+    let out = "";
+    let i = 0;
+    while (i < seg.length) {
+      const ch = seg[i];
+      if (ch === "{") {
+        const end = seg.indexOf("}", i);
+        if (end !== -1) {
+          const alts = seg
+            .slice(i + 1, end)
+            .split(",")
+            .map((a) => a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+          out += `(?:${alts.join("|")})`;
+          i = end + 1;
+          continue;
+        }
+      }
+      if (ch === "*") {
+        out += "[^/]*";
+      } else if (ch === "?") {
+        out += "[^/]";
+      } else {
+        out += ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      }
+      i += 1;
+    }
+    return new RegExp(`^${out}$`);
+  };
+
+  const re = patSegs.map((s) => (s === "**" ? null : segRe(s)));
+
+  // DP: dp[i][j] = можно ли сопоставить паттерн[0..i) со значением[0..j).
+  const dp = Array.from({ length: patSegs.length + 1 }, () =>
+    Array(valSegs.length + 1).fill(false),
+  );
+  dp[0][0] = true;
+  for (let i = 1; i <= patSegs.length; i++) {
+    if (patSegs[i - 1] === "**") dp[i][0] = dp[i - 1][0];
+  }
+  for (let i = 1; i <= patSegs.length; i++) {
+    for (let j = 1; j <= valSegs.length; j++) {
+      if (patSegs[i - 1] === "**") {
+        // `**` матчит 0+ сегментов.
+        dp[i][j] = dp[i - 1][j] || dp[i][j - 1];
+      } else if (re[i - 1].test(valSegs[j - 1])) {
+        dp[i][j] = dp[i - 1][j - 1];
+      }
+    }
+  }
+  return dp[patSegs.length][valSegs.length];
+}
+
+/**
  * Normalize a target path to a canonical project-relative form (posix separators).
  * Сводит absolute / relative / `./` / `..` к единому виду для glob-матчинга.
  * @param {string} root    Project root (absolute).
@@ -580,6 +654,8 @@ export function isPluginMetaFile(root, target) {
  * Confidential — security-граница: матчинг case-insensitive (APFS/NTFS могут
  * резолвить case-варианты в тот же файл) и блокирует как файлы под паттерном,
  * так и саму директорию/поддиректории (листинг — C2).
+ * Сегментная семантика `confGlobMatch`: `**` покрывает корень и вложенные,
+ * `*`/`?` — в пределах одного сегмента; маска без `/` — только корневые файлы.
  * @param {string} root      Project root (absolute).
  * @param {string[]} patterns  Confidential path globs (e.g. `docs/confidential/**`).
  * @param {string} target    Raw path from tool args.
@@ -592,12 +668,10 @@ export function isConfidentialTarget(root, patterns, target) {
   for (const p of patterns ?? []) {
     if (typeof p !== "string" || !p) continue;
     const pat = p.toLowerCase();
-    if (globMatch(pat, lower)) return true; // файл под паттерном
-    if (pat.endsWith("/**")) {
-      const prefix = pat.slice(0, -3); // убрать `/**`
-      if (lower === prefix) return true; // сама директория
-      if (lower.startsWith(prefix + "/")) return true; // поддиректория (листинг глубже)
-    }
+    // Confidential-граница: сегментный матчинг (confGlobMatch). Директория,
+    // поддиректории и файлы под `dir/**` покрываются самим матчером
+    // (`**` матчит 0+ сегментов), поэтому отдельный префикс не нужен.
+    if (confGlobMatch(pat, lower)) return true;
   }
   return false;
 }
