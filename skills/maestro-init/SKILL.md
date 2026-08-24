@@ -198,19 +198,16 @@ global (`~/.config/opencode/opencode.json`) → project (`opencode.json`) →
 из global. Fallback (если `models` нигде нет): HITL-ввод вручную + попытка
 `opencode models <provider>`.
 
-### .gitignore — конкретные пути (не весь `.maestro/`)
+### .gitignore — весь `.maestro/` (только эфемерное)
 
-Добавить недостающие записи (не дублировать):
+Добавить (идемпотентно, не дублировать):
 ```
-.maestro/sdd/
-.maestro/last-run.md
-.maestro/logs/
-.maestro/feedback-reports/
-.maestro/plugin-version
+.maestro/
 ```
-**НЕ** использовать `.maestro/` (весь каталог) — эфемерные файлы игнорируются
-точечно; конфиги (`maestro.json`) коммитятся в git. `.maestro/feedback-reports/`
-(отчёты `@maestro-feedback-report`) — эфемерное, в gitignore.
+`.maestro/` содержит только эфемерное (sdd/, last-run.md, logs/, feedback-reports/,
+plugin-version) и игнорируется целиком. Конфиг проекта — единственный файл
+`maestro.json` в корне (рядом с `opencode.json`). **Никакие конфиги не класть в
+`.maestro/`** — иначе они потеряются из git (`.maestro/` в `.gitignore`).
 
 ### regression/ — структура каталогов
 
