@@ -191,7 +191,7 @@ deny. Trust не наследуется вложенными субагента�
 
 #### Логи плагина: формат и структура записей
 
-Плагин `maestro-bootstrap` пишет JSONL-логи в `.maestro/logs/` (gitignored,
+Плагин `maestro-bootstrap` пишет JSONL-логи в `.maestro/logs/` (весь `.maestro/` в gitignore,
 разбивка по дням) — **два** лога с разным назначением:
 
 - `maestro-bootstrap-<дата>.log` — **observability**: task-диспатчи, ошибки/повторы
@@ -558,11 +558,7 @@ MAESTRO_BOOTSTRAP_LOG_DIR="/var/log/maestro"
 | `regression/entries/*.md` | Активные entries регрессии | Да |
 | `regression/released/*.md` | Архив завершённых entries | Да |
 | `regression/cancelled-features.md` | Решения об отменах | Да |
-| `.maestro/sdd/*.md` | SDD progress (текучие) | Нет |
-| `.maestro/last-run.md` | Свод запуска | Нет |
-| `.maestro/logs/maestro-bootstrap-*.log` | Логи плагина | Нет |
-| `.maestro/feedback-reports/*.md` | Отчёты фидбэка | Нет |
-| `.maestro/plugin-version` | Версия загруженного плагина | Нет |
+| `.maestro/**` | SDD progress, last-run.md, logs/, feedback-reports/, plugin-version (эфемерное) | Нет |
 
 ## 🔗 Связанные разделы
 

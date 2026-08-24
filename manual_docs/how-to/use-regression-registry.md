@@ -18,7 +18,7 @@ $REGISTRY_DIR = $(git rev-parse --show-toplevel)/regression
 ```
 
 Реестр закоммичен в git (корень репо). Per-worktree остаются только эфемерные
-файлы в `.maestro/` (sdd/, maestro-bootstrap-*.log, last-run) — они в `.gitignore`.
+файлы в `.maestro/` (эфемерное) — весь каталог в `.gitignore`.
 
 ## 📖 Как это встраивается в pipeline
 

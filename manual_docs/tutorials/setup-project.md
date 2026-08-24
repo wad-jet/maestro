@@ -39,8 +39,7 @@
    - `maestro.json` — `trust` (design, sanitizer), `access_policy`, `confidential`,
      `sanitizer_whitelist`;
    - `opencode.json` — регистрация плагина `maestro-bootstrap` + модели агентов;
-   - `.gitignore` — конкретные пути (`.maestro/sdd/`, `.maestro/last-run.md`,
-      `.maestro/logs/`, `.maestro/plugin-version`);
+   - `.gitignore` — весь `.maestro/` (эфемерное);
    - `regression/` — структуру реестра рисков.
 4. **Каталоги** — `.maestro/`, `docs/superpowers/{specs,plans}/`.
 5. **Проверки** — скилы superpowers (предложит установить через HITL), плагин

@@ -13,6 +13,9 @@
 - **How-to-документ «Обновление maestro»** (`manual_docs/how-to/update-maestro.md`):
   доставка новой версии скиллов и плагина, контроль версии через `/maestro-version`.
   Зафиксировано правило: версия скилов и плагина — единая (корневой `package.json`).
+- **Смена `.gitignore` для `.maestro/`**: вместо конкретных путей (sdd/, last-run,
+  logs/, feedback-reports/, plugin-version) — весь каталог `.maestro/` в `.gitignore`.
+  Конфиг проекта — `maestro.json` в корне.
 
 ## [2026-08-21]
 

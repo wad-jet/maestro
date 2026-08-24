@@ -35,7 +35,8 @@
 
 Setup-фаза bootstrap нового проекта: `docs/project-context.md` (14 категорий),
 конфигурация maestro (`maestro.json`, `opencode.json` с плагином и моделями,
-`.gitignore`), каталоги pipeline (`.maestro/`, `docs/superpowers/{specs,plans}/`),
+`.gitignore`), каталоги pipeline (`.maestro/` — весь в `.gitignore`,
+`docs/superpowers/{specs,plans}/`),
 `regression/` структура. Использует скилл `maestro-init`.
 Проверяет предусловия: `AGENTS.md` (встроенный `/init`), скилы superpowers
 (предлагает установку через HITL), плагин `maestro-bootstrap` (не блокер).
