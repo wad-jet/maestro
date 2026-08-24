@@ -26,6 +26,9 @@ project context, запускает pre-flight, определяет катег�
 
 **Быстрый маршрут для простых фич:** категория **простая** (1-2 файла) →
 шаги `0→2→6→7(b)→11→13→16→18`. Spec (8–10) и Spec Review пропускаются.
+Сжатая запись опускает шаги 14/15/15a для краткости; для простых фич
+пропускаются только шаги 8-10 — **шаг 14 (документация) обязателен** для
+всех категорий.
 
 ### Шаг за шагом
 
@@ -44,7 +47,7 @@ project context, запускает pre-flight, определяет катег�
 | 11 | Plan | Создание плана задач: tasks, Project Context Changes, regression risk |
 | 12 | Plan gate | Approve (коммит spec+plan+regression-entry) · Revise · Cancel |
 | 13 | SDD | Реализация: субагенты haiku/sonnet по сложности, per-task review (sonnet), progress log |
-| 14 | Docs | Обновление пользовательской документации |
+| 14 | Docs | Обязательное обновление пользовательской документации: diff-сверка кода с manual_docs/; HITL только при расхождении. Coverage — на шаге 15 |
 | 15 | Checks | Тесты (TEST_COMMAND), e2e, coverage (docs/obs), lint |
 | 15a | Build | Проверка компиляции (BUILD_COMMAND) |
 | 16 | Code Review | Финальное ревью всей ветки (`code-reviewer`, opus-tier). Secret-scan diff. Трекинг issues: fixed / open + follow-up |

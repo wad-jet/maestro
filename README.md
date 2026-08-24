@@ -181,7 +181,9 @@ OpenCode установит плагин автоматически (Bun) при
 ### Быстрый маршрут для простых фич
 
 Для небольших задач на 1-2 файла spec можно пропустить: категория **простая**
-→ маршрут `0→6→7(b)→11→13→16→18`.
+→ маршрут `0→6→7(b)→11→13→16→18`. Сжатая запись опускает шаги 14/15/15a для
+краткости — **шаг 14 (обновление пользовательской документации) обязателен**
+для всех категорий (для простых пропускаются только шаги 8-10).
 
 ## Docs
 
@@ -193,7 +195,7 @@ OpenCode установит плагин автоматически (Bun) при
 agents/          — конфиги субагентов (design, haiku, sonnet, opus, fable, code-reviewer, sanitizer)
 commands/        — @command конфиги (/maestro, /maestro-init, /regression, /test-agents)
 plugins/         — maestro-bootstrap (ESM-плагин: sanitize, access_policy, observability)
-skills/          — скиллы (maestro, maestro-init, maestro-design, manual-docs)
+skills/          — скиллы (maestro, maestro-init, maestro-design, manual-docs — generic user-docs)
 specs/           — дизайн-спеки и план-ы этого репо (never in root!)
 manual_docs/     — пользовательская документация скилла (Diátaxis)
 ```

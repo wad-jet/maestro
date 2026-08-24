@@ -1,6 +1,6 @@
 ---
 name: manual-docs
-description: Use when adding or changing API endpoints, modules, configs, user-facing behavior, or completing sprint deliverables — maintains user-facing documentation in manual_docs/ (Diátaxis) and is enforced by docs.coverage.spec.ts. Also use when writing examples, tutorials, or reference docs for the project.
+description: Use when adding or changing user-facing behavior, modules, configs, API endpoints, or completing sprint deliverables — maintains user-facing documentation in manual_docs/ (Diátaxis) for the target application. Enforced in the maestro pipeline at step 14 (diff-verification) and optionally by a docs-coverage command at step 15. Also use when writing examples, tutorials, or reference docs for the project.
 ---
 
 # Manual Docs
@@ -11,21 +11,23 @@ description: Use when adding or changing API endpoints, modules, configs, user-f
 **Diátaxis** (tutorials / how-to / reference / explanation). Документация живёт в
 `manual_docs/` отдельно от технической документации разработчика в `docs/`.
 
-**Базовый принцип:** документация — это код. Она пишется до или вместе с кодом,
-ревьюится в том же PR и проверяется автоматическим тестом `docs.coverage.spec.ts`
-(по образцу `observability.coverage.spec.ts`). Устаревшая или отсутствующая
-документация блокирует сборку так же, как падающий юнит-тест.
+**Базовый принцип:** документация — это код. Она ревьюится в том же PR, что и
+код, и попадает в него в рамках обязательного шага 14 пайплайна maestro
+(diff-сверка кода с `manual_docs/`). При наличии в проекте coverage-команды
+(`DOCS_COVERAGE_COMMAND`) актуальность дополнительно проверяется на шаге 15.
+Устаревшая или отсутствующая документация блокирует merge так же, как падающий
+юнит-тест.
 
 ## Когда применять
 
 Применять **обязательно** при:
 
-- Добавлении нового эндпоинта (`@Get`/`@Post`/`@Put`/`@Delete`/`@Patch` в контроллере)
-- Добавлении или переименовании модуля (`src/<module>/`)
+- Добавлении или изменении пользовательского поведения (бизнес-флоу, статусы, конфигурация)
+- Добавлении или переименовании модуля/подсистемы (`src/<module>/`, сервис, пакет)
+- Добавлении или изменении публичного API-эндпоинта (в контроллере/роуте)
 - Изменении конфигурации, переменных окружения, docker-compose
-- Изменении пользовательского поведения (статусы узлов, Saga-флоу, ETL-пайплайн)
 - Завершении спринта (критерии приёмки документируются)
-- Добавлении примеров кода, curl-команд, схем
+- Добавлении примеров кода, команд, схем
 
 ## Когда НЕ применять
 
@@ -47,9 +49,8 @@ manual_docs/
     deploy-with-docker.md
   reference/                # Справочник (information-oriented): ищем факт
     api-authentication.md
-    api-endpoints.md        # Все эндпоинты в таблице (проверяется тестом)
     system-accounts.md
-    configuration.md
+    configuration.md        # Ключи/параметры конфигурации (пример, не API-центрично)
   explanation/              # Пояснения (understanding-oriented): почему так
     architecture.md
     double-entry.md
@@ -74,9 +75,11 @@ manual_docs/
 
 ### Правило 1: Документация → Код (Docs-as-Code TDD)
 
-- **Перед** разработкой новой функции создаётся или обновляется документация
-  в `manual_docs/`.
-- Для крупных изменений документация утверждается на ревью до написания кода.
+- **В пайплайне maestro** дока обновляется на шаге 14 — после реализации, до
+  финальных проверок (шаг 15). Обновление `manual_docs/` — обязательная часть
+  PR, проверяется diff-сверкой.
+- Для крупных изменений документация может утверждаться на ревью до написания
+  кода (на уровне спецификации) — «документация → код» для отдельных крупных фич.
 
 ### Правило 2: Один PR — одна документация
 
@@ -86,8 +89,9 @@ manual_docs/
 - Обновлён ли `CHANGELOG.md` в разделе `Unreleased`.
 - Обновлена ли пользовательская документация в `manual_docs/`.
 - Добавлены ли примеры для новых функций.
-- Для нового эндпоинта — добавлена ли строка в `manual_docs/reference/api-endpoints.md`
-  (иначе падает `docs.coverage.spec.ts`).
+- Для нового/изменённого эндпоинта — отражение в справочнике (например,
+  `reference/configuration.md` или api-reference) — иначе PR блокируется
+  (coverage-гейт на шаге 15 или diff-сверка на шаге 14).
 
 ### Правило 3: Рецензия документации
 
@@ -109,19 +113,42 @@ manual_docs/
 приложение — штатным механизмом (вручную из удалённого репозитория или через `agpack`);
 отдельное `.opencode/`-зеркалирование не требуется (см. AGENTS.md → «Скиллы»).
 
-## Тест покрытия `docs.coverage.spec.ts`
+## Роль в maestro
 
-Тест (зеркалит `observability.coverage.spec.ts`) гарантирует актуальность:
+`manual-docs` — **generic user-docs скилл для целевого приложения**. В пайплайне
+maestro он загружается оркестратором на **шаге 14** через skill-инструмент
+(не субагент; `step_to_tier` не затрагивается), чтобы обеспечить отражение
+пользовательских изменений в `manual_docs/` целевого приложения.
 
-1. **Эндпоинты:** сканирует `src/**/*.controller.ts`, извлекает HTTP-метод + путь
-   (с учётом `@Controller(prefix)` и глобального префикса `/api`), и требует, чтобы
-   каждая строка `METHOD /api/path` была в `manual_docs/reference/api-endpoints.md`.
-2. **Оглавление:** проверяет существование `manual_docs/index.md`.
-3. **Ссылки:** проверяет, что относительные markdown-ссылки из `index.md` резолвятся.
-4. **Исключения:** `manual_docs/.coverage-exemptions.json` (`{"routes":["..."],"modules":["..."]}`)
-   для инфраструктурных эндпоинтов, не требующих user-facing доки.
+Это **отдельно** от правила синхронизации `manual_docs/` самого maestro — т.е. от
+документации скилла maestro (см. `manual_docs/how-to/keep-docs-up-to-date.md`).
+`manual_docs/` maestro описывает сам скилл; скилл `manual-docs` описывает, как
+вести пользовательскую доку целевого приложения.
 
-При падении тест называет точный файл и эндпоинт, который нужно задокументировать.
+## Тест покрытия документации (опционально)
+
+В maestro актуальность `manual_docs/` обеспечивается двумя механизмами:
+
+1. **Diff-сверка (всегда, шаг 14)** — оркестратор сверяет diff кода с
+   изменениями в `manual_docs/` и требует отражения пользовательских изменений
+   в документации. HITL поднимается только при расхождении.
+2. **Coverage-гейт (опционально, шаг 15)** — если в проекте задан
+   `DOCS_COVERAGE_COMMAND` (например, `docs.coverage.spec.ts`) и он не `none`,
+   maestro выполняет его в финальных проверках. Пример такого теста
+   (зеркалит `observability.coverage.spec.ts`):
+
+   - **Пользовательские сущности/эндпоинты:** сканирует декларации в коде
+     (например, `src/**/*.controller.ts` для REST) и требует, чтобы каждая
+     пользовательская поверхность была отражена в `manual_docs/reference/`.
+   - **Оглавление:** проверяет существование `manual_docs/index.md`.
+   - **Ссылки:** проверяет, что относительные markdown-ссылки из `index.md` резолвятся.
+   - **Исключения:** `manual_docs/.coverage-exemptions.json` для инфраструктурных
+     сущностей, не требующих user-facing доки.
+
+   При падении тест называет точный файл и сущность, которую нужно задокументировать.
+
+> Если `DOCS_COVERAGE_COMMAND` не задана — coverage-гейт заменяется diff-сверкой
+> на шаге 14 (fallback, работает в любом проекте без coverage-теста).
 
 ## Шаблоны документов
 
@@ -138,7 +165,7 @@ manual_docs/
 
 ## 📚 Пользовательская документация
 - [Оглавление](./manual_docs/index.md)
-- [API Reference](./manual_docs/reference/api-endpoints.md)
+- [Справочник](./manual_docs/reference/index.md)
 
 ## 🤝 Вклад в проект
 Ссылка на [CONTRIBUTING.md](./CONTRIBUTING.md)
@@ -199,12 +226,12 @@ manual_docs/
 
 - [ ] Обновлён `CHANGELOG.md` (раздел `Unreleased`).
 - [ ] Обновлена документация в `manual_docs/`.
-- [ ] Для нового эндпоинта добавлена строка в `manual_docs/reference/api-endpoints.md`.
+- [ ] Для нового/изменённого эндпоинта — отражение в справочнике (`manual_docs/reference/`).
 - [ ] Добавлены или обновлены примеры кода/команд (реальные, проверенные).
 - [ ] В начале обновлённых файлов есть ссылка на оглавление (`../index.md`).
 - [ ] Документация проверена на орфографию и грамматику.
 - [ ] Инструкции воспроизводимы (попробуйте выполнить как пользователь).
-- [ ] `npm test -- docs.coverage` проходит локально.
+- [ ] `npm test -- docs.coverage` проходит локально (если `DOCS_COVERAGE_COMMAND` задана).
 
 ## Частые ошибки
 
@@ -216,12 +243,12 @@ manual_docs/
 | Дублирование текста из `docs/` | Ссылаться на `docs/`, не копировать |
 | Технический жаргон без пояснений | Объяснять для конечного пользователя |
 | Забыт `CHANGELOG.md` | Обновлять в каждом PR |
-| Игнор `docs.coverage.spec.ts` | Тест падает → PR не пройдёт |
+| Игнор coverage-гейта (`docs.coverage`) | PR не пройдёт (если `DOCS_COVERAGE_COMMAND` задана) |
 
 ## Красные флаги — остановитесь
 
-- «Документирую после кода» → нарушает Docs-as-Code TDD.
-- «Это внутренний эндпоинт, дока не нужна» → добавьте в `.coverage-exemptions.json` с причиной.
+- «Документирую после кода» → нарушает Docs-as-Code: дока должна попадать в тот же PR, что и код.
+- «Это внутренняя сущность, дока не нужна» → добавьте в `.coverage-exemptions.json` с причиной.
 - «Скопирую пример из старого туториала» → проверьте работоспособность.
 - «Обновлю index.md потом» → проверка ссылок упадёт.
 

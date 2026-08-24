@@ -11,7 +11,7 @@ This is the **authoring repo** for the OpenCode `maestro` system (the "maestro" 
 - `skills/maestro-init/{SKILL.md,init-context.md}` — `/maestro-init` skill for bootstrapping new projects (project-context.md 14 categories, architecture design, scaffold, roadmap).
 - `skills/maestro-design/SKILL.md` — `/maestro-design` skill for design + spec (via `design` agent), code scaffold (TDD), and roadmap.
 - `skills/maestro-assistant/SKILL.md` — `/maestro-assistant` skill: consultation & config/structure/context organization for maestro (single source of config rules). Self-contained; loaded by init (tasks 2/3/3a) and maestro (pipeline config questions).
-- `skills/manual-docs/SKILL.md` — user-docs skill for `manual_docs/` (Diátaxis).
+- `skills/manual-docs/SKILL.md` — generic user-docs skill (доки целевого приложения, Diátaxis), загружается на шаге 14 пайплайна maestro. Отдельно от правила синхронизации `manual_docs/` самого maestro (ниже).
 - `plugins/maestro-bootstrap/` — ESM OpenCode plugin.
 - `specs/*.md` — design specs and implementation plans for work on this repo (kebab-case: `<topic>.md` for spec, `<topic>-plan.md` for plan). **Rule: all feature/bugfix design docs (specs AND plans) must be created in `specs/`, never in the repo root.**
 - `SECURITY.md` — **internal security (ИБ) standard** for the maestro skill (trust model, ИБ requirements P1–P5, invariants, testing). Not part of `manual_docs/`. It is the source of truth for security decisions; specs/plans reference it.

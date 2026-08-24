@@ -8,6 +8,13 @@
 значит, документация должна обновляться **вместе** с ним. Этот файл — правило
 поддержания актуальности.
 
+> **Два разных понятия, не путать:**
+> - Скилл `manual-docs` (`skills/manual-docs/SKILL.md`) — **generic user-docs
+>   скилл для целевого приложения**, загружается на шаге 14 пайплайна maestro.
+> - Это правило (данный файл) — синхронизация `manual_docs/` **самого maestro**,
+>   т.е. документации скилла maestro. Это отдельное правило, не требующее скилла
+>   `manual-docs`.
+
 ## 📖 Правило
 
 Изменение `skills/maestro/SKILL.md`, `commands/*.md` или `agents/*.md` требует
@@ -29,6 +36,8 @@
 | Trust / санитайзер | `explanation/agents-and-trust.md` |
 | Security Review / sanitizer-сабагент / file access control | `explanation/agents-and-trust.md`, `reference/model-selection.md`, `reference/hitl-gates.md` |
 | Реестр регрессии | `how-to/use-regression-registry.md` |
+| Шаг 14 (docs: diff-сверка, HITL при расхождении) | `explanation/pipeline-overview.md`, `tutorials/run-first-feature.md` |
+| `DOCS_COVERAGE_COMMAND` (fallback diff-сверка) | `explanation/project-context.md`, `skills/maestro/stack-detection.md` |
 | Любое изменение поведения | `overview/changelog.md` |
 
 > **Синк канона ↔ производные:** полный JSON-канон `maestro.json` живёт в

@@ -64,7 +64,7 @@ BUILD_COMMAND: "go build ./..."
 | `BUILD_COMMAND` | Сборка проекта (шаг 15a) |
 | `E2E_COMMAND` | End-to-end тесты (шаг 15) |
 | `LINT_COMMAND` | Линтинг (шаг 15) |
-| `DOCS_COVERAGE_COMMAND` | Покрытие документации (шаг 15) |
+| `DOCS_COVERAGE_COMMAND` | Покрытие документации (шаг 15). Если не задана/`none` — на шаге 14 используется diff-сверка как fallback |
 | `OBSERVABILITY_COVERAGE_COMMAND` | Покрытие observability (шаг 15) |
 
 ### Значения

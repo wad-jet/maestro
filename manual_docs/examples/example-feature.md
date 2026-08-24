@@ -47,7 +47,7 @@
           -> fix-субагент -> re-review -> approved
         - Task 3 (haiku): DONE, commits [ghi789]; review -> approved
         - Regression reconciliation: path/run проверены
-Шаг 14: manual-docs -> документация обновлена
+Шаг 14: [skill] manual-docs -> diff-сверка OK, документация обновлена
 Шаг 15: тесты, coverage, lint pass
 Шаг 15a: build pass
 Шаг 16: requesting-code-review -> final review (opus)

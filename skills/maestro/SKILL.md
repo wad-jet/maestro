@@ -74,7 +74,7 @@ Interactive — агент комментирует находки по ходу
 - superpowers:subagent-driven-development — исполнение plan (implementer + reviewer per task)
 - superpowers:test-driven-development — TDD-дисциплина для шага 13 (SDD)
 - superpowers:using-git-worktrees — изоляция workspace
-- manual-docs (локальный скил репозитория) — пользовательская документация
+- manual-docs (локальный скил репозитория) — обязательное обновление пользовательской документации целевого приложения (шаг 14, diff-сверка)
 - superpowers:requesting-code-review — финальное ревью
 - superpowers:finishing-a-development-branch — завершение
 - superpowers:systematic-debugging — поиск и анализ багов (debug sub-pipeline)
@@ -460,7 +460,22 @@ Interactive — агент комментирует находки по ходу
          4. Reconciliation — отдельный хук, не перегенерация всей entry
             (статус и `last_full_pass` сохраняются). Если entry не создана
             (не было risk-сценариев на шаге 11) — шаг пропускается
-🟢 14. [agent] manual-docs -> обновление пользовательской документации
+🟢 14. [skill] manual-docs -> обновление пользовательской документации (обязательно)
+       — Оркестратор загружает скилл `manual-docs` через skill-инструмент
+         (не субагент; `step_to_tier` не затрагивается).
+       — **Acceptance criteria:** каждое пользовательское изменение кода имеет
+         отражение в `manual_docs/` целевого приложения:
+         - новый/изменённый API-эндпоинт → строка в справочнике (`reference/`);
+         - новый/изменённый модуль/конфиг/поведение → how-to/reference/explanation;
+         - изменённое пользовательское поведение → обновлённая соответствующая страница.
+       — **Diff-сверка:** оркестратор сверяет diff кода с изменениями в `manual_docs/`.
+         В efficient-режиме — молча; в interactive — комментирует находки.
+       — **HITL только при расхождении** (без расхождений — гейта нет):
+         (a) дополнить доку до выхода из шага → вернуться к 14;
+         (b) документировать как follow-up (не блокирует merge);
+         (c) skip с подтверждением (осознанный пропуск).
+       — **Coverage НЕ выполняется на этом шаге** — `DOCS_COVERAGE_COMMAND`
+         остаётся на шаге 15 (единая точка проверки coverage, без дублирования).
 🟡 15. [agent] Финальные проверки:
           **Регрессия здесь НЕ запускается** — `@regression` только standalone,
           по явному запросу пользователя (см. секцию «Regression Registry»).
@@ -738,7 +753,7 @@ pipeline; после завершения переход на шаг 11 (writing
 | Ветка | inline-конвенция `feature/<kebab-case>` / `fix/<kebab-case>` / `hotfix/<kebab-case>` (определяет имя ветки) |
 | Изоляция | `using-git-worktrees` (worktree) / `git checkout -b` (простая ветка) |
 | Имплементация | `subagent-driven-development` + `test-driven-development` |
-| Документация | `manual-docs` (локальный скил репозитория) |
+| Документация | `manual-docs` (локальный скил репозитория) — обязательный шаг 14, diff-сверка; coverage на шаге 15 |
 | Ревью | `requesting-code-review` |
 | Завершение | `finishing-a-development-branch`, `git-commit` |
 | Регрессия | `@regression` (standalone, по запросу) — реестр рисков `regression/` (в git) |
@@ -1558,7 +1573,7 @@ Pipeline не имеет механизма cross-repo координации (�
         - Implementer: DONE, commits [ghi789]
         - Reviewer (sonnet): approved
         - Regression reconciliation: path/run: проверены — совпадают с кодом
-Шаг 14: [agent] manual-docs -> документация обновлена
+Шаг 14: [skill] manual-docs -> diff-сверка OK, документация обновлена
 Шаг 15: [agent] Финальные проверки: $TEST_COMMAND, $DOCS_COVERAGE_COMMAND,
         $OBSERVABILITY_COVERAGE_COMMAND pass
 Шаг 15a: [agent] $BUILD_COMMAND — сборка проходит
@@ -1619,7 +1634,7 @@ Pipeline не имеет механизма cross-repo координации (�
         - Implementer: DONE, commits [fix123]
         - Reviewer: approved
         - Regression reconciliation: path/run: проверены — совпадают с кодом
-Шаг 14: [agent] manual-docs -> manual_docs/reference/api-endpoints.md обновлён
+Шаг 14: [skill] manual-docs -> manual_docs/reference/configuration.md обновлён, diff-сверка OK
 Шаг 15: [agent] Финальные проверки: $TEST_COMMAND, $DOCS_COVERAGE_COMMAND, $OBSERVABILITY_COVERAGE_COMMAND pass
 Шаг 16: [agent] requesting-code-review -> final review -> approved
 Шаг 17: -- HITL: pre-PR, пользователь approves merge --
