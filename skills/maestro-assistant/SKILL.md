@@ -140,9 +140,9 @@ description: Use when the user asks for help configuring maestro, organizing pro
 ### 4. Организация структуры каталогов
 
 Проверить/создать (идемпотентно): `.maestro/`, `docs/superpowers/{specs,plans}/`,
-`docs/confidential/`, `regression/{entries,released}/`. `.gitignore` — конкретные пути
-(`.maestro/sdd/`, `.maestro/last-run.md`, `.maestro/logs/`, `.maestro/feedback-reports/`,
-`.maestro/plugin-version`), НЕ весь `.maestro/`.
+`docs/confidential/`, `regression/{entries,released}/`. `.gitignore` — `.maestro/`
+целиком (только эфемерное); конфиг проекта — только `maestro.json` в корне,
+не в `.maestro/`.
 
 ## Обработка сбоев
 
