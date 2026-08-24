@@ -112,6 +112,8 @@ tier-подсказка.
 
 ## 🔗 Связанные разделы
 
+- [Требования и оценка ИБ (SECURITY.md)](../../../SECURITY.md) — модель доверия,
+  P4 (trusted → изолированная модель)
 - [Классификация фич](feature-classification.md)
 - [Настройка проекта для maestro](../tutorials/setup-project.md)
 - [Агенты и модель доверия](../explanation/agents-and-trust.md)

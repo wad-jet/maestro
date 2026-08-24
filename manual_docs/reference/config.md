@@ -566,6 +566,8 @@ MAESTRO_BOOTSTRAP_LOG_DIR="/var/log/maestro"
 
 ## 🔗 Связанные разделы
 
+- [Требования и оценка ИБ (SECURITY.md)](../../../SECURITY.md) — модель доверия,
+  секции `confidential`/`trust`/`access_policy`
 - [Кастомизация скилла](../how-to/customize-maestro.md)
 - [Агенты и модель доверия](../explanation/agents-and-trust.md)
 - [Плагин maestro-bootstrap](../reference/commands.md) (установка из `@maestro-init`)
