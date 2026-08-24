@@ -196,10 +196,9 @@ untrusted, access-policy не enforced, дефолтные sanitizer-прави�
 
 ## Логирование
 
-Плагин пишет JSONL-лог в `.maestro/logs/` (каталог создаётся автоматически). В
-`.gitignore` добавляются **конкретные пути**, а не весь `.maestro/`:
-`.maestro/sdd/`, `.maestro/last-run.md`, `.maestro/logs/`,
-`.maestro/feedback-reports/`.
+Плагин пишет JSONL-лог в `.maestro/logs/` (каталог создаётся автоматически).
+Весь `.maestro/` добавляется в `.gitignore` (только эфемерное: sdd/, last-run.md,
+logs/, feedback-reports/, plugin-version); конфиг проекта — `maestro.json` в корне.
 Логи **разбиваются по дням** — один файл на дату:
 
 ```
