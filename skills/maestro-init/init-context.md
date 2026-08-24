@@ -129,34 +129,18 @@ BUILD_COMMAND: "go build ./..."
 
 ## Вывод конфигурации из контекста
 
-Задача 3 `/maestro-init` выводит секции `maestro.json` из 14 категорий. Правила
-вывода:
+Задача 3 `/maestro-init` выводит секции `maestro.json` из 14 категорий. Правила вывода и
+**полный JSON-канон** — в скилле `maestro-assistant` (`skills/maestro-assistant/SKILL.md`).
+Задача 3 загружает `maestro-assistant` и следует его канону. Ниже — краткая сводка:
 
-### `maestro.json` → `trust`
+- **`trust`** — всегда `design: true`, `sanitizer: true` (trusted по роли). Остальные — untrusted.
+- **`access_policy`** — `allow` из §3/§5 (src/test/packages + расширения языков), `ask` из
+  docs/specs/manual_docs/config, `deny` — секреты (`*.env`, `*.{pem,key,cert,secret}`); `default: "ask"`.
+- **`confidential`** — дефолт `paths: ["docs/confidential/**"]`, `trusted` read allow / write+edit deny.
+- **`sanitizer_whitelist`** — `rules` дефолтные, `extra_fields`/`extra_uri_schemes` из §12/§3.
 
-- **Всегда** `design: true`, `sanitizer: true` (trusted по роли, см. Trust Model).
-- Остальные агенты (opus, haiku, sonnet, fable, code-reviewer) — **не** добавлять
-  в `trust` (untrusted по умолчанию).
-- Из §12 (безопасность): если пользователь явно хочет доверять ещё кому-то —
-  HITL предложить добавить со значением `true`.
-
-### `maestro.json` → `access_policy`
-
-- **`allow`** — из §3 (стек) + §5 (домены): каталоги исходников (`src/**`,
-  `test/**`, `packages/**`) и расширения языков из §3 (`*.{ts,js,py,go,rs}`).
-- **`ask`** — документация и конфиги: `docs/**`, `specs/**`, `manual_docs/**`,
-  `*.{md,mdx}`, `*.config.*`.
-- **`deny`** — секреты: `*.env`, `*.env.*`, `*.{pem,key,cert,secret}`.
-- `default: "ask"` (безопасное значение).
-- Эталон: `plugins/maestro-bootstrap/examples/maestro.example.json`.
-
-### `maestro.json` → `sanitizer_whitelist`
-
-- `rules` — дефолтные (все категории true), менять по §12.
-- `by_agent` — `code-reviewer: []` (если нужно отключить категории).
-- `patterns` — `[]` (или значения из §12, которые НЕ считаются sensitive).
-- `extra_fields` — кастомные sensitive-поля из §12.
-- `extra_uri_schemes` — URI-схемы из §3 (`redis`, `kafka`, `grpc`).
+> Полный JSON-канон и детали — в `skills/maestro-assistant/SKILL.md` (единый источник; не
+> дублировать здесь).
 
 ### `opencode.json` → `agent.*` (модели, M1)
 

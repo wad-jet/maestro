@@ -94,12 +94,21 @@ pipeline maestro: есть `docs/project-context.md` (источник конт�
 
 → создаёт `docs/project-context.md`.
 
+> **Делегирование правил наполнения:** правила актуализации/наполнения project-context
+> (граница «схема vs наполнение», §14 Commands, обязательные секции) — в скилле
+> `maestro-assistant` (канон). Схема 14 категорий остаётся в `init-context.md`; схему
+> не менять, править только наполнение. При вопросах по наполнению/актуализации — загрузить
+> `maestro-assistant`.
+
 ## Задача 3. Конфигурация maestro
 
 На основе контекста (§3 стек, §5 домены, §12 безопасность) сгенерировать конфиги
 идемпотентно (см. `specs/init-idempotency-plan.md` для деталей).
 
 ### 3а. Подготовка каталогов
+
+> Правила структуры каталогов pipeline + `.gitignore` конкретных путей — в скилле
+> `maestro-assistant` (канон). Идемпотентно (`mkdir -p` безопасен).
 
 Перед генерацией конфигов (идемпотентно, `mkdir -p` безопасен):
 - `mkdir -p .maestro/` (для логов плагина и `last-run.md`)
@@ -108,56 +117,20 @@ pipeline maestro: есть `docs/project-context.md` (источник конт�
 
 ### maestro.json (консолидированный конфиг, коммитится в git)
 
-Четыре секции:
+**Перед генерацией — probe скилла `maestro-assistant` (жёсткий gate, CRIT-2).**
+Вызвать `skill` tool с bogus-именем и проверить наличие `maestro-assistant` в списке доступных.
+- **Скилл есть** → загрузить `maestro-assistant` (`skill` tool) и следовать его **канону**
+  `maestro.json` (четыре секции: `trust` / `access_policy` / `confidential` / `sanitizer_whitelist`;
+  полный JSON-канон — в `skills/maestro-assistant/SKILL.md`).
+- **Скилла нет** → HITL-сообщение «необходимо установить скилл `maestro-assistant` для
+  продолжения» и **жёсткое прерывание задачи 3 и всего процесса `/maestro-init`** (не переходить
+  к 4–5, без fallback-деградации). Идемпотентно: проверка выполняется только если задача 3
+  реально генерирует/обновляет конфиг; при пропуске задачи (конфиг уже есть) — не проверяется.
 
-**`trust`** — только trusted сабагенты (`true`):
-```json
-"trust": {
-  "design": true,
-  "sanitizer": true
-}
-```
-- `design` и `sanitizer` — trusted по роли. Остальные — untrusted (default).
-- Идемпотентность: merge сохраняет пользовательские trusted-агенты.
-
-**`access_policy`** — из §3 + §5 + §12:
-```json
-"access_policy": {
-  "version": 1,
-  "default": "ask",
-  "allow": ["src/**", "test/**", "packages/**", "*.{ts,js,py,go,rs}"],
-  "ask": ["docs/**", "specs/**", "manual_docs/**", "*.{md,mdx}", "*.config.*"],
-  "deny": ["*.env", "*.env.*", "*.{pem,key,cert,secret}"]
-}
-```
-Эталон: `plugins/maestro-bootstrap/examples/maestro.example.json`.
-
-**`confidential`** — защита конфиденциальных путей (строже `access_policy`):
-```json
-"confidential": {
-  "version": 1,
-  "paths": ["docs/confidential/**"],
-  "trusted": { "read": "allow", "write": "deny", "edit": "deny" }
-}
-```
-- Дефолт: `paths: ["docs/confidential/**"]`; trusted читает, запись/редактирование —
-  deny (выдаются явно). Untrusted/primary — всегда deny.
-- Идемпотентность: при существующем `confidential` merge сохраняет правки; если
-  секции нет — добавляется дефолтная.
-
-**`sanitizer_whitelist`** — из §3 + §12:
-```json
-"sanitizer_whitelist": {
-  "rules": { "env_secret": true, "data_field": true, "env_file": true, "db_credential": true, "ledger_entry": true, "private_key": true, "auth_header": true },
-  "by_agent": { "code-reviewer": [] },
-  "patterns": [],
-  "extra_fields": [],
-  "extra_uri_schemes": []
-}
-```
-
-Идемпотентность: при существовании `maestro.json` — diff по секциям; merge
-сохраняет пользовательские правки. Если файла нет — создаётся целиком.
+Правила вывода секций (по канону assistant): `trust` — всегда `design: true`, `sanitizer: true`;
+`access_policy.allow` из §3/§5, `deny` из §12; `confidential.paths` дефолт `["docs/confidential/**"]`;
+`sanitizer_whitelist` из §3/§12. Идемпотентность: при существовании `maestro.json` — diff по
+секциям; merge сохраняет пользовательские правки; если файла нет — создаётся целиком.
 
 ### opencode.json — регистрация плагина + модели агентов
 

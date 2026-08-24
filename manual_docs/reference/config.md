@@ -24,6 +24,11 @@
 Старые файлы `trust-config.json`, `.maestro/access-policy.json`,
 `.maestro/sanitizer-whitelist.json` **не поддерживаются**.
 
+> **Генерация/настройка конфига — через `/maestro-assistant`.** Полный JSON-канон
+> `maestro.json` и правила вывода секций из контекста живут в скилле `maestro-assistant`
+> (`skills/maestro-assistant/SKILL.md`) — единый источник, доступный `/maestro-init`,
+> `@maestro` и HITL-консультациям. Ниже — человеческие справочные таблицы по секциям.
+
 ### Секция `trust`
 
 Перечисляет **только trusted** сабагентов. Всё, чего нет — untrusted.

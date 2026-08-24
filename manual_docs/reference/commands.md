@@ -5,7 +5,8 @@
 ## 🎯 Назначение
 
 Справочник доступных `@command` для работы со скиллом `maestro`. Конфиги живут
-в `commands/*.md` (authoring-репо), runtime-копии — в `.opencode/commands/`.
+в `commands/*.md` (authoring-репо); доставляются в целевое приложение штатным механизмом
+(вручную из удалённого репозитория или через `agpack`).
 
 ## 📖 Команды
 
@@ -73,6 +74,15 @@ Setup-фаза bootstrap нового проекта: `docs/project-context.md` 
 Читает `.maestro/plugin-version` (пишется при инициализации плагина). Если файла
 нет — сообщает, что плагин не инициализирован или версия неизвестна (признак
 сбоя init плагина).
+
+### `/maestro-assistant`
+
+Консультации и настройка maestro-конфигурации/структуры/контекста в течение жизни
+проекта. Загружает скилл `maestro-assistant` (tool: skill) и применяет его к запросу HITL.
+Обрабатывает: `maestro.json` (trust/access_policy/confidential/sanitizer_whitelist),
+`opencode.json`, структуру каталогов, актуализацию `project-context.md`, консультации по
+правилам работы maestro. Плагин-гейт не требуется. Если запрос требует изменения кода/spec/плана
+или запуска pipeline — редирект на `@maestro`/`/maestro-design`/`@regression`.
 
 ## 💡 Примечания
 

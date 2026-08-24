@@ -35,8 +35,8 @@
    `/init` opencode (создаёт `AGENTS.md`).
 2. **Сбор контекста** — интерактивный опрос по 14 категориям → создаёт
    `docs/project-context.md`. Обязательные секции: 1, 2, 3, 4, 9, 14.
-3. **Конфигурация** — генерирует:
-   - `maestro.json` — `trust` (design, sanitizer), `access_policy`,
+3. **Конфигурация** — генерирует (по канону скилла `maestro-assistant`):
+   - `maestro.json` — `trust` (design, sanitizer), `access_policy`, `confidential`,
      `sanitizer_whitelist`;
    - `opencode.json` — регистрация плагина `maestro-bootstrap` + модели агентов;
    - `.gitignore` — конкретные пути (`.maestro/sdd/`, `.maestro/last-run.md`,
@@ -45,6 +45,10 @@
 4. **Каталоги** — `.maestro/`, `docs/superpowers/{specs,plans}/`.
 5. **Проверки** — скилы superpowers (предложит установить через HITL), плагин
    `maestro-bootstrap` (не блокер).
+
+> Полный JSON-канон `maestro.json` и правила вывода секций — в скилле `maestro-assistant`
+> (`skills/maestro-assistant/SKILL.md`). Настройка конфигурации/структуры/контекста после
+> setup — через `/maestro-assistant`.
 
 > На шаге «Настройка моделей» `/maestro-init` спросит модели для агентов — см.
 > раздел [Настройка моделей по тирам](#настройка-моделей-по-тирам) ниже.

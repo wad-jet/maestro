@@ -105,9 +105,9 @@ manual_docs/
 
 ### Правило 5: Синхронизация скилла
 
-Скилл живёт в `skills/manual-docs/SKILL.md` (source of truth, под git). Runtime-копия
-в `.opencode/skills/manual-docs/SKILL.md` (автозагрузка opencode). При изменении
-обновлять оба файла (см. AGENTS.md → «Скиллы»).
+Скилл живёт в `skills/manual-docs/SKILL.md` (source of truth, под git). Доставка в целевое
+приложение — штатным механизмом (вручную из удалённого репозитория или через `agpack`);
+отдельное `.opencode/`-зеркалирование не требуется (см. AGENTS.md → «Скиллы»).
 
 ## Тест покрытия `docs.coverage.spec.ts`
 
