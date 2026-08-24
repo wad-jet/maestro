@@ -8,20 +8,15 @@ description: Use when implementing a feature end-to-end — orchestrates brainst
 **Язык HITL:** русский.
 
 1. **Маркер проекта.** Если в корне проекта есть `maestro.json` — это проект под
-   управлением maestro, выполняется проверка плагина (шаги 2–3). Если `maestro.json`
+   управлением maestro, выполняется проверка плагина (шаг 2). Если `maestro.json`
    НЕТ — проект не под maestro, гейт пропускается, работаем как обычно.
 
-2. **Плагин заявлен в конфиге.** Проверь `opencode.json` → `plugin`: там должна
-   быть запись, указывающая на `maestro-bootstrap` (git-spec
-   `maestro-bootstrap@git+https://github.com/wad-jet/maestro.git` или локальный путь
-   `./plugins/maestro-bootstrap/index.js`). Нет → перейти к шагу 4 (стоп).
-
-3. **Плагин реально работал.** Открой самый свежий файл
+2. **Плагин реально работал.** Открой самый свежий файл
    `.maestro/logs/maestro-bootstrap-<дата>.log` (по имени-дате). Найди строку
    `plugin initialized`. Если есть И её ISO-`ts` не старше 24 часов от текущего
-   момента — плагин работает, продолжить работу. Иначе → шаг 4 (стоп).
+   момента — плагин работает, продолжить работу. Иначе → шаг 3 (стоп).
 
-4. **Жёсткий STOP (без «продолжить»).** Останови работу и покажи HITL:
+3. **Жёсткий STOP (без «продолжить»).** Останови работу и покажи HITL:
 
    > **Плагин `maestro-bootstrap` не подключён или не загружен.**
    > Защита `docs/confidential/**` НЕ действует: confidential-данные могут быть
@@ -32,7 +27,7 @@ description: Use when implementing a feature end-to-end — orchestrates brainst
    > плагин и перезапустить opencode:
    > ```
    > opencode plugin "maestro-bootstrap@git+https://github.com/wad-jet/maestro.git"
-   > # или добавить spec в opencode.json
+   > # spec добавить в global ~/.config/opencode/opencode.json (реком.) или .opencode/opencode.json
    > ```
    >
    > (a) Подключить плагин и перезапустить opencode — затем повторить команду
@@ -169,8 +164,9 @@ Interactive — агент комментирует находки по ходу
       ```
       - Реестр закоммичен в git (корень репо, `regression/`) — идентичен из
         любого worktree/клона; трюков с git-common-dir не нужно
-      - `.maestro/` целиком в `.gitignore` (только эфемерное: sdd/, last-run,
-        logs/, feedback-reports/, plugin-version); реестр в git
+      - `.maestro/` и `.opencode/` целиком в `.gitignore` (только эфемерное/
+        доставляемое: sdd/, last-run, logs/, feedback-reports/, plugin-version);
+        реестр в git
       - Структура (`regression/entries/`, `regression/released/`,
         `regression/cancelled-features.md`) закоммичена через `.gitkeep` —
         каталоги существуют всегда
@@ -773,7 +769,8 @@ init), следует его правилам, затем решает и про
 - **Claude Code:** параметр `model` у Agent tool (алиасы `haiku`/`sonnet`/`opus`/`fable`)
 - **OpenCode:** диспатч **именованного сабагента** через `task` tool с
   `subagent_type` = `haiku` | `sonnet` | `opus`. Модель жёстко привязана к
-  сабагенту в `opencode.json` → `agent.{haiku,sonnet,opus}.model`. Task tool
+  сабагенту в merge-конфиге (`agent.{haiku,sonnet,opus}.model` в
+  `.opencode/opencode.json` или global). Task tool
   не поддерживает per-dispatch выбор модели — поэтому для OpenCode оркестратор
   выбирает **сабагента**, а не модель.
 
@@ -808,17 +805,18 @@ init), следует его правилам, затем решает и про
 ### OpenCode: именованные сабагенты
 
 Сабагенты объявлены в `.opencode/agents/` как markdown-файлы. Модели
-настраиваются в `opencode.json`, пермишены — в `.opencode/agents/*.md`:
+настраиваются в `.opencode/opencode.json` или global (merge), пермишены — в
+`.opencode/agents/*.md`:
 
 | Сабагент | Файл конфигурации |
 |---|---|
-| `haiku` | `.opencode/agents/haiku.md` + `opencode.json → agent.haiku.model` |
-| `sonnet` | `.opencode/agents/sonnet.md` + `opencode.json → agent.sonnet.model` |
-| `opus` | `.opencode/agents/opus.md` + `opencode.json → agent.opus.model` |
-| `design` | `.opencode/agents/design.md` + `opencode.json → agent.design.model` |
-| `code-reviewer` | `.opencode/agents/code-reviewer.md` + `opencode.json → agent.code-reviewer.model` |
-| `fable` | `.opencode/agents/fable.md` + `opencode.json → agent.fable.model` |
-| `sanitizer` | `.opencode/agents/sanitizer.md` + `opencode.json → agent.sanitizer.model` |
+| `haiku` | `.opencode/agents/haiku.md` + `agent.haiku.model` (`.opencode/opencode.json`/global) |
+| `sonnet` | `.opencode/agents/sonnet.md` + `agent.sonnet.model` (`.opencode/opencode.json`/global) |
+| `opus` | `.opencode/agents/opus.md` + `agent.opus.model` (`.opencode/opencode.json`/global) |
+| `design` | `.opencode/agents/design.md` + `agent.design.model` (`.opencode/opencode.json`/global) |
+| `code-reviewer` | `.opencode/agents/code-reviewer.md` + `agent.code-reviewer.model` (`.opencode/opencode.json`/global) |
+| `fable` | `.opencode/agents/fable.md` + `agent.fable.model` (`.opencode/opencode.json`/global) |
+| `sanitizer` | `.opencode/agents/sanitizer.md` + `agent.sanitizer.model` (`.opencode/opencode.json`/global) |
 
 Все под-агенты, кроме `code-reviewer`, объявлены `hidden: true` — не показываются
 в `@`-меню, вызываются только программно через `task` tool. `code-reviewer`
@@ -897,7 +895,8 @@ Subagent (general-purpose):
 ```
 
 OpenCode `task` tool **не принимает** параметр `model` — модель жёстко
-привязана к именованному сабагенту в `opencode.json`. Поэтому оркестратор
+привязана к именованному сабагенту в merge-конфиге (`.opencode/opencode.json` или
+global). Поэтому оркестратор
 транслирует вызов по таблице «Шаг → Tier»:
 
 | SDD-шаблон пишет | Шаг → Tier | OpenCode subagent_type |
@@ -971,11 +970,12 @@ task(
 
 Значение по умолчанию для любого сабагента — **untrusted**, кроме `design` и
 `sanitizer` (trusted по своей роли). Меняется только через `maestro.json`
-(см. ниже). От модели в `opencode.json` trust не зависит.
+(см. ниже). От модели в merge-конфиге (`.opencode/opencode.json` или global)
+trust не зависит.
 
 ### Управление: maestro.json
 
-Файл `maestro.json` в корне проекта (рядом с `opencode.json`) — консолидированный
+Файл `maestro.json` в корне проекта — консолидированный
 конфиг: три секции (`trust`, `access_policy`, `sanitizer_whitelist`). Секция
 `trust` перечисляет **только trusted** сабагентов. Всё, чего нет в секции —
 untrusted.

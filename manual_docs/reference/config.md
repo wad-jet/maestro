@@ -4,13 +4,13 @@
 
 ## 🎯 Назначение
 
-Полный справочник форматов `maestro.json`, `opencode.json` (maestro-часть) и
-переменных окружения, которые управляют поведением скилла `maestro` и плагина
-`maestro-bootstrap`.
+Полный справочник форматов `maestro.json`, `.opencode/opencode.json` (maestro-часть;
+или глобальный конфиг) и переменных окружения, которые управляют поведением скилла
+`maestro` и плагина `maestro-bootstrap`.
 
 ## 📄 maestro.json
 
-Консолидированный конфиг в корне проекта (рядом с `opencode.json`). Коммитится
+Консолидированный конфиг в корне проекта. Коммитится
 в git — он описывает security-политику и trust-модель проекта. Файл состоит из
 четырёх секций: `trust`, `access_policy`, `confidential`, `sanitizer_whitelist`.
 
@@ -177,7 +177,8 @@ deny. Trust не наследуется вложенными субагента�
 > `confidential` реализована **внутри плагина `maestro-bootstrap`** (перехват
 > `tool.execute.before`) и **не является файловой защитой на уровне ОС**
 > (не chmod/ACL, не шифрование). Это полноценный **fail-open**: если плагин не
-> подключён в `opencode.json` (`plugin` без `maestro-bootstrap`), не загрузился,
+> подключён в конфиге (`.opencode/opencode.json`/global, `plugin` без
+> `maestro-bootstrap`), не загрузился,
 > деактивирован или opencode запущен без него — `read`/`write`/`edit` в
 > `docs/confidential/**` выполняются **как обычные** (без каких-либо ограничений).
 > То же касается `access_policy` и sanitizer (все — в плагине): отключение
@@ -343,14 +344,19 @@ deny. Trust не наследуется вложенными субагента�
 "extra_uri_schemes": ["kafka", "custom-proto", "zookeeper"]
 ```
 
-## 📄 opencode.json
+## 📄 opencode.json (`.opencode/opencode.json` или global)
+
+Корневой `opencode.json` в проекте **не используется**. Плагин и модели агентов
+живут в merge-конфиге OpenCode: `.opencode/opencode.json` (project) или глобальный
+`~/.config/opencode/opencode.json`.
 
 ### Плагин
 
 Плагин `maestro-bootstrap` поставляется из git-репозитория `wad-jet/maestro`
 (публикация в npm не используется). Подключается до запуска пайплайна.
 
-**Из git (рекомендуется):**
+**Из git (рекомендуется)** — в `~/.config/opencode/opencode.json` (реком.) или
+`.opencode/opencode.json`:
 
 ```json
 {
@@ -375,27 +381,26 @@ deny. Trust не наследуется вложенными субагента�
 
 Если ключа `plugin` нет — добавить; если есть массив, но пути нет —
 дописать. Если путь уже есть — пропустить. **Никогда не перезаписывать**
-существующее содержимое `opencode.json`.
+существующее содержимое конфига.
 
 Перезапуск opencode обязателен после добавления плагина.
 
-### Гейт «плагин подключён» для runtime-команд
+### Гейт «плагин работает» для runtime-команд
 
 В maestro-проекте (есть `maestro.json`) команды `@maestro`, `@maestro-design`,
 `@maestro-feedback-report` при старте выполняют жёсткий гейт:
 
-1. `opencode.json → plugin` должен содержать `maestro-bootstrap`;
-2. самый свежий `.maestro/logs/maestro-bootstrap-<дата>.log` должен содержать
+1. самый свежий `.maestro/logs/maestro-bootstrap-<дата>.log` должен содержать
    запись `plugin initialized` с timestamp не старше 24 часов.
 
-Если любое условие не выполнено — жёсткий STOP без «продолжить»: только
+Если условие не выполнено — жёсткий STOP без «продолжить»: только
 «(a) подключить плагин и перезапустить» / «(c) стоп». Причина: без плагина
 защита `docs/confidential/**` и sanitize не действуют (fail-open), confidential-
 данные доступны untrusted-агентам. `@maestro-init` и `@regression` не гейтятся.
 
 ### Агенты: модели
 
-Каждый сабагент имеет модель в `opencode.json`:
+Каждый сабагент имеет модель в `.opencode/opencode.json` (или global):
 
 ```json
 {
@@ -480,16 +485,16 @@ deny. Trust не наследуется вложенными субагента�
 
 Кандидаты для `model` определяются из `provider.<name>.models` **по всем уровням**:
 
-1. `.opencode/opencode.json` (приоритет выше)
-2. `opencode.json` (project)
-3. `~/.config/opencode/opencode.json` (global)
+1. `~/.config/opencode/opencode.json` (global)
+2. `.opencode/opencode.json` (project)
 
-Приоритет merge: `.opencode` > project > global. Если `models` не задан ни
-на одном уровне — HITL-ввод вручную + попытка `opencode models <provider>`.
+Приоритет merge: project > global. Если `models` не задан ни на одном уровне
+(например, в чистом клоне без локальных моделей) — нужен global с
+`provider.*.models`, иначе HITL-ввод вручную + попытка `opencode models <provider>`.
 
 > **Агенты (`agent.*`)** также наследуются из global через merge — `model` и
 > `temperature` агентов, настроенные глобально, применяются ко всем проектам;
-> project `opencode.json` переопределяет global при необходимости.
+> project `.opencode/opencode.json` переопределяет global при необходимости.
 
 #### Pлейсхолдеры запрещены
 
@@ -550,7 +555,8 @@ MAESTRO_BOOTSTRAP_LOG_DIR="/var/log/maestro"
 | Путь | Назначение | В git? |
 |---|---|---|
 | `maestro.json` | Консолидированный конфиг (trust, access_policy, confidential, sanitizer_whitelist) | Да |
-| `opencode.json` | Регистрация плагина + модели сабагентов | Да |
+| `.opencode/opencode.json` | Плагин (альтернативно) + модели сабагентов | Нет (в `.gitignore`) |
+| `.opencode/` (скиллы/агенты/команды) | Доставляемая конфигурация средств (вручную/agpack) | Нет (в `.gitignore`) |
 | `docs/project-context.md` | Проектовый контекст шага 0 (14 категорий) | Да |
 | `docs/superpowers/specs/*.md` | Spec-файлы | Да |
 | `docs/superpowers/plans/*.md` | План реализации | Да |

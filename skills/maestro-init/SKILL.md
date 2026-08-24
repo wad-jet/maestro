@@ -1,6 +1,6 @@
 ---
 name: maestro-init
-description: Use when bootstrapping a NEW project with maestro — generates docs/project-context.md (14 categories), maestro config (maestro.json, opencode.json, .gitignore), regression/ structure, and verifies prerequisites (AGENTS.md, superpowers, plugin)
+description: Use when bootstrapping a NEW project with maestro — generates docs/project-context.md (14 categories), maestro config (maestro.json, .gitignore, plugin+models in .opencode/opencode.json or global), regression/ structure, and verifies prerequisites (AGENTS.md, superpowers, plugin)
 ---
 
 # Init — Bootstrap нового проекта
@@ -10,7 +10,8 @@ description: Use when bootstrapping a NEW project with maestro — generates doc
 Сквозная инициализация нового проекта для maestro. Команда `/maestro-init`
 запускает этот скилл в любой primary-сессии. Цель — подготовить проект к работе
 pipeline maestro: есть `docs/project-context.md` (источник контекста шага 0),
-конфигурация maestro (`maestro.json` + `opencode.json` + `.gitignore`),
+конфигурация maestro (`maestro.json` + `.gitignore` + плагин/модели в
+`.opencode/opencode.json` или глобально),
 структура `regression/` и проверенные предусловия (AGENTS.md, superpowers, плагин).
 
 **ВНИМАНИЕ:** `/maestro-init` выполняет **только setup-фазу**. Дизайн, scaffold
@@ -28,7 +29,7 @@ pipeline maestro: есть `docs/project-context.md` (источник конт�
 |---|---|
 | 1. `/init` гейт | `AGENTS.md` (проверка/создание через встроенный `/init`) |
 | 2. Контекст | `docs/project-context.md` (14 категорий, см. `init-context.md`) |
-| 3. Конфиг | `maestro.json` (trust/access_policy/confidential/sanitizer_whitelist) + `opencode.json` (plugin + агенты M1) + `.gitignore` + `regression/` |
+| 3. Конфиг | `maestro.json` (trust/access_policy/confidential/sanitizer_whitelist) + плагин/модели (`.opencode/opencode.json` или global) + `.gitignore` + `regression/` |
 | 3а. Каталоги | `.maestro/`, `docs/superpowers/{specs,plans}/`, `docs/confidential/` |
 | 4. superpowers | проверка/установка (HITL) |
 | 5. плагин | проверка подключения `maestro-bootstrap` (не блокер) |
@@ -132,13 +133,19 @@ pipeline maestro: есть `docs/project-context.md` (источник конт�
 `sanitizer_whitelist` из §3/§12. Идемпотентность: при существовании `maestro.json` — diff по
 секциям; merge сохраняет пользовательские правки; если файла нет — создаётся целиком.
 
-### opencode.json — регистрация плагина + модели агентов
+### Плагин + модели агентов (без корневого `opencode.json`)
 
-- Регистрация плагина: `"plugin": ["maestro-bootstrap@git+https://github.com/wad-jet/maestro.git"]`.
-  Если ключа `plugin` нет → добавить; если есть, но spec отсутствует → дописать;
-  если уже есть → skip. **Никогда не перезаписывать существующий контент.**
+Корневой `opencode.json` **не создаётся**. Плагин и модели живут в merge-конфиге
+OpenCode (`.opencode/opencode.json` или глобальный `~/.config/opencode/opencode.json`).
+
+- **Плагин** `maestro-bootstrap` — рекомендуется **глобально** в
+  `~/.config/opencode/opencode.json` (`"plugin": ["maestro-bootstrap@git+https://github.com/wad-jet/maestro.git"]`).
+  Допустим также `.opencode/opencode.json`. Если ключа `plugin` нет → добавить;
+  если есть, но spec отсутствует → дописать; если уже есть → skip.
+  **Никогда не перезаписывать существующий контент.**
   Для локального клона репозитория допустим путь `./plugins/maestro-bootstrap/index.js`.
-- Модели агентов — по M1 (см. ниже). **Плейсхолдеры запрещены.**
+- **Модели агентов** — в `.opencode/opencode.json` (gitignored) или глобально,
+  по M1 (см. ниже). **Плейсхолдеры запрещены.**
 
 ### M1 — выбор моделей агентов (7 отдельных HITL-вопросов)
 
@@ -153,9 +160,9 @@ pipeline maestro: есть `docs/project-context.md` (источник конт�
 Для каждого из 7 агентов:
 1. Определить tier-класс (Ось A).
 2. Сформировать предложение (приоритет): эффективное значение `agent.<name>.model`
-   (merge-представление: project → global): project `opencode.json` (если задан
-   в проекте) → global (`~/.config/opencode/opencode.json`, наследуемая) →
-   git-история → tier-подсказка (design→opus-модель; sanitizer→своя/безопасная).
+   (merge-представление: project → global): project `.opencode/opencode.json` (если
+   задан в проекте) → global (`~/.config/opencode/opencode.json`, наследуемая) →
+   tier-подсказка (design→opus-модель; sanitizer→своя/безопасная).
 3. HITL через вопросный инструмент (radio): «Модель для `<agent>`?». Варианты:
    кандидаты моделей из D2 (доступные из `provider.<name>.models`) + `auto`
    (ключ `model` не пишется) + «оставить текущую (из проекта)»/«оставить текущую
@@ -166,7 +173,7 @@ pipeline maestro: есть `docs/project-context.md` (источник конт�
    не писать в project (наследование работает автоматически через merge).
 
 **Temperature задаётся дефолтом по tier** (если у агента ещё нет значения в
-`opencode.json`), пользователь может поправить:
+merge-конфиге — `.opencode/opencode.json` или global), пользователь может поправить:
 
 | Агент | Tier | temperature (дефолт) |
 |---|---|---|
@@ -192,22 +199,26 @@ pipeline maestro: есть `docs/project-context.md` (источник конт�
 
 **D2 — определение доступных моделей.** Список кандидатов для tier-подсказок
 берётся из `provider.<name>.models` **по всем уровням конфигурации** (merge):
-global (`~/.config/opencode/opencode.json`) → project (`opencode.json`) →
-`.opencode/opencode.json`. Приоритет merge: `.opencode` > project > global.
-Локальный конфиг может задать `provider` без `models` — тогда модели наследуются
-из global. Fallback (если `models` нигде нет): HITL-ввод вручную + попытка
-`opencode models <provider>`.
+global (`~/.config/opencode/opencode.json`) → project (`.opencode/opencode.json`).
+Приоритет merge: project > global. Локальный конфиг может задать `provider` без
+`models` — тогда модели наследуются из global. В чистом клоне (локальные модели
+gitignored) для D2 нужен global с `provider.*.models`; иначе кандидатов нет и D2
+уходит в ручной ввод (HITL + `opencode models <provider>`). Fallback (если `models`
+нигде нет): HITL-ввод вручную + попытка `opencode models <provider>`.
 
-### .gitignore — весь `.maestro/` (только эфемерное)
+### .gitignore — весь `.maestro/` и `.opencode/` (только эфемерное/доставляемое)
 
 Добавить (идемпотентно, не дублировать):
 ```
 .maestro/
+.opencode/
 ```
 `.maestro/` содержит только эфемерное (sdd/, last-run.md, logs/, feedback-reports/,
-plugin-version) и игнорируется целиком. Конфиг проекта — единственный файл
-`maestro.json` в корне (рядом с `opencode.json`). **Никакие конфиги не класть в
-`.maestro/`** — иначе они потеряются из git (`.maestro/` в `.gitignore`).
+plugin-version) и игнорируется целиком. `.opencode/` — доставляемая конфигурация
+средств (скиллы/агенты/команды/`opencode.json`), в git проекта не коммитится
+(доставка — вручную/agpack). Конфиг проекта — единственный файл `maestro.json` в
+корне. **Никакие конфиги не класть в `.maestro/`** — иначе они потеряются из git
+(`.maestro/` в `.gitignore`).
 
 ### regression/ — структура каталогов
 
@@ -245,7 +256,8 @@ regression/cancelled-features.md   (пустой файл с заголовко�
 
 ## Задача 5. Проверка плагина `maestro-bootstrap`
 
-Проверить, что плагин `maestro-bootstrap` подключён в `opencode.json` и
+Проверить, что плагин `maestro-bootstrap` подключён в merge-конфиге
+(`~/.config/opencode/opencode.json` — реком., или `.opencode/opencode.json`) и
 загружается:
 - `"plugin"` содержит git-spec `maestro-bootstrap@git+https://github.com/wad-jet/maestro.git`
   (или аналог, например локальный путь `./plugins/maestro-bootstrap/index.js`).

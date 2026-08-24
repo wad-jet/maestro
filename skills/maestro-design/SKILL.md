@@ -8,20 +8,15 @@ description: Use to produce design, spec, scaffold and roadmap for a project aft
 **Язык HITL:** русский.
 
 1. **Маркер проекта.** Если в корне проекта есть `maestro.json` — это проект под
-   управлением maestro, выполняется проверка плагина (шаги 2–3). Если `maestro.json`
+   управлением maestro, выполняется проверка плагина (шаг 2). Если `maestro.json`
    НЕТ — проект не под maestro, гейт пропускается, работаем как обычно.
 
-2. **Плагин заявлен в конфиге.** Проверь `opencode.json` → `plugin`: там должна
-   быть запись, указывающая на `maestro-bootstrap` (git-spec
-   `maestro-bootstrap@git+https://github.com/wad-jet/maestro.git` или локальный путь
-   `./plugins/maestro-bootstrap/index.js`). Нет → перейти к шагу 4 (стоп).
-
-3. **Плагин реально работал.** Открой самый свежий файл
+2. **Плагин реально работал.** Открой самый свежий файл
    `.maestro/logs/maestro-bootstrap-<дата>.log` (по имени-дате). Найди строку
    `plugin initialized`. Если есть И её ISO-`ts` не старше 24 часов от текущего
-   момента — плагин работает, продолжить работу. Иначе → шаг 4 (стоп).
+   момента — плагин работает, продолжить работу. Иначе → шаг 3 (стоп).
 
-4. **Жёсткий STOP (без «продолжить»).** Останови работу и покажи HITL:
+3. **Жёсткий STOP (без «продолжить»).** Останови работу и покажи HITL:
 
    > **Плагин `maestro-bootstrap` не подключён или не загружен.**
    > Защита `docs/confidential/**` НЕ действует: confidential-данные могут быть
@@ -32,7 +27,7 @@ description: Use to produce design, spec, scaffold and roadmap for a project aft
    > плагин и перезапустить opencode:
    > ```
    > opencode plugin "maestro-bootstrap@git+https://github.com/wad-jet/maestro.git"
-   > # или добавить spec в opencode.json
+   > # spec добавить в global ~/.config/opencode/opencode.json (реком.) или .opencode/opencode.json
    > ```
    >
    > (a) Подключить плагин и перезапустить opencode — затем повторить команду
@@ -88,7 +83,8 @@ description: Use to produce design, spec, scaffold and roadmap for a project aft
 ### Другие предусловия
 
 - `/maestro-init` выполнен: есть `docs/project-context.md` (источник контекста).
-- **Модели агентов наследуются** из `opencode.json` (настроены на init или вручную).
+- **Модели агентов наследуются** из `.opencode/opencode.json` или global
+  (настроены на init или вручную).
   `/maestro-design` **НЕ переспрашивает модели.**
 
 ## Шаг (a). План и дизайн проекта (архитектура)
@@ -152,4 +148,4 @@ description: Use to produce design, spec, scaffold and roadmap for a project aft
 | init выполнен, но project-context.md всё равно нет | Сообщить: запустите `/maestro-init` сначала |
 | design: revise | Вернуться к дизайн-диалогу (re-dispatch `design`), повторить |
 | scaffold: BUILD/TEST упал | HITL: fix-loop / skip с подтверждением |
-| Модели агентов не настроены | Предупредить; предложить настроить `agent.*` в opencode.json |
+| Модели агентов не настроены | Предупредить; предложить настроить `agent.*` в `.opencode/opencode.json` или global |

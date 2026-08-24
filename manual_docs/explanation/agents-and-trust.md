@@ -44,7 +44,7 @@ Trust-статус управляет **двумя** измерениями за
 
 ### trust-config → maestro.json
 
-Файл `maestro.json` в корне проекта (рядом с `opencode.json`) — консолидированный
+Файл `maestro.json` в корне проекта — консолидированный
 конфиг с четырьмя секциями: `trust`, `access_policy`, `confidential`,
 `sanitizer_whitelist`. Секция
 `trust` перечисляет **только trusted** сабагентов. Всё, чего нет в файле —
@@ -117,7 +117,8 @@ bash/glob/grep — нативные permissions. Файл `maestro.json` (сек
 bash-команд ненадёжно извлекаются).
 
 **Рекомендуемый 2-й эшелон защиты — нативные permissions OpenCode**
-(`opencode.json`), чтобы закрыть `bash`/`glob`/`grep` для confidential-путей:
+(`.opencode/agents/*.md` + `.opencode/opencode.json`/global), чтобы закрыть
+`bash`/`glob`/`grep` для confidential-путей:
 
 ```json
 {
@@ -186,10 +187,10 @@ untrusted работают по очищенным артефактам, а до
 
 Чтобы пользователь не работал с confidential-данными при отключённом плагине,
 на входе `@maestro`, `@maestro-design`, `@maestro-feedback-report` (в maestro-
-проекте с `maestro.json`) выполняется гейт: наличие `maestro-bootstrap` в
-`opencode.json → plugin` И свежая запись `plugin initialized` в логе плагина.
-При невыполнении — жёсткий стоп без «продолжить» (только подключить+перезапуск
-или отмена).
+проекте с `maestro.json`) выполняется гейт: самый свежий
+`.maestro/logs/maestro-bootstrap-<дата>.log` должен содержать свежую запись
+`plugin initialized` (timestamp не старше 24 часов). При невыполнении — жёсткий
+стоп без «продолжить» (только подключить+перезапуск или отмена).
 
 **Ограничения гейта:**
 - **Не OS-барьер.** Гейт — инструкция в `SKILL.md`, исполняемая оркестратором

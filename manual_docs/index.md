@@ -36,7 +36,7 @@ primary-сессии.
 - [Классификация фич](reference/feature-classification.md) — категории и матрица сигналов
 - [Выбор моделей](reference/model-selection.md) — tier и субагенты
 - [Команды](reference/commands.md) — доступные `@command`
-- [Конфигурация](reference/config.md) — maestro.json, opencode.json, env vars
+- [Конфигурация](reference/config.md) — maestro.json, .opencode/opencode.json, env vars
 
 ## Explanation (пояснения)
 

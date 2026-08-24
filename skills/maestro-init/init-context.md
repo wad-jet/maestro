@@ -142,7 +142,7 @@ BUILD_COMMAND: "go build ./..."
 > Полный JSON-канон и детали — в `skills/maestro-assistant/SKILL.md` (единый источник; не
 > дублировать здесь).
 
-### `opencode.json` → `agent.*` (модели, M1)
+### `.opencode/opencode.json` (или global) → `agent.*` (модели, M1)
 
 - tier-класс per агент (см. `skills/maestro-init/SKILL.md`, M1).
 - Доступные модели — из `provider.<name>.models` по всем уровням конфигурации

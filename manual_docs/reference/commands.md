@@ -34,8 +34,9 @@
 ### `/maestro-init`
 
 Setup-фаза bootstrap нового проекта: `docs/project-context.md` (14 категорий),
-конфигурация maestro (`maestro.json`, `opencode.json` с плагином и моделями,
-`.gitignore`), каталоги pipeline (`.maestro/` — весь в `.gitignore`,
+конфигурация maestro (`maestro.json`, плагин+модели в `.opencode/opencode.json`
+или global, `.gitignore` — весь `.maestro/` и `.opencode/`), каталоги pipeline
+(`.maestro/` — весь в `.gitignore`,
 `docs/superpowers/{specs,plans}/`),
 `regression/` структура. Использует скилл `maestro-init`.
 Проверяет предусловия: `AGENTS.md` (встроенный `/init`), скилы superpowers
@@ -47,7 +48,7 @@ Setup-фаза bootstrap нового проекта: `docs/project-context.md` 
 - (a) spec через сабагент `design` (trusted) → `docs/superpowers/specs/YYYY-MM-DD-<project>-design.md`; опц. spec-review (`opus`).
 - (b) scaffold — каркас кода через `implementer-prompt.md` (TDD), диспатч `haiku`/`sonnet`.
 - (c) `docs/roadmap.md` (MVP + этапы).
-Модели агентов наследуются из `opencode.json` (не переспрашивает).
+Модели агентов наследуются из `.opencode/opencode.json` или global (не переспрашивает).
 
 ### `/maestro-feedback-report`
 
@@ -69,6 +70,11 @@ Setup-фаза bootstrap нового проекта: `docs/project-context.md` 
 реальная работа модели: невалидное имя модели или недоступный провайдер
 проявятся как FAIL при диспатче.
 
+Дополнительно проверяется **confidential-инвариант** (P1/P3, `SECURITY.md`):
+trusted-агенты (`design`, `sanitizer`) читают `docs/confidential/**`, а
+primary-сессия при чтении того же файла получает `deny`. Статус инварианта —
+`PASS` / `FAIL` (утечка → СТОП) / `skipped` (нет `docs/confidential/**`).
+
 ### `/maestro-version`
 
 Показать версию плагина `maestro-bootstrap`, подключённого в текущей сессии.
@@ -81,7 +87,8 @@ Setup-фаза bootstrap нового проекта: `docs/project-context.md` 
 Консультации и настройка maestro-конфигурации/структуры/контекста в течение жизни
 проекта. Загружает скилл `maestro-assistant` (tool: skill) и применяет его к запросу HITL.
 Обрабатывает: `maestro.json` (trust/access_policy/confidential/sanitizer_whitelist),
-`opencode.json`, структуру каталогов, актуализацию `project-context.md`, консультации по
+`.opencode/opencode.json` / global (плагин, модели), структуру каталогов,
+актуализацию `project-context.md`, консультации по
 правилам работы maestro. Плагин-гейт не требуется. Если запрос требует изменения кода/spec/плана
 или запуска pipeline — редирект на `@maestro`/`/maestro-design`/`@regression`.
 

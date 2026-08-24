@@ -14,7 +14,7 @@
 - Проект настроен: `docs/project-context.md` (секция 14 — Commands), конфигурация
   maestro. Если ещё не настроен — выполните
   [Настройку проекта для maestro](../tutorials/setup-project.md) (`/maestro-init`).
-- Модели агентов настроены в `opencode.json`.
+- Модели агентов настроены в `.opencode/opencode.json` или global.
 
 ## 🚀 Пошагово
 

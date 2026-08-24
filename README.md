@@ -106,7 +106,8 @@ agpack sync                    # разворачивает skills/commands/agen
 
 > **Примечание:** agpack не покрывает плагин `maestro-bootstrap` (он ставится
 > из git — см. шаг [2. Подключите плагин](#2-подключите-плагин)) и конфиги
-> (`maestro.json`, `opencode.json`, `.gitignore`, `regression/`) — их создаёт `/maestro-init`.
+> (`maestro.json`, `.gitignore`, `regression/`; модели/плагин — в
+> `.opencode/opencode.json` или global) — их создаёт `/maestro-init`.
 
 #### Вариант B — вручную
 
@@ -123,7 +124,7 @@ agpack sync                    # разворачивает skills/commands/agen
 #### Из git (рекомендуется)
 
 ```jsonc
-// .opencode/opencode.json или opencode.json
+// ~/.config/opencode/opencode.json (реком.) или .opencode/opencode.json
 {
   "plugin": [
     "maestro-bootstrap@git+https://github.com/wad-jet/maestro.git"
@@ -136,7 +137,7 @@ OpenCode установит плагин автоматически (Bun) при
 #### Локально (из исходников)
 
 ```jsonc
-// .opencode/opencode.json или opencode.json
+// ~/.config/opencode/opencode.json (реком.) или .opencode/opencode.json
 {
   "plugin": [
     "./plugins/maestro-bootstrap/index.js"
@@ -172,12 +173,65 @@ OpenCode установит плагин автоматически (Bun) при
 | `/maestro-init` | Новый и существующий | Создаёт `project-context.md`, `maestro.json`, `.gitignore`, каталоги `.maestro/`, `regression/`; для существующего — детектит context и merge-ит конфиги |
 | `/maestro-design` | Новый (опционально) | Дизайн + spec + scaffold + roadmap |
 
-На этапе `/maestro-init` также настраиваются **модели агентов** (M1 — 7 HITL-вопросов, по одному на агента) и записываются в `opencode.json`. Рекомендация: настроить модели по тирам централизованно в global-конфиге `~/.config/opencode/opencode.json` один раз — новые проекты наследуют, `/maestro-init` предложит «оставить из global». Trusted по роли: `design` + `sanitizer` — подготовкой/изучением проекта занимаются именно они.
-
 - **Новый проект:** `/maestro-init` → `/maestro-design` → `/maestro`
 - **Существующий:** `/maestro-init` → `/maestro`
 
 Подробности — [Настройка проекта](manual_docs/tutorials/setup-project.md).
+
+#### Настройка моделей агентов по тирам
+
+M1-воркфлоу (`/maestro-init`) задаёт **7 отдельных HITL-вопросов** (по одному на
+агента), чтобы `design` и `sanitizer` могли получить разные модели. Для каждого
+агента предложение формируется из каскада:
+
+```
+.opencode/opencode.json (project) → global (~/.config/opencode/opencode.json) → tier-подсказка
+```
+
+**Оси Tier и Trust — ортогональны.** Tier — мощность модели (выбор провайдера);
+Trust — доверие (`maestro.json → trust`), атрибут безопасности, не мощность.
+Trusted по роли: `design` + `sanitizer` (обоим доступен `docs/confidential/**`),
+но это **разные агенты с разными моделями**.
+
+| Агент | Tier (роль) | Trusted? |
+|---|---|---|
+| `design` | opus (spec formation, архитектура) | ✅ |
+| `sanitizer` | своя модель (security review) | ✅ |
+| `opus` | opus (spec review) | ❌ |
+| `code-reviewer` | opus (code review) | ❌ |
+| `haiku` | haiku (механические задачи) | ❌ |
+| `sonnet` | sonnet (интеграционные задачи) | ❌ |
+| `fable` | fable (примеры/метафоры) | ❌ |
+
+Кандидаты моделей для подсказок (D2) берутся из `provider.<name>.models` по всем
+уровням конфигурации (merge), с приоритетом project > global.
+
+**Рекомендуемый способ — централизованная глобальная настройка.** Настроить
+`agent.{design,haiku,sonnet,opus,fable,code-reviewer,sanitizer}` (model +
+`temperature`) один раз в `~/.config/opencode/opencode.json` — новые проекты
+наследуют значения, `/maestro-init` предлагает «оставить из global» первым
+вариантом. Project `.opencode/opencode.json` переопределяет global при нужде в
+индивидуальном наборе. Корневой `opencode.json` не используется.
+
+`temperature` задаётся дефолтом по tier, если у агента нет собственного значения
+(существующее не перезаписывается). Полная таблица дефолтов и ролей — в
+[Выборе моделей](manual_docs/reference/model-selection.md).
+
+#### Проверка конфигурации моделей
+
+После настройки моделей убедитесь, что каждый сабагент реально диспатчится и
+модель доступна — командой `/test-agents`:
+
+- диспатч каждого из 7 сабагентов (`design`, `haiku`, `sonnet`, `opus`, `fable`,
+  `code-reviewer`, `sanitizer`) тривиальной тестовой задачей «верни OK и своё имя»;
+- сводная таблица `OK / FAIL` по каждому агенту с причиной при ошибке (недоступна
+  модель, ошибка провайдера, таймаут);
+- дополнительно проверяется confidential-инвариант: trusted-агент читает
+  `docs/confidential/**`, а primary-сессия получает `deny`.
+
+Проверка **не читает конфиги** — только реальную работу модели через `task`-диспатч.
+Подробно — [Проверка сабагентов](manual_docs/reference/commands.md) и
+[Настройка проекта](manual_docs/tutorials/setup-project.md).
 
 ### 4. Запустите pipeline
 

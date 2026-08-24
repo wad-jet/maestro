@@ -18,7 +18,7 @@
   `resolveIsTrustedSubagent`: сессия без `parentID` → untrusted), инвариант
   конфига (`manual_docs/reference/config.md` → секция `confidential`).
 - **Trust привязан к имени агента** (`maestro.json → trust`), не к модели. Модель
-  — атрибут имени (`opencode.json → agent.{name}.model`).
+  — атрибут имени (`agent.*.model` в merge-конфиге: `.opencode/opencode.json` или global).
 - **Fail-closed:** всё, чего нет в `trust` → untrusted; отсутствие `maestro.json`
   → все untrusted; primary/root, нерезолвнутый агент, ошибка lookup → untrusted.
 

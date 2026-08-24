@@ -156,7 +156,7 @@ flowchart TB
 - [Классификация фич](../reference/feature-classification.md) — как определяется категория фичи
 - [HITL-гейты](../reference/hitl-gates.md) — полный перечень гейтов
 - [Агенты и доверие](../explanation/agents-and-trust.md) — trusted/untrusted, security review
-- [Конфигурация](../reference/config.md) — maestro.json, opencode.json, env vars
+- [Конфигурация](../reference/config.md) — maestro.json, .opencode/opencode.json, env vars
 - [Команды](../reference/commands.md) — доступные команды
 - [Запуск первой фичи](../tutorials/run-first-feature.md) — пошаговый проход с объяснениями
 - [Запуск багфикса](../how-to/run-a-bugfix.md) — debug sub-pipeline детальнее

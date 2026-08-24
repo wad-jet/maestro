@@ -9,9 +9,9 @@ description: Консультации и настройка maestro-конфиг
 ## Что обрабатывает
 
 - `maestro.json` (trust / access_policy / confidential / sanitizer_whitelist)
-- `opencode.json` (регистрация плагина, модели/температура агентов) — как консультация
+- `.opencode/opencode.json` / global (плагин, модели/температура агентов) — как консультация
 - `project-context.md` (14 категорий, актуализация наполнения)
-- Структура каталогов pipeline + `.gitignore` (весь `.maestro/`)
+- Структура каталогов pipeline + `.gitignore` (весь `.maestro/` и `.opencode/`)
 - Консультации по правилам/процессам работы maestro
 
 ## Ключевые правила

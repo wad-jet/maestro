@@ -284,7 +284,8 @@ npm test
 ### Из git-репозитория (рекомендуется)
 
 Плагин поставляется из git-репозитория `wad-jet/maestro` (публикация в npm не используется).
-Добавьте spec в `opencode.json`:
+Добавьте spec в `~/.config/opencode/opencode.json` (рекомендуется) или
+`.opencode/opencode.json` (корневой `opencode.json` не используется):
 
 ```json
 {

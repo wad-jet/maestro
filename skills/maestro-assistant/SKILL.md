@@ -23,7 +23,8 @@ description: Use when the user asks for help configuring maestro, organizing pro
 
 ## Полномочия и границы
 
-- **Может напрямую редактировать** `maestro.json`, `opencode.json`, `project-context.md`,
+- **Может напрямую редактировать** `maestro.json`, `.opencode/opencode.json` (или
+  global-конфиг), `project-context.md`,
   структуру каталогов по запросу HITL. Идемпотентно, с HITL-гейтом на approve/правки/отмена
   и показом diff-merge перед записью.
 - **НЕ реализует фичи** — не запускает pipeline, не пишет spec/plan/код.
@@ -125,7 +126,7 @@ description: Use when the user asks for help configuring maestro, organizing pro
 
 ### 2. Настройка конфигурации (правка)
 
-1. Прочитать текущий артефакт (`maestro.json` / `opencode.json` / `project-context.md`).
+1. Прочитать текущий артефакт (`maestro.json` / `.opencode/opencode.json` / `project-context.md`).
 2. Сформировать diff-merge (идемпотентно, сохраняя пользовательские правки).
 3. **HITL-гейт:** «(a) approve — (b) правки — (c) отмена» + показ diff-merge.
 4. Для `confidential.paths` / `access_policy.deny→allow` / `sanitizer_whitelist.rules→false` —
@@ -141,8 +142,8 @@ description: Use when the user asks for help configuring maestro, organizing pro
 
 Проверить/создать (идемпотентно): `.maestro/`, `docs/superpowers/{specs,plans}/`,
 `docs/confidential/`, `regression/{entries,released}/`. `.gitignore` — `.maestro/`
-целиком (только эфемерное); конфиг проекта — только `maestro.json` в корне,
-не в `.maestro/`.
+и `.opencode/` целиком (эфемерное/доставляемое); конфиг проекта — только
+`maestro.json` в корне, не в `.maestro/`.
 
 ## Обработка сбоев
 

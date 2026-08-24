@@ -19,8 +19,10 @@
 | Скиллы/команды/агенты | `agpack sync` / вручную из репозитория | нет отдельной версии; версия = версия дистрибутива из `package.json` |
 | Плагин `maestro-bootstrap` | git (`@git+...`), опционально `#<commit-sha>` | `.maestro/plugin-version` + `/maestro-version` |
 
-> `agpack` не покрывает плагин и конфиги (`maestro.json`, `opencode.json`,
-> `.gitignore`, `regression/`) — их создаёт `/maestro-init`.
+> `agpack` не покрывает плагин и конфиги (`maestro.json`, `.gitignore`,
+> `regression/`; модели — `.opencode/opencode.json` или global) — их создаёт
+> `/maestro-init`. Скиллы/команды/агенты (`агpack`) и плагин/конфиги доставляются
+> разными механизмами.
 
 ## 🔍 Единая версия и как её узнать
 

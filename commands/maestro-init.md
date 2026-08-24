@@ -1,5 +1,5 @@
 ---
-description: Инициализация нового проекта: project-context.md (14 категорий), конфигурация maestro (maestro.json, opencode.json, .gitignore), каталоги, проверка superpowers и плагина
+description: Инициализация нового проекта: project-context.md (14 категорий), конфигурация maestro (maestro.json, .gitignore, plugin+models в .opencode/opencode.json или global), каталоги, проверка superpowers и плагина
 ---
 Загрузи skill `maestro-init` (tool: skill) и следуй SKILL.md из `skills/maestro-init/`.
 
@@ -10,7 +10,8 @@ opencode (тот создаёт AGENTS.md). НЕ выполняет дизайн
 2. Проверка `docs/project-context.md` + запрос git-решения (без автокоммитов).
 3. Собрать контекст по 14 категориям -> `docs/project-context.md`.
 4. Конфигурация: `maestro.json` (trust/access_policy/confidential/sanitizer_whitelist),
-   `opencode.json` (plugin + модели агентов по M1), `.gitignore` (весь `.maestro/`),
+   плагин + модели агентов по M1 (`.opencode/opencode.json` или global), `.gitignore`
+   (весь `.maestro/` и `.opencode/`),
    `regression/` структура. Каталоги: `.maestro/`,
    `docs/superpowers/{specs,plans}/`. **Задача 3 требует скилл `maestro-assistant`
    (жёсткий gate): если его нет — установить и продолжить, иначе прерывание.**

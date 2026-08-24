@@ -5,7 +5,7 @@ description: Дизайн и scaffold проекта после /maestro-init: s
 
 `/maestro-design` — дизайн/архитектура, scaffold и roadmap для проекта, у которого
 уже есть setup (`/maestro-init`). НЕ выполняет setup (контекст/конфиг) — они в
-`/maestro-init`. Модели агентов НЕ переспрашивает — наследует из `opencode.json`.
+`/maestro-init`. Модели агентов НЕ переспрашивает — наследует из `.opencode/opencode.json` или global.
 Действия:
 1. Проверка выполнения `/maestro-init`: если проект новый или скилл `maestro`
    ранее не применялся — проверить признаки init (`docs/project-context.md`,
