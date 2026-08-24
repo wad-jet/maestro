@@ -1656,3 +1656,81 @@ describe("maestro-bootstrap isConfidentialTarget (single-file & mask)", () => {
     assert.equal(isConfidentialTarget(root, ["*.env", "**/*.pem"], "docs/readme.md"), false);
   });
 });
+
+describe("maestro-bootstrap confidential enforcement by mask/filename", () => {
+  let dir, hooks, savedLogEnv;
+  const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR"];
+
+  function makeClient(sessions) {
+    return {
+      session: {
+        get: async ({ path }) => {
+          const rec = sessions[path.id];
+          if (!rec) throw new Error("not found");
+          return { data: rec.session };
+        },
+        messages: async ({ path }) => {
+          const rec = sessions[path.id];
+          if (!rec) return { data: [] };
+          return { data: rec.messages };
+        },
+      },
+    };
+  }
+
+  const rootSessions = {
+    root: { session: { id: "root" }, messages: [] },
+  };
+
+  before(async () => {
+    savedLogEnv = {};
+    for (const k of LOG_ENV) { savedLogEnv[k] = process.env[k]; delete process.env[k]; }
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-fmask-"));
+    fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({
+      confidential: { paths: ["*.env", "**/*.pem", "maestro.json"] },
+    }));
+    hooks = await MaestroBootstrapPlugin({ directory: dir, client: makeClient(rootSessions) });
+  });
+
+  after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    for (const k of LOG_ENV) {
+      if (savedLogEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedLogEnv[k];
+    }
+  });
+
+  it("denies read of root-level mask file", async () => {
+    const out = { args: { filePath: "prod.env" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "m1" }, out),
+      /confidential:deny/,
+    );
+  });
+  it("does not deny read of nested file not matching root mask", async () => {
+    const out = { args: { filePath: "config/prod.env" } };
+    await hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "m2" }, out);
+    assert.ok(true);
+  });
+  it("denies read of recursive-mask file at root", async () => {
+    const out = { args: { filePath: "app.pem" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "m3" }, out),
+      /confidential:deny/,
+    );
+  });
+  it("denies read of recursive-mask file nested", async () => {
+    const out = { args: { filePath: "certs/app.pem" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "m4" }, out),
+      /confidential:deny/,
+    );
+  });
+  it("denies read of full filename at root", async () => {
+    const out = { args: { filePath: "maestro.json" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "m5" }, out),
+      /confidential:deny/,
+    );
+  });
+});
