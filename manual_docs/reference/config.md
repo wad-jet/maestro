@@ -483,14 +483,18 @@ deny. Trust не наследуется вложенными субагента�
 
 #### Доступные модели (D2)
 
-Кандидаты для `model` определяются из `provider.<name>.models` **по всем уровням**:
+Кандидаты для `model` определяются так:
 
-1. `~/.config/opencode/opencode.json` (global)
-2. `.opencode/opencode.json` (project)
+1. **Основной источник — `opencode models <provider>`** (запрос к рантайму opencode,
+   не чтение глобального файла), для каждого известного провайдера (`provider.*`),
+   списки объединяются.
+2. **Fallback** — `provider.<name>.models` в merge-конфиге:
+   - `~/.config/opencode/opencode.json` (global)
+   - `.opencode/opencode.json` (project)
 
-Приоритет merge: project > global. Если `models` не задан ни на одном уровне
-(например, в чистом клоне без локальных моделей) — нужен global с
-`provider.*.models`, иначе HITL-ввод вручную + попытка `opencode models <provider>`.
+   Приоритет merge: project > global.
+3. **Ручной ввод** — если кандидатов нет (нет провайдеров/моделей): HITL-ввод ID
+   вручную + попытка `opencode models <provider>`.
 
 > **Агенты (`agent.*`)** также наследуются из global через merge — `model` и
 > `temperature` агентов, настроенные глобально, применяются ко всем проектам;

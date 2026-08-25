@@ -50,102 +50,16 @@
 
 ### 1. Настройте проект
 
-Установить `maestro` в целевой проект можно двумя способами: через **agpack**
-(рекомендуется) или **вручную**.
-
-#### Вариант A — через [agpack](https://github.com/PhilippTh/agpack)
-
-`agpack` — пакетный менеджер для AI-кодинг-тулов: объявил зависимости в
-`agpack.yml`, запустил `agpack sync` — и скилы/команды/агенты разворачиваются
-сами в `.opencode/` целевого проекта.
-
-```bash
-pipx install agpack            # или: uv tool install agpack
-agpack init                    # создаёт agpack.yml
-```
-
-> **macOS (pipx):** после установки `agpack` может не находиться в новых
-> консольных сессиях — pipx кладёт бинари в `~/.local/bin`, который не всегда
-> в `PATH`. Исправьте:
-> ```bash
-> pipx ensurepath    # добавляет ~/.local/bin в PATH (перезапустите консоль)
-> # или временно:  export PATH="$HOME/.local/bin:$PATH"
-> ```
-
-Минимальный `agpack.yml` для `maestro`:
-
-```yaml
-targets:
-  - opencode
-
-dependencies:
-  skills:
-    - url: https://github.com/wad-jet/maestro
-      path: skills/maestro
-    - url: https://github.com/wad-jet/maestro
-      path: skills/maestro-init
-    - url: https://github.com/wad-jet/maestro
-      path: skills/maestro-design
-    - url: https://github.com/wad-jet/maestro
-      path: skills/manual-docs
-    - url: https://github.com/obra/superpowers
-      path: skills
-  commands:
-    - url: https://github.com/wad-jet/maestro
-      path: commands
-  agents:
-    - url: https://github.com/wad-jet/maestro
-      path: agents
-```
-
-Затем:
-
-```bash
-agpack sync                    # разворачивает skills/commands/agents в .opencode/
-```
-
-> **Примечание:** agpack не покрывает плагин `maestro-bootstrap` (он ставится
-> из git — см. шаг [2. Подключите плагин](#2-подключите-плагин)) и конфиги
-> (`maestro.json`, `.gitignore`, `regression/`; модели/плагин — в
-> `.opencode/opencode.json` или global) — их создаёт `/maestro-init`.
-
-#### Вариант B — вручную
-
-Скопируйте `.opencode/`, `skills/`, `commands/` и плагин в **целевой проект**.
-
-> В обоих вариантах подробности — [Настройка проекта](manual_docs/tutorials/setup-project.md).
+Установить `maestro` в целевой проект можно через **agpack** (рекомендуется) или
+**вручную** (копированием). Подробная инструкция с `agpack.yml`, картой путей и
+подключением плагина — [Первая установка maestro](manual_docs/how-to/install-maestro.md).
 
 ### 2. Подключите плагин
 
 Плагин `maestro-bootstrap` (санитайзинг промптов, file access control, audit-логи)
 подключается **до** запуска пайплайна. Он поставляется из git-репозитория `wad-jet/maestro`
-(публикация в npm не используется).
-
-#### Из git (рекомендуется)
-
-```jsonc
-// ~/.config/opencode/opencode.json (реком.) или .opencode/opencode.json
-{
-  "plugin": [
-    "maestro-bootstrap@git+https://github.com/wad-jet/maestro.git"
-  ]
-}
-```
-
-OpenCode установит плагин автоматически (Bun) при старте.
-
-#### Локально (из исходников)
-
-```jsonc
-// ~/.config/opencode/opencode.json (реком.) или .opencode/opencode.json
-{
-  "plugin": [
-    "./plugins/maestro-bootstrap/index.js"
-  ]
-}
-```
-
-Перезапустите OpenCode — плагин создаст `.maestro/` с JSONL-логами.
+(публикация в npm не используется). Подключение (из git или локально) — в
+[Первая установка maestro](manual_docs/how-to/install-maestro.md).
 
 > **Версия плагина.** Единственный источник версии — **корневой** `package.json`
 > репозитория (сейчас `1.1.0`). `readPluginVersion()` резолвит его относительно
@@ -181,8 +95,9 @@ OpenCode установит плагин автоматически (Bun) при
 #### Настройка моделей агентов по тирам
 
 M1-воркфлоу (`/maestro-init`) задаёт **7 отдельных HITL-вопросов** (по одному на
-агента), чтобы `design` и `sanitizer` могли получить разные модели. Для каждого
-агента предложение формируется из каскада:
+агента — гибкость выбора): `design` и `sanitizer` могут получить разные модели, но
+**одна модель тоже допустима** (см. выше). Для каждого агента предложение
+формируется из каскада:
 
 ```
 .opencode/opencode.json (project) → global (~/.config/opencode/opencode.json) → tier-подсказка
@@ -194,7 +109,8 @@ M1-воркфлоу (`/maestro-init`) задаёт **7 отдельных HITL-�
 модальность, `sanitizer` — доверие). Контекст задаёт конкретная модель, не тир.
 Trust — доверие (`maestro.json → trust`), атрибут безопасности, не мощность.
 Trusted по роли: `design` + `sanitizer` (обоим доступен `docs/confidential/**`),
-но это **разные агенты с разными моделями**.
+но это **разные агенты** (модели могут быть разными, но одна модель тоже допустима
+на усмотрение пользователя — например, одна локальная/изолированная для обоих).
 
 | Агент | Tier (роль) | Trusted? |
 |---|---|---|
@@ -272,20 +188,6 @@ skills/          — скиллы (maestro, maestro-init, maestro-design, manual
 specs/           — дизайн-спеки и план-ы этого репо (never in root!)
 manual_docs/     — пользовательская документация скилла (Diátaxis)
 ```
-
-## Синхронизация
-
-`skills/`, `agents/`, `commands/` здесь — **источник истины**. Runtime-копии
-живут в целевом приложении:
-
-```
-authors/repo              →  target/app
-skills/maestro/SKILL.md   →  .opencode/skills/maestro/SKILL.md
-agents/haiku.md           →  .opencode/agents/haiku.md
-commands/maestro.md       →  .opencode/commands/maestro.md
-```
-
-Изменили источник → обновите копию.
 
 ## Тесты плагина
 

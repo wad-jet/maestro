@@ -93,6 +93,7 @@ agpack sync        # разворачивает актуальные skills/comm
 
 ## 🔗 Связанные разделы
 
+- [Первая установка maestro](install-maestro.md)
 - [Настройка проекта для maestro](../tutorials/setup-project.md)
 - [Кастомизация скилла](customize-maestro.md)
 - [Команды](../reference/commands.md) — `/maestro-version`

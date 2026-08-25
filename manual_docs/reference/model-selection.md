@@ -22,7 +22,7 @@
 | Шаг | Tier | OpenCode сабагент |
 |---|---|---|
 | `spec_formation` (шаг 8) | opus | `design` (trusted) |
-| `spec_review` (шаг 9) | opus | `opus` |
+| `spec_review` (шаг 9, после sanitize) | opus | `opus` |
 | `task_reviewer` (шаг 13, per-task) | sonnet | `sonnet` |
 | `code_review` (шаг 16) | opus | `code-reviewer` |
 | `implementer_mechanical` (шаг 13, 1-2 файла) | haiku | `haiku` |
@@ -43,10 +43,15 @@
 | `design` | `agents/design.md` | edit (spec), без bash | Spec formation: brainstorming, дизайн-решения, написание spec (trusted) |
 | `haiku` | `agents/haiku.md` | edit+bash | Механические задачи, юнит-тесты, bash (git, grep, запуск тестов/сборки) |
 | `sonnet` | `agents/sonnet.md` | edit+bash | Интеграционные, multi-file, отладка |
-| `opus` | `agents/opus.md` | read-only | Spec Review, security audit, архитектура |
-| `fable` | `agents/fable.md` | read-only | Примеры, метафоры, пояснения |
+| `opus` | `agents/opus.md` | read-only | Spec Review (ревьюит спецификацию, прошедшую проверку `sanitizer` — Ур.1 плагин + Ур.2 сабагент), security audit, архитектура |
+| `fable` | `agents/fable.md` | read-only | Примеры, метафоры, пояснения. Диспатчится по запросу (шаг `explain`), не автоматически в pipeline |
 | `code-reviewer` | `agents/code-reviewer.md` | bash+read (без edit) | Финальное ревью ветки |
 | `sanitizer` | `agents/sanitizer.md` | read-only | Security review — поиск и пометка чувствительных данных |
+
+**Когда использовать `fable`** (по запросу, шаг `explain`):
+- объяснить концепцию/паттерн через метафору или аналогию;
+- предложить аналогию для нестандартной идеи;
+- пояснить сложный абстрактный термин через пример/«историю».
 
 Все субагенты, кроме `code-reviewer`, объявлены `hidden: true`
 (вызываются только программно через `task` tool). `task: deny` — субагенты не
@@ -73,7 +78,9 @@ OpenCode:    task(subagent_type="haiku", prompt="...")
 - **Tier:** design→opus, opus→opus, code-reviewer→opus, haiku→haiku, sonnet→sonnet,
   fable→fable, **sanitizer→своя**.
 - **Trust:** `design` и `sanitizer` — trusted (в `maestro.json`); остальные —
-  untrusted. `design` и `sanitizer` — **разные агенты с разными моделями**.
+  untrusted. `design` и `sanitizer` — **разные агенты**, оба trusted. Модели могут
+  быть разными, но **одна модель тоже допустима** на усмотрение пользователя
+  (например, одна локальная/изолированная для обоих).
 
 > **«Своя модель» (`sanitizer`).** Это **не tier-класс** (не haiku/sonnet/opus/fable),
 > а особая категория: индивидуально подобранная модель под security-задачу —
@@ -84,14 +91,21 @@ OpenCode:    task(subagent_type="haiku", prompt="...")
 > Задаётся в `agent.sanitizer.model` (в `.opencode/opencode.json` или global) по
 > общим правилам M1/D2. `sanitizer` trusted (доступ к `docs/confidential/**`) —
 > это **доверие**, не мощность.
+>
+> **Рекомендация (локальная модель).** Для `sanitizer` (и `design` — trusted-
+> агентов) **рекомендуется** использовать локальную/изолированную модель — она не
+> отправляет confidential-данные во внешний провайдер (см. `SECURITY.md` → P4).
+> Это **предпочтение, не жёсткое требование**: выбор остаётся за пользователем.
+> Допустимо, что одна такая модель обслуживает и `design`, и `sanitizer` (см. п.27).
 
 Выбор моделей — **7 отдельных HITL-вопросов** (по одному на агента). Каждый
 задаётся через вопросный инструмент (radio) с вариантами: кандидаты моделей
 (из D2) + `auto` + «оставить текущую» + «свой вариант» (ручной ввод ID).
 Предложение формируется из: текущий `.opencode/opencode.json` (project) → global →
 tier-подсказка.
-Доступные модели определяются (D2) из `provider.<name>.models` **по всем уровням
-конфигурации** (global → project), с merge-приоритетом project > global.
+Доступные модели определяются (D2): основной источник — `opencode models <provider>`
+(по каждому известному провайдеру, списки объединяются); fallback — `provider.<name>.models`
+в merge-конфиге (project → global), затем ручной ввод.
 
 **Temperature** задаётся дефолтом по tier (если у агента нет своего значения),
 существующее значение не перезаписывается; записывается вместе с `model`

@@ -155,7 +155,9 @@ OpenCode (`.opencode/opencode.json` или глобальный `~/.config/openc
   haiku→haiku, sonnet→sonnet, fable→fable, sanitizer→своя.
 - **Trust (доверие, Ось B):** design ✅ + sanitizer ✅ trusted; остальные untrusted.
 
-`design` и `sanitizer` — **оба trusted**, но **разные агенты с разными моделями**.
+`design` и `sanitizer` — **оба trusted**, но **разные агенты**. Модели могут быть
+разными, но **одна модель тоже допустима** на усмотрение пользователя (например,
+одна локальная/изолированная для обоих).
 
 Для каждого из 7 агентов:
 1. Определить tier-класс (Ось A).
@@ -164,7 +166,8 @@ OpenCode (`.opencode/opencode.json` или глобальный `~/.config/openc
    задан в проекте) → global (`~/.config/opencode/opencode.json`, наследуемая) →
    tier-подсказка (design→opus-модель; sanitizer→своя/безопасная).
 3. HITL через вопросный инструмент (radio): «Модель для `<agent>`?». Варианты:
-   кандидаты моделей из D2 (доступные из `provider.<name>.models`) + `auto`
+   кандидаты моделей из D2 (`opencode models <provider>`, с fallback на
+   `provider.<name>.models`) + `auto`
    (ключ `model` не пишется) + «оставить текущую (из проекта)»/«оставить текущую
    (из global)» (если агент уже настроен на соответствующем уровне) +
    «свой вариант» (ручной ввод ID модели).
@@ -197,14 +200,19 @@ merge-конфиге — `.opencode/opencode.json` или global), пользо�
 > значения, М1 предлагает «оставить текущую (из global)» первым вариантом.
 > Подробнее: `manual_docs/tutorials/setup-project.md`.
 
-**D2 — определение доступных моделей.** Список кандидатов для tier-подсказок
-берётся из `provider.<name>.models` **по всем уровням конфигурации** (merge):
-global (`~/.config/opencode/opencode.json`) → project (`.opencode/opencode.json`).
-Приоритет merge: project > global. Локальный конфиг может задать `provider` без
-`models` — тогда модели наследуются из global. В чистом клоне (локальные модели
-gitignored) для D2 нужен global с `provider.*.models`; иначе кандидатов нет и D2
-уходит в ручной ввод (HITL + `opencode models <provider>`). Fallback (если `models`
-нигде нет): HITL-ввод вручную + попытка `opencode models <provider>`.
+**D2 — определение доступных моделей.** Список кандидатов для tier-подсказок.
+
+1. **Основной источник — `opencode models <provider>`** (запрос к рантайму opencode,
+   не чтение глобального файла). Выполнить для **каждого провайдера**, известного
+   в эффективном merge-конфиге (`provider.*`), и объединить списки моделей.
+2. **Fallback** (если `opencode models` недоступна как команда / ошибка / пустой
+   список): взять `provider.<name>.models` из эффективного merge-конфига
+   (project → global).
+3. **Ручной ввод** — если и это не дало кандидатов (нет провайдеров/моделей),
+   HITL-ввод ID вручную + попытка `opencode models <provider>`.
+
+Устраняет обращение к глобальному файлу при настройке opencode: доступные модели
+спрашиваем у рантайма, а не «прогуливаем» конфиги вручную.
 
 ### .gitignore — весь `.maestro/` и `.opencode/` (только эфемерное/доставляемое)
 
