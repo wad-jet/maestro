@@ -50,9 +50,22 @@
 
 ### 1. Настройте проект
 
-Установить `maestro` в целевой проект можно через **agpack** (рекомендуется) или
-**вручную** (копированием). Подробная инструкция с `agpack.yml`, картой путей и
-подключением плагина — [Первая установка maestro](manual_docs/how-to/install-maestro.md).
+**Самый простой способ — скрипт `maestro-init.sh`** (новый или существующий проект,
+где maestro ранее не применялся). Он устанавливает `agpack`, создаёт `agpack.yml`,
+запускает `agpack sync` и подключает плагин `maestro-bootstrap`:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/wad-jet/maestro/main/maestro-init.sh -o maestro-init.sh
+bash maestro-init.sh
+```
+
+> Предусловия: bash (macOS/Linux), python3 ≥ 3.11, git. Windows — запускайте через
+> WSL или Git Bash. После скрипта — перезапустите OpenCode и выполните
+> `/maestro-init` (см. шаг 3 ниже).
+
+Установить `maestro` можно также через **agpack** (вручную) или **копированием**.
+Подробная инструкция с `agpack.yml`, картой путей и подключением плагина —
+[Первая установка maestro](manual_docs/how-to/install-maestro.md).
 
 ### 2. Подключите плагин
 

@@ -1,0 +1,238 @@
+#!/usr/bin/env bash
+#
+# maestro-init.sh — bootstrap проекта для maestro через agpack.
+#
+# Готовит базу для разработки с помощью maestro в пустом каталоге (новый проект)
+# или в каталоге существующего проекта, где maestro ранее не применялся:
+#   1. Проверяет предусловия (git, python3 >= 3.11).
+#   2. Устанавливает/настраивает agpack (uv tool или pipx, с нюансами по OS).
+#   3. Создаёт agpack.yml (идемпотентно, не перезаписывает существующий).
+#   4. Запускает `agpack sync` — разворачивает skills/commands/agents в .opencode/.
+#   5. Подключает плагин opencode `maestro-bootstrap` (мерж, без перезаписи).
+#   6. Выдаёт краткую инструкцию по запуску инициализации в opencode.
+#
+# Совместимость: bash 3.2+ (macOS GNU bash 3.2.57); bash-на-macOS/Linux.
+# Windows — через WSL/Git Bash (см. оговорку в доке).
+#
+# Флаги:
+#   --global   регистрировать плагин в глобальном конфиге opencode
+#              (по умолчанию — в .opencode/opencode.json проекта)
+#   --help     краткая справка и выход
+#
+# Содержимое agpack.yml встроено heredoc-ом (самодостаточный скрипт).
+# Коммиченный maestro-init/agpack.yml — справочная копия для доков.
+set -euo pipefail
+
+# --- Константы -------------------------------------------------------------
+
+PLUGIN_SPEC="maestro-bootstrap@git+https://github.com/wad-jet/maestro.git"
+REPO_URL="https://github.com/wad-jet/maestro"
+RAW_URL="https://raw.githubusercontent.com/wad-jet/maestro/main/maestro-init.sh"
+
+# --- Вспомогательные функции ----------------------------------------------
+
+say()  { printf '%s\n' "$*"; }
+info() { printf '\033[1;34m[maestro-init]\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m[maestro-init] ВНИМАНИЕ:\033[0m %s\n' "$*"; }
+die()  { printf '\033[1;31m[maestro-init] ОШИБКА:\033[0m %s\n' "$*" >&2; exit 1; }
+
+usage() {
+  cat <<'USAGE'
+maestro-init — подготовка проекта для maestro через agpack.
+
+Использование:
+  bash maestro-init.sh [--global] [--help]
+
+Флаги:
+  --global   зарегистрировать плагин maestro-bootstrap в глобальном конфиге
+             opencode (~/.config/opencode/opencode.json).
+             По умолчанию — в .opencode/opencode.json проекта.
+  --help     показать эту справку и выйти.
+
+Предусловия: bash (macOS/Linux), git, python3 >= 3.11.
+Windows: запускайте через WSL или Git Bash.
+USAGE
+}
+
+# --- Разбор аргументов ----------------------------------------------------
+
+GLOBAL_MODE=0
+for arg in "$@"; do
+  case "$arg" in
+    --help|-h)   usage; exit 0 ;;
+    --global)    GLOBAL_MODE=1 ;;
+    --*)         die "неизвестный флаг: $arg (см. --help)" ;;
+    *)           die "неожиданный аргумент: $arg (см. --help)" ;;
+  esac
+done
+
+# --- 1. Preflight -----------------------------------------------------------
+
+command -v git >/dev/null 2>&1 \
+  || die "не найден 'git'. Установите git и повторите."
+
+if ! command -v python3 >/dev/null 2>&1; then
+  die "не найден 'python3'. Установите Python >= 3.11 и повторите."
+fi
+
+PY_MAJOR=$(python3 -c 'import sys; print(sys.version_info[0])')
+PY_MINOR=$(python3 -c 'import sys; print(sys.version_info[1])')
+if [ "$PY_MAJOR" -lt 3 ] || { [ "$PY_MAJOR" -eq 3 ] && [ "$PY_MINOR" -lt 11 ]; }; then
+  die "требуется Python >= 3.11 (найдено $(python3 --version 2>&1)). Обновите Python и повторите."
+fi
+
+# --- 2. Обнаружение/установка agpack ---------------------------------------
+
+AGPACK=""
+if command -v agpack >/dev/null 2>&1; then
+  AGPACK="$(command -v agpack)"
+elif [ -x "$HOME/.local/bin/agpack" ]; then
+  AGPACK="$HOME/.local/bin/agpack"
+fi
+
+if [ -z "$AGPACK" ]; then
+  info "agpack не найден — устанавливаю."
+
+  if command -v uv >/dev/null 2>&1; then
+    info "установка через 'uv tool install agpack'..."
+    uv tool install agpack
+  elif command -v pipx >/dev/null 2>&1; then
+    info "установка через 'pipx install agpack'..."
+    pipx install agpack
+  else
+    cat <<'EOT'
+[maestro-init] ОШИБКА: не найдены ни 'uv', ни 'pipx'.
+
+Установите agpack одним из способов:
+  # предпочтительно (uv)
+  uv tool install agpack
+
+  # или (pipx)
+  pipx install agpack
+
+Примечания:
+  - macOS (pipx): после установки agpack может не находиться в новых консолях.
+    Выполните:  pipx ensurepath   (или: export PATH="$HOME/.local/bin:$PATH")
+  - Ubuntu (pipx): нужен python3-venv:  sudo apt install python3-venv python3-pip
+
+После установки запустите этот скрипт заново.
+EOT
+    exit 1
+  fi
+
+  if [ -x "$HOME/.local/bin/agpack" ]; then
+    AGPACK="$HOME/.local/bin/agpack"
+  elif command -v agpack >/dev/null 2>&1; then
+    AGPACK="$(command -v agpack)"
+  else
+    die "agpack установлен, но не найден в PATH. Выполните 'pipx ensurepath' и запустите скрипт заново."
+  fi
+fi
+
+info "agpack: $AGPACK"
+
+# --- 3. Создание agpack.yml (идемпотентно, heredoc) --------------------------
+
+if [ -f "agpack.yml" ]; then
+  info "agpack.yml уже существует — пропускаю создание (не перезаписываю)."
+else
+  info "создаю agpack.yml..."
+  cat > agpack.yml <<'YAML'
+targets:
+  - opencode
+
+dependencies:
+  skills:
+    - url: https://github.com/wad-jet/maestro
+      path: skills/maestro
+    - url: https://github.com/wad-jet/maestro
+      path: skills/maestro-init
+    - url: https://github.com/wad-jet/maestro
+      path: skills/maestro-design
+    - url: https://github.com/wad-jet/maestro
+      path: skills/manual-docs
+    - url: https://github.com/obra/superpowers
+      path: skills
+  commands:
+    - url: https://github.com/wad-jet/maestro
+      path: commands
+  agents:
+    - url: https://github.com/wad-jet/maestro
+      path: agents
+YAML
+fi
+
+# --- 4. agpack sync ----------------------------------------------------------
+
+info "запускаю 'agpack sync'..."
+"$AGPACK" sync
+
+# --- 5. Регистрация плагина maestro-bootstrap (идемпотентно) ------------------
+
+if [ "$GLOBAL_MODE" -eq 1 ]; then
+  : "${XDG_CONFIG_HOME:=$HOME/.config}"
+  CONFIG_FILE="$XDG_CONFIG_HOME/opencode/opencode.json"
+else
+  CONFIG_FILE=".opencode/opencode.json"
+fi
+
+info "регистрирую плагин в конфиге opencode: $CONFIG_FILE"
+mkdir -p "$(dirname "$CONFIG_FILE")"
+
+python3 - "$CONFIG_FILE" "$PLUGIN_SPEC" <<'PY'
+import json
+import os
+import sys
+
+config_path, plugin_spec = sys.argv[1], sys.argv[2]
+
+data = {}
+if os.path.exists(config_path):
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            content = f.read().strip()
+            if content:
+                data = json.loads(content)
+    except (json.JSONDecodeError, OSError) as e:
+        sys.stderr.write("maestro-init: не могу прочитать %s: %s\n" % (config_path, e))
+        sys.exit(1)
+
+plugins = data.get("plugin")
+if plugins is None:
+    plugins = []
+if not isinstance(plugins, list):
+    sys.stderr.write("maestro-init: ключ 'plugin' в %s — не массив; не трогаю.\n" % config_path)
+    sys.exit(1)
+
+if plugin_spec in plugins:
+    print("maestro-init: плагин уже подключён (%s)" % plugin_spec)
+else:
+    plugins.append(plugin_spec)
+    data["plugin"] = plugins
+    with open(config_path, "w", encoding="utf-8") as f:
+        json.dump(data, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    print("maestro-init: плагин добавлен в конфиг opencode")
+PY
+
+# --- 6. Инструкция -----------------------------------------------------------
+
+cat <<EOT
+
+[maestro-init] Готово. База для maestro подготовлена.
+  - agpack.yml: создан/существующий
+  - .opencode/: развёрнуты skills/commands/agents (agpack sync)
+  - плагин: $PLUGIN_SPEC → $CONFIG_FILE
+
+Что дальше:
+  1. Запустите opencode в этом каталоге:  opencode
+  2. Выполните инициализацию проекта:     /maestro-init
+     (создаёт project-context.md, maestro.json, модели агентов, каталоги)
+  3. Для нового проекта — дизайн и каркас: /maestro-design
+  4. Запуск фичи:                          /maestro "ваша задача"
+
+Перезапустите opencode, чтобы плагин maestro-bootstrap подхватился.
+
+Русский — рабочий язык. Источник: $REPO_URL
+Обновление скрипта: $RAW_URL
+EOT

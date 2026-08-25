@@ -12,10 +12,30 @@
 > плагина; [Настройка проекта](../tutorials/setup-project.md) — про настройку
 > проекта под maestro (project-context, `maestro.json`, модели агентов).
 
-## 🔀 Два способа установки
+## 🔀 Способы установки
 
-Установить `maestro` в целевой проект можно двумя способами: через **agpack**
-(рекомендуется) или **вручную**.
+Установить `maestro` в целевой проект можно тремя способами: через **скрипт**
+`maestro-init.sh` (проще всего), через **agpack** (рекомендуется) или **вручную**.
+
+### Вариант 0 — скрипт `maestro-init.sh` (проще всего)
+
+Скрипт автоматизирует установку для нового или существующего проекта, где maestro
+ранее не применялся: устанавливает `agpack`, создаёт `agpack.yml`, запускает
+`agpack sync` (разворачивает skills/commands/agents в `.opencode/`), подключает
+плагин `maestro-bootstrap` и выдаёт инструкцию для `/maestro-init`.
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/wad-jet/maestro/main/maestro-init.sh -o maestro-init.sh
+bash maestro-init.sh          # опции: --global (плагин в global-конфиг), --help
+```
+
+> Предусловия: bash (macOS/Linux), python3 ≥ 3.11, git. Windows — через WSL или Git Bash
+> (глобальный opencode-путь может отличаться). Содержимое `agpack.yml` встроено в
+> скрипт; коммиченный `maestro-init/agpack.yml` — справочная копия для доков.
+> Детали — в разделе «Быстрый старт» README репозитория.
+
+После скрипта — перезапустите OpenCode и выполните [Настройку проекта](../tutorials/setup-project.md)
+(`/maestro-init`).
 
 ### Вариант A — через agpack
 
