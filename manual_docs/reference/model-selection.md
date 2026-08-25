@@ -28,7 +28,7 @@
 | `implementer_mechanical` (шаг 13, 1-2 файла) | haiku | `haiku` |
 | `implementer_integration` (шаг 13, multi-file) | sonnet | `sonnet` |
 | `explain` (по запросу, примеры/метафоры) | fable | `fable` |
-| `security_review` (шаг 8.6, перед untrusted-диспатчем) | trusted | `sanitizer` |
+| `security_review` (шаг 8.6, перед untrusted-диспатчем) | своя | `sanitizer` (trusted) |
 
 **Fix-loop эскалация (rounds 4-5):** минимум на tier выше предыдущей попытки.
 
@@ -74,6 +74,16 @@ OpenCode:    task(subagent_type="haiku", prompt="...")
   fable→fable, **sanitizer→своя**.
 - **Trust:** `design` и `sanitizer` — trusted (в `maestro.json`); остальные —
   untrusted. `design` и `sanitizer` — **разные агенты с разными моделями**.
+
+> **«Своя модель» (`sanitizer`).** Это **не tier-класс** (не haiku/sonnet/opus/fable),
+> а особая категория: индивидуально подобранная модель под security-задачу —
+> поиск и маркировка чувствительных данных перед untrusted-диспатчем. Требуемое —
+> **точность и надёжность** распознавания, а не мощность рассуждения; по типу
+> операции это детерминированная классификация, но модель **не обязана быть
+> лёгкой/дешёвой**. По умолчанию `temperature 0.0` (стабильность вывода), поправимо.
+> Задаётся в `agent.sanitizer.model` (в `.opencode/opencode.json` или global) по
+> общим правилам M1/D2. `sanitizer` trusted (доступ к `docs/confidential/**`) —
+> это **доверие**, не мощность.
 
 Выбор моделей — **7 отдельных HITL-вопросов** (по одному на агента). Каждый
 задаётся через вопросный инструмент (radio) с вариантами: кандидаты моделей
