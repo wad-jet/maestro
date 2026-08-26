@@ -1,0 +1,38 @@
+# Set to false to ignore the global config (~/.config/agpack/agpack.yml):
+# global: false
+
+targets:
+  # - claude
+  - opencode
+  # - codex
+  # - cursor
+  # - copilot
+
+dependencies:
+  skills:
+    - url: https://github.com/obra/superpowers
+      path: skills
+    # - url: https://github.com/wad-jet/maestro
+    #   path: skills
+
+  commands:
+    # - url: https://github.com/wad-jet/maestro
+    #   path: commands
+
+  agents:
+    # - url: https://github.com/wad-jet/maestro
+    #   path: agents
+
+  mcp:
+    # - name: sequential-thinking
+    #   command: npx
+    #   args: [
+    #     "-y",
+    #     "@modelcontextprotocol/server-sequential-thinking"
+    #   ]
+
+    # - name: my-server
+    #   command: npx
+    #   args: ["-y", "@example/mcp-server"]
+    #   env:
+    #     API_KEY: ${API_KEY}   # resolved from .env or shell environment

@@ -1,2 +1,4 @@
 .worktrees/
+.opencode/
+.agpack.lock.yml
 TODO.md
