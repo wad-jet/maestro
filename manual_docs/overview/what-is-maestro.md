@@ -6,7 +6,7 @@
 
 `maestro` — агент для OpenCode, который оркестрирует сквозную реализацию фич и
 багфиксов в целевом приложении. Он проводит работу от идеи до мержа: дизайн
-(сабагент `design`), спецификация, план, реализация (SDD), ревью и документация —
+(brainstorm primary + custodian Q/A по confidential), спецификация, план, реализация (SDD), ревью и документация —
 с HITL-гейтами на ключевых точках.
 
 **Core principle:** оркестратор координирует — субагенты реализуют. HITL-гейты
@@ -33,12 +33,13 @@
 - **Плагин** `maestro-bootstrap` — глобальная observability (логирование
   `task`-диспатчей и ошибок сессий), не привязан к агенту.
 
-## 🔀 Два маршрута
+## 🔀 Маршруты
 
 | Маршрут | Описание |
 |---|---|
-| **Feature** (шаги 0–18) | Полный цикл: project context → pre-flight → дизайн (design) → spec → plan → SDD → docs → review → finish |
+| **Feature** (шаги 0–18) | Полный цикл: project context → pre-flight → дизайн (brainstorm primary + custodian Q/A) → spec → plan → SDD → docs → review → finish |
 | **Bugfix** (шаги 0–6 → D1–D7 → шаги 11–18) | Ресеч → гипотеза → probe → откат → plan → SDD → docs → review → finish |
+| **Spike** (feasibility) | Короткий ресеч/прототип → рекомендация; без spec/plan/мержа; throwaway-код |
 
 ## 🧭 Ключевые понятия
 

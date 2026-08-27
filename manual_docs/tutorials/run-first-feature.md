@@ -29,7 +29,12 @@ feature-маршрута скилла `maestro` (шаги 0→18). Пример 
 
 ### Шаг 1: Маршрут
 
-Выберите `(f) feature`.
+Три маршрута:
+
+- `(f) feature` — полный pipeline (spec → plan → SDD → review).
+- `(b) bugfix` — сокращённый путь для исправлений.
+- `(s) spike` — feasibility/исследование: **без** spec/plan/merge, throwaway-код
+  для проверки подхода/рисков. Ветка не мержится; результат — вывод, а не артефакт.
 
 ### Шаг 1.5: Режим
 
@@ -59,8 +64,10 @@ baseline-тесты) и начало работы · `(b) отмена`. Pre-fli
 
 ### Шаги 8–10: Spec и Spec Review (для сложных/архитектурных)
 
-- Шаг 8 — диспатч сабагента `design` (trusted): brainstorming → spec. `design`
-  пишет spec файл и возвращает summary + открытые вопросы. В fast-track шаг
+- Шаг 8 — primary (superpowers:brainstorming) формирует spec, опираясь на Q/A по
+  confidential от trusted-сабагента `custodian` (broker: возвращает только
+  агрегаты, без значений; `edit: deny`, spec пишет primary). primary пишет spec
+  файл и возвращает summary + открытые вопросы. В fast-track шаг
   пропускается — используется внешний spec.
 - Шаг 9 — оркестратор **обязан** предложить Spec Review (для архитектурных —
   обязателен). Диспатч `opus`-субагента (untrusted, независимый ревьюер).

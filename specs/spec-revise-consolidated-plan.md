@@ -619,6 +619,13 @@ opus и оркестратор НЕ получают confidential-данных; 
   - `plugins/maestro-bootstrap/index.test.js` — `trust: { design }`, `Set(["design"])`, `res.agent === "design"` → `custodian` (иначе сломаются тесты плагина).
   - `maestro.json` (в целевом app-репо) — `trust.design`→`trust.custodian`, `agent.design.model`→`agent.custodian.model` (отдельная доставка).
   - `manual_docs/` (agents-and-trust, model-selection) — design→custodian role.
+  - **Пробел инвентаря (закрыт на ревью, 2026-08-27):** рефейм также требует
+    `skills/maestro-init/SKILL.md` (trust/tier/table `design`), `skills/maestro-init/init-context.md`
+    (trust-дефолт), `skills/maestro-assistant/SKILL.md` (trust-канон), `commands/test-agents.md`
+    (список/таблица/trusted), `commands/maestro.md` (список субагентов), `SECURITY.md` (P1/P4
+    trusted по имени), `plugins/maestro-bootstrap/README.md` (пример `maestro.json`). Без них
+    `/maestro-init`/`/maestro-assistant` генерируют `trust.design`, а не `trust.custodian` →
+    custodian untrusted (см. OQ-8).
   - **НЕ рефеймится:** `commands/maestro-design.md`/`skills/maestro-design/SKILL.md` как скилл-команда (остаются `/maestro-design`), `...-design.md` (имя spec-файла).
   **custodian — единый Q/A-брокер по confidential** для основного pipeline и `/maestro-design`. Требует Task 7b.
 - **OQ-8 (РЕШЕНО):** Порядок доставки рефейма vs конфиг `maestro.json`. custodian работает корректно (trusted, читает confidential) **только после** обновления `trust.custodian` / `agent.custodian.model` в конфиге. **Порядок:** (1) обновить `maestro.json`/app-конфиг (trust custodian) → (2) включить `agents/custodian.md` + `custodian-prompt.md` → (3) обновить `index.test.js` (тесты плагина) → (4) обновить SKILL.md/maestro-design/commands. **Блокер:** включение custodian без обновления trust-конфига делает его untrusted (не сможет читать confidential).

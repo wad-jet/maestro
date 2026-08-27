@@ -15,10 +15,10 @@ control.
 
 | Агент | Роль | Изменяет файлы? |
 |---|---|---|
-| `design` | Spec formation: brainstorming, дизайн-решения, написание spec | да (spec файл) |
+| `custodian` | Q/A-брокер по confidential: отвечает primary агрегатами (без значений), spec пишет primary | нет (`edit: deny`) |
 | `haiku` | Механические задачи + bash-скрипты | да |
 | `sonnet` | Интеграционные задачи | да |
-| `opus` | Архитектурные решения, Spec Review | нет (read-only) |
+| `opus` | Архитектурные решения, Spec Review + правки на Revise (применяет оркестратор) | нет (read-only) |
 | `fable` | Примеры, метафоры | нет (read-only) |
 | `code-reviewer` | Финальное ревью ветки | нет (только git diff/log) |
 | `sanitizer` | Security review — поиск и пометка чувствительных данных | нет (read-only) |
@@ -29,7 +29,7 @@ control.
 доступ к `confidential/**` для него закрыт (плагин deny'ит root/primary,
 инвариант конфига; см. [`SECURITY.md`](../../../SECURITY.md) → P1).
 Любой субагент — отдельный инференс/сессия; данные покидают контекст
-оркестратора. Поэтому **по умолчанию все субагенты untrusted** (кроме `design`
+оркестратора. Поэтому **по умолчанию все субагенты untrusted** (кроме `custodian`
 и `sanitizer`).
 
 Trust-статус управляет **двумя** измерениями защиты:
@@ -52,13 +52,13 @@ untrusted. Если файла нет — все untrusted.
 
 `maestro.json` **генерируется `/maestro-init`** (задача «Конфигурация maestro», по канону
 скилла `maestro-assistant`) и коммитится в git. Настройка/консультации по конфигурации в
-течение жизни проекта — через `/maestro-assistant`. `design` и `sanitizer` — trusted по роли;
+течение жизни проекта — через `/maestro-assistant`. `custodian` и `sanitizer` — trusted по роли;
 модели у них **независимые** (trusted — атрибут безопасности, не мощность).
 
 ```json
 {
   "trust": {
-    "design": true,
+    "custodian": true,
     "sanitizer": true
   }
 }
@@ -67,7 +67,8 @@ untrusted. Если файла нет — все untrusted.
 - Ключ в `trust` — имя сабагента; значение только `true` = trusted.
 - Файл коммитится в git — trust-level policy проекта.
 - Оркестратор читает его один раз на шаге 0 и кэширует.
-- `design` — trusted по роли (видит полный контекст для качественного spec).
+- `custodian` — trusted по роли (читает confidential-источники, отвечает
+  агрегатами без значений; spec пишет primary).
 - `sanitizer` — trusted по роли (видит сырые данные, чтобы пометить).
 - `maestro.json` — единственный источник конфигурации. Старые `trust-config.json`
   и отдельные файлы в `.maestro/` больше не читаются плагином.
@@ -101,6 +102,28 @@ FINDINGS_FOUND`. Также генерирует/поддерживает сек
 `deny` → жёсткий блок; приоритет deny > ask > allow). Покрывается только `read`;
 bash/glob/grep — нативные permissions. Файл `maestro.json` (секция `access_policy`)
 формирует сабагент `sanitizer` или вручную; если файла нет — плагин не блокирует (fail-open).
+
+### Revise-цикл: opus-правки + оркестратор (шаг 10b)
+
+На Revise `opus` (untrusted) **не пишет в spec** (`edit: deny` сохраняется), а
+выдаёт структурированные правки (заменить/добавить/удалить + ссылки на секции).
+Оркестратор (primary) прогоняет текст правок через Ур.1 (Слой 5) и инкрементально
+применяет их к spec. Полный повторный 8.6 (sanitizer) на обычном opus-цикле
+**не выполняется** (OQ-2) — opus видит только очищенный spec; выполняется только
+при вовлечении trusted-контура (правка готовится `custodian` по Q/A-агрегатам).
+
+**Гарантия отсутствия доступа `opus`/оркестратора к confidential** обеспечивается:
+Слой 1 (custodian отвечает агрегатами без значений), Слой 2 (маскирование промпта
+при диспатче), Слой 3 (confidential deny + built-in набор), Слой 5 (Ур.1 при
+применении правки), Слой 6 (HITL-мост для особого случая). Если правка/вопрос
+opus затрагивает помеченную `из confidential` секцию → HITL: (a) trusted `custodian`
+/ (b) follow-up / (c) отмена. Единственный мост из confidential-контура — trusted
+`custodian` или HITL-решение.
+
+> **Built-in confidential (OQ-3):** помимо `confidential.paths`, плагин закрывает
+> по умолчанию `.env`, `.env.*`, `*.pem`, `*.key`, `*.crt`, `*.p12`, `*.pfx` для
+> `read`/`write`/`edit` — deny для primary и non-trusted независимо от конфига.
+> `confidential.paths` расширяет built-in, а не заменяет его.
 
 ### Защищённая папка `docs/confidential`
 
@@ -171,7 +194,8 @@ permissions OpenCode закрывают `bash/glob/grep`. При настрой�
 
 **⚠️ Чего делать НЕ надо — НЕ добавлять рабочие spec/plan пути в `paths`.**
 Каталоги `docs/superpowers/specs/**` и `docs/superpowers/plans/**` являются
-**двухролевыми**: генерируются trusted `design` (пишет spec/plan) и читаются
+**двухролевыми**: генерируются **primary** (пишет spec из brainstorm + Q/A
+`custodian`, plan — через writing-plans) и читаются
 trusted `sanitizer`, но **потребляются untrusted**-субагентами — `opus` (spec
 review, шаг 9), implementer (`haiku`/`sonnet`, шаг 13), `code-reviewer` (шаг 16).
 Если добавить эти пути в `confidential.paths`, untrusted-субагенты и primary

@@ -128,7 +128,7 @@ pipeline maestro: есть `docs/project-context.md` (источник конт�
   к 4–5, без fallback-деградации). Идемпотентно: проверка выполняется только если задача 3
   реально генерирует/обновляет конфиг; при пропуске задачи (конфиг уже есть) — не проверяется.
 
-Правила вывода секций (по канону assistant): `trust` — всегда `design: true`, `sanitizer: true`;
+Правила вывода секций (по канону assistant): `trust` — всегда `custodian: true`, `sanitizer: true`;
 `access_policy.allow` из §3/§5, `deny` из §12; `confidential.paths` дефолт `["docs/confidential/**"]`;
 `sanitizer_whitelist` из §3/§12. Идемпотентность: при существовании `maestro.json` — diff по
 секциям; merge сохраняет пользовательские правки; если файла нет — создаётся целиком.
@@ -151,11 +151,11 @@ OpenCode (`.opencode/opencode.json` или глобальный `~/.config/openc
 
 **Оси Tier и Trust ортогональны.** Trusted — атрибут безопасности, не мощность.
 
-- **Tier (мощность, Ось A):** design→opus, opus→opus, code-reviewer→opus,
+- **Tier (мощность, Ось A):** custodian→opus, opus→opus, code-reviewer→opus,
   haiku→haiku, sonnet→sonnet, fable→fable, sanitizer→своя.
-- **Trust (доверие, Ось B):** design ✅ + sanitizer ✅ trusted; остальные untrusted.
+- **Trust (доверие, Ось B):** custodian ✅ + sanitizer ✅ trusted; остальные untrusted.
 
-`design` и `sanitizer` — **оба trusted**, но **разные агенты**. Модели могут быть
+`custodian` и `sanitizer` — **оба trusted**, но **разные агенты**. Модели могут быть
 разными, но **одна модель тоже допустима** на усмотрение пользователя (например,
 одна локальная/изолированная для обоих).
 
@@ -164,7 +164,7 @@ OpenCode (`.opencode/opencode.json` или глобальный `~/.config/openc
 2. Сформировать предложение (приоритет): эффективное значение `agent.<name>.model`
    (merge-представление: project → global): project `.opencode/opencode.json` (если
    задан в проекте) → global (`~/.config/opencode/opencode.json`, наследуемая) →
-   tier-подсказка (design→opus-модель; sanitizer→своя/безопасная).
+   tier-подсказка (custodian→opus-модель; sanitizer→своя/безопасная).
 3. HITL через вопросный инструмент (radio): «Модель для `<agent>`?». Варианты:
    кандидаты моделей из D2 (`opencode models <provider>`, с fallback на
    `provider.<name>.models`) + `auto`
@@ -185,7 +185,7 @@ merge-конфиге — `.opencode/opencode.json` или global), пользо�
 | `opus` | opus | 0.1 |
 | `code-reviewer` | opus | 0.2 |
 | `fable` | fable | 0.7 |
-| `design` | opus | 0.1 |
+| `custodian` | opus | 0.1 |
 | `sanitizer` | своя | 0.0 |
 
 - Если `agent.<name>.temperature` уже задан — **не перезаписывать** (сохранить
@@ -194,7 +194,7 @@ merge-конфиге — `.opencode/opencode.json` или global), пользо�
 - При записи новой модели в проект: наследовать `temperature` из global (если
   задана), иначе — дефолт по tier.
 
-> **Централизованный вариант (рекомендуется).** Настроить `agent.{design,haiku,
+> **Централизованный вариант (рекомендуется).** Настроить `agent.{custodian,haiku,
 > sonnet,opus,fable,code-reviewer,sanitizer}` (model + temperature) один раз в
 > global-конфиге `~/.config/opencode/opencode.json` — новые проекты наследуют
 > значения, М1 предлагает «оставить текущую (из global)» первым вариантом.

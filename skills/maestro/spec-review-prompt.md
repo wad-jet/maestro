@@ -16,6 +16,13 @@ with the task-reviewer and final code-review formats.
 - `{spec_path}` — path to the spec (under review)
 - `{context}` — codebase context, relevant conventions
 - `{user_questions}` — specific questions from the user (may be empty)
+- `{previous_verdict}` — verdict of the previous review round (present only on a
+  Revise cycle). Use it to confirm that previously-flagged Critical/Important
+  findings are now addressed.
+- `{previous_findings}` — cleaned list of previous findings (Critical/Important/
+  Minor), already passed through the Level-1 sanitizer. On a Revise cycle these are
+  the past issues to check for closure; do not re-raise a closed finding unless it
+  is genuinely still open.
 
 ## Review Checklist
 
@@ -84,3 +91,23 @@ Markdown. No JSON, no numeric scores.
 - "revise" = spec needs changes before planning (list issues).
 - "reject" = spec is fundamentally flawed (explain why).
 - Output the markdown sections above; no surrounding prose outside them.
+
+## Rules — Revise cycle (untrusted)
+
+- On a Revise cycle you work **only with the cleaned spec**. Do not request or
+  expect any confidential data; you see only sanitized content.
+- For every `Critical`/`Important` finding at verdict `revise`, provide a
+  **concrete edit**: what to replace/add/delete, and a reference to the spec
+  section. The orchestrator applies your edits to the spec.
+- **Do not expand scope:** you do not see the project codebase; edit only what
+  is mentioned in your findings or in the spec.
+- If an edit needs context you lack, explicitly mark it **«требует уточнения
+  контекста»** — do not silently invent values. This is a formal indicator that
+  triggers an orchestrator HITL decision.
+- Ask questions **only if they block an edit**, and **always propose a default**
+  (question-with-default pattern, like step 8). Do not ask questions whose
+  answer is already in the spec.
+- The `из confidential` marker in the spec is **metadata, not data**: take it
+  into account when marking «требует уточнения», but never reveal or carry over
+  the underlying value. A finding touching a `из confidential`-marked section
+  must be flagged for HITL, not applied silently.

@@ -1,6 +1,6 @@
 ---
 name: maestro-design
-description: Use to produce design, spec, scaffold and roadmap for a project after /maestro-init setup — generates spec via design agent, code scaffold via TDD, and docs/roadmap.md
+description: Use to produce design, spec, scaffold and roadmap for a project after /maestro-init setup — generates spec via primary brainstorm + custodian Q/A, code scaffold via TDD, and docs/roadmap.md
 ---
 
 ## Гейт 0 — Проверка плагина maestro-bootstrap (обязательный)
@@ -91,18 +91,23 @@ description: Use to produce design, spec, scaffold and roadmap for a project aft
 
 Переиспользует brainstorming→spec флоу maestro (НЕ изобретает новый формат):
 
-1. **Диспатч `design`** (trusted сабагент maestro, `task` tool c
-   `subagent_type=design`) с промптом `design-prompt.md`. Для нового проекта
-   по умолчанию уровень «архитектурный» (новая кодовая база целиком). `design`
-   анализирует project context (14 категорий из `docs/project-context.md`) и ведёт
-   дизайн-работу: цели, ограничения, компоненты, потоки, решения. Brainstorming
-   workflow embedded в `design-prompt.md`.
-2. Вывод — `docs/superpowers/specs/YYYY-MM-DD-<project>-design.md`
-   (формат spec из maestro), пишется сабагентом `design` напрямую.
-3. **Опциональный Spec Review** (`spec-review-prompt.md`, диспатч `opus`
+1. **Brainstorm ведёт primary** (superpowers:brainstorming, interactive/диалоговый
+   скилл): грузит `superpowers:brainstorming` через `skill`-инструмент и ведёт
+   диалог с пользователем по канону (классификация пути → вопросы → подходы →
+   дизайн → approval). Для нового проекта по умолчанию уровень «архитектурный».
+   Primary анализирует project context (14 категорий из `docs/project-context.md`).
+2. **Custodian (trusted) — Q/A-брокер по confidential.** Если дизайн требует
+   confidential-контекста, primary диспатчит `custodian` через `task` tool
+   (`subagent_type=custodian`, модель из `agent.custodian.model`, opus-tier) с
+   промптом `custodian-prompt.md`. `custodian` отвечает агрегатами
+   (тип/ограничение/чувствительность/связь) БЕЗ raw-значений, НЕ пишет spec.
+3. **Spec пишет primary** по результатам brainstorm + Q/A custodian →
+   `docs/superpowers/specs/YYYY-MM-DD-<project>-design.md`. Primary помечает
+   confidential-фрагменты бинарным маркером `из confidential`.
+4. **Опциональный Spec Review** (`spec-review-prompt.md`, диспатч `opus`
    через `task` tool), по HITL. Provisional — пользователь решает, нужен ли.
 
-**HITL gate:** «Дизайн утверждён? (a) approve — (b) revise (к design) — (c) отмена».
+**HITL gate:** «Дизайн утверждён? (a) approve — (b) revise — (c) отмена».
 
 Дизайн-решения переносятся в `docs/project-context.md` §4 (архитектура) и §5
 (модули), если они уточнились.
@@ -146,6 +151,6 @@ description: Use to produce design, spec, scaffold and roadmap for a project aft
 |---|---|
 | project-context.md отсутствует (init не выполнялся) | HITL: (a) выполнить `/maestro-init` / (b) продолжить без / (c) отмена (Предусловие 0) |
 | init выполнен, но project-context.md всё равно нет | Сообщить: запустите `/maestro-init` сначала |
-| design: revise | Вернуться к дизайн-диалогу (re-dispatch `design`), повторить |
+| spec: revise | Вернуться к дизайн-диалогу (повторить brainstorm primary + custodian Q/A при необходимости), повторить |
 | scaffold: BUILD/TEST упал | HITL: fix-loop / skip с подтверждением |
 | Модели агентов не настроены | Предупредить; предложить настроить `agent.*` в `.opencode/opencode.json` или global |

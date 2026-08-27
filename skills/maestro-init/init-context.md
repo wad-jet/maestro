@@ -133,7 +133,7 @@ BUILD_COMMAND: "go build ./..."
 **полный JSON-канон** — в скилле `maestro-assistant` (`skills/maestro-assistant/SKILL.md`).
 Задача 3 загружает `maestro-assistant` и следует его канону. Ниже — краткая сводка:
 
-- **`trust`** — всегда `design: true`, `sanitizer: true` (trusted по роли). Остальные — untrusted.
+- **`trust`** — всегда `custodian: true`, `sanitizer: true` (trusted по роли). Остальные — untrusted.
 - **`access_policy`** — `allow` из §3/§5 (src/test/packages + расширения языков), `ask` из
   docs/specs/manual_docs/config, `deny` — секреты (`*.env`, `*.{pem,key,cert,secret}`); `default: "ask"`.
 - **`confidential`** — дефолт `paths: ["docs/confidential/**"]`, `trusted` read allow / write+edit deny.

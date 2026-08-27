@@ -116,6 +116,18 @@ deny; trusted читает по умолчанию (`trusted.read: allow`), пи
 без `/` (напр. `*.env`) закрывает только корневые файлы. В отличие от
 `access_policy` (где `*` пересекает `/`), в `confidential` маска сегментная.
 
+### Built-in confidential (OQ-3, `BUILTIN_CONFIDENTIAL_PATTERNS`)
+
+Помимо `confidential.paths`, плагин применяет **built-in набор** по умолчанию,
+независимо от наличия/содержимого секции `confidential` в `maestro.json`:
+`.env`, `.env.*`, `*.pem`, `*.key`, `*.crt`, `*.p12`, `*.pfx`. Это служебные
+файлы секретов (`.env`) и приватные ключи — для `read`/`write`/`edit` они
+**всегда deny** для primary и non-trusted (тот же confidential-контур). Маски
+без `/` закрывают только корневые файлы.
+
+`confidential.paths` **расширяет**, а не заменяет built-in набор: пользовательские
+пути добавляются к `.env`/ключам, не отменяя их.
+
 ## Аудит-лог
 
 Security-фактура по доступу пишется в **отдельный аудит-лог**
@@ -153,7 +165,7 @@ Security-фактура по доступу пишется в **отдельны
 ```json
 {
   "trust": {
-    "design": true,
+    "custodian": true,
     "sanitizer": true
   },
   "access_policy": {

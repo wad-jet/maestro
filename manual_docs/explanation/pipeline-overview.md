@@ -35,16 +35,16 @@ project context, запускает pre-flight, определяет катег�
 | # | Шаг | Назначение |
 |---|---|---|
 | 0 | Project Context | Загрузка проекта контекста из `docs/project-context.md` (или создание через HITL) |
-| 1 | Выбор маршрута | Feature или bugfix? Определяет дальнейший путь. |
+| 1 | Выбор маршрута | Feature / Bugfix / Spike? Определяет дальнейший путь. Spike — feasibility/ресеч, без spec/plan/мержа. |
 | 1.5 | Режим работы | Efficient (молчит между гейтами) / Interactive (комментирует находки) |
 | 2–6 | Pre-flight и изоляция | Диагностика рабочего дерева → создание рабочей ветки → изоляция (worktree/checkout) |
 | 7 | Категория фичи | Простая / Сложная / Архитектурная — определяет глубину pipeline (см. [Классификация фич](../reference/feature-classification.md)) |
-| 8 | Spec Formation | Сабагент `design` (trusted, opus-tier) проводит brainstorming → пишет spec |
-| 8.5 | Context changes | Оркестратор оценивает, изменил ли spec проект контекст. Применяется после аппрува плана. |
-| 8.6 | Security Review | Сабагент `sanitizer` (trusted) проверяет spec на чувствительные данные. При находках → HITL: вычистить / принять риск / стоп |
+| 8 | Spec Formation | Primary ведёт brainstorm (superpowers:brainstorming) + `custodian` (trusted, Q/A по confidential, без значений) → **spec пишет primary**, помечает фрагменты `из confidential` |
+| 8.5 | Context changes | Оркестратор оценивает, изменил ли spec проект контекст + фиксирует spec-follow-up. Применяется после аппрува плана. |
+| 8.6 | Security Review | Сабагент `sanitizer` (trusted) проверяет spec на чувствительные данные. При находках → HITL: вычистить / принять риск / стоп. Полный прогон — на первичной записи и при вовлечении trusted-контура (OQ-2) |
 | 9 | Spec Review | Независимый ревью spec от `opus` (untrusted, read-only). Для арх. фич — обязателен |
-| 10 | Spec gate | Approve → к плану · Revise → к шагу 8 (re-dispatch `design`, повторить security review) · Reject → стоп |
-| 11 | Plan | Создание плана задач: tasks, Project Context Changes, regression risk |
+| 10 | Spec gate | Approve → к плану · Revise → правки opus + оркестратор применяет (Ур.1), повторный review; 8.6 только при trusted-контуре · Reject → стоп. Особый случай (нужен confidential) → HITL custodian/follow-up |
+| 11 | Plan | Создание плана задач: tasks, Project Context Changes, spec-follow-up, regression risk |
 | 12 | Plan gate | Approve (коммит spec+plan+regression-entry) · Revise · Cancel |
 | 13 | SDD | Реализация: субагенты haiku/sonnet по сложности, per-task review (sonnet), progress log |
 | 14 | Docs | Обязательное обновление пользовательской документации: diff-сверка кода с manual_docs/; HITL только при расхождении. Coverage — на шаге 15 |
@@ -66,7 +66,7 @@ flowchart TB
   Step2 --> Step3_6["2–6: Изоляция"]
   Step3_6 --> Step7["7: Категория фичи"]
 
-  Step7 -- сложная --> Step8["8: Spec (design)"]
+  Step7 -- сложная --> Step8["8: Spec (primary brainstorm + custodian Q/A)"]
   Step7 -- простая --> Step11["11: План"]
 
   Step8 --> Step85["8.5: Context changes"]

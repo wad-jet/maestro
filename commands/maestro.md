@@ -5,7 +5,7 @@ description: Вход в pipeline maestro — сквозная реализац�
 # @maestro
 
 Загрузи skill `maestro` (tool: skill) и следуй pipeline из SKILL.md.
-Координируй субагентов (design, haiku, sonnet, opus, fable, code-reviewer, sanitizer)
+Координируй субагентов (custodian, haiku, sonnet, opus, fable, code-reviewer, sanitizer)
 на каждом этапе.
 
 Работает в любой primary-сессии — привязки к конкретному агенту нет.
