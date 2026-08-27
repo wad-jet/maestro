@@ -415,13 +415,29 @@ export function loadAccessPolicy(config) {
 // Допустимые значения политики trusted для инструмента.
 const CONF_TRUSTED_ACTIONS = new Set(["allow", "deny"]);
 
+// Built-in confidential-набор (OQ-3, решение B): применяется по умолчанию,
+// независимо от `confidential.paths`. Охватывает служебные файлы секретов
+// (`.env`, `.env.*`) и приватные ключи (`*.pem`, `*.key`, `*.crt`, `*.p12`,
+// `*.pfx`) — deny для primary и non-trusted. `confidential.paths` РАСШИРЯЕТ,
+// а не заменяет этот набор. Маски без `/` матчат только корневые файлы
+// (см. `confGlobMatch`).
+const BUILTIN_CONFIDENTIAL_PATTERNS = [
+  ".env",
+  ".env.*",
+  "*.pem",
+  "*.key",
+  "*.crt",
+  "*.p12",
+  "*.pfx",
+];
+
 /**
  * Extract the confidential access policy from a parsed maestro config.
  * Секция `confidential` — строже access_policy и применяется к read/write/edit
  * по путям из `paths`. Для untrusted/primary — всегда deny (инвариант, не
  * конфигурируется). Для trusted-субагентов действие задаётся мапой `trusted`.
  * @param {object} config  Parsed `maestro.json`.
- * @returns {{ exists: boolean, paths: string[], trusted: {read:string, write:string, edit:string} }}
+ * @returns {{ exists: boolean, paths: string[], builtin: string[], trusted: {read:string, write:string, edit:string} }}
  */
 export function loadConfidentialConfig(config) {
   const section = config?.confidential;
@@ -429,8 +445,10 @@ export function loadConfidentialConfig(config) {
     paths: ["docs/confidential/**"],
     trusted: { read: "allow", write: "deny", edit: "deny" },
   };
+  // Built-in набор присутствует ВСЕГДА (OQ-3): не зависит от секции `confidential`.
+  const builtin = [...BUILTIN_CONFIDENTIAL_PATTERNS];
   if (!section || typeof section !== "object") {
-    return { exists: false, ...defaults };
+    return { exists: false, paths: defaults.paths, builtin, trusted: { ...defaults.trusted } };
   }
   const paths = Array.isArray(section.paths) && section.paths.length > 0
     ? section.paths
@@ -445,7 +463,7 @@ export function loadConfidentialConfig(config) {
       trusted[tool] = CONF_TRUSTED_ACTIONS.has(provided[tool]) ? provided[tool] : "deny";
     }
   }
-  return { exists: true, paths, trusted };
+  return { exists: true, paths, builtin, trusted };
 }
 
 /**
@@ -929,9 +947,16 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
         // `.maestro/plugin-version` (isPluginMetaFile) исключён из confidential
         // и для write/edit тоже — намеренно: файл нечувствителен (semver),
         // перезаписывается плагином при каждом init. Не «закрывать» read обратно.
-        if (confidential.exists && CONF_TOOLS.has(input.tool)) {
+        // Built-in набор (OQ-3) применяется даже при отсутствии секции `confidential`
+        // в maestro.json: `confidential.builtin` непуст всегда. Если целевой путь
+        // попадает под конфигурируемые `confidential.paths` ИЛИ под built-in —
+        // это confidential-граница (confidential выигрывает у access_policy).
+        if (CONF_TOOLS.has(input.tool)) {
           const target = filePathOf(input.tool, output?.args);
-          if (target && !isPluginMetaFile(root, target) && isConfidentialTarget(root, confidential.paths, target)) {
+          const isConfTarget = target && !isPluginMetaFile(root, target) &&
+            ((confidential.exists && isConfidentialTarget(root, confidential.paths, target)) ||
+             isConfidentialTarget(root, confidential.builtin, target));
+          if (isConfTarget) {
             wasConfidential = true;
             let trustInfo = sessionTrustCache.get(input.sessionID);
             if (trustInfo === undefined) {

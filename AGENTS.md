@@ -5,11 +5,11 @@
 This is the **authoring repo** for the OpenCode `maestro` system (the "maestro" skill that orchestrates feature/bugfix implementation in a target application). It is **not** the application repo — there is no application code here.
 
 - `skills/maestro/SKILL.md` — authoritative pipeline spec (feature/bugfix orchestration, HITL gates, regression registry). Read it before touching anything in `skills/`.
-- `agents/*.md` — OpenCode agent configs (`mode`, `permission`, `hidden`, `description` in YAML frontmatter). All are subagents (`design`, `haiku`, `sonnet`, `opus`, `fable`, `code-reviewer`, `sanitizer`). `design` and `sanitizer` are trusted by default (spec formation, security review). There is **no primary `maestro` agent** — entry is via the `@maestro` command (skill).
+- `agents/*.md` — OpenCode agent configs (`mode`, `permission`, `hidden`, `description` in YAML frontmatter). All are subagents (`custodian`, `haiku`, `sonnet`, `opus`, `fable`, `code-reviewer`, `sanitizer`). `custodian` and `sanitizer` are trusted by default (custodian: Q/A по confidential; sanitizer: security review). There is **no primary `maestro` agent** — entry is via the `@maestro` command (skill).
 - `commands/*.md` — `@command` configs (frontmatter `agent:` field; `@maestro` is the entry point).
-- `skills/maestro/{design-prompt.md,implementer-prompt.md,spec-review-prompt.md,stack-detection.md}` — support files referenced by SKILL.md.
+- `skills/maestro/{custodian-prompt.md,implementer-prompt.md,spec-review-prompt.md,stack-detection.md}` — support files referenced by SKILL.md.
 - `skills/maestro-init/{SKILL.md,init-context.md}` — `/maestro-init` skill for bootstrapping new projects (project-context.md 14 categories, architecture design, scaffold, roadmap).
-- `skills/maestro-design/SKILL.md` — `/maestro-design` skill for design + spec (via `design` agent), code scaffold (TDD), and roadmap.
+- `skills/maestro-design/SKILL.md` — `/maestro-design` skill for design + spec (via primary brainstorm + custodian Q/A), code scaffold (TDD), and roadmap.
 - `skills/maestro-assistant/SKILL.md` — `/maestro-assistant` skill: consultation & config/structure/context organization for maestro (single source of config rules). Self-contained; loaded by init (tasks 2/3/3a) and maestro (pipeline config questions).
 - `skills/manual-docs/SKILL.md` — generic user-docs skill (доки целевого приложения, Diátaxis), загружается на шаге 14 пайплайна maestro. Отдельно от правила синхронизации `manual_docs/` самого maestro (ниже).
 - `plugins/maestro-bootstrap/` — ESM OpenCode plugin.

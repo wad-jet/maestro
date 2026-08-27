@@ -7,6 +7,27 @@
 > Хронология составлена по истории authoring-репо `maestro-agent`. Даты
 > приблизительные (по коммитам).
 
+## [2026-08-27]
+
+### Изменено
+- **Рефакторинг: сабагент `design` → `custodian`.** Прежний trusted-сабагент
+  `design` (писал spec) перепрофилирован в trusted **Q/A-брокера по
+  confidential** `custodian`: отвечает primary только **агрегатами** (без
+  значений), `permission` — `edit: deny`. Spec теперь пишет **primary** через
+  superpowers:brainstorming, опираясь на Q/A от `custodian`. Имя команд/скиллов
+  `/maestro-design` и `skills/maestro-design`, а также соглашение об имени
+  spec-файла `YYYY-MM-DD-<project>-design.md` **не меняются**.
+- **Цикл Revise через `opus` + оркестратор**: при `Revise` на spec-гейте
+  переработка spec выполняется primary совместно с ревью `opus`-агента и
+  оркестратора (без trusted-райтера).
+- **Маршрут Spike (3-й в шаге 1)**: feasibility/исследование — **без**
+  spec/plan/merge; throwaway-код для проверки подхода; ветка не мержится,
+  результат — вывод, а не артефакт.
+- **Built-in confidential (OQ-3)**: помимо `confidential.paths`, плагин
+  закрывает по умолчанию `.env`, `.env.*`, `*.pem`, `*.key`, `*.crt`, `*.p12`,
+  `*.pfx` — deny для `read`/`write`/`edit` для primary и non-trusted независимо
+  от конфига; `confidential.paths` расширяет, а не заменяет built-in.
+
 ## [2026-08-25]
 
 ### Добавлено

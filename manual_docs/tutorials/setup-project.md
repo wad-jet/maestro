@@ -36,7 +36,7 @@
 2. **Сбор контекста** — интерактивный опрос по 14 категориям → создаёт
    `docs/project-context.md`. Обязательные секции: 1, 2, 3, 4, 9, 14.
 3. **Конфигурация** — генерирует (по канону скилла `maestro-assistant`):
-   - `maestro.json` — `trust` (design, sanitizer), `access_policy`, `confidential`,
+   - `maestro.json` — `trust` (custodian, sanitizer), `access_policy`, `confidential`,
      `sanitizer_whitelist`;
    - плагин `maestro-bootstrap` + модели агентов — в `.opencode/opencode.json`
      (реком.) или глобальном конфиге;
@@ -56,9 +56,10 @@
 ### Шаг 2: `/maestro-design`
 
 После init запустите `/maestro-design`. Скилл `maestro-design` выполнит:
-- **(a) Дизайн + spec** — сабагент `design` (trusted) проанализирует контекст и
-  напишет `docs/superpowers/specs/YYYY-MM-DD-<project>-design.md`. Опционально —
-  Spec Review (`opus`).
+- **(a) Дизайн + spec** — primary (brainstorming) формулирует spec, опираясь на
+  Q/A по confidential от trusted-сабагента `custodian` (возвращает только
+  агрегаты, без значений), результат — `docs/superpowers/specs/YYYY-MM-DD-<project>-design.md`.
+  Опционально — Spec Review (`opus`).
 - **(b) Scaffold** — создаст каркас кода (структура каталогов, роуты, DTO,
   конфиги) через `implementer-prompt.md` (TDD) с диспатчем `haiku`/`sonnet`.
 - **(c) Roadmap** — создаст `docs/roadmap.md` (MVP + этапы развития).
@@ -127,7 +128,7 @@ roadmap, как в Варианте A.
 
 | Агент | Tier (роль) | Trusted? |
 |---|---|---|
-| `design` | opus (spec formation, архитектура) | ✅ |
+| `custodian` | opus (confidential Q/A broker) | ✅ |
 | `sanitizer` | своя модель (security review) | ✅ |
 | `opus` | opus (spec review) | ❌ |
 | `code-reviewer` | opus (code review) | ❌ |
@@ -135,7 +136,7 @@ roadmap, как в Варианте A.
 | `sonnet` | sonnet (интеграционные задачи) | ❌ |
 | `fable` | fable (примеры/метафоры) | ❌ |
 
-> `design` и `sanitizer` — **оба trusted**, но **разные агенты**. Модели могут быть
+> `custodian` и `sanitizer` — **оба trusted**, но **разные агенты**. Модели могут быть
 > разными, но **одна модель тоже допустима** на усмотрение пользователя (например,
 > одна локальная/изолированная для обоих).
 
@@ -145,7 +146,7 @@ roadmap, как в Варианте A.
 |---|---|---|---|
 | haiku | механические: 1-2 файла, трансляция, юнит-тесты | низкий reasoning, следование spec | `haiku` |
 | sonnet | интеграционные: multi-file, отладка, pattern matching | средний reasoning + контекст | `sonnet` |
-| opus | архитектура, spec, дизайн-решения, ревью | высокий reasoning/дизайн-суждение | `design` (spec, **trusted**), `opus`-агент (spec review, untrusted), `code-reviewer` (code review, untrusted) |
+| opus | архитектура, spec, дизайн-решения, ревью | высокий reasoning/дизайн-суждение | `custodian` (confidential Q/A, **trusted**), `opus`-агент (spec review, untrusted), `code-reviewer` (code review, untrusted) |
 | fable | примеры, метафоры, пояснения | модальность, не мощность | `fable` |
 | своя (sanitizer) | security-пометка: поиск/маркировка чувствительных данных | **вне tier-класса**: точность + доверие (trusted), не мощность | `sanitizer` |
 
@@ -189,7 +190,7 @@ roadmap, как в Варианте A.
 (ручной ввод ID модели).
 
 - **7 отдельных вопросов** — по одному на каждого агента (гибкость выбора):
-  `design` и `sanitizer` могут получить разные модели, но **одна модель тоже
+  `custodian` и `sanitizer` могут получить разные модели, но **одна модель тоже
   допустима** (см. выше).
 - **`auto`** — ключ `model` не пишется (наследуется дефолт сессии).
 - **Плейсхолдеры запрещены** (`<...>` невалидны, сломают загрузку агента).
@@ -200,7 +201,7 @@ roadmap, как в Варианте A.
 
 #### Вариант: глобальная настройка по тирам (рекомендуется)
 
-Настроить `agent.{design,haiku,sonnet,opus,fable,code-reviewer,sanitizer}`
+Настроить `agent.{custodian,haiku,sonnet,opus,fable,code-reviewer,sanitizer}`
 (model + temperature) один раз в `~/.config/opencode/opencode.json` — новые
 проекты наследуют значения через merge-конфигурацию OpenCode.
 
@@ -213,7 +214,7 @@ roadmap, как в Варианте A.
     "opus": { "model": "akash/zai-org/GLM-5.2", "temperature": 0.1 },
     "code-reviewer": { "model": "akash/deepseek-ai/DeepSeek-V4-Flash-0731", "temperature": 0.2 },
     "fable": { "model": "akash/deepseek-ai/DeepSeek-V4-Flash", "temperature": 0.7 },
-    "design": { "model": "akash/Qwen/Qwen3.6-35B-A3B", "temperature": 0.1 },
+    "custodian": { "model": "akash/Qwen/Qwen3.6-35B-A3B", "temperature": 0.1 },
     "sanitizer": { "model": "akash/Qwen/Qwen3.6-35B-A3B", "temperature": 0.0 }
   }
 }
@@ -237,7 +238,7 @@ roadmap, как в Варианте A.
 | `opus` | opus | `akash/zai-org/GLM-5.2` | 0.1 |
 | `code-reviewer` | opus | `akash/deepseek-ai/DeepSeek-V4-Flash-0731` | 0.2 |
 | `fable` | fable | `akash/deepseek-ai/DeepSeek-V4-Flash` | 0.7 |
-| `design` | opus | (модель opus-tier) | 0.1 |
+| `custodian` | opus | (модель opus-tier) | 0.1 |
 | `sanitizer` | своя | (безопасная/дефолтная) | 0.0 |
 
 `temperature` — **дефолт по tier**: `/maestro-init` проставляет его, если у агента
@@ -259,7 +260,7 @@ roadmap, как в Варианте A.
 
 **Что делает проверка:**
 
-1. **Диспатч всех 7 сабагентов** — `design`, `haiku`, `sonnet`, `opus`, `fable`,
+1. **Диспатч всех 7 сабагентов** — `custodian`, `haiku`, `sonnet`, `opus`, `fable`,
    `code-reviewer`, `sanitizer` — через `task`-тул реальным диспатчем. Каждому
    агенту даётся одинаковая тривиальная задача: «Верни ровно одно слово OK и своё
    имя агента. Не используй инструменты».
@@ -270,7 +271,7 @@ roadmap, как в Варианте A.
 
 3. **Проверка confidential-инварианта** (P1/P3, `SECURITY.md`) — доступ к
    `docs/confidential/**` не должен зависеть от доступности модели:
-   - для каждого trusted-агента (`design`, `sanitizer`), если он в основной
+   - для каждого trusted-агента (`custodian`, `sanitizer`), если он в основной
      таблице `OK`, дать задачу «Прочитай `docs/confidential/<файл>.md`» — он должен
      прочитать (его право);
    - затем из primary-сессии попытаться прочитать тот же файл — должен прийти

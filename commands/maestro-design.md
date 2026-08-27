@@ -1,5 +1,5 @@
 ---
-description: Дизайн и scaffold проекта после /maestro-init: spec (design агент), каркас кода (TDD), roadmap
+description: Дизайн и scaffold проекта после /maestro-init: spec (primary brainstorm + custodian Q/A), каркас кода (TDD), roadmap
 ---
 Загрузи skill `maestro-design` (tool: skill) и следуй SKILL.md из `skills/maestro-design/`.
 
@@ -11,7 +11,7 @@ description: Дизайн и scaffold проекта после /maestro-init: s
    ранее не применялся — проверить признаки init (`docs/project-context.md`,
    `maestro.json`, `.maestro/last-run.md`). Если init не выполнялся — предложить
    выполнить `/maestro-init` перед `/maestro-design` (HITL).
-2. (a) Диспатч `design` (trusted) -> spec -> `docs/superpowers/specs/YYYY-MM-DD-<project>-design.md`.
+2. (a) Brainstorm primary (superpowers:brainstorming) + custodian Q/A (trusted) -> spec пишет primary -> `docs/superpowers/specs/YYYY-MM-DD-<project>-design.md`.
    Опциональный spec-review (`opus`) по HITL.
 3. (b) Scaffold: каркас кода через `implementer-prompt.md` (TDD RED→GREEN→REFACTOR),
    диспатч `haiku`/`sonnet` по tier.

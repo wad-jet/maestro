@@ -1,6 +1,6 @@
 ---
 name: maestro
-description: Use when implementing a feature end-to-end — orchestrates brainstorm (via design subagent), spec, plan, implementation, review, and docs with HITL gates
+description: Use when implementing a feature end-to-end — orchestrates brainstorm (via primary + custodian Q/A), spec, plan, implementation, review, and docs with HITL gates
 ---
 
 ## Гейт 0 — Проверка плагина maestro-bootstrap (обязательный)
@@ -47,9 +47,10 @@ description: Use when implementing a feature end-to-end — orchestrates brainst
 **Core principle:** Оркестратор координирует — субагенты реализуют. HITL-gates
 на ключевых точках. Spec review — только по запросу.
 
-**Два маршрута на шаге 1:**
-- **Feature** (шаги 0–18) — полный цикл: project context → pre-flight → brainstorm (design subagent) → spec → plan → SDD → docs → review → finish
+**Три маршрута на шаге 1:**
+- **Feature** (шаги 0–18) — полный цикл: project context → pre-flight → brainstorm (primary + custodian Q/A) → spec → plan → SDD → docs → review → finish
 - **Bugfix** (шаги 0–6 → D1–D7 → шаги 11–18) — project context → pre-flight + branch → debug sub-pipeline: ресеч → гипотеза → probe → откат → plan → SDD → docs → review → finish
+- **Spike** (feasibility/ресеч/прототип, OQ-6/OQ-9) — короткий ресеч кода/прототип → вывод-рекомендация; **без spec/plan/мержа**; код — throwaway. Использует Spike-path скилла brainstorming (см. шаг 1, вариант (s)). Шаги 11-18 НЕ выполняются.
 
 **Mode protocol:** Два уровня режимов:
 
@@ -64,7 +65,7 @@ Interactive — агент комментирует находки по ходу
 в неоднозначных ситуациях. Подробнее — шаг 1.5.
 
 **REQUIRED SUB-SKILLS:**
-- `design` сабагент (trusted) — для сложных фич (3+ модуля, новая таблица, public API): spec formation (brainstorming workflow embedded в `design-prompt.md`)
+- `custodian` сабагент (trusted) — Q/A-брокер по confidential для сложных фич (3+ модуля, новая таблица, public API): отвечает primary агрегатами (без значений), spec пишет primary
 - superpowers:writing-plans — создание implementation plan
 - superpowers:subagent-driven-development — исполнение plan (implementer + reviewer per task)
 - superpowers:test-driven-development — TDD-дисциплина для шага 13 (SDD)
@@ -94,7 +95,7 @@ Interactive — агент комментирует находки по ходу
 | Категория | Примеры | Pipeline | Spec Review | SDD | Модель SDD |
 |---|---|---|---|---|---|
 | **Trivial fix** (1-2 строки) | Typos, config tweak, rename, single-line bugfix | TDD + commit напрямую; pipeline не запускается | Нет | Нет | — |
-| **Простая фича** | Новый simple endpoint, UI-компонент без стейта, добавление поля к existing DTO | Шаги 2-7 → gate: простая → план (шаги 11-12) → SDD (шаг 13) | Нет (пропускается) | 1-2 task-а без review-package | **Haiku** |
+| **Простая фича** | Новый simple endpoint, UI-компонент без стейта, добавление поля к existing DTO | Шаги 2-7 → gate: простая (Bounded) → короткий дизайн в чате → approval → SDD (шаг 13) | Нет (пропускается) | 1-2 task-а без review-package | **Haiku** |
 | **Сложная фича** | Новая сущность с миграцией, multi-step flow, новый публичный endpoint с auth/rate-limiting | Полный pipeline: шаги 2-7 → spec (8) → опц. Spec Review (9) → gate (10) → план (11-12) → SDD (13). **Fast-track** (шаг 7d): внешний spec вместо шага 8 | Рекомендован | Multi-task, review-package per task | **Sonnet** (**Opus** для key task) |
 | **Архитектурная фича** | Новая таблица + сервис + контроллер + тесты, новый middleware, breaking change, cross-module refactoring | Полный pipeline + обязательный Spec Review | **Обязателен** | Multi-task, review-package per task, redesign после review если verdict `revise` | **Opus** |
 
@@ -117,6 +118,15 @@ Interactive — агент комментирует находки по ходу
 Если хотя бы один сигнал попадает в колонку «Сложная» или «Архитектурная»,
 фича НЕ считается простой, и шаги 8-10 (spec + опциональный Spec Review)
 выполняются.
+
+### Маппинг маршрутов на пути brainstorm (OQ-6)
+
+| Маршрут maestro | Путь superpowers:brainstorming | Spec | Примечание |
+|---|---|---|---|
+| **Spike** (шаг 1, вариант (s)) | Spike | Нет (вывод — рекомендация) | feasibility/ресеч/прототип; без spec/plan/мержа; throwaway-код |
+| **Простая фича** (шаг 7b) | Bounded | Нет | короткий дизайн в чате → approval → SDD |
+| **Сложная/Архитектурная** (шаг 7a) | Architectural | Да (шаг 8) | полный spec → review → gate → plan |
+| **Bugfix** (шаг 1, вариант (b)) | — (debug sub-pipeline) | Нет | systematic-debugging (D1-D7), НЕ Spike |
 
 ### Почему это важно
 
@@ -192,10 +202,23 @@ Interactive — агент комментирует находки по ходу
         (c) пропустить
         (d) отмена
 🟡  1. [agent] Load `skill maestro`
-      -- HITL GATE: "Что делаем? (f) feature — (b) bugfix — (c) отмена" --
+      -- HITL GATE: "Что делаем? (f) feature — (b) bugfix — (s) spike — (c) отмена" --
       Выбор:
         - (b) → шаги 0–6 (project context + pre-flight + branch) → Debug Sub-pipeline (шаги D1–D7) → шаги 11–18 (plan → SDD → docs → review → finish)
         - (f) → основной pipeline (шаги 0–18)
+        - (s) → **Spike** (feasibility/ресеч/прототип, OQ-6/OQ-9):
+            — короткий ресеч кода/прототип → вывод-рекомендация; БЕЗ spec/plan/мержа.
+            — Изоляция НЕ требуется (опц. временный worktree для прототипа,
+              НЕ мержится/удаляется). Pre-flight — минимум (`git status` только).
+            — Артефакты: рекомендация — в ответе primary (не в spec-файле);
+              throwaway-код не коммитить (или удалить), не мержить в main.
+            — Исследователь — primary (Spike-path скилла brainstorming); при
+              необходимости — диспатч `haiku` для прототипа.
+            — HITL-gates: шаг 1 (выбор spike) + nod на план + финальный
+              «принять/продолжить/отмена».
+            — Spike ≠ bugfix: debug sub-pipeline (D1-D7) НЕ применяется.
+            — Шаги 11-18 НЕ выполняются. Выход: HITL решает — оформить как
+              feature/bugfix/завершить.
 🟡 1.5. -- HITL GATE: выбрать режим работы --
       "Как будем работать? (a) efficient — (b) interactive — (c) отмена"
       (a) efficient — текущее поведение: агент работает молча, HITL только на gates
@@ -228,9 +251,12 @@ Interactive — агент комментирует находки по ходу
         (a) Сложная / Архитектурная — полный pipeline (шаги 8-10).
             Оркестратор применяет матрицу сигналов, предлагает категорию,
             пользователь подтверждает.
-        (b) Простая — шаги 8-10 пропускаются, сразу к плану (шаг 11).
-            Требования берутся из user story напрямую, formal spec не создаётся.
-            Spec Review по умолчанию пропускается.
+        (b) Простая — по **Bounded-логике** (OQ-6): короткий дизайн в чате →
+            approval → SDD. Шаги 8-10 пропускаются (no formal spec). Вместо
+            полного writing-plans (шаг 11) — **короткий дизайн** (краткое
+            описание подхода + план в чате, не формальный plan-документ),
+            затем approval и SDD (шаг 13). Requirements берутся из user story
+            напрямую. Spec Review по умолчанию пропускается.
         (c) Отмена
       Если (a) → Spec Review РЕКОМЕНДОВАН для сложных, ОБЯЗАТЕЛЕН
       для архитектурных. Оркестратор предложит его на шаге 9.
@@ -246,26 +272,37 @@ Interactive — агент комментирует находки по ходу
           (a) пропустить review / (b) прогнать (шаги 9+10)»;
         - валидная sanitize-подпись (`status: CLEAN`) → шаг 8.6 пропускается;
           иначе → шаг 8.6 выполняется.
+      Схема Revise (шаг 10b) совместима с fast-track re-entry: review-подпись
+      ставится при Approve (шаг 10); правки до Approve идут через opus+оркестратора.
+      Любая правка spec меняет hash → подпись stale → при повторном входе (re-entry)
+      8.6/9 перезапускаются (правило 3).
       Fast-track применим только для сложных/архитектурных фич (шаг 7a).
-🟢  8. [agent] Dispatch `design` (trusted) -> Spec (обязательно для сложных фич)
-       — Оркестратор диспатчит сабагент `design` (trusted) через `task` tool
-         с `subagent_type=design` (модель из `agent.design.model`, opus-tier).
-       — `design` trusted → промпт НЕ санизируется (видит полный контекст).
-       — Передать: `{user_story}`, `{context}` (project context + паттерны),
-         `{spec_path}` (см. File Path Conventions), `{feature_category}`.
-       — Промпт: `design-prompt.md` из этого скилла (self-contained,
-         brainstorming workflow embedded — `design` НЕ загружает скиллы).
-       — `design` пишет spec файл напрямую (`edit: allow`), возвращает
-         summary + открытые вопросы.
-       — Если `design` вернул открытые вопросы → HITL: оркестратор показывает
-         их пользователю, получает ответы, **re-dispatch** `design` с ответами.
-         Max 3 re-dispatch цикла; после — HITL: (a) продолжить с текущим spec /
-         (b) упростить scope / (c) стоп.
-       — Запись в лог: `design: spec created at <spec_path>`
+🟢  8. [agent] Brainstorm (primary) + Custodian Q/A -> Spec (обязательно для сложных фич)
+       — **Brainstorm ведёт primary** (superpowers:brainstorming, interactive/диалоговый
+         скилл). Primary грузит `superpowers:brainstorming` через `skill`-инструмент
+         и ведёт диалог с пользователем по канону скилла: классификация пути →
+         вопросы по одному → подходы → секционный дизайн → approval. HITL напрямую.
+       — **Custodian (trusted) — Q/A-брокер по confidential.** Primary диспатчит
+         `custodian` через `task` tool с `subagent_type=custodian` (модель из
+         `agent.custodian.model`, opus-tier), когда нужен confidential-контекст.
+       — `custodian` trusted → промпт НЕ санизируется (видит полный контекст).
+       — Передать: `{questions}`, `{context}` (project context + паттерны),
+         `{confidential_paths}`.
+       — Промпт: `custodian-prompt.md` из этого скилла (self-contained).
+       — `custodian` НЕ пишет spec (`edit: deny`), НЕ ведёт brainstorm; отвечает
+         агрегатами (тип/ограничение/чувствительность/связь) БЕЗ raw-значений,
+         помечает provenance.
+       — **Spec пишет primary** по результатам brainstorm + Q/A-ответы custodian.
+         Primary помечает confidential-фрагменты **бинарным маркером `из confidential`**
+         (по пометкам custodian, без категории/значений).
+       — Если primary нужен confidential-контекст для вопросов → re-dispatch
+         `custodian` с Q/A-ответами. Сходимость: если вопросы перестали появляться
+         → HITL: (a) продолжить / (b) упростить scope / (c) стоп.
+       — Запись в лог: `custodian: Q/A answered; primary: spec created at <spec_path>`
 🟢  8.5. [agent] Оценка изменений контекста
        — **Fast-track (шаг 7d):** шаг 8.5 выполняется ТАКЖЕ — внешний spec
          анализируется на изменения контекста/cross-cutting (план на шаге 11
-         зависит от 8.5; fast-track пропускает только шаг 8 «Dispatch design»).
+         зависит от 8.5; fast-track пропускает только шаг 8 «Brainstorm + Spec»).
        — Оркестратор анализирует spec: появились ли новые категории,
          изменения стека, команды или уточнения для проектного контекста.
        — Если да — запоминает как pending context changes.
@@ -276,9 +313,18 @@ Interactive — агент комментирует находки по ходу
          найденные файлы как pending cross-cutting changes (вместе с context
          changes). Они попадают в plan (шаг 11) как задачи на обновление
          затронутых файлов.
-       — **HITL не требуется.** Изменения контекста будут зафиксированы
-         в плане (шаг 11) и применены автоматически после аппрува плана
-         (шаг 12a).
+        — **HITL не требуется.** Изменения контекста будут зафиксированы
+          в плане (шаг 11) и применены автоматически после аппрува плана
+          (шаг 12a).
+        — **Spec-follow-up (OQ-5):** оркестратор фиксирует spec-follow-up из
+          особого случая шага 10b (вариант (b)) и плато OQ-4 (вариант (c)) как
+          **отдельный pending-список** (рядом с `pending context changes` /
+          `pending cross-cutting changes`), с пометкой причины («не хватает
+          контекста» / «несущественно/scope»). Каждый follow-up помечается
+          **«не блокирует Approve»**. Хранение — orchestral-состояние сессии,
+          **не в spec-файле** (не загрязнять spec/подписи). На шаге 11
+          follow-up транслируется в задачи плана (или секцию плана) наравне
+          с context/cross-cutting changes.
 🟡  8.6. [agent] Spec security review (Точка 1, см. Security Review)
        — Только для фич, где есть spec (сложные/архитектурные).
        — **Fast-track (шаг 7d):** если в spec есть валидная sanitize-подпись
@@ -302,37 +348,57 @@ Interactive — агент комментирует находки по ходу
        — После `CLEAN` или (a)/(b) оркестратор **штампует подпись
          `<!-- maestro:sanitize -->`** в конец spec файла (см. «Подписи
          spec-файла»): `status: CLEAN | FINDINGS_ACCEPTED` + date + hash
-         (sha256 содержимого без `maestro:*` блоков).
-       — **Перезапуск на каждый Revise-цикл:** если шаг 10 вернёт Revise →
-         шаг 8 → шаг 8.6 повторяется (spec мог измениться). Подписи
-         инвалидируются hash'ем (см. «Подписи spec-файла»).
+          (sha256 содержимого без `maestro:*` блоков).
+        — **Перезапуск 8.6 (OQ-2):** полный прогон 8.6 выполняется на **первой**
+          итерации (после первичной записи spec; spec пишет primary по результатам
+          brainstorm + Q/A `custodian`). На повторных **opus-циклах** (правки
+          untrusted opus + применение оркестратором, шаг 10b) 8.6 **НЕ
+          выполняется** — opus видит только очищенный spec, новые real-значения
+          неоткуда; остаётся Ур.1 (Слой 5) при применении правки. Полный
+          повторный 8.6 выполняется **только при вовлечении trusted-контура**:
+          особый случай (a) → trusted `custodian` (мог вновь занести confidential)
+          или opus-trusted (B-5, защита untrusted снята). Подписи инвалидируются
+          hash'ем (см. «Подписи spec-файла»).
 🟢  9. [HITL] Spec Review на spec:
-       - **Spec уже прошёл security review (шаг 8.6)** — opus получает
-         очищенный spec; security-проверку не дублирует (см. Security Review).
-         Spec написан сабагентом `design` (trusted, шаг 8) или взят внешним
-         (fast-track, шаг 7d).
-       - **Fast-track (шаг 7d):** валидная review-подпись → шаг пропущен
-         (auto). Нет/stale → уже согласовано на шаге 7 (вариант B):
-         (a) пропустить — шаги 9/10 не выполняются, подпись не ставится;
-         (b) прогнать — выполнить шаг 9 + шаг 10, при Approve поставить
-         review-подпись.
-       - **Для сложных фич: оркестратор ОБЯЗАН предложить Spec Review.
-         Шаг 10 (spec gate) не наступает, пока пользователь не ответил
-         на предложение (да/нет).**
-       - Для простых — пропускается.
-       - Для архитектурных — **обязателен**, пользователь не может отказаться.
-       - Режим: spec (единственный) — ревьюит spec: архитектура, требования,
-         риски дизайна
-       - Диспатч: OpenCode — `task` tool с `subagent_type=opus`;
-         Claude Code — Agent tool с `model=opus` + инструкция ревьюера
-       - **Перед диспатчем opus (untrusted) — Точка 2 Security Review:**
-         оркестратор прогоняет промпт через sanitize (Ур.1 плагин + Ур.2
-         сабагент sanitizer, см. ниже). Trusted opus (если в maestro.json) → skip.
-       - Промпт ревьюера: `spec-review-prompt.md` из этого скилла
-       - Передать: spec + контекст + встроенный чеклист + вопросы
-       - **Opus игнорирует `<!-- maestro:* -->` metadata-блоки** (подписи) —
-         ревьюит только содержимое spec.
-       - Получить: structured review (severity-бакеты + verdict approve/revise/reject)
+        - **Spec уже прошёл security review (шаг 8.6)** — opus получает
+          очищенный spec; security-проверку не дублирует (см. Security Review).
+          Spec написан primary (шаг 8, brainstorm + custodian Q/A) или взят внешним
+          (fast-track, шаг 7d).
+        - **Fast-track (шаг 7d):** валидная review-подпись → шаг пропущен
+          (auto). Нет/stale → уже согласовано на шаге 7 (вариант B):
+          (a) пропустить — шаги 9/10 не выполняются, подпись не ставится;
+          (b) прогнать — выполнить шаг 9 + шаг 10, при Approve поставить
+          review-подпись.
+        - **Для сложных фич: оркестратор ОБЯЗАН предложить Spec Review.
+          Шаг 10 (spec gate) не наступает, пока пользователь не ответил
+          на предложение (да/нет).**
+        - Для простых — пропускается.
+        - Для архитектурных — **обязателен**, пользователь не может отказаться.
+        - Режим: spec (единственный) — ревьюит spec: архитектура, требования,
+          риски дизайна
+        - Диспатч: OpenCode — `task` tool с `subagent_type=opus`;
+          Claude Code — Agent tool с `model=opus` + инструкция ревьюера
+        - **Перед диспатчем opus (untrusted) — Точка 2 Security Review:**
+          оркестратор прогоняет промпт через sanitize (Ур.1 плагин + Ур.2
+          сабагент sanitizer, см. ниже). Trusted opus (если в maestro.json) → skip.
+        - Промпт ревьюера: `spec-review-prompt.md` из этого скилла
+        - Передать: spec + контекст + встроенный чеклист + вопросы
+        - **На Revise-цикле (шаг 10b) дополнительно передать `previous_verdict`
+          + `previous_findings`** — очищенные результаты прошлого ревью opus
+          (прошли Ур.1), для подтверждения закрытия прошлых замечаний.
+        - **Хранение `previous_verdict`/`previous_findings` (OQ-5, Task 6
+          Step 1b):** orchestral-состояние сессии (по аналогии с pending context
+          / cross-cutting / spec-follow-up), НЕ в spec-файле (не загрязнять spec
+          и подписи). Передаются в следующий диспатч opus вместе с актуальным
+          очищенным spec. Подписи `maestro:review`/`maestro:sanitize` отвечают
+          за стабильность содержимого (hash), а `previous_verdict` — за историю
+          ревью в пределах сессии; это разные механизмы, не смешивать. При
+          повторном входе (re-entry) через fast-track `previous_verdict` сессии
+          не сохраняется (новая сессия) — opus-ревью стартует с чистого
+          состояния; это допустимо и согласуется с правилом 3 (Stale-детект).
+        - **Opus игнорирует `<!-- maestro:* -->` metadata-блоки** (подписи) —
+          ревьюит только содержимое spec.
+        - Получить: structured review (severity-бакеты + verdict approve/revise/reject)
 🟡 10. -- HITL GATE: spec утверждён (с учётом экспертного ревью) --
       Оркестратор ПОКАЗЫВАЕТ diff правок (что изменилось после review).
       ВАРИАНТЫ:
@@ -340,12 +406,53 @@ Interactive — агент комментирует находки по ходу
             **штампует подпись `<!-- maestro:review -->`** в конец spec файла
             (см. «Подписи spec-файла»): reviewer: opus + date + verdict: approve
             + hash (sha256 содержимого без `maestro:*` блоков).
-        (b) Revise — вернуться к шагу 8, доработать spec, **повторить шаг 8.6
-            (security review)**, затем повторный review. Подписи становятся
-            stale (hash меняется) → 8.6 и 9 перезапускаются автоматически.
-            Перед ре-диспатчем `design` оркестратор вырезает существующие
-            `maestro:*` блоки из spec файла (см. «Подписи spec-файла», правило 5).
+        (b) Revise — вернуться к шагу 9 (повторный Spec Review); НЕ выполняется
+            полное переписывание spec доверенным агентом (в новой модели —
+            декомпозиция design→custodian+primary; custodian — Q/A-брокер, не
+            переписыватель). Оркестратор re-dispatch'ит `opus` (untrusted) с
+            обратной связью: предыдущий вердикт + список замечаний + текущий
+            очищенный spec. opus возвращает **структурированные правки**
+            (заменить/добавить/удалить, ссылки на секции). Оркестратор прогоняет
+            текст правок через Ур.1 (regex-sanitizer плагина, Слой 5) и
+            **инкрементально применяет их к spec** (Edit). Повторный 8.6 на
+            обычном opus-цикле **НЕ выполняется** (OQ-2): opus видит только
+            очищенный spec; полный повторный 8.6 нужен только при вовлечении
+            trusted-контура (особый случай (a) → правку готовит trusted
+            `custodian` по Q/A-агрегатам, без значений, применяет primary;
+            opus-trusted B-5). Затем — повторный Spec Review (шаг 9). Подписи
+            становятся stale (hash меняется) → при необходимости 8.6/9
+            перезапускаются. Если для правки требуется confidential-контекст
+            (opus не видит его) → HITL-эскалация (см. ниже «Особый случай»).
         (c) Reject — фича отменяется, STOP
+
+        **Особый случай (правка требует confidential-контекста).**
+        Оркестратор применяет правки opus молча, если они синтаксически
+        согласованы со spec И не затрагивают помеченные confidential-фрагменты.
+        HITL ставится при:
+          (1) правка/вопрос затрагивает секцию, помеченную `из confidential`;
+          (2) opus явно пометил «требует уточнения контекста»;
+          (3) правка ссылается на отсутствующие в spec сущности/поля (выход за scope).
+        Вопросы opus обрабатываются отдельно от правок (по паттерну шага 8):
+        оркестратор сначала отвечает на те, что покрыты spec; остальные → HITL.
+        Варианты HITL (и для правок, и для вопросов):
+          (a) правку/вопрос решает trusted `custodian` (отвечает по confidential
+              агрегатами, без значений; на основе его Q/A оркестратор применяет
+              правку), затем 8.6 + 9;
+          (b) зафиксировать как follow-up на spec-уровне (решать на шаге 11/13);
+          (c) отмена.
+        opus и оркестратор НЕ получают confidential-данных; маркер provenance —
+        метаданные без значений; единственный мост из confidential-контура —
+        вызов trusted `custodian` (a) по Q/A или HITL-решение (b).
+
+        **Сходимость Revise (OQ-4, guard плато).** Оркестратор ведёт счётчик
+        раундов Revise и список новых Critical/Important на каждом (на базе
+        `previous_findings`, см. шаг 9 / spec-review-prompt). Если **2
+        последовательных раунда** opus не добавили ни одного **нового**
+        Critical/Important (только повторяют/уточняют прошлые) → оркестратор
+        поднимает HITL: «Достигнуто плато: 2 раунда без новых Critical/Important.
+        (a) Approve spec / (b) продолжить ещё / (c) follow-up оставшиеся».
+        Новый Critical/Important **обнуляет** счётчик «2 раунда». Повторяющиеся
+        не-закрытые замечания НЕ считаются «новыми».
 🟢 11. [agent] writing-plans -> Implementation Plan
       **Fast-track (шаг 7d):** план пишется ИЗ внешнего spec (шаг 8 пропущен).
       After writing, оркестратор ПРОВЕРЯЕТ plan на качество:
@@ -376,6 +483,9 @@ Interactive — агент комментирует находки по ходу
       - **Если есть pending cross-cutting changes (шаг 8.5):** добавить
         задачи на обновление затронутых файлов (examples, конфиги, доки)
         как отдельные задачи плана.
+      - **Если есть spec-follow-up (шаг 8.5):** транслировать его в задачи
+        плана (или секцию плана) наравне с context/cross-cutting changes;
+        каждый follow-up помечен «не блокирует Approve» (OQ-5).
       - **Regression risk + scenarios (шаг 11, а не 8.5):** оркестратор
         анализирует plan по сигналам матрицы риска (см. секцию
         «Regression Registry»):
@@ -584,13 +694,19 @@ Decision gates (шаги 10, 12, 17) — явный вопрос с вариан
 
 Feature:
 - Шаг 0 — загрузка Project Context (загрузить/создать/пропустить/отмена)
-- Шаг 1 — выбор маршрута (feature/bugfix/cancel)
+- Шаг 1 — выбор маршрута (feature/bugfix/spike/cancel)
+- Шаг 1 — Spike (выбор): nod на план + финальный «принять/продолжить/отмена»
 - Шаг 1.5 — выбор режима (efficient/interactive/cancel)
 - Шаг 2 — подтверждение старта + pre-flight (да/отмена/skip в interactive)
 - Шаг 7 — сложность фичи (сложная/простая/отмена) + fast-track (d)/(e) + вариант B (внешний review)
 - Шаг 8.6 — spec security review: при `FINDINGS_FOUND` (вычистить и продолжить /
   продолжить как есть (принять риск) / стоп)
 - Шаг 10 — spec утверждён (approve/revise/reject)
+- Шаг 10 — **Особый случай Revise** (правке/вопросу нужен confidential-контекст):
+  (a) решает trusted `custodian` (Q/A-агрегат, без значений) / (b) follow-up /
+  (c) отмена (см. шаг 10b, «Особый случай»)
+- Шаг 10 — **Сходимость Revise** (плато: 2 раунда без новых Critical/Important):
+  (a) Approve spec / (b) продолжить ещё / (c) follow-up оставшиеся (см. шаг 10b)
 - Шаг 12 — plan утверждён (approve/revise/cancel)
 - Шаг 17 — pre-PR (approve merge/fix/cancel)
 - Security Review (Точка 2) — при находке sanitizer перед untrusted-диспатчем
@@ -744,7 +860,7 @@ pipeline; после завершения переход на шаг 11 (writing
 
 | Фаза | Скилл/Инструмент |
 |---|---|
-| Дизайн | `design` сабагент (trusted) — brainstorming workflow embedded в `design-prompt.md` |
+| Дизайн | `custodian` сабагент (trusted) — Q/A-брокер по confidential: отвечает primary агрегатами (без значений); spec пишет primary |
 | План | `writing-plans` |
 | Ветка | inline-конвенция `feature/<kebab-case>` / `fix/<kebab-case>` / `hotfix/<kebab-case>` (определяет имя ветки) |
 | Изоляция | `using-git-worktrees` (worktree) / `git checkout -b` (простая ветка) |
@@ -780,15 +896,15 @@ init), следует его правилам, затем решает и про
 |---|---|---|
 | **Haiku** (Быстрая/дешёвая) | Механические task-и: 1-2 файла, полный spec, трансляция+тесты | `haiku` |
 | **Sonnet** (средняя/сбалансированная) | Интеграционные task-и: multi-file, pattern matching, debugging | `sonnet` |
-| **Opus** (наиболее мощная) | Архитектура, spec formation, design judgment, final whole-branch review | `design` (spec formation), `opus` (spec review), `code-reviewer` (code review) |
+| **Opus** (наиболее мощная) | Архитектура, spec formation, design judgment, final whole-branch review | `custodian` (Q/A по confidential), `opus` (spec review), `code-reviewer` (code review). На Revise (шаг 10b) `opus` **выдаёт структурированные правки**, а не пишет в файл (`edit: deny` сохраняется) |
 | **Fable** (креативная) | Примеры, метафоры, аналогии, пояснения в стиле историй | `fable` |
 
 ### Шаг → Tier (встроенный `step_to_tier`)
 
 | Шаг | Tier | OpenCode сабагент |
 |---|---|---|
-| `spec_formation` (шаг 8) | opus | `design` (trusted) |
-| `spec_review` (шаг 9) | opus | `opus` |
+| `spec_formation` (шаг 8) | opus | `custodian` (trusted, Q/A по confidential) |
+| `spec_review` (шаг 9) | opus | `opus` (untrusted; на Revise-цикле выдаёт правки, применяет оркестратор) |
 | `security_review` (шаг 8.6) | sanitizer | `sanitizer` (trusted) |
 | `task_reviewer` (шаг 13, per-task) | sonnet | `sonnet` |
 | `code_review` (шаг 16) | opus | `code-reviewer` |
@@ -813,7 +929,7 @@ init), следует его правилам, затем решает и про
 | `haiku` | `.opencode/agents/haiku.md` + `agent.haiku.model` (`.opencode/opencode.json`/global) |
 | `sonnet` | `.opencode/agents/sonnet.md` + `agent.sonnet.model` (`.opencode/opencode.json`/global) |
 | `opus` | `.opencode/agents/opus.md` + `agent.opus.model` (`.opencode/opencode.json`/global) |
-| `design` | `.opencode/agents/design.md` + `agent.design.model` (`.opencode/opencode.json`/global) |
+| `custodian` | `.opencode/agents/custodian.md` + `agent.custodian.model` (`.opencode/opencode.json`/global) |
 | `code-reviewer` | `.opencode/agents/code-reviewer.md` + `agent.code-reviewer.model` (`.opencode/opencode.json`/global) |
 | `fable` | `.opencode/agents/fable.md` + `agent.fable.model` (`.opencode/opencode.json`/global) |
 | `sanitizer` | `.opencode/agents/sanitizer.md` + `agent.sanitizer.model` (`.opencode/opencode.json`/global) |
@@ -824,15 +940,17 @@ init), следует его правилам, затем решает и про
 
 - `permission` — `haiku`/`sonnet` могут редактировать файлы и запускать bash
   (имплементация), `opus`/`fable`/`sanitizer` — read-only без bash (ревью,
-  объяснения, security-пометки), `code-reviewer` — `bash: allow` (git
-  diff/log/show), `edit: deny` (без мутаций), `design` — `edit: allow` (пишет
-  spec файл), `bash: deny` (без запуска команд), `task: deny` (без вложенных
-  сабагентов).
+  объяснения, security-пометки). **`opus` сохраняет `edit: deny` на Revise-цикле:
+  он выдаёт структурированные правки, а применяет их к spec оркестратор**,
+  `code-reviewer` — `bash: allow` (git
+  diff/log/show), `edit: deny` (без мутаций), `custodian` — `edit: deny`
+  (Q/A-брокер, не пишет spec), `bash: deny` (без запуска команд), `task: deny`
+  (без вложенных сабагентов).
 - `task: deny` — агенты не диспатчат вложенные под-агенты
   (один уровень вложенности).
 
 **При диспатче:** оркестратор по таблице «Шаг → Tier» определяет нужный tier,
-маппит tier → имя агента (`haiku`/`sonnet`/`opus`/`design`/`code-reviewer`/`fable`/`sanitizer`),
+маппит tier → имя агента (`haiku`/`sonnet`/`opus`/`custodian`/`code-reviewer`/`fable`/`sanitizer`),
 диспатчит через `task` tool с `subagent_type` = имени агента. Доступность модели
 обеспечивает провайдер OpenCode — отдельная проверка не требуется.
 
@@ -938,7 +1056,7 @@ task(
 
 ### Недоступность модели trusted-агента (P3, см. `SECURITY.md`)
 
-При недоступности/ошибке модели trusted-агента (`design`/`sanitizer`):
+При недоступности/ошибке модели trusted-агента (`custodian`/`sanitizer`):
 
 - **Запрещено** подставлять другой `subagent_type` или модель для продолжения
   работы с конфиденциальным контекстом.
@@ -962,13 +1080,13 @@ task(
 |---|---|---|
 | `haiku` | untrusted | |
 | `sonnet` | untrusted | |
-| `opus` | untrusted | |
+| `opus` | untrusted | Spec review + правки на Revise. **Если указан trusted (`trust.opus: true`)** — Слои 2 (маскирование промпта) и 3-5 (confidential-deny / access_policy / Ур.1) для него НЕ действуют: opus получает промпт как есть и доступ к файлам по конфигу; гарантия «opus не видит confidential» снимается. Это осознанное решение конфигурации (пользователь расширил доверие). Рекомендация — не помечать opus trusted; при необходимости фиксировать с пониманием последствий. |
 | `code-reviewer` | untrusted | |
 | `fable` | untrusted | |
-| `design` | **trusted** | Spec formation (шаг 8): видит полный контекст (user story + project context) для качественного spec. Его промпт при диспатче не санизируется. |
-| `sanitizer` | **trusted** | Security review: единственный, кому разрешено видеть сырые данные (чтобы пометить). Его промпт при диспатче не санизируется — рекурсии нет. |
+| `custodian` | **trusted** | Q/A-брокер по confidential (шаг 8): читает confidential-источники, отвечает primary агрегатами (тип/ограничение/чувствительность/связь) БЕЗ raw-значений. Его промпт при диспатче не санизируется. Если `trust: false`/absent — агент **non-functional** (confidential deny + sanitize промпта); не fallback, а блокировка роли. |
+| `sanitizer` | **trusted** | Security review: единственный, кому разрешено видеть сырые данные (чтобы пометить). Его промпт при диспатче не санизируется — рекурсии нет. Если `trust: false`/absent — агент **non-functional** (рекурсия: промпт санизируется до него); не fallback. |
 
-Значение по умолчанию для любого сабагента — **untrusted**, кроме `design` и
+Значение по умолчанию для любого сабагента — **untrusted**, кроме `custodian` и
 `sanitizer` (trusted по своей роли). Меняется только через `maestro.json`
 (см. ниже). От модели в merge-конфиге (`.opencode/opencode.json` или global)
 trust не зависит.
@@ -983,7 +1101,7 @@ untrusted.
 ```json
 {
   "trust": {
-    "design": true,
+    "custodian": true,
     "sanitizer": true
   },
   "access_policy": { ... },
@@ -991,7 +1109,7 @@ untrusted.
 }
 ```
 
-- **Ключ в `trust`:** имя сабагента (`design`, `sanitizer`, `haiku`, `sonnet`, `opus` и т.д.)
+- **Ключ в `trust`:** имя сабагента (`custodian`, `sanitizer`, `haiku`, `sonnet`, `opus` и т.д.)
 - **Значение:** только `true` = trusted. Любое другое значение → untrusted
 - Если файла `maestro.json` нет → **все сабагенты untrusted** (безопасное значение по умолчанию)
 - Файл коммитится в git — trust-level + security policy проекта
@@ -1070,7 +1188,7 @@ Trust-уровень определяется по `maestro.json` (см. Trust M
 
 | Шаг | Сабагент | Security Review |
 |---|---|---|
-| Шаг 8 — Spec Formation | `design` | **Skip** (trusted — видит полный контекст для качественного spec) |
+| Шаг 8 — Custodian Q/A | `custodian` | **Skip** (trusted — видит полный контекст для агрегации по confidential) |
 | Шаг 9 — Spec Review | `opus` | Применяется (untrusted) |
 | Шаг 13 — SDD implementer | `haiku` / `sonnet` | Применяется (untrusted) |
 | Шаг 13 — SDD task-reviewer | `sonnet` | Применяется (untrusted) |
@@ -1163,6 +1281,12 @@ Trust-уровень определяется по `maestro.json` (см. Trust M
 - **По умолчанию — всегда** (на каждом untrusted-диспатче + на spec review).
 - Опция (env/конфиг `MAESTRO_SANITIZER_MODE=hybrid`) переключает на гибрид:
   spec review всегда + диспатч только если Уровень 1 что-то нашёл или недоступен.
+- **Исключение — обычные opus-циклы Revise (OQ-2, шаг 10b):** Ур.2-сабагент
+  НЕ запускается (полный 8.6 не выполняется). Полный формат пометок
+  `location: <секция/строка>` используется ТОЛЬКО в случаях вовлечения
+  trusted-контура (полный 8.6). На opus-циклах защита — Ур.1 (Слой 5 при
+  применении правки) + маскирование входа opus (Слой 2). Вопрос «полный vs
+  diff» снимается: на opus-циклах прогона sanitizer нет.
 
 ### File access control (реализовано в плагине)
 
@@ -1212,9 +1336,9 @@ permissions OpenCode.
 (3+ модуля / новая таблица / public API) оркестратор **предлагает** Spec Review
 на spec-gate; для простых — пропускает. Окончательное решение — за пользователем.
 
-**Вход:** spec, написанный сабагентом `design` (trusted, шаг 8) и очищенный
+**Вход:** spec, написанный primary (шаг 8, brainstorm + custodian Q/A) и очищенный
 `sanitizer` (шаг 8.6). `opus` — независимый ревьюер (untrusted), ревьюит то, что
-создал другой агент — исключает конфликт интересов self-review.
+создал другой контур (primary) — исключает конфликт интересов self-review.
 
 **Режим:** `spec` (единственный) — ревьюит spec: архитектуру, требования, риски
 дизайна. План ещё не существует — ревью предотвращает архитектурные ошибки до
@@ -1267,11 +1391,16 @@ hash: <sha256 содержимого spec без блоков maestro:*>
    трактуется как отсутствующая.
 4. **`FINDINGS_ACCEPTED` не даёт skip 8.6 при re-entry** — spec содержит
    sensitive, повторная санизация безопаснее (консервативно).
-5. **Stale-клир:** перед ре-диспатчем `design` (шаг 8, в т.ч. Revise-цикл)
-   оркестратор вырезает существующие `maestro:*` блоки из spec файла
-   (`design-prompt.md` о подписях не знает).
-6. **Revise-loop:** шаг 10 = Revise → spec правится → hash меняется →
-   подписи stale → 8.6 и 9 перезапускаются автоматически.
+5. **Stale-клир:** вырезание `maestro:*` блоков перед ре-диспатчем `custodian`
+   актуально **только при первичном Q/A-вызове `custodian` (шаг 8)** и при особом
+   случае (a) шага 10b (`custodian-prompt.md` о подписях не знает). На обычном
+   Revise-цикле (правки untrusted opus + применение оркестратором) ре-диспатч
+   `custodian` не происходит → Stale-клир не применяется.
+6. **Revise-loop:** шаг 10 = Revise → spec правится через opus+оркестратора
+   (оркестратор применяет правки, Ур.1) → hash меняется → подписи stale.
+   Повторный Spec Review (шаг 9) перезапускается всегда. Повторный 8.6 —
+   **только при вовлечении trusted-контура** (особый случай (a) → `custodian`;
+   opus-trusted B-5), см. OQ-2.
 7. **Разграничение с Точкой 2:** подпись spec файла НЕ отменяет sanitize
    промптов на 13d/16 — Точка 2 санизирует сборку промпта, а не файл.
 8. **Forgeability:** блок можно вставить вручную. Принято как конвенция
@@ -1301,11 +1430,12 @@ hash: <sha256 содержимого spec без блоков maestro:*>
 |---|---|
 | **HITL шаг 2: skip (interactive)** | Pre-flight пропускается: bugfix → D1; feature → шаг 5 (имя ветки). В efficient (b) — отмена → STOP. Cleanup не требуется (ветка ещё не создана). |
 | **HITL шаг 1.5: отмена (1.5c)** | STOP — pipeline завершён. Пользователь отказался от запуска. |
-| **Spec gate: revise (10b)** | Вернуться к шагу 8 (re-dispatch `design`), доработать spec, повторный security review + review |
-| **Внешний spec невалидный (шаг 7d)** | Пустой / нечитаемый / не содержит требований → HITL: (a) создать заново через `design` (шаг 8) / (b) указать другой путь / (c) отмена |
+| **Spec gate: revise (10b)** | re-dispatch `opus` (untrusted) для правок, оркестратор применяет их к spec (Ур.1, Слой 5); повторный Spec Review (шаг 9). При необходимости confidential-контекста — HITL: (a) trusted `custodian` (Q/A-агрегат) / (b) follow-up. Повторный 8.6 только при вовлечении trusted-контура (OQ-2). |
+| **Внешний spec невалидный (шаг 7d)** | Пустой / нечитаемый / не содержит требований → HITL: (a) создать заново через шаг 8 (brainstorm primary + custodian Q/A) / (b) указать другой путь / (c) отмена |
 | **Plan gate: revise (12b)** | Вернуться к шагу 11 (writing-plans), доработать план |
-| **Spec review: revise** | Вернуться к шагу 8 (re-dispatch `design`), доработать spec, повторить security review (8.6) + review (шаг 9) |
+| **Spec review: revise** | re-dispatch `opus` для правок, оркестратор применяет их (Ур.1); при необходимости confidential-контекста — HITL: (a) trusted `custodian` / (b) follow-up. Повторить review (шаг 9); 8.6 только при trusted-контуре (OQ-2). |
 | **Spec review: reject** | Эскалация к пользователю: пересмотр требований или отмена фичи |
+| **`custodian`/`sanitizer`: `confidential:deny`** | Агент untrusted (проверить `maestro.json` → `trust`: absent/`false`) — он non-functional без доверия. Предупредить: "custodian/sanitizer не trusted (проверьте `maestro.json` → `trust`), без доверия агент не может выполнять свою роль" → HITL: (a) обновить конфиг и перезапустить / (b) стоп. Не ретраить как обычную ошибку сабагента. |
 | **Gate: отмена (шаги 7c, 10c, 12c, 17c, D7b)** | STOP + cleanup: удалить feature-ветку (`git branch -D <branch>`) и worktree (`git worktree remove <path>`), если создан. Решение оставить в `regression/cancelled-features.md` (в git) для последующей архивации. **Regression cleanup:** если `entries/<YYYY-MM-DD-<feature>>.md` существует → `git mv entries/X.md released/X.md`, `status: cancelled`, `released: <дата>`, дописать решение в `regression/cancelled-features.md` и закоммитить оба файла (`chore(regression): <feature> cancelled`) (только после шага 12a; до 12a entry ещё не создан — no-op). |
 | **Implementer: BLOCKED** | Оркестратор: (1) дать контекст, (2) мощнее модель, (3) разбить задачу, (4) эскалация |
 | **Implementer: NEEDS_CONTEXT** | Оркестратор предоставляет недостающий контекст, re-dispatch |
@@ -1537,9 +1667,10 @@ Pipeline не имеет механизма cross-repo координации (�
 Шаг 5:  [agent] имя ветки (inline-конвенция) -> feature/resource-activation
 Шаг 6:  [agent] git checkout -b feature/resource-activation
 Шаг 7:  -- HITL: фича сложная -> идём на дизайн --
-Шаг 8:  [agent] Dispatch design (subagent_type=design, trusted)
-         - Передаёт: user story, project context, spec_path, feature_category
-         - design пишет spec (activation flow, idempotency, error handling)
+Шаг 8:  [agent] Brainstorm (primary) -> Spec
+         - Primary грузит superpowers:brainstorming, ведёт диалог с пользователем
+         - confidential не затрагивается → custodian Q/A не требуется
+         - Primary пишет spec (activation flow, idempotency, error handling)
          - Открытых вопросов нет
          - Контекст не изменился (нет новых категорий/команд/стека) → шаг 8.5: изменений нет
 Шаг 9:  [HITL] Оркестратор предлагает Spec Review на spec (фича сложная)

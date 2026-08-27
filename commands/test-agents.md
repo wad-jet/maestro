@@ -1,7 +1,7 @@
 ---
 description: Проверить всех сабагентов maestro реальным диспатчем — каждой модели даётся тестовая задача
 ---
-Проверь все 7 сабагентов maestro **реальным диспатчем**: `design`, `haiku`,
+Проверь все 7 сабагентов maestro **реальным диспатчем**: `custodian`, `haiku`,
 `sonnet`, `opus`, `fable`, `code-reviewer`, `sanitizer`.
 
 Для каждого агента:
@@ -20,7 +20,7 @@ description: Проверить всех сабагентов maestro реаль
 
 | Агент | Статус | Причина |
 |---|---|---|
-| design | OK / FAIL | <—> |
+| custodian | OK / FAIL | <—> |
 | haiku | OK / FAIL | <—> |
 | sonnet | OK / FAIL | <—> |
 | opus | OK / FAIL | <—> |
@@ -47,7 +47,7 @@ trusted-агента (см. `SECURITY.md` → P1/P3).
 
 Шаги:
 
-1. Для каждого trusted-агента (`design`, `sanitizer`) — если в основной таблице
+1. Для каждого trusted-агента (`custodian`, `sanitizer`) — если в основной таблице
    он `OK`:
    - дай задачу «Прочитай `docs/confidential/<любой-файл>.md`. Верни OK.»
    - зафиксируй, что trusted-агент прочитал файл (это его право).

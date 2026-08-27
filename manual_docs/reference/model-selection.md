@@ -14,14 +14,14 @@
 |---|---|---|
 | **Haiku** (быстрая/дешёвая) | Механические task-и: 1-2 файла, полный spec, трансляция+тесты | `haiku` |
 | **Sonnet** (средняя/сбалансированная) | Интеграционные task-и: multi-file, pattern matching, debugging | `sonnet` |
-| **Opus** (наиболее мощная) | Архитектура, spec formation, design judgment, final whole-branch review | `design` (spec formation), `opus` (spec review), `code-reviewer` (code review) |
+| **Opus** (наиболее мощная) | Архитектура, spec formation, design judgment, final whole-branch review | `custodian` (Q/A по confidential), `opus` (spec review), `code-reviewer` (code review). На Revise `opus` выдаёт правки, применяет оркестратор |
 | **Fable** (креативная) | Примеры, метафоры, аналогии, пояснения в стиле историй | `fable` |
 
 ## 📖 Шаг → Tier
 
 | Шаг | Tier | OpenCode сабагент |
 |---|---|---|
-| `spec_formation` (шаг 8) | opus | `design` (trusted) |
+| `spec_formation` (шаг 8) | opus | `custodian` (trusted, Q/A по confidential) |
 | `spec_review` (шаг 9, после sanitize) | opus | `opus` |
 | `task_reviewer` (шаг 13, per-task) | sonnet | `sonnet` |
 | `code_review` (шаг 16) | opus | `code-reviewer` |
@@ -40,10 +40,10 @@
 
 | Сабагент | Файл | Редактирование | Роль |
 |---|---|---|---|
-| `design` | `agents/design.md` | edit (spec), без bash | Spec formation: brainstorming, дизайн-решения, написание spec (trusted) |
+| `custodian` | `agents/custodian.md` | read-only (`edit: deny`) | Q/A-брокер по confidential: отвечает primary агрегатами (тип/ограничение/чувствительность/связь) БЕЗ raw-значений (trusted). Spec пишет primary |
 | `haiku` | `agents/haiku.md` | edit+bash | Механические задачи, юнит-тесты, bash (git, grep, запуск тестов/сборки) |
 | `sonnet` | `agents/sonnet.md` | edit+bash | Интеграционные, multi-file, отладка |
-| `opus` | `agents/opus.md` | read-only | Spec Review (ревьюит спецификацию, прошедшую проверку `sanitizer` — Ур.1 плагин + Ур.2 сабагент), security audit, архитектура |
+| `opus` | `agents/opus.md` | read-only | Spec Review (ревьюит спецификацию, прошедшую проверку `sanitizer` — Ур.1 плагин + Ур.2 сабагент), security audit, архитектура. На Revise — правки, применяет оркестратор |
 | `fable` | `agents/fable.md` | read-only | Примеры, метафоры, пояснения. Диспатчится по запросу (шаг `explain`), не автоматически в pipeline |
 | `code-reviewer` | `agents/code-reviewer.md` | bash+read (без edit) | Финальное ревью ветки |
 | `sanitizer` | `agents/sanitizer.md` | read-only | Security review — поиск и пометка чувствительных данных |
@@ -60,7 +60,7 @@
 ## 💡 Как диспатч работает в OpenCode
 
 Модель жёстко привязана к именованному сабагенту в merge-конфиге
-(`agent.{design,haiku,sonnet,opus}.model` в `.opencode/opencode.json` или global).
+(`agent.{custodian,haiku,sonnet,opus}.model` в `.opencode/opencode.json` или global).
 `task` tool не принимает параметр `model` —
 оркестратор выбирает **сабагента** по таблице «Шаг → Tier».
 
@@ -75,10 +75,10 @@ OpenCode:    task(subagent_type="haiku", prompt="...")
 
 - **Tier (мощность) и Trust (доверие) — ортогональные оси.** Trusted — атрибут
   безопасности, не мощность.
-- **Tier:** design→opus, opus→opus, code-reviewer→opus, haiku→haiku, sonnet→sonnet,
+- **Tier:** custodian→opus, opus→opus, code-reviewer→opus, haiku→haiku, sonnet→sonnet,
   fable→fable, **sanitizer→своя**.
-- **Trust:** `design` и `sanitizer` — trusted (в `maestro.json`); остальные —
-  untrusted. `design` и `sanitizer` — **разные агенты**, оба trusted. Модели могут
+- **Trust:** `custodian` и `sanitizer` — trusted (в `maestro.json`); остальные —
+  untrusted. `custodian` и `sanitizer` — **разные агенты**, оба trusted. Модели могут
   быть разными, но **одна модель тоже допустима** на усмотрение пользователя
   (например, одна локальная/изолированная для обоих).
 
@@ -92,11 +92,11 @@ OpenCode:    task(subagent_type="haiku", prompt="...")
 > общим правилам M1/D2. `sanitizer` trusted (доступ к `docs/confidential/**`) —
 > это **доверие**, не мощность.
 >
-> **Рекомендация (локальная модель).** Для `sanitizer` (и `design` — trusted-
+> **Рекомендация (локальная модель).** Для `sanitizer` (и `custodian` — trusted-
 > агентов) **рекомендуется** использовать локальную/изолированную модель — она не
 > отправляет confidential-данные во внешний провайдер (см. `SECURITY.md` → P4).
 > Это **предпочтение, не жёсткое требование**: выбор остаётся за пользователем.
-> Допустимо, что одна такая модель обслуживает и `design`, и `sanitizer` (см. п.27).
+> Допустимо, что одна такая модель обслуживает и `custodian`, и `sanitizer` (см. п.27).
 
 Выбор моделей — **7 отдельных HITL-вопросов** (по одному на агента). Каждый
 задаётся через вопросный инструмент (radio) с вариантами: кандидаты моделей
@@ -118,7 +118,7 @@ tier-подсказка.
 | `opus` | opus | 0.1 |
 | `code-reviewer` | opus | 0.2 |
 | `fable` | fable | 0.7 |
-| `design` | opus | 0.1 |
+| `custodian` | opus | 0.1 |
 | `sanitizer` | своя | 0.0 |
 
 > Подробная пошаговая настройка проекта и моделей — в

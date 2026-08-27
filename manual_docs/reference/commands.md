@@ -45,7 +45,7 @@ Setup-фаза bootstrap нового проекта: `docs/project-context.md` 
 ### `/maestro-design`
 
 Дизайн/архитектура, scaffold и roadmap после `/maestro-init`:
-- (a) spec через сабагент `design` (trusted) → `docs/superpowers/specs/YYYY-MM-DD-<project>-design.md`; опц. spec-review (`opus`).
+- (a) spec через **primary brainstorm (superpowers:brainstorming) + custodian Q/A (trusted)** → spec пишет primary → `docs/superpowers/specs/YYYY-MM-DD-<project>-design.md`; опц. spec-review (`opus`).
 - (b) scaffold — каркас кода через `implementer-prompt.md` (TDD), диспатч `haiku`/`sonnet`.
 - (c) `docs/roadmap.md` (MVP + этапы).
 Модели агентов наследуются из `.opencode/opencode.json` или global (не переспрашивает).
@@ -64,14 +64,14 @@ Setup-фаза bootstrap нового проекта: `docs/project-context.md` 
 ### `/test-agents`
 
 Проверка всех сабагентов maestro **реальным диспатчем**: каждой из 7 моделей
-(`design`, `haiku`, `sonnet`, `opus`, `fable`, `code-reviewer`, `sanitizer`)
+(`custodian`, `haiku`, `sonnet`, `opus`, `fable`, `code-reviewer`, `sanitizer`)
 даётся одинаковая тривиальная тестовая задача через `task` tool. Возвращает
 сводную таблицу статусов (OK/FAIL с причиной). Конфиги не читаются — проверяется
 реальная работа модели: невалидное имя модели или недоступный провайдер
 проявятся как FAIL при диспатче.
 
 Дополнительно проверяется **confidential-инвариант** (P1/P3, `SECURITY.md`):
-trusted-агенты (`design`, `sanitizer`) читают `docs/confidential/**`, а
+trusted-агенты (`custodian`, `sanitizer`) читают `docs/confidential/**`, а
 primary-сессия при чтении того же файла получает `deny`. Статус инварианта —
 `PASS` / `FAIL` (утечка → СТОП) / `skipped` (нет `docs/confidential/**`).
 
@@ -96,7 +96,7 @@ primary-сессия при чтении того же файла получае
 
 - Все HITL-вопросы и сообщения пользователю — только на русском.
 - Команды, привязанные к конкретному агенту, указывают его в поле `agent:`
-  (например `/maestro-design` → `design`). `/test-agents` — общая команда,
+  (например `/maestro-design` → flow primary brainstorm + custodian Q/A). `/test-agents` — общая команда,
   привязки к агенту нет.
 
 ## 🔗 Связанные разделы

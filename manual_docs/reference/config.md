@@ -36,7 +36,7 @@
 ```json
 {
   "trust": {
-    "design": true,
+    "custodian": true,
     "sanitizer": true
   }
 }
@@ -46,10 +46,10 @@
 |---|---|---|
 | Имя сабагента | `true` | Единственное допустимое значение = trusted. Любое другое → untrusted |
 
-**Имена сабагентов:** `design`, `sanitizer`, `haiku`, `sonnet`, `opus`,
+**Имена сабагентов:** `custodian`, `sanitizer`, `haiku`, `sonnet`, `opus`,
 `fable`, `code-reviewer`.
 
-> `design` и `sanitizer` — trusted по умолчанию (по роли). Изменять не нужно,
+> `custodian` и `sanitizer` — trusted по умолчанию (по роли). Изменять не нужно,
 > если не требуется доверять другим сабагентам.
 
 ### Секция `access_policy`
@@ -166,6 +166,12 @@ File access control: определяет, к каким файлам untrusted 
 В `confidential` маска без `/` закрывает только корневые файлы. Одна и та же
 маска `*.env` в двух секциях ведёт себя по-разному — это намеренно. Для
 рекурсивной защиты секретов используйте `**/*.env`.
+
+**Built-in confidential (OQ-3).** Помимо `confidential.paths`, плагин применяет
+**built-in набор по умолчанию** — `.env`, `.env.*`, `*.pem`, `*.key`, `*.crt`,
+`*.p12`, `*.pfx` — deny для `read`/`write`/`edit` для primary и non-trusted,
+независимо от наличия/содержимого секции `confidential`. Маски без `/` закрывают
+только корневые файлы. `confidential.paths` **расширяет**, а не заменяет built-in.
 
 **Кто считается trusted-субагентом:** вызов `read`/`write`/`edit` к
 confidential-пути, выполненный внутри дочерней сессии субагента, чьё имя есть в
@@ -405,12 +411,13 @@ deny. Trust не наследуется вложенными субагента�
 ```json
 {
   "agent": {
-    "design": {
+    "custodian": {
       "model": "opus",
       "permission": {
-        "edit": "allow",
+        "edit": "deny",
         "bash": "deny",
-        "task": "deny"
+        "task": "deny",
+        "hidden": true
       }
     },
     "sanitizer": {
@@ -473,7 +480,7 @@ deny. Trust не наследуется вложенными субагента�
 
 | Ключ сабагента | Рекомендуемая модель | `edit` | `bash` | `hidden` | Роль |
 |---|---|---|---|---|---|
-| `design` | opus | allow | deny | true | Spec formation (trusted) |
+| `custodian` | opus | deny | deny | true | Q/A-брокер по confidential (trusted), не пишет spec |
 | `sanitizer` | opus (или безопасная) | deny | deny | true | Security review (trusted) |
 | `haiku` | haiku | allow | allow | true | Механические задачи SDD |
 | `sonnet` | sonnet | allow | allow | true | Интеграционные задачи SDD, task-reviewer |

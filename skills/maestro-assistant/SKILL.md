@@ -46,7 +46,7 @@ description: Use when the user asks for help configuring maestro, organizing pro
 
 ```json
 {
-  "trust": { "design": true, "sanitizer": true },
+  "trust": { "custodian": true, "sanitizer": true },
   "access_policy": {
     "version": 1,
     "default": "ask",
@@ -71,7 +71,7 @@ description: Use when the user asks for help configuring maestro, organizing pro
 
 ### Секции (семантика)
 
-- **`trust`** — только trusted сабагенты (`true`). `design` и `sanitizer` — trusted по роли.
+- **`trust`** — только trusted сабагенты (`true`). `custodian` и `sanitizer` — trusted по роли.
   Остальные — untrusted (default). Файл коммитится в git.
 - **`access_policy`** — file access control для untrusted через `read` (`allow`/`ask`/`deny`;
   приоритет deny > ask > allow; default `ask`). Покрывает только `read`; bash/glob/grep — нативные permissions.
@@ -87,7 +87,12 @@ description: Use when the user asks for help configuring maestro, organizing pro
 
 ### Правила вывода (из контекста §3/§5/§12)
 
-- **`trust`:** всегда `design: true`, `sanitizer: true`. Другие — не добавлять, если HITL не просит.
+- **`trust`:** всегда `custodian: true`, `sanitizer: true`. Другие — не добавлять, если HITL не просит.
+  > ⚠️ Снятие `custodian`/`sanitizer` из `trust` (или `false`) делает агента
+  > **неработоспособным** (non-functional): confidential-deny + sanitize промпта.
+  > Это не «понижение доверия» — агент не может выполнять свою роль. Для
+  > custodian: нет чтения confidential; для sanitizer: рекурсия (промпт
+  > санизируется до него). Не удаляйте их из trust без понимания последствий.
 - **`access_policy.allow`:** из §3 (стек) + §5 (домены): каталоги исходников + расширения языков.
 - **`access_policy.deny`:** секреты (`*.env`, `*.env.*`, `*.{pem,key,cert,secret}`).
 - **`sanitizer_whitelist`:** по §12; `extra_uri_schemes` из §3.
