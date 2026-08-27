@@ -37,6 +37,10 @@
 - **P4.** Гигиена конфига: trusted-агенты (`custodian`, `sanitizer`) — на
   локальной/изолированной модели; проверка доступности моделей через
   `@test-agents` перед пайплайном (TODO #23).
+- **P4a.** Снятие `custodian`/`sanitizer` из `trust` (или `false`) → агент
+  **non-functional** (не fallback): confidential-deny + sanitize промпта. Для
+  sanitizer — рекурсия (Ур.1 маскирует raw до него). Это fail-closed по
+  дизайну: доступ блокируется, агент не может выполнять свою роль.
 - **P5.** Плагин `maestro-bootstrap` обязателен (гейт на входе `/maestro`). При
   отключённом плагине защита fail-open — признанный риск (см. §5).
 

@@ -88,6 +88,11 @@ description: Use when the user asks for help configuring maestro, organizing pro
 ### Правила вывода (из контекста §3/§5/§12)
 
 - **`trust`:** всегда `custodian: true`, `sanitizer: true`. Другие — не добавлять, если HITL не просит.
+  > ⚠️ Снятие `custodian`/`sanitizer` из `trust` (или `false`) делает агента
+  > **неработоспособным** (non-functional): confidential-deny + sanitize промпта.
+  > Это не «понижение доверия» — агент не может выполнять свою роль. Для
+  > custodian: нет чтения confidential; для sanitizer: рекурсия (промпт
+  > санизируется до него). Не удаляйте их из trust без понимания последствий.
 - **`access_policy.allow`:** из §3 (стек) + §5 (домены): каталоги исходников + расширения языков.
 - **`access_policy.deny`:** секреты (`*.env`, `*.env.*`, `*.{pem,key,cert,secret}`).
 - **`sanitizer_whitelist`:** по §12; `extra_uri_schemes` из §3.

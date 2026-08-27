@@ -1751,6 +1751,132 @@ describe("maestro-bootstrap confidential audit log", () => {
   });
 });
 
+describe("maestro-bootstrap un-trusted custodian/sanitizer: confidential deny", () => {
+  // Агент с именем custodian, но не в trust-сете → deny (не trusted по имени,
+  // а по maestro.json). Trust = runtime-решение плагина, не свойство агента.
+  let dir, hooks, savedLogEnv;
+  const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR"];
+
+  function makeClient(sessions) {
+    return {
+      session: {
+        get: async ({ path }) => {
+          const rec = sessions[path.id];
+          if (!rec) throw new Error("not found");
+          return { data: rec.session };
+        },
+        messages: async ({ path }) => {
+          const rec = sessions[path.id];
+          if (!rec) return { data: [] };
+          return { data: rec.messages };
+        },
+      },
+    };
+  }
+
+  const rootSessions = {
+    childUntrusted: {
+      session: { id: "childUntrusted", parentID: "root" },
+      messages: [{ info: { role: "assistant", mode: "custodian" }, parts: [] }],
+    },
+  };
+
+  before(async () => {
+    savedLogEnv = {};
+    for (const k of LOG_ENV) { savedLogEnv[k] = process.env[k]; delete process.env[k]; }
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-untrust-"));
+    // custodian: false — агент с именем custodian, но не trusted.
+    fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({
+      trust: { custodian: false },
+      confidential: { paths: ["docs/confidential/**"], trusted: { read: "allow", write: "deny", edit: "deny" } },
+    }));
+    hooks = await MaestroBootstrapPlugin({ directory: dir, client: makeClient(rootSessions) });
+  });
+
+  after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    for (const k of LOG_ENV) {
+      if (savedLogEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedLogEnv[k];
+    }
+  });
+
+  it("un-trusted custodian: confidential read deny (trust: false)", async () => {
+    const out = { args: { filePath: "docs/confidential/secrets.md" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "childUntrusted", callID: "ut-conf" }, out),
+      /confidential:deny/,
+    );
+  });
+
+  it("un-trusted custodian: .env deny (built-in, trust: false)", async () => {
+    const out = { args: { filePath: ".env" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "childUntrusted", callID: "ut-env" }, out),
+      /confidential:deny/,
+    );
+  });
+});
+
+describe("maestro-bootstrap un-trusted custodian/sanitizer: prompt sanitize", () => {
+  // task-санитайзинг проверяет trustedAgents.has(subagent_type) без session
+  // resolution — client mock не нужен (по паттерну "trusted skip", L560).
+  let dir, hooks, savedLogEnv;
+  const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR", "MAESTRO_CONFIG"];
+
+  async function makeHooks(trust) {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), "fab-untrust-pr-"));
+    fs.writeFileSync(path.join(d, "maestro.json"), JSON.stringify({ trust }));
+    const h = await MaestroBootstrapPlugin({ directory: d });
+    return { d, h };
+  }
+
+  before(() => {
+    savedLogEnv = {};
+    for (const k of LOG_ENV) { savedLogEnv[k] = process.env[k]; delete process.env[k]; }
+  });
+
+  after(() => {
+    for (const k of LOG_ENV) {
+      if (savedLogEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedLogEnv[k];
+    }
+  });
+
+  it("un-trusted custodian: dispatch prompt sanitized (trust empty)", async () => {
+    const { d, h } = await makeHooks({});
+    try {
+      const output = { args: { subagent_type: "custodian", prompt: "Check POSTGRES_PASSWORD=s3cr3t" } };
+      await h["tool.execute.before"]({ tool: "task", sessionID: "s", callID: "ut-pr-cust" }, output);
+      assert.doesNotMatch(output.args.prompt, /s3cr3t/, "un-trusted custodian prompt sanitized");
+    } finally {
+      fs.rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it("un-trusted sanitizer: dispatch prompt sanitized — recursion (custodian trusted, sanitizer not)", async () => {
+    const { d, h } = await makeHooks({ custodian: true });
+    try {
+      const output = { args: { subagent_type: "sanitizer", prompt: "Check POSTGRES_PASSWORD=s3cr3t" } };
+      await h["tool.execute.before"]({ tool: "task", sessionID: "s", callID: "ut-pr-san" }, output);
+      assert.doesNotMatch(output.args.prompt, /s3cr3t/, "un-trusted sanitizer prompt sanitized (recursion)");
+    } finally {
+      fs.rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it("trusted custodian: dispatch prompt NOT sanitized (control)", async () => {
+    const { d, h } = await makeHooks({ custodian: true });
+    try {
+      const output = { args: { subagent_type: "custodian", prompt: "Check POSTGRES_PASSWORD=s3cr3t" } };
+      await h["tool.execute.before"]({ tool: "task", sessionID: "s", callID: "ut-pr-ctrl" }, output);
+      assert.match(output.args.prompt, /s3cr3t/, "trusted custodian prompt not sanitized");
+    } finally {
+      fs.rmSync(d, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("maestro-bootstrap confGlobMatch (segment-aware, confidential-only)", () => {
   it("full filename matches only root-level", () => {
     assert.equal(confGlobMatch("maestro.json", "maestro.json"), true);

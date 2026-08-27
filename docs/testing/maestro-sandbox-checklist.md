@@ -19,6 +19,7 @@
 | A4 | Built-in: `confidential.paths` расширяет built-in | ✅ | пользовательский путь не заменяет built-in | |
 | A5 | Маркер `из confidential` не маскируется sanitizer | ✅ | тест в index.test.js (S10) | |
 | A6 | Маркер не ломает sanitize (не ложное срабатывание) | ❌ | маркер не вызывает false-positive маскирование | |
+| A7 | Un-trusted custodian/sanitizer — юнит-тесты плагина | ✅ | `npm test` покрывает `trust.custodian: false` / `trust.sanitizer: false` (confidential deny + prompt sanitize). Парный с D7/D8 | |
 
 ## B. Подготовка спецификации / brainstorm
 | # | Сценарий | Тип | Проверка | Результат |
@@ -58,6 +59,8 @@
 | D4 | Утечка через bash/glob/grep | ❌ | гейт-0, bash-permissions (плагин не покрывает — ручная проверка) | |
 | D5 | trusted-opus (B-5): гарантии сняты → предупреждение | ❌ | при `trust.opus=true` — предупреждение | |
 | D6 | **Маркер-driven (негатив):** правка по `из confidential`-секции НЕ применяется молча | ❌ | обязателен HITL (не silent). Парный с C6. Маркер-детект формален, не эвристика, не обходится «синтаксической согласованностью» | |
+| D7 | Un-trusted custodian: `trust.custodian: false` → confidential deny | ❌ | custodian не читает `docs/confidential/**` и `.env`; промпт санизируется; агент **non-functional** (не fallback). Проверить audit-лог `confidential:deny`. Юнит-тест: Task 1, Step 2-4 | |
+| D8 | Un-trusted sanitizer: `trust.sanitizer: false` → промпт санизируется (рекурсия) | ❌ | промпт sanitizer маскируется Ур.1 до него → не видит raw для пометки; агент **non-functional**. Проверить `sanitizer.redacted` в логе. Юнит-тест: Task 1, Step 5 | |
 
 ## E. Интеграция команд/скилов
 | # | Сценарий | Тип | Проверка | Результат |

@@ -32,6 +32,13 @@ control.
 оркестратора. Поэтому **по умолчанию все субагенты untrusted** (кроме `custodian`
 и `sanitizer`).
 
+> ⚠️ Снятие `custodian`/`sanitizer` из `trust` (или `false`) делает агента
+> **неработоспособным** (non-functional): confidential-deny + sanitize промпта.
+> Это не «понижение доверия» — агент не может выполнять свою роль. Для
+> `custodian`: нет чтения confidential; для `sanitizer`: рекурсия (промпт
+> санизируется Ур.1 до него — он не видит raw для пометки). Не удаляйте их из
+> trust без понимания последствий (см. [`SECURITY.md`](../../../SECURITY.md) → P4a).
+
 Trust-статус управляет **двумя** измерениями защиты:
 
 | Уровень | Sanitize промпта | File access control |

@@ -1083,8 +1083,8 @@ task(
 | `opus` | untrusted | Spec review + правки на Revise. **Если указан trusted (`trust.opus: true`)** — Слои 2 (маскирование промпта) и 3-5 (confidential-deny / access_policy / Ур.1) для него НЕ действуют: opus получает промпт как есть и доступ к файлам по конфигу; гарантия «opus не видит confidential» снимается. Это осознанное решение конфигурации (пользователь расширил доверие). Рекомендация — не помечать opus trusted; при необходимости фиксировать с пониманием последствий. |
 | `code-reviewer` | untrusted | |
 | `fable` | untrusted | |
-| `custodian` | **trusted** | Q/A-брокер по confidential (шаг 8): читает confidential-источники, отвечает primary агрегатами (тип/ограничение/чувствительность/связь) БЕЗ raw-значений. Его промпт при диспатче не санизируется. |
-| `sanitizer` | **trusted** | Security review: единственный, кому разрешено видеть сырые данные (чтобы пометить). Его промпт при диспатче не санизируется — рекурсии нет. |
+| `custodian` | **trusted** | Q/A-брокер по confidential (шаг 8): читает confidential-источники, отвечает primary агрегатами (тип/ограничение/чувствительность/связь) БЕЗ raw-значений. Его промпт при диспатче не санизируется. Если `trust: false`/absent — агент **non-functional** (confidential deny + sanitize промпта); не fallback, а блокировка роли. |
+| `sanitizer` | **trusted** | Security review: единственный, кому разрешено видеть сырые данные (чтобы пометить). Его промпт при диспатче не санизируется — рекурсии нет. Если `trust: false`/absent — агент **non-functional** (рекурсия: промпт санизируется до него); не fallback. |
 
 Значение по умолчанию для любого сабагента — **untrusted**, кроме `custodian` и
 `sanitizer` (trusted по своей роли). Меняется только через `maestro.json`
@@ -1435,6 +1435,7 @@ hash: <sha256 содержимого spec без блоков maestro:*>
 | **Plan gate: revise (12b)** | Вернуться к шагу 11 (writing-plans), доработать план |
 | **Spec review: revise** | re-dispatch `opus` для правок, оркестратор применяет их (Ур.1); при необходимости confidential-контекста — HITL: (a) trusted `custodian` / (b) follow-up. Повторить review (шаг 9); 8.6 только при trusted-контуре (OQ-2). |
 | **Spec review: reject** | Эскалация к пользователю: пересмотр требований или отмена фичи |
+| **`custodian`/`sanitizer`: `confidential:deny`** | Агент untrusted (проверить `maestro.json` → `trust`: absent/`false`) — он non-functional без доверия. Предупредить: "custodian/sanitizer не trusted (проверьте `maestro.json` → `trust`), без доверия агент не может выполнять свою роль" → HITL: (a) обновить конфиг и перезапустить / (b) стоп. Не ретраить как обычную ошибку сабагента. |
 | **Gate: отмена (шаги 7c, 10c, 12c, 17c, D7b)** | STOP + cleanup: удалить feature-ветку (`git branch -D <branch>`) и worktree (`git worktree remove <path>`), если создан. Решение оставить в `regression/cancelled-features.md` (в git) для последующей архивации. **Regression cleanup:** если `entries/<YYYY-MM-DD-<feature>>.md` существует → `git mv entries/X.md released/X.md`, `status: cancelled`, `released: <дата>`, дописать решение в `regression/cancelled-features.md` и закоммитить оба файла (`chore(regression): <feature> cancelled`) (только после шага 12a; до 12a entry ещё не создан — no-op). |
 | **Implementer: BLOCKED** | Оркестратор: (1) дать контекст, (2) мощнее модель, (3) разбить задачу, (4) эскалация |
 | **Implementer: NEEDS_CONTEXT** | Оркестратор предоставляет недостающий контекст, re-dispatch |
