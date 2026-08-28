@@ -71,6 +71,10 @@ dependencies:
     - url: https://github.com/wad-jet/maestro
       path: skills/maestro-design
     - url: https://github.com/wad-jet/maestro
+      path: skills/maestro-assistant
+    - url: https://github.com/wad-jet/maestro
+      path: skills/maestro-feedback-report
+    - url: https://github.com/wad-jet/maestro
       path: skills/manual-docs
     - url: https://github.com/obra/superpowers
       path: skills
