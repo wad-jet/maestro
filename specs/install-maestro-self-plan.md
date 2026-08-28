@@ -101,7 +101,7 @@ AGENTS.md гласит: «это authoring-репо, не целевое при�
 {
   "$schema": "https://opencode.ai/config.json",
   "plugin": [
-    "file:///Users/odemidov/Documents/dev/github/maestro-agent/plugins/maestro-bootstrap/index.js"
+    "maestro-bootstrap@git+https://github.com/wad-jet/maestro.git"
   ],
   "agent": {
     "custodian":      { "model": "akash/zai-org/GLM-5.2", "temperature": 0.1 },
@@ -126,26 +126,26 @@ AGENTS.md гласит: «это authoring-репо, не целевое при�
 > `temperature` берём дефолт по tier (M1). Модели — реальные ID global-конфига,
 > плейсхолдеры запрещены.
 
-> **Путь плагина (уточнение реализации).** `./plugins/maestro-bootstrap/index.js` в
-> `.opencode/opencode.json` резолвится **относительно `.opencode/`** (а не корня
-> проекта) → `.opencode/plugins/maestro-bootstrap/index.js`, которого нет → плагин
-> не загружается (silent fail, `.maestro/logs/` не создаётся). Проверено через
-> `opencode debug config` (`plugin_origins.source` = `.opencode/opencode.json`, spec
-> указывает на `.opencode/plugins/...`). Исправление — **абсолютный путь**
-> `file:///.../plugins/maestro-bootstrap/index.js` (указывает на рабочий `plugins/`
-> в корне, где мы разрабатываем плагин). После правки — перезапуск opencode;
-> при инициализации создаётся `.maestro/logs/maestro-bootstrap-<дата>.log` со
-> строкой `plugin initialized`.
->
-> **Источник плагина — GitHub (штатный способ).** Каноническая установка плагина в
-> целевое приложение — из внешнего git-репозитория:
+> **Источник плагина — GitHub (устранено).** Плагин в этом репо подключён **из внешнего
+> git-репозитория** `wad-jet/maestro`:
 > ```json
 > "plugin": ["maestro-bootstrap@git+https://github.com/wad-jet/maestro.git"]
 > ```
-> (в global `~/.config/opencode/opencode.json` реком. или `.opencode/opencode.json`).
-> Локальный `file://` путь в этом репо — **временное решение для dogfooding** (чтобы
-> правки в `plugins/` подхватывались). При публикации/штатной установке — использовать
-> git-источник `wad-jet/maestro`.
+> Проверено: `opencode debug config` показывает git-источник; `.maestro/plugin-version`
+> = `1.1.0`; строка `plugin initialized` от git-плагина в `.maestro/logs/` свежая.
+> **Следствие:** правки в локальном `plugins/` этого репо НЕ подхватываются — тестируется
+> опубликованная версия с GitHub. Для разработки плагина — временно вернуть локальный
+> путь (см. ниже).
+>
+> **Путь плагина (диагностика и отклонение).** Промежуточно использовался локальный
+> путь `file:///.../plugins/maestro-bootstrap/index.js`. Причина: относительный
+> `./plugins/maestro-bootstrap/index.js` в `.opencode/opencode.json` резолвится
+> **относительно `.opencode/`** (а не корня проекта) → `.opencode/plugins/...`, которого
+> нет → silent fail (`.maestro/logs/` не создаётся; подтверждено через `opencode debug
+> config`, `plugin_origins.source` = `.opencode/opencode.json`). Локальный путь рабочий,
+> но по решению пользователя финализирован git-источник `wad-jet/maestro` (штатный способ
+> установки плагина). Локальный `file://` путь — запасной вариант для разработки плагина
+> с подхватом правок.
 
 ## Задача 3. Целевые артефакты проекта
 
