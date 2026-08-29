@@ -12,16 +12,26 @@ dependencies:
   skills:
     - url: https://github.com/obra/superpowers
       path: skills
-    # - url: https://github.com/wad-jet/maestro
-    #   path: skills
+    - url: https://github.com/wad-jet/maestro
+      path: skills/maestro
+    - url: https://github.com/wad-jet/maestro
+      path: skills/maestro-init
+    - url: https://github.com/wad-jet/maestro
+      path: skills/maestro-design
+    - url: https://github.com/wad-jet/maestro
+      path: skills/maestro-assistant
+    - url: https://github.com/wad-jet/maestro
+      path: skills/maestro-feedback-report
+    - url: https://github.com/wad-jet/maestro
+      path: skills/manual-docs
 
   commands:
-    # - url: https://github.com/wad-jet/maestro
-    #   path: commands
+    - url: https://github.com/wad-jet/maestro
+      path: commands
 
   agents:
-    # - url: https://github.com/wad-jet/maestro
-    #   path: agents
+    - url: https://github.com/wad-jet/maestro
+      path: agents
 
   mcp:
     # - name: sequential-thinking
