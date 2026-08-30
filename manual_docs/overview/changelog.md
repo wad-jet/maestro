@@ -24,6 +24,18 @@
   `~/.cache/opencode/packages/` и НЕ обновляется при перезапуске OpenCode — кэш
   нужно очищать (`maestro-update.sh` или вручную + перезапуск).
 
+### Изменено
+- **Диагностика локального подключения плагина (silent fail).** Относительный
+  путь плагина резолвится **от `.opencode/`**, а не от корня проекта: `./plugins/...`
+  → `.opencode/plugins/...` (нет такого пути) — плагин молча не загружается.
+  Документация (`manual_docs/reference/config.md`, `manual_docs/how-to/install-maestro.md`,
+  `manual_docs/overview/changelog.md`, `plugins/maestro-bootstrap/README.md`,
+  `docs/project-context.md`) и `skills/maestro-init/SKILL.md` теперь рекомендуют
+  `../plugins/...` (подъём к корню) или абсолютный `file:///…`, а также объясняют
+  диагностический признак:
+  отсутствие свежего `.maestro/logs/maestro-bootstrap-<дата>.log` с записью
+  `plugin initialized` означает, что плагин не загружен.
+
 ## [2026-08-27]
 
 ### Изменено

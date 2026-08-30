@@ -150,7 +150,10 @@ OpenCode (`.opencode/opencode.json` или глобальный `~/.config/openc
   Допустим также `.opencode/opencode.json`. Если ключа `plugin` нет → добавить;
   если есть, но spec отсутствует → дописать; если уже есть → skip.
   **Никогда не перезаписывать существующий контент.**
-  Для локального клона репозитория допустим путь `./plugins/maestro-bootstrap/index.js`.
+  Для локального клона репозитория допустим путь `../plugins/maestro-bootstrap/index.js`
+  (относительный путь резолвится от каталога конфига: `.opencode/` для проектного,
+  `~/.config/opencode/` для глобального; `./plugins/...` → `.opencode/plugins/...`,
+  которого нет, — плагин молча не загрузится; при сомнении — абсолютный `file:///…`).
 - **Модели агентов** — в `.opencode/opencode.json` (gitignored) или глобально,
   по M1 (см. ниже). **Плейсхолдеры запрещены.**
 
@@ -275,7 +278,9 @@ regression/cancelled-features.md   (пустой файл с заголовко�
 (`~/.config/opencode/opencode.json` — реком., или `.opencode/opencode.json`) и
 загружается:
 - `"plugin"` содержит git-spec `maestro-bootstrap@git+https://github.com/wad-jet/maestro.git`
-  (или аналог, например локальный путь `./plugins/maestro-bootstrap/index.js`).
+  (или аналог, например локальный путь `../plugins/maestro-bootstrap/index.js` —
+  относительный путь резолвится от `.opencode/`, поэтому `./plugins/...` не работает,
+  используйте `../plugins/...` или абсолютный `file:///…`).
 - Файл плагина существует.
 - **Не блокер:** если плагин не подключён/не загружается — НЕ останавливать init.
   Отметить в своде и `last-run.md`. Пользователь чинит после.

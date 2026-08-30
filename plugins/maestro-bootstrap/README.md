@@ -334,10 +334,17 @@ OpenCode установит плагин автоматически (Bun) при
 ```json
 {
   "plugin": [
-    "./plugins/maestro-bootstrap/index.js"
+    "../plugins/maestro-bootstrap/index.js"
   ]
 }
 ```
+
+> **Silent fail.** Относительный путь плагина резолвится **от каталога конфига**
+> (`.opencode/` для проектного, `~/.config/opencode/` для глобального), не от корня:
+> `./plugins/...` → `.opencode/plugins/...` (нет такого пути) — плагин молча
+> не загрузится. Используйте `../plugins/...` (для проектного конфига) или
+> абсолютный `file:///…`. Признак незагруженного плагина — отсутствие свежего
+> `.maestro/logs/maestro-bootstrap-<дата>.log` с записью `plugin initialized`.
 
 В обоих случаях перезапустите opencode, чтобы плагин подхватился.
 

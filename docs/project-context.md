@@ -112,7 +112,8 @@ design-доки этого репо лежат в `specs/` (корень, пра
 ## 11. Развёртывание и окружения
 
 - **Локальная разработка:** авторский репозиторий, plugin подключается локальным путём
-  (`./plugins/maestro-bootstrap/index.js`) в `.opencode/opencode.json`.
+  `../plugins/maestro-bootstrap/index.js` (относительный путь резолвится от `.opencode/`)
+  в `.opencode/opencode.json`.
 - **Доставка в целевые приложения:** через `agpack` из GitHub `wad-jet/maestro` или
   ручным копированием; публикация — push в `main`.
 
