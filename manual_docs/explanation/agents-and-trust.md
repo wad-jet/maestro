@@ -110,6 +110,12 @@ FINDINGS_FOUND`. Также генерирует/поддерживает сек
 bash/glob/grep — нативные permissions. Файл `maestro.json` (секция `access_policy`)
 формирует сабагент `sanitizer` или вручную; если файла нет — плагин не блокирует (fail-open).
 
+> **`maestro.json` остаётся за `access_policy`** — конфиг не выносится из-под
+> контроля доступа (fail-closed, см. [`SECURITY.md`](../../../SECURITY.md) → P6).
+> Расширение `isPluginMetaFile` касается **только двух semver-метафайлов**
+> (`.maestro/plugin-version`, `.maestro/expected-version`) — предупреждение о
+> версии использует их, не ослабляя доступ к конфигу.
+
 ### Revise-цикл: opus-правки + оркестратор (шаг 10b)
 
 На Revise `opus` (untrusted) **не пишет в spec** (`edit: deny` сохраняется), а

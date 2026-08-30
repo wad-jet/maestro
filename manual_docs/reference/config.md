@@ -12,7 +12,8 @@
 
 Консолидированный конфиг в корне проекта. Коммитится
 в git — он описывает security-политику и trust-модель проекта. Файл состоит из
-четырёх секций: `trust`, `access_policy`, `confidential`, `sanitizer_whitelist`.
+четырёх секций: `trust`, `access_policy`, `confidential`, `sanitizer_whitelist` —
+и поля `expected_version`.
 
 Путь к файлу resolves в таком порядке:
 1. Переменная окружения `MAESTRO_CONFIG`
@@ -28,6 +29,26 @@
 > `maestro.json` и правила вывода секций из контекста живут в скилле `maestro-assistant`
 > (`skills/maestro-assistant/SKILL.md`) — единый источник, доступный `/maestro-init`,
 > `@maestro` и HITL-консультациям. Ниже — человеческие справочные таблицы по секциям.
+
+### Поле `expected_version`
+
+Ожидаемая (целевая) версия maestro-дистрибутива. Пишется `maestro-update.sh` при
+обновлении или `/maestro-init` при первичной установке. Значение — semver
+(напр. `1.1.0`).
+
+```json
+{
+  "expected_version": "1.1.0"
+}
+```
+
+Плагин зеркалирует его в `.maestro/expected-version` (эфемерный метафайл) и
+сравнивает с фактической версией из `.maestro/plugin-version`; при рассинхроне
+`/maestro-version` показывает предупреждение (см. [Команды](commands.md)).
+
+> **ИБ:** поле `expected_version` — часть `maestro.json` и НЕ выносится из-под
+> `access_policy`. Предупреждение о версии использует только `.maestro/`-метафайлы
+> (semver-only), без ослабления доступа к конфигу (см. [`SECURITY.md`](../../../SECURITY.md)).
 
 ### Секция `trust`
 
@@ -565,7 +586,7 @@ MAESTRO_BOOTSTRAP_LOG_DIR="/var/log/maestro"
 
 | Путь | Назначение | В git? |
 |---|---|---|
-| `maestro.json` | Консолидированный конфиг (trust, access_policy, confidential, sanitizer_whitelist) | Да |
+| `maestro.json` | Консолидированный конфиг (trust, access_policy, confidential, sanitizer_whitelist, expected_version) | Да |
 | `.opencode/opencode.json` | Плагин (альтернативно) + модели сабагентов | Нет (в `.gitignore`) |
 | `.opencode/` (скиллы/агенты/команды) | Доставляемая конфигурация средств (вручную/agpack) | Нет (в `.gitignore`) |
 | `docs/project-context.md` | Проектовый контекст шага 0 (14 категорий) | Да |
@@ -575,7 +596,7 @@ MAESTRO_BOOTSTRAP_LOG_DIR="/var/log/maestro"
 | `regression/entries/*.md` | Активные entries регрессии | Да |
 | `regression/released/*.md` | Архив завершённых entries | Да |
 | `regression/cancelled-features.md` | Решения об отменах | Да |
-| `.maestro/**` | SDD progress, last-run.md, logs/, feedback-reports/, plugin-version (эфемерное) | Нет |
+| `.maestro/**` | SDD progress, last-run.md, logs/, feedback-reports/, plugin-version, expected-version (эфемерное) | Нет |
 
 ## 🔗 Связанные разделы
 

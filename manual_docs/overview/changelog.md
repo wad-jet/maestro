@@ -7,6 +7,23 @@
 > Хронология составлена по истории authoring-репо `maestro-agent`. Даты
 > приблизительные (по коммитам).
 
+## [2026-08-30]
+
+### Добавлено
+- **Скрипт `maestro-update.sh`** — обновление maestro одной командой: определяет
+  целевую версию, запускает `agpack sync`, очищает кэш плагина
+  (`~/.cache/opencode/packages/`), пишет `expected_version` в `maestro.json`;
+  опционально `--pin <sha>`.
+- **Поле `expected_version` в `maestro.json`** — ожидаемая версия дистрибутива;
+  пишется `maestro-update.sh` / `/maestro-init`; зеркалируется плагином в
+  `.maestro/expected-version`.
+- **Предупреждение о рассинхроне версий в `/maestro-version`**: команда сравнивает
+  фактическую версию (`.maestro/plugin-version`) с ожидаемой
+  (`.maestro/expected-version`) и предупреждает при расхождении.
+- **Исправлен механизм обновления плагина**: git-плагин кэшируется в
+  `~/.cache/opencode/packages/` и НЕ обновляется при перезапуске OpenCode — кэш
+  нужно очищать (`maestro-update.sh` или вручную + перезапуск).
+
 ## [2026-08-27]
 
 ### Изменено

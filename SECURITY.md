@@ -43,6 +43,11 @@
   дизайну: доступ блокируется, агент не может выполнять свою роль.
 - **P5.** Плагин `maestro-bootstrap` обязателен (гейт на входе `/maestro`). При
   отключённом плагине защита fail-open — признанный риск (см. §5).
+- **P6.** `maestro.json` (в т.ч. `sanitizer_whitelist.patterns`) НЕ выносится
+  из-под `access_policy` — конфиг остаётся под контролем доступа (fail-closed).
+  Предупреждение о версии (`/maestro-version`) использует только
+  `.maestro/`-метафайлы (`.maestro/plugin-version`, `.maestro/expected-version`,
+  semver-only) и НЕ ослабляет доступ к конфигу.
 
 ## 4. Реализованные контрмеры
 

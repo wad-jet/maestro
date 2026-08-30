@@ -37,6 +37,10 @@ bash maestro-init.sh          # опции: --global (плагин в global-к�
 После скрипта — перезапустите OpenCode и выполните [Настройку проекта](../tutorials/setup-project.md)
 (`/maestro-init`).
 
+> **Обновление** после установки — скрипт `maestro-update.sh` (см.
+> [Обновление maestro](update-maestro.md)). `maestro-init.sh` — только первичная
+> установка.
+
 ### Вариант A — через agpack
 
 [`agpack`](https://github.com/PhilippTh/agpack) — пакетный менеджер для AI-кодинг-
@@ -140,6 +144,9 @@ commands/*.md             →  .opencode/commands/*.md
 ```
 
 После подключения — перезапустите OpenCode, чтобы плагин подхватился.
+
+> **Обновление** подключённого плагина — через `maestro-update.sh` (очистка кэша
+> плагина и перезапуск), см. [Обновление maestro](update-maestro.md).
 
 ## После установки
 

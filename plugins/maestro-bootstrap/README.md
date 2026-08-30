@@ -18,6 +18,11 @@ file access control** (не привязан к агенту). Скилл `maest
 - Логирует вызовы `task`-тула (диспатч субагентов) — observability.
 - Логирует ошибки/повторы сессий (`session.error`, `session.status.retry`).
 - Детектит пустой результат субагента (`tool.execute.after.empty_result`).
+- **Версия и предупреждение о рассинхроне**: пишет `.maestro/plugin-version`
+  (фактическая) и зеркалирует `.maestro/expected-version` (ожидаемая из
+  `maestro.json` → `expected_version`). При расхождении логирует warn
+  `plugin.version_mismatch` (используются только semver-метафайлы, без доступа к
+  конфигу).
 
 Плагин **глобальный** — не фильтрует по агенту, работает во всех сессиях.
 
@@ -229,6 +234,8 @@ logs/, feedback-reports/, plugin-version); конфиг проекта — `maes
 Что логируется:
 
 - `plugin initialized` — загрузка плагина (info)
+- `plugin.version_mismatch` — рассинхрон версий: `.maestro/plugin-version` ≠
+  `.maestro/expected-version` (warn)
 - `tool.execute.before` — вызов `task`-тула (info)
 - `tool.execute.after` — завершение `task` + `durationMs` (info)
 - `tool.execute.after.empty_result` — субагент вернул пустой результат (warn)
