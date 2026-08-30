@@ -654,17 +654,20 @@ export function normalizeTarget(root, target) {
 }
 
 /**
- * Whether a target path is the plugin's own version metadata file.
- * `.maestro/plugin-version` — внутренний diagnostic-файл плагина; не подпадает
- * под access_policy/confidential (должен быть всегда читаем для /maestro-version).
- * Содержимое — только semver (не чувствительно). Сопоставление case-sensitive:
- * плагин пишет каноническое имя; несовпадение = fail-closed (файл блокируется).
+ * Whether a target path is one of the plugin's own version metadata files.
+ * `.maestro/plugin-version` и `.maestro/expected-version` — внутренние
+ * diagnostic-файлы плагина; не подпадают под access_policy/confidential
+ * (должны быть всегда читаемы для /maestro-version и проверки рассинхрона).
+ * Содержимое обоих — только semver (не чувствительно). Сопоставление
+ * case-sensitive: плагин пишет каноническое имя; несовпадение = fail-closed
+ * (файл блокируется).
  * @param {string} root    Project root (absolute).
  * @param {string} target  Raw path from tool args.
  * @returns {boolean}
  */
 export function isPluginMetaFile(root, target) {
-  return normalizeTarget(root, target) === ".maestro/plugin-version";
+  const t = normalizeTarget(root, target);
+  return t === ".maestro/plugin-version" || t === ".maestro/expected-version";
 }
 
 /**
@@ -851,6 +854,32 @@ export function writePluginVersionFile(dir, version) {
   }
 }
 
+/**
+ * Write the mirrored expected version to `<dir>/.maestro/expected-version`.
+ * Плагин читает `maestro.json` нативно (loadMaestroConfig, fs без access-гейта)
+ * и зеркалит `expected_version` в `.maestro/`-метафайл — он вынесен из
+ * `access_policy` через isPluginMetaFile. `.maestro/expected-version` НЕ содержит
+ * чувствительных данных (semver). Провал записи молча игнорируется (fail-soft).
+ * Если expected_version отсутствует/не строка — метафайл удаляется (чтобы не
+ * дать вечный ложный mismatch). @param {string} dir @param {string|undefined} expected
+ */
+export function writeExpectedVersionFile(dir, expected) {
+  const target = path.join(dir, ".maestro/expected-version");
+  try {
+    fs.mkdirSync(path.join(dir, ".maestro"), { recursive: true });
+    if (typeof expected === "string" && expected) {
+      fs.writeFileSync(target, expected + "\n", "utf8");
+    } else {
+      fs.rmSync(target, { force: true });
+    }
+  } catch (err) {
+    // fail-soft: не роняем сессию из-за второстепенного метафайла, НО логируем
+    // причину (по прецеденту `audit write failed` / `init failed` в плагине),
+    // чтобы не было тихой потери диагностики версии.
+    console.error("[maestro-bootstrap] write expected-version failed:", err instanceof Error ? err.message : err);
+  }
+}
+
 // Ограниченная карта: при переполнении вытесняет самую старую запись по
 // порядку вставки — защита от неограниченного роста в долгоживущем процессе.
 export function makeBoundedMap(max = 1024) {
@@ -896,6 +925,15 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
     });
   }
   writePluginVersionFile(root, version);
+  writeExpectedVersionFile(root, config?.expected_version);
+
+  const expectedVersion = typeof config?.expected_version === "string" ? config.expected_version : undefined;
+  if (version && expectedVersion && version !== expectedVersion) {
+    const msg = `[maestro-bootstrap] ВНИМАНИЕ: плагин версии ${version}, ожидается ${expectedVersion} (maestro.json). Кэш плагина, вероятно, устарел — выполните maestro-update.sh и перезапустите opencode.`;
+    log.warn("plugin.version_mismatch", { current: version, expected: expectedVersion });
+    console.warn(msg);
+  }
+
   log.info("plugin initialized", {
     version,
     logDir: log.logDir,

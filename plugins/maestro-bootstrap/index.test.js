@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile } from "./core.js";
+import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, writeExpectedVersionFile, isPluginMetaFile } from "./core.js";
 
 function readLogs(dir, filePrefix = "maestro-bootstrap") {
   const logDir = path.join(dir, ".maestro/logs");
@@ -1546,6 +1546,48 @@ describe("maestro-bootstrap plugin version", () => {
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }
+  });
+
+  it("isPluginMetaFile covers expected-version too", () => {
+    const dir = process.cwd();
+    assert.equal(isPluginMetaFile(dir, ".maestro/plugin-version"), true);
+    assert.equal(isPluginMetaFile(dir, ".maestro/expected-version"), true);
+    assert.equal(isPluginMetaFile(dir, ".maestro/logs/x.log"), false);
+  });
+
+  it("writeExpectedVersionFile writes and removes mirror", () => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), "fab-expected-"));
+    writeExpectedVersionFile(d, "1.2.0");
+    assert.equal(fs.readFileSync(path.join(d, ".maestro/expected-version"), "utf8"), "1.2.0\n");
+    writeExpectedVersionFile(d, undefined);
+    assert.equal(fs.existsSync(path.join(d, ".maestro/expected-version")), false);
+    fs.rmSync(d, { recursive: true, force: true });
+  });
+
+  it("read of .maestro/expected-version is NOT blocked by restrictive access_policy", async () => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), "fab-expected-acc-"));
+    fs.writeFileSync(path.join(d, "maestro.json"), JSON.stringify({
+      access_policy: { version: 1, default: "deny", allow: [], ask: [], deny: ["**"] },
+    }));
+    const hooks = await MaestroBootstrapPlugin({ directory: d });
+    const out = { args: { filePath: ".maestro/expected-version" } };
+    await hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c1" }, out);
+    assert.ok(true, "expected-version read must not be blocked");
+    fs.rmSync(d, { recursive: true, force: true });
+  });
+
+  it("read of maestro.json IS still blocked by restrictive access_policy (ИБ)", async () => {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), "fab-json-acc-"));
+    fs.writeFileSync(path.join(d, "maestro.json"), JSON.stringify({
+      access_policy: { version: 1, default: "deny", allow: [], ask: [], deny: ["**"] },
+    }));
+    const hooks = await MaestroBootstrapPlugin({ directory: d });
+    const out = { args: { filePath: "maestro.json" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c2" }, out),
+      /access-policy/,
+    );
+    fs.rmSync(d, { recursive: true, force: true });
   });
 });
 
