@@ -47,6 +47,7 @@ description: Use when the user asks for help configuring maestro, organizing pro
 ```json
 {
   "trust": { "custodian": true, "sanitizer": true },
+  "expected_version": "1.2.0",
   "access_policy": {
     "version": 1,
     "default": "ask",
@@ -78,6 +79,7 @@ description: Use when the user asks for help configuring maestro, organizing pro
 - **`confidential`** — защита конфиденциальных путей (жёстче access_policy). Дефолт
   `paths: ["docs/confidential/**"]`; trusted читает по умолчанию, запись/редактирование deny
   (выдаются явно). Primary/untrusted — всегда deny.
+- **`expected_version`** — ожидаемая версия дистрибутива maestro (пишется `maestro-update.sh` / `/maestro-init`). Опционально; плагин зеркалирует её в `.maestro/expected-version` и предупреждает при рассинхроне с фактической.
 - **`confidential.paths`** — принимает папки, отдельные файлы по полному имени
   и по маске, включая корневую папку. Сегментная семантика: `**` = 0+ сегментов
   (покрывает корень), `*`/`?` — в пределах сегмента (не через `/`), маска без `/`
