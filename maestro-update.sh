@@ -72,7 +72,8 @@ if [[ -n "$PIN" ]]; then
   MAESTRO_INIT_AGPACK="$(git -C "$TMP_DIR" show "$PIN:maestro-init/agpack.yml" 2>/dev/null || true)"
 else
   git clone -q --depth 1 "$REPO_URL.git" "$TMP_DIR" || die "не удалось клонировать $REPO_URL"
-  TARGET_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$TMP_DIR/package.json")"
+  TARGET_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$TMP_DIR/package.json" 2>/dev/null)" \
+    || die "в $REPO_URL нет валидного package.json с version"
   MAESTRO_INIT_AGPACK="$(cat "$TMP_DIR/maestro-init/agpack.yml" 2>/dev/null || true)"
 fi
 info "целевая версия: $TARGET_VERSION"
@@ -139,8 +140,14 @@ if [[ -f "maestro.json" ]]; then
 import json, sys
 p = "maestro.json"
 target = sys.argv[1]
-with open(p, "r", encoding="utf-8") as f:
-    data = json.load(f)
+try:
+    with open(p, "r", encoding="utf-8") as f:
+        content = f.read().strip()
+        if content:
+            data = json.loads(content)
+except (json.JSONDecodeError, OSError) as e:
+    sys.stderr.write("maestro-update: не могу прочитать %s: %s\n" % (p, e))
+    sys.exit(1)
 data["expected_version"] = target
 with open(p, "w", encoding="utf-8") as f:
     json.dump(data, f, ensure_ascii=False, indent=2)
@@ -153,7 +160,7 @@ fi
 
 # --- 6. Пин версии (опционально) ---------------------------------------------
 
-CONFIG_FILE="$HOME/.config/opencode/opencode.json"
+CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/opencode.json"
 [[ "$GLOBAL_MODE" -eq 0 ]] && CONFIG_FILE=".opencode/opencode.json"
 
 python3 - "$CONFIG_FILE" "$PLUGIN_SPEC" "$PIN" <<'PY'
@@ -161,10 +168,14 @@ import json, os, sys
 config_path, plugin_spec, pin = sys.argv[1], sys.argv[2], sys.argv[3] or ""
 data = {}
 if os.path.exists(config_path):
-    with open(config_path, "r", encoding="utf-8") as f:
-        c = f.read().strip()
-        if c:
-            data = json.loads(c)
+    try:
+        with open(config_path, "r", encoding="utf-8") as f:
+            c = f.read().strip()
+            if c:
+                data = json.loads(c)
+    except (json.JSONDecodeError, OSError) as e:
+        sys.stderr.write("maestro-update: не могу прочитать %s: %s\n" % (config_path, e))
+        sys.exit(1)
 plugins = data.get("plugin") or []
 new_plugins = []
 for p in plugins:
