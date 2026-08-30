@@ -82,33 +82,105 @@ info "целевая версия: $TARGET_VERSION"
 
 if [[ -n "$MAESTRO_INIT_AGPACK" ]]; then
   python3 - "$MAESTRO_INIT_AGPACK" <<'PY'
+import re
 import sys
+
+# Построчный текстовый merge-add: добавляет отсутствующие (url, path)-записи из
+# канонического maestro-init/agpack.yml в соответствующие секции `dependencies.*`
+# проекта. Сохраняет комментарии и существующие записи без изменений. Не требует
+# pyyaml (чистый текст). При ошибке — только sync (деградация из плана).
+canon_text = sys.argv[1]
+
+def parse_section(text, section):
+    """Извлечь (url, path)-пары из YAML-секции без парсера."""
+    recs = []
+    cur = None
+    for line in text.splitlines():
+        m = re.match(r"^\s{4}-\s*url:\s*(\S+)", line)
+        if m:
+            cur = {"url": m.group(1).strip("\"'"), "path": None}
+            continue
+        if cur is not None and re.match(r"^\s{6}path:\s*(\S+)", line):
+            cur["path"] = re.match(r"^\s{6}path:\s*(\S+)", line).group(1).strip("\"'")
+        if cur is not None and cur["path"] is not None:
+            recs.append(cur)
+            cur = None
+    return recs
+
+# Парсим канон по секциям.
+canon_sections = {}
+for sec in ("skills", "commands", "agents"):
+    m = re.search(r"^\s{2}%s:" % sec, canon_text, re.M)
+    if m:
+        block = canon_text[m.end():]
+        nxt = re.search(r"^\s{2}\w+:", block, re.M)
+        block = block[:nxt.start()] if nxt else block
+        canon_sections[sec] = parse_section(block, sec)
+
 try:
-    import yaml as _y
-    canon = _y.safe_load(sys.argv[1]) or {}
-    records = []
-    for section in ("skills", "commands", "agents"):
-        for d in (canon.get("dependencies", {}).get(section) or []):
-            if isinstance(d, dict) and d.get("url") and d.get("path"):
-                records.append((d["url"], d["path"]))
     with open("agpack.yml", "r", encoding="utf-8") as f:
-        text = f.read()
-    additions = []
-    for url, path in records:
-        if ("path: %s" % path) not in text:
-            additions.append("    - url: %s" % url)
-            additions.append("      path: %s" % path)
-    if additions:
-        if text and not text.endswith("\n"):
-            text += "\n"
-        text += "\n".join(additions) + "\n"
-        with open("agpack.yml", "w", encoding="utf-8") as f:
-            f.write(text)
-        print("maestro-update: agpack.yml дополнен каноническими записями")
-    else:
-        print("maestro-update: agpack.yml актуален")
-except Exception as e:
-    sys.stderr.write("maestro-update: не удалось дополнить agpack.yml (формат не распознан) — только sync: %s\n" % e)
+        lines = f.read().splitlines()
+except OSError as e:
+    sys.stderr.write("maestro-update: не могу прочитать agpack.yml: %s\n" % e)
+    sys.exit(1)
+
+def section_range(lines, section):
+    """Найти диапазон строк секции `dependencies.<section>` (индексы вставки)."""
+    in_deps = False
+    for i, ln in enumerate(lines):
+        if re.match(r"^dependencies:\s*$", ln):
+            in_deps = True
+            continue
+        if in_deps and re.match(r"^\s{2}\w+:\s*$", ln):
+            if ln.strip() == section + ":":
+                j = i + 1
+                while j < len(lines) and (lines[j].strip() == "" or lines[j].startswith("    ") or lines[j].startswith("#") or re.match(r"^\s{4}-", lines[j])):
+                    j += 1
+                return i, j
+            elif ln.strip() not in ("skills:", "commands:", "agents:", "mcp:"):
+                return None, None
+    return None, None
+
+changed = False
+for sec, recs in canon_sections.items():
+    start, end = section_range(lines, sec)
+    existing = set()
+    for ln in lines:
+        m = re.match(r"^\s{6}path:\s*(\S+)", ln)
+        if m:
+            existing.add(m.group(1).strip("\"'"))
+    if start is None:
+        # Секции нет — вставить новую после `dependencies:`.
+        dep_i = next((i for i, ln in enumerate(lines) if re.match(r"^dependencies:\s*$", ln)), None)
+        if dep_i is None:
+            continue
+        # Собрать блок вставки корректно.
+        add = ["  %s:" % sec]
+        for r in recs:
+            if r["path"] in existing:
+                continue
+            add.append("    - url: %s" % r["url"])
+            add.append("      path: %s" % r["path"])
+        if len(add) > 1:
+            lines[dep_i + 1:dep_i + 1] = add
+            changed = True
+        continue
+    add = []
+    for r in recs:
+        if r["path"] in existing:
+            continue
+        add.append("    - url: %s" % r["url"])
+        add.append("      path: %s" % r["path"])
+    if add:
+        lines[start + 1:start + 1] = add
+        changed = True
+
+if changed:
+    with open("agpack.yml", "w", encoding="utf-8") as f:
+        f.write("\n".join(lines) + "\n")
+    print("maestro-update: agpack.yml дополнен каноническими записями")
+else:
+    print("maestro-update: agpack.yml актуален")
 PY
 else
   info "maestro-init/agpack.yml не найден в источнике — пропускаю merge-add"
