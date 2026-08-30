@@ -82,30 +82,33 @@ info "целевая версия: $TARGET_VERSION"
 
 if [[ -n "$MAESTRO_INIT_AGPACK" ]]; then
   python3 - "$MAESTRO_INIT_AGPACK" <<'PY'
-import json, sys
-canon_text = sys.argv[1]
+import sys
 try:
     import yaml as _y
-    canon = _y.safe_load(canon_text)
-    with open("agpack.yml") as f:
-        proj = _y.safe_load(f) or {}
-    changed = False
+    canon = _y.safe_load(sys.argv[1]) or {}
+    records = []
     for section in ("skills", "commands", "agents"):
-        cs = canon.get("dependencies", {}).get(section) or []
-        ps = proj.setdefault("dependencies", {}).setdefault(section, [])
-        existing = {(d.get("url"), d.get("path")) for d in ps}
-        for d in cs:
-            key = (d.get("url"), d.get("path"))
-            if key not in existing:
-                ps.append(d); existing.add(key); changed = True
-    if changed:
-        with open("agpack.yml", "w") as f:
-            _y.safe_dump(proj, f, sort_keys=False, allow_unicode=True)
+        for d in (canon.get("dependencies", {}).get(section) or []):
+            if isinstance(d, dict) and d.get("url") and d.get("path"):
+                records.append((d["url"], d["path"]))
+    with open("agpack.yml", "r", encoding="utf-8") as f:
+        text = f.read()
+    additions = []
+    for url, path in records:
+        if ("path: %s" % path) not in text:
+            additions.append("    - url: %s" % url)
+            additions.append("      path: %s" % path)
+    if additions:
+        if text and not text.endswith("\n"):
+            text += "\n"
+        text += "\n".join(additions) + "\n"
+        with open("agpack.yml", "w", encoding="utf-8") as f:
+            f.write(text)
         print("maestro-update: agpack.yml дополнен каноническими записями")
     else:
         print("maestro-update: agpack.yml актуален")
-except ImportError:
-    print("maestro-update: python-yaml не найден — пропускаю merge-add agpack.yml (только sync)")
+except Exception as e:
+    sys.stderr.write("maestro-update: не удалось дополнить agpack.yml (формат не распознан) — только sync: %s\n" % e)
 PY
 else
   info "maestro-init/agpack.yml не найден в источнике — пропускаю merge-add"
@@ -117,7 +120,7 @@ info "запускаю 'agpack sync'..."
 # --- 4. Очистка кэша плагина OpenCode ---------------------------------------
 
 CACHE_BASE="${XDG_CACHE_HOME:-$HOME/.cache}/opencode/packages"
-CACHE_PREFIX="maestro-bootstrap@git+https:"
+CACHE_PREFIX="maestro-bootstrap@git+https://github.com/wad-jet/maestro"
 info "очищаю кэш плагина OpenCode: $CACHE_BASE/${CACHE_PREFIX}*"
 MATCHED=0
 if [[ -d "$CACHE_BASE" ]]; then
@@ -160,8 +163,15 @@ fi
 
 # --- 6. Пин версии (опционально) ---------------------------------------------
 
-CONFIG_FILE="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/opencode.json"
-[[ "$GLOBAL_MODE" -eq 0 ]] && CONFIG_FILE=".opencode/opencode.json"
+GLOBAL_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/opencode.json"
+if [[ "$GLOBAL_MODE" -eq 1 ]]; then
+  CONFIG_FILE="$GLOBAL_CONFIG"
+elif [[ -f "$GLOBAL_CONFIG" ]] && grep -qF "$PLUGIN_SPEC" "$GLOBAL_CONFIG"; then
+  CONFIG_FILE="$GLOBAL_CONFIG"
+  info "плагин найден в глобальном конфиге: $CONFIG_FILE"
+else
+  CONFIG_FILE=".opencode/opencode.json"
+fi
 
 python3 - "$CONFIG_FILE" "$PLUGIN_SPEC" "$PIN" <<'PY'
 import json, os, sys
