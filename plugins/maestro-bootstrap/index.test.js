@@ -1548,6 +1548,24 @@ describe("maestro-bootstrap plugin version", () => {
     }
   });
 
+  it("logs plugin.version_mismatch when expected_version differs from actual version", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-ver-mismatch-"));
+    try {
+      fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({
+        expected_version: "0.0.1",
+      }));
+      await MaestroBootstrapPlugin({ directory: dir });
+      const entries = readLogs(dir);
+      const mismatch = entries.find((e) => e.msg === "plugin.version_mismatch");
+      assert.ok(mismatch, "plugin.version_mismatch entry must exist");
+      assert.equal(mismatch.level, "warn");
+      assert.equal(mismatch.expected, "0.0.1");
+      assert.match(mismatch.current, /^\d+\.\d+\.\d+$/);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("isPluginMetaFile covers expected-version too", () => {
     const dir = process.cwd();
     assert.equal(isPluginMetaFile(dir, ".maestro/plugin-version"), true);
