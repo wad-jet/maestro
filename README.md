@@ -52,7 +52,8 @@
 
 **Самый простой способ — скрипт `maestro-init.sh`** (новый или существующий проект,
 где maestro ранее не применялся). Он устанавливает `agpack`, создаёт `agpack.yml`,
-запускает `agpack sync` и подключает плагин `maestro-bootstrap`:
+запускает `agpack sync`, подключает плагин `maestro-bootstrap` и загружает
+`maestro-update.sh` (для будущих обновлений):
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/wad-jet/maestro/main/maestro-init.sh -o maestro-init.sh
@@ -75,7 +76,7 @@ bash maestro-init.sh
 [Первая установка maestro](manual_docs/how-to/install-maestro.md).
 
 > **Версия плагина.** Единственный источник версии — **корневой** `package.json`
-> репозитория (сейчас `1.1.0`). `readPluginVersion()` резолвит его относительно
+> репозитория (сейчас `1.2.1`). `readPluginVersion()` резолвит его относительно
 > `core.js` (`plugins/maestro-bootstrap/` → `../../package.json`, фиксированная
 > глубина макета репо). Не копируйте папку плагина отдельно от репозитория —
 > версия не определится (`/maestro-version` сообщит «не инициализирован»).

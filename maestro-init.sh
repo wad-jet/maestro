@@ -9,7 +9,8 @@
 #   3. Создаёт agpack.yml (идемпотентно, не перезаписывает существующий).
 #   4. Запускает `agpack sync` — разворачивает skills/commands/agents в .opencode/.
 #   5. Подключает плагин opencode `maestro-bootstrap` (мерж, без перезаписи).
-#   6. Выдаёт краткую инструкцию по запуску инициализации в opencode.
+#   6. Загружает `maestro-update.sh` (для будущих обновлений maestro).
+#   7. Выдаёт краткую инструкцию по запуску инициализации в opencode.
 #
 # Совместимость: bash 3.2+ (macOS GNU bash 3.2.57); bash-на-macOS/Linux.
 # Windows — через WSL/Git Bash (см. оговорку в доке).
@@ -28,6 +29,7 @@ set -euo pipefail
 PLUGIN_SPEC="maestro-bootstrap@git+https://github.com/wad-jet/maestro.git"
 REPO_URL="https://github.com/wad-jet/maestro"
 RAW_URL="https://raw.githubusercontent.com/wad-jet/maestro/main/maestro-init.sh"
+MAESTRO_UPDATE_RAW_URL="https://raw.githubusercontent.com/wad-jet/maestro/main/maestro-update.sh"
 
 # --- Вспомогательные функции ----------------------------------------------
 
@@ -219,7 +221,21 @@ else:
     print("maestro-init: плагин добавлен в конфиг opencode")
 PY
 
-# --- 6. Инструкция -----------------------------------------------------------
+# --- 6. Загрузка maestro-update.sh (идемпотентно, всегда перезаписывает) -----
+
+if command -v curl >/dev/null 2>&1; then
+  info "загружаю maestro-update.sh..."
+  curl -fsSL "$MAESTRO_UPDATE_RAW_URL" -o maestro-update.sh \
+    || warn "не удалось загрузить maestro-update.sh (curl): продолжаю без него — скачайте вручную: $MAESTRO_UPDATE_RAW_URL"
+elif command -v wget >/dev/null 2>&1; then
+  info "загружаю maestro-update.sh (wget)..."
+  wget -qO maestro-update.sh "$MAESTRO_UPDATE_RAW_URL" \
+    || warn "не удалось загрузить maestro-update.sh (wget): продолжаю без него — скачайте вручную: $MAESTRO_UPDATE_RAW_URL"
+else
+  warn "не найден 'curl'/'wget' — maestro-update.sh не загружен. Скачайте вручную: $MAESTRO_UPDATE_RAW_URL"
+fi
+
+# --- 7. Инструкция -----------------------------------------------------------
 
 cat <<EOT
 
@@ -227,6 +243,7 @@ cat <<EOT
   - agpack.yml: создан/существующий
   - .opencode/: развёрнуты skills/commands/agents (agpack sync)
   - плагин: $PLUGIN_SPEC → $CONFIG_FILE
+  - maestro-update.sh: загружен (для будущих обновлений maestro)
 
 Что дальше:
   1. Запустите opencode в этом каталоге:  opencode
@@ -236,6 +253,8 @@ cat <<EOT
   4. Запуск фичи:                          /maestro "ваша задача"
 
 Перезапустите opencode, чтобы плагин maestro-bootstrap подхватился.
+
+Обновление maestro в дальнейшем:  bash maestro-update.sh  (см. обновление — одна команда).
 
 Русский — рабочий язык. Источник: $REPO_URL
 Обновление скрипта: $RAW_URL
