@@ -138,10 +138,19 @@ commands/*.md             →  .opencode/commands/*.md
 ```json
 {
   "plugin": [
-    "./plugins/maestro-bootstrap/index.js"
+    "../plugins/maestro-bootstrap/index.js"
   ]
 }
 ```
+
+> **Подводный камень (silent fail).** Относительный путь плагина резолвится
+> **от каталога конфига** (`.opencode/` для проектного или `~/.config/opencode/`
+> для глобального), а не от корня проекта: `./plugins/...` станет
+> `.opencode/plugins/...` (нет такого пути) — плагин молча не загрузится.
+> Используйте `../plugins/...` (подъём к корню; работает для проектного
+> `.opencode/opencode.json`) или абсолютный `file:///…`. Если плагин не загружен —
+> в `.maestro/logs/` нет свежего `maestro-bootstrap-<дата>.log` с записью
+> `plugin initialized`.
 
 После подключения — перезапустите OpenCode, чтобы плагин подхватился.
 
