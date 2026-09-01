@@ -21,7 +21,7 @@
 
 > `agpack` не покрывает плагин и конфиги (`maestro.json`, `.gitignore`,
 > `regression/`; модели — `.opencode/opencode.json` или global) — их создаёт
-> `/maestro-init`. Скиллы/команды/агенты (`агpack`) и плагин/конфиги доставляются
+> `/maestro-new`. Скиллы/команды/агенты (`агpack`) и плагин/конфиги доставляются
 > разными механизмами.
 
 ## 🔍 Единая версия и как её узнать
@@ -50,7 +50,7 @@ bash maestro-update.sh          # опции: --pin <sha>, --global, --help
 ```
 
 > Скрипт `maestro-update.sh` уже загружен в проект при первичной установке
-> (`maestro-init.sh` скачивает его автоматически). Если его нет — возьмите из
+> (`maestro-install.sh` скачивает его автоматически). Если его нет — возьмите из
 > репозитория:
 > ```bash
 > curl -fsSL https://raw.githubusercontent.com/wad-jet/maestro/main/maestro-update.sh -o maestro-update.sh
@@ -104,13 +104,13 @@ rm -rf ~/.cache/opencode/packages/maestro-bootstrap@git+https:...
 > **Не копируйте папку плагина отдельно от репозитория** — версия не определится
 > (`/maestro-version` сообщит «не инициализирован»).
 >
-> **`maestro-init.sh` — только первичная установка.** Для обновления используйте
-> `maestro-update.sh`, а не `maestro-init.sh` (тот рассчитан на первый bootstrap
+> **`maestro-install.sh` — только первичная установка.** Для обновления используйте
+> `maestro-update.sh`, а не `maestro-install.sh` (тот рассчитан на первый bootstrap
 > нового проекта).
 >
 > **Merge-add-семантика `agpack`:** `maestro-update.sh` добавляет отсутствующие
 > записи в `agpack.yml`, но **не удаляет** устаревшие. Конвенция: каждый новый
-> компонент (skill/command/agent) релиза добавляется в `maestro-init/agpack.yml`.
+> компонент (skill/command/agent) релиза добавляется в `maestro-install/agpack.yml`.
 
 ### Шаг 3: Контроль обновления
 

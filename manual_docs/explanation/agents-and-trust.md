@@ -10,7 +10,7 @@ control.
 
 ## 📖 Роли агентов
 
-Оркестрация — через скилл `maestro` в любой primary-сессии (вход `/maestro`);
+Оркестрация — через скилл `maestro` в любой primary-сессии (вход `/maestro-init`);
 отдельного primary-агента `maestro` нет. Субагенты (вызываются через `task`):
 
 | Агент | Роль | Изменяет файлы? |
@@ -57,7 +57,7 @@ Trust-статус управляет **двумя** измерениями за
 `trust` перечисляет **только trusted** сабагентов. Всё, чего нет в файле —
 untrusted. Если файла нет — все untrusted.
 
-`maestro.json` **генерируется `/maestro-init`** (задача «Конфигурация maestro», по канону
+`maestro.json` **генерируется `/maestro-new`** (задача «Конфигурация maestro», по канону
 скилла `maestro-assistant`) и коммитится в git. Настройка/консультации по конфигурации в
 течение жизни проекта — через `/maestro-assistant`. `custodian` и `sanitizer` — trusted по роли;
 модели у них **независимые** (trusted — атрибут безопасности, не мощность).
@@ -223,7 +223,7 @@ untrusted работают по очищенным артефактам, а до
 ### Жёсткий гейт «плагин работает»
 
 Чтобы пользователь не работал с confidential-данными при отключённом плагине,
-на входе `@maestro`, `@maestro-design`, `@maestro-feedback-report` (в maestro-
+на входе `@maestro-init`, `@maestro-design`, `@maestro-feedback-report` (в maestro-
 проекте с `maestro.json`) выполняется гейт: самый свежий
 `.maestro/logs/maestro-bootstrap-<дата>.log` должен содержать свежую запись
 `plugin initialized` (timestamp не старше 24 часов). При невыполнении — жёсткий

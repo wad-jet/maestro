@@ -41,7 +41,7 @@ plugins/maestro-bootstrap/     ← ESM-плагин OpenCode
 ## 💡 Примеры
 
 - **Изменить описание субагента:** правьте `agents/haiku.md`, доставьте через репо/`agpack`.
-- **Изменить команду входа:** правьте `commands/maestro.md`, доставьте через репо/`agpack`.
+- **Изменить команду входа:** правьте `commands/maestro-init.md`, доставьте через репо/`agpack`.
 - **Добавить команду:** создайте `commands/foo.md`, доставьте через репо/`agpack`.
 - **Изменить pipeline:** правьте `skills/maestro/SKILL.md`, доставьте через репо/`agpack`.
 - **Настроить конфигурацию/структуру/контекст проекта:** используйте `/maestro-assistant` —

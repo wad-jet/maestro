@@ -2,7 +2,7 @@
 
 Документация по использованию скилла `maestro` — оркестратора сквозной
 реализации фич и багфиксов в целевом приложении (design → spec → plan →
-SDD → review → docs, с HITL-гейтами). Вход — команда `/maestro` в любой
+SDD → review → docs, с HITL-гейтами). Вход — команда `/maestro-init` в любой
 primary-сессии.
 
 ## Быстрый старт
@@ -19,7 +19,7 @@ primary-сессии.
 
 ## Tutorials (обучение)
 
-- [Настройка проекта для maestro](tutorials/setup-project.md) — подготовка проекта (`/maestro-init`, `/maestro-design`, модели по тирам)
+- [Настройка проекта для maestro](tutorials/setup-project.md) — подготовка проекта (`/maestro-new`, `/maestro-design`, модели по тирам)
 - [Запуск первой фичи](tutorials/run-first-feature.md) — полный цикл 0→18
 
 ## How-to (инструкции)

@@ -10,7 +10,7 @@
 
 ## 📖 Команды
 
-### `/maestro`
+### `/maestro-init`
 
 Вход в pipeline: загружает скилл `maestro` и следует pipeline из SKILL.md.
 Работает в любой primary-сессии (привязки к агенту нет).
@@ -31,20 +31,20 @@
 /regression purge preview            # предпросмотр удаляемого
 ```
 
-### `/maestro-init`
+### `/maestro-new`
 
 Setup-фаза bootstrap нового проекта: `docs/project-context.md` (14 категорий),
 конфигурация maestro (`maestro.json`, плагин+модели в `.opencode/opencode.json`
 или global, `.gitignore` — весь `.maestro/` и `.opencode/`), каталоги pipeline
 (`.maestro/` — весь в `.gitignore`,
 `docs/superpowers/{specs,plans}/`),
-`regression/` структура. Использует скилл `maestro-init`.
+`regression/` структура. Использует скилл `maestro-new`.
 Проверяет предусловия: `AGENTS.md` (встроенный `/init`), скилы superpowers
 (предлагает установку через HITL), плагин `maestro-bootstrap` (не блокер).
 
 ### `/maestro-design`
 
-Дизайн/архитектура, scaffold и roadmap после `/maestro-init`:
+Дизайн/архитектура, scaffold и roadmap после `/maestro-new`:
 - (a) spec через **primary brainstorm (superpowers:brainstorming) + custodian Q/A (trusted)** → spec пишет primary → `docs/superpowers/specs/YYYY-MM-DD-<project>-design.md`; опц. spec-review (`opus`).
 - (b) scaffold — каркас кода через `implementer-prompt.md` (TDD), диспатч `haiku`/`sonnet`.
 - (c) `docs/roadmap.md` (MVP + этапы).
@@ -91,7 +91,7 @@ primary-сессия при чтении того же файла получае
 `.opencode/opencode.json` / global (плагин, модели), структуру каталогов,
 актуализацию `project-context.md`, консультации по
 правилам работы maestro. Плагин-гейт не требуется. Если запрос требует изменения кода/spec/плана
-или запуска pipeline — редирект на `@maestro`/`/maestro-design`/`@regression`.
+или запуска pipeline — редирект на `@maestro-init`/`/maestro-design`/`@regression`.
 
 ## 💡 Примечания
 

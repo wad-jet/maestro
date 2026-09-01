@@ -27,13 +27,13 @@
 
 > **Генерация/настройка конфига — через `/maestro-assistant`.** Полный JSON-канон
 > `maestro.json` и правила вывода секций из контекста живут в скилле `maestro-assistant`
-> (`skills/maestro-assistant/SKILL.md`) — единый источник, доступный `/maestro-init`,
-> `@maestro` и HITL-консультациям. Ниже — человеческие справочные таблицы по секциям.
+> (`skills/maestro-assistant/SKILL.md`) — единый источник, доступный `/maestro-new`,
+> `@maestro-init` и HITL-консультациям. Ниже — человеческие справочные таблицы по секциям.
 
 ### Поле `expected_version`
 
 Ожидаемая (целевая) версия maestro-дистрибутива. Пишется `maestro-update.sh` при
-обновлении или `/maestro-init` при первичной установке. Значение — semver
+обновлении или `/maestro-new` при первичной установке. Значение — semver
 (напр. `1.2.0`).
 
 ```json
@@ -213,7 +213,7 @@ deny. Trust не наследуется вложенными субагента�
 > единственный барьер** — при отключённом плагине данные доступны любому
 > (primary и untrusted). Для гарантированного барьера на уровне ОС ограничьте
 > права каталога средствами ОС/репозитория (read-only для не-нужного,
-> git-криптография и т.п.). `/maestro-init` задача 5 лишь проверяет подключение
+> git-криптография и т.п.). `/maestro-new` задача 5 лишь проверяет подключение
 > плагина и **не блокирует** init при его отсутствии — плагин может быть не
 > поднят, а confidential-данные уже созданы.
 
@@ -426,7 +426,7 @@ deny. Trust не наследуется вложенными субагента�
 
 ### Гейт «плагин работает» для runtime-команд
 
-В maestro-проекте (есть `maestro.json`) команды `@maestro`, `@maestro-design`,
+В maestro-проекте (есть `maestro.json`) команды `@maestro-init`, `@maestro-design`,
 `@maestro-feedback-report` при старте выполняют жёсткий гейт:
 
 1. самый свежий `.maestro/logs/maestro-bootstrap-<дата>.log` должен содержать
@@ -435,7 +435,7 @@ deny. Trust не наследуется вложенными субагента�
 Если условие не выполнено — жёсткий STOP без «продолжить»: только
 «(a) подключить плагин и перезапустить» / «(c) стоп». Причина: без плагина
 защита `docs/confidential/**` и sanitize не действуют (fail-open), confidential-
-данные доступны untrusted-агентам. `@maestro-init` и `@regression` не гейтятся.
+данные доступны untrusted-агентам. `@maestro-new` и `@regression` не гейтятся.
 
 ### Агенты: модели
 
@@ -616,6 +616,6 @@ MAESTRO_BOOTSTRAP_LOG_DIR="/var/log/maestro"
   секции `confidential`/`trust`/`access_policy`
 - [Кастомизация скилла](../how-to/customize-maestro.md)
 - [Агенты и модель доверия](../explanation/agents-and-trust.md)
-- [Плагин maestro-bootstrap](../reference/commands.md) (установка из `@maestro-init`)
+- [Плагин maestro-bootstrap](../reference/commands.md) (установка из `@maestro-new`)
 - Техническая деталь: `plugins/maestro-bootstrap/core.js` (loadMaestroConfig,
   resolveFileAccess, resolveSanitizeOptions)

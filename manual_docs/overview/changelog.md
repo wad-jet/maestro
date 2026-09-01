@@ -7,6 +7,32 @@
 > Хронология составлена по истории authoring-репо `maestro-agent`. Даты
 > приблизительные (по коммитам).
 
+## [2026-09-01]
+
+### Изменено
+
+- **Переименование команд (v2.0.0).** Имена команд и скиллов приведены к
+  единому смыслу:
+  - старый `/maestro` (вход в пайплайн фич/багфиксов) → **`/maestro-init`**
+    (`@maestro` → `@maestro-init`);
+  - старый `/maestro-init` (bootstrap/setup нового проекта) → **`/maestro-new`**
+    (скилл `maestro-init` → `maestro-new`, путь `skills/maestro-init` →
+    `skills/maestro-new`);
+  - скрипт `maestro-init.sh` → **`maestro-install.sh`**;
+  - файл команды `commands/maestro.md` → `commands/maestro-init.md`.
+  Скилл `maestro` (ядро пайплайна) не меняется. Обновлены `commands/*.md`,
+  `agents/*.md`, `AGENTS.md`, `manual_docs/`.
+
+### Миграция
+
+- Команда входа в пайплайн фич/багфиксов — теперь **`/maestro-init`** вместо
+  `/maestro`.
+- Bootstrap/setup нового проекта — теперь **`/maestro-new`** вместо
+  `/maestro-init` (порядок: `/maestro-new` → `/maestro-design` (для нового
+  проекта) → `/maestro-init`).
+- Скрипт первичной установки — `maestro-install.sh` вместо `maestro-init.sh`;
+  справочная копия `maestro-init/agpack.yml` → `maestro-install/agpack.yml`.
+
 ## [2026-08-30]
 
 ### Добавлено

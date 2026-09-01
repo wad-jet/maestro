@@ -69,9 +69,9 @@ SDD-шаблон:  Subagent (general-purpose): model: haiku
 OpenCode:    task(subagent_type="haiku", prompt="...")
 ```
 
-## 💡 Настройка моделей через `/maestro-init`
+## 💡 Настройка моделей через `/maestro-new`
 
-`/maestro-init` настраивает модели агентов в `.opencode/opencode.json` или global (M1):
+`/maestro-new` настраивает модели агентов в `.opencode/opencode.json` или global (M1):
 
 - **Tier (мощность) и Trust (доверие) — ортогональные оси.** Trusted — атрибут
   безопасности, не мощность.
@@ -126,13 +126,13 @@ tier-подсказка.
 >
 > **Централизованная настройка (рекомендуется).** Настроить `agent.*`
 > (model + temperature) один раз в global-конфиге
-> `~/.config/opencode/opencode.json`. Проекты наследуют значения; `/maestro-init`
+> `~/.config/opencode/opencode.json`. Проекты наследуют значения; `/maestro-new`
 > предлагает «оставить из global» первым вариантом. Project `.opencode/opencode.json`
 > переопределяет global, если нужен индивидуальный набор.
 
 > **Консультации по настройке моделей/конфигурации:** для вопросов по семантике моделей,
 > tier/trust, D2 — используйте `/maestro-assistant` (консультативная точка). M1/D2-воркфлоу
-> остаются в `/maestro-init`.
+> остаются в `/maestro-new`.
 
 ## 🔗 Связанные разделы
 
