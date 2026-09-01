@@ -171,7 +171,6 @@ fi
 # --- 3a. Миграция agpack.yml (rename skills/maestro-init -> skills/maestro-new) ---
 if [ -f "agpack.yml" ]; then
   python3 - <<'PY'
-import re
 path = "agpack.yml"
 with open(path, "r", encoding="utf-8") as f:
     text = f.read()
