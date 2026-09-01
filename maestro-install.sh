@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# maestro-init.sh — bootstrap проекта для maestro через agpack.
+# maestro-install.sh — bootstrap проекта для maestro через agpack.
 #
 # Готовит базу для разработки с помощью maestro в пустом каталоге (новый проект)
 # или в каталоге существующего проекта, где maestro ранее не применялся:
@@ -21,29 +21,29 @@
 #   --help     краткая справка и выход
 #
 # Содержимое agpack.yml встроено heredoc-ом (самодостаточный скрипт).
-# Коммиченный maestro-init/agpack.yml — справочная копия для доков.
+# Коммиченный maestro-install/agpack.yml — справочная копия для доков.
 set -euo pipefail
 
 # --- Константы -------------------------------------------------------------
 
 PLUGIN_SPEC="maestro-bootstrap@git+https://github.com/wad-jet/maestro.git"
 REPO_URL="https://github.com/wad-jet/maestro"
-RAW_URL="https://raw.githubusercontent.com/wad-jet/maestro/main/maestro-init.sh"
+RAW_URL="https://raw.githubusercontent.com/wad-jet/maestro/main/maestro-install.sh"
 MAESTRO_UPDATE_RAW_URL="https://raw.githubusercontent.com/wad-jet/maestro/main/maestro-update.sh"
 
 # --- Вспомогательные функции ----------------------------------------------
 
 say()  { printf '%s\n' "$*"; }
-info() { printf '\033[1;34m[maestro-init]\033[0m %s\n' "$*"; }
-warn() { printf '\033[1;33m[maestro-init] ВНИМАНИЕ:\033[0m %s\n' "$*"; }
-die()  { printf '\033[1;31m[maestro-init] ОШИБКА:\033[0m %s\n' "$*" >&2; exit 1; }
+info() { printf '\033[1;34m[maestro-install]\033[0m %s\n' "$*"; }
+warn() { printf '\033[1;33m[maestro-install] ВНИМАНИЕ:\033[0m %s\n' "$*"; }
+die()  { printf '\033[1;31m[maestro-install] ОШИБКА:\033[0m %s\n' "$*" >&2; exit 1; }
 
 usage() {
   cat <<'USAGE'
-maestro-init — подготовка проекта для maestro через agpack.
+maestro-install — подготовка проекта для maestro через agpack.
 
 Использование:
-  bash maestro-init.sh [--global] [--help]
+  bash maestro-install.sh [--global] [--help]
 
 Флаги:
   --global   зарегистрировать плагин maestro-bootstrap в глобальном конфиге
@@ -103,7 +103,7 @@ if [ -z "$AGPACK" ]; then
     pipx install agpack
   else
     cat <<'EOT'
-[maestro-init] ОШИБКА: не найдены ни 'uv', ни 'pipx'.
+[maestro-install] ОШИБКА: не найдены ни 'uv', ни 'pipx'.
 
 Установите agpack одним из способов:
   # предпочтительно (uv)
@@ -148,7 +148,7 @@ dependencies:
     - url: https://github.com/wad-jet/maestro
       path: skills/maestro
     - url: https://github.com/wad-jet/maestro
-      path: skills/maestro-init
+      path: skills/maestro-new
     - url: https://github.com/wad-jet/maestro
       path: skills/maestro-design
     - url: https://github.com/wad-jet/maestro
@@ -168,10 +168,30 @@ dependencies:
 YAML
 fi
 
+# --- 3a. Миграция agpack.yml (rename skills/maestro-init -> skills/maestro-new) ---
+if [ -f "agpack.yml" ]; then
+  python3 - <<'PY'
+import re
+path = "agpack.yml"
+with open(path, "r", encoding="utf-8") as f:
+    text = f.read()
+old = '      path: skills/maestro-init'
+new = '      path: skills/maestro-new'
+if old in text:
+    text = text.replace(old, new)
+    with open(path, "w", encoding="utf-8") as f:
+        f.write(text)
+    print("maestro-install: agpack.yml: skills/maestro-init -> skills/maestro-new")
+PY
+fi
+
 # --- 4. agpack sync ----------------------------------------------------------
 
 info "запускаю 'agpack sync'..."
 "$AGPACK" sync
+
+# --- 4a. Очистка stale-артефактов (agpack не прунит) ---
+rm -rf .opencode/commands/maestro.md .opencode/skills/maestro-init
 
 # --- 5. Регистрация плагина maestro-bootstrap (идемпотентно) ------------------
 
@@ -200,25 +220,25 @@ if os.path.exists(config_path):
             if content:
                 data = json.loads(content)
     except (json.JSONDecodeError, OSError) as e:
-        sys.stderr.write("maestro-init: не могу прочитать %s: %s\n" % (config_path, e))
+        sys.stderr.write("maestro-install: не могу прочитать %s: %s\n" % (config_path, e))
         sys.exit(1)
 
 plugins = data.get("plugin")
 if plugins is None:
     plugins = []
 if not isinstance(plugins, list):
-    sys.stderr.write("maestro-init: ключ 'plugin' в %s — не массив; не трогаю.\n" % config_path)
+    sys.stderr.write("maestro-install: ключ 'plugin' в %s — не массив; не трогаю.\n" % config_path)
     sys.exit(1)
 
 if plugin_spec in plugins:
-    print("maestro-init: плагин уже подключён (%s)" % plugin_spec)
+    print("maestro-install: плагин уже подключён (%s)" % plugin_spec)
 else:
     plugins.append(plugin_spec)
     data["plugin"] = plugins
     with open(config_path, "w", encoding="utf-8") as f:
         json.dump(data, f, ensure_ascii=False, indent=2)
         f.write("\n")
-    print("maestro-init: плагин добавлен в конфиг opencode")
+    print("maestro-install: плагин добавлен в конфиг opencode")
 PY
 
 # --- 6. Загрузка maestro-update.sh (идемпотентно, всегда перезаписывает) -----
@@ -239,7 +259,7 @@ fi
 
 cat <<EOT
 
-[maestro-init] Готово. База для maestro подготовлена.
+[maestro-install] Готово. База для maestro подготовлена.
   - agpack.yml: создан/существующий
   - .opencode/: развёрнуты skills/commands/agents (agpack sync)
   - плагин: $PLUGIN_SPEC → $CONFIG_FILE
@@ -247,10 +267,10 @@ cat <<EOT
 
 Что дальше:
   1. Запустите opencode в этом каталоге:  opencode
-  2. Выполните инициализацию проекта:     /maestro-init
+  2. Выполните инициализацию проекта:     /maestro-new
      (создаёт project-context.md, maestro.json, модели агентов, каталоги)
   3. Для нового проекта — дизайн и каркас: /maestro-design
-  4. Запуск фичи:                          /maestro "ваша задача"
+  4. Запуск фичи:                          /maestro-init "ваша задача"
 
 Перезапустите opencode, чтобы плагин maestro-bootstrap подхватился.
 

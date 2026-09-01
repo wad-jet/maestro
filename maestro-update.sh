@@ -69,24 +69,24 @@ if [[ -n "$PIN" ]]; then
   git -C "$TMP_DIR" fetch -q --depth 1 origin "$PIN" || die "не удалось получить коммит $PIN"
   TARGET_VERSION="$(git -C "$TMP_DIR" show "$PIN:package.json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["version"])' 2>/dev/null)" \
     || die "в коммите $PIN нет валидного package.json с version"
-  MAESTRO_INIT_AGPACK="$(git -C "$TMP_DIR" show "$PIN:maestro-init/agpack.yml" 2>/dev/null || true)"
+  MAESTRO_INSTALL_AGPACK="$(git -C "$TMP_DIR" show "$PIN:maestro-install/agpack.yml" 2>/dev/null || true)"
 else
   git clone -q --depth 1 "$REPO_URL.git" "$TMP_DIR" || die "не удалось клонировать $REPO_URL"
   TARGET_VERSION="$(python3 -c 'import json,sys; print(json.load(open(sys.argv[1]))["version"])' "$TMP_DIR/package.json" 2>/dev/null)" \
     || die "в $REPO_URL нет валидного package.json с version"
-  MAESTRO_INIT_AGPACK="$(cat "$TMP_DIR/maestro-init/agpack.yml" 2>/dev/null || true)"
+  MAESTRO_INSTALL_AGPACK="$(cat "$TMP_DIR/maestro-install/agpack.yml" 2>/dev/null || true)"
 fi
 info "целевая версия: $TARGET_VERSION"
 
 # --- 3. Merge-add канонических записей в agpack.yml + agpack sync ------------
 
-if [[ -n "$MAESTRO_INIT_AGPACK" ]]; then
-  python3 - "$MAESTRO_INIT_AGPACK" <<'PY'
+if [[ -n "$MAESTRO_INSTALL_AGPACK" ]]; then
+  python3 - "$MAESTRO_INSTALL_AGPACK" <<'PY'
 import re
 import sys
 
 # Построчный текстовый merge-add: добавляет отсутствующие (url, path)-записи из
-# канонического maestro-init/agpack.yml в соответствующие секции `dependencies.*`
+# канонического maestro-install/agpack.yml в соответствующие секции `dependencies.*`
 # проекта. Сохраняет комментарии и существующие записи без изменений. Не требует
 # pyyaml (чистый текст). При ошибке — только sync (деградация из плана).
 canon_text = sys.argv[1]
@@ -107,6 +107,25 @@ def parse_section(text, section):
             cur = None
     return recs
 
+# Rename-aware: безусловно удалить устаревшую запись skills/maestro-init (M-5/M-9)
+def drop_old_init(lines):
+    out = []
+    i = 0
+    while i < len(lines):
+        if re.match(r"^\s{4}-\s*url:\s*\S+", lines[i]):
+            j = i + 1
+            is_old = False
+            while j < len(lines) and (lines[j].strip().startswith("path:") or lines[j].strip() == "" or lines[j].startswith("-")):
+                if re.match(r"^\s{6}path:\s*skills/maestro-init\s*$", lines[j]):
+                    is_old = True
+                j += 1
+            if is_old:
+                i = j
+                continue
+        out.append(lines[i])
+        i += 1
+    return out
+
 # Парсим канон по секциям.
 canon_sections = {}
 for sec in ("skills", "commands", "agents"):
@@ -123,6 +142,8 @@ try:
 except OSError as e:
     sys.stderr.write("maestro-update: не могу прочитать agpack.yml: %s\n" % e)
     sys.exit(1)
+
+lines = drop_old_init(lines)
 
 def section_range(lines, section):
     """Найти диапазон строк секции `dependencies.<section>` (индексы вставки)."""
@@ -149,6 +170,7 @@ for sec, recs in canon_sections.items():
         m = re.match(r"^\s{6}path:\s*(\S+)", ln)
         if m:
             existing.add(m.group(1).strip("\"'"))
+    existing.discard("skills/maestro-init")
     if start is None:
         # Секции нет — вставить новую после `dependencies:`.
         dep_i = next((i for i, ln in enumerate(lines) if re.match(r"^dependencies:\s*$", ln)), None)
@@ -183,11 +205,14 @@ else:
     print("maestro-update: agpack.yml актуален")
 PY
 else
-  info "maestro-init/agpack.yml не найден в источнике — пропускаю merge-add"
+  info "maestro-install/agpack.yml не найден в источнике — пропускаю merge-add"
 fi
 
 info "запускаю 'agpack sync'..."
 "$AGPACK" sync
+
+# --- 3a. Очистка stale-артефактов (agpack не прунит) ---
+rm -rf .opencode/commands/maestro.md .opencode/skills/maestro-init
 
 # --- 4. Очистка кэша плагина OpenCode ---------------------------------------
 
@@ -230,7 +255,7 @@ with open(p, "w", encoding="utf-8") as f:
 print("maestro-update: expected_version = %s записан в maestro.json" % target)
 PY
 else
-  warn "maestro.json не найден — expected_version не записан (выполните /maestro-init)"
+  warn "maestro.json не найден — expected_version не записан (выполните /maestro-new)"
 fi
 
 # --- 6. Пин версии (опционально) ---------------------------------------------
