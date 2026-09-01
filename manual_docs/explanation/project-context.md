@@ -93,6 +93,6 @@ BUILD_COMMAND: "go build ./..."
 
 ## 🔗 Связанные разделы
 
-- [Настройка проекта](../tutorials/setup-project.md) — создание через `/maestro-init`
+- [Настройка проекта](../tutorials/setup-project.md) — создание через `/maestro-new`
 - [Быстрый старт](../overview/quick-start.md) — загрузка на шаге 0 pipeline
 - [Полный цикл фичи](../tutorials/run-first-feature.md) — шаг 0 — Project Context

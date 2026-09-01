@@ -143,7 +143,9 @@ except OSError as e:
     sys.stderr.write("maestro-update: не могу прочитать agpack.yml: %s\n" % e)
     sys.exit(1)
 
+_lines_before_drop = lines
 lines = drop_old_init(lines)
+dropped_init = (lines != _lines_before_drop)
 
 def section_range(lines, section):
     """Найти диапазон строк секции `dependencies.<section>` (индексы вставки)."""
@@ -179,7 +181,7 @@ for sec, recs in canon_sections.items():
         # Собрать блок вставки корректно.
         add = ["  %s:" % sec]
         for r in recs:
-            if r["path"] in existing:
+            if r["path"] == "skills/maestro-init" or r["path"] in existing:
                 continue
             add.append("    - url: %s" % r["url"])
             add.append("      path: %s" % r["path"])
@@ -189,7 +191,7 @@ for sec, recs in canon_sections.items():
         continue
     add = []
     for r in recs:
-        if r["path"] in existing:
+        if r["path"] == "skills/maestro-init" or r["path"] in existing:
             continue
         add.append("    - url: %s" % r["url"])
         add.append("      path: %s" % r["path"])
@@ -197,10 +199,10 @@ for sec, recs in canon_sections.items():
         lines[start + 1:start + 1] = add
         changed = True
 
-if changed:
+if changed or dropped_init:
     with open("agpack.yml", "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
-    print("maestro-update: agpack.yml дополнен каноническими записями")
+    print("maestro-update: agpack.yml дополнен/обновлён каноническими записями")
 else:
     print("maestro-update: agpack.yml актуален")
 PY

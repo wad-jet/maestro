@@ -33,6 +33,24 @@
 - Скрипт первичной установки — `maestro-install.sh` вместо `maestro-init.sh`;
   справочная копия `maestro-init/agpack.yml` → `maestro-install/agpack.yml`.
 
+**Обновление существующего проекта (важно):** в `agpack.yml` целевого проекта
+запись `path: skills/maestro-init` переименована в `path: skills/maestro-new`.
+Если её не обновить, `agpack sync` упадёт с `FetchError` («Path 'skills/maestro-init'
+not found»), т.к. каталог удалён из репозитория. Пути миграции:
+
+1. Перезапустить `maestro-install.sh` (идемпотентен, автоматически заменит запись
+   перед `agpack sync`), **или**
+2. Запустить `maestro-update.sh` (rename-aware merge заменит запись), **или**
+3. Вручную в `agpack.yml`: `path: skills/maestro-init` → `path: skills/maestro-new`.
+
+После обновления скрипты также удаляют устаревшие `.opencode/commands/maestro.md`
+и `.opencode/skills/maestro-init/` (agpack не удаляет их автоматически).
+
+**Откат (`--pin` на старую версию):** при `maestro-update.sh --pin <sha-до-2.0.0>`
+канон старого коммита не содержит `maestro-install/agpack.yml`, поэтому
+rename-aware merge не сработает; `agpack sync` после этого упадёт с `FetchError`
+на `skills/maestro-new` (нет в старом репо). Вручную вернуть `path: skills/maestro-init`.
+
 ## [2026-08-30]
 
 ### Добавлено

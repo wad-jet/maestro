@@ -109,7 +109,9 @@ rm -rf ~/.cache/opencode/packages/maestro-bootstrap@git+https:...
 > нового проекта).
 >
 > **Merge-add-семантика `agpack`:** `maestro-update.sh` добавляет отсутствующие
-> записи в `agpack.yml`, но **не удаляет** устаревшие. Конвенция: каждый новый
+> записи в `agpack.yml`, но **не удаляет** устаревшие. Единственное исключение —
+> переименование `skills/maestro-init` → `skills/maestro-new` (v2.0.0), которое
+> скрипт обрабатывает автоматически. Конвенция: каждый новый
 > компонент (skill/command/agent) релиза добавляется в `maestro-install/agpack.yml`.
 
 ### Шаг 3: Контроль обновления

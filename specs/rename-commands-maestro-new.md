@@ -136,10 +136,12 @@
 команда попадёт в пайплайн фич; `/maestro` исчезает. Громкое предупреждение в changelog-секции
 «Миграция» и README.
 
-**Rollback (M-9):** `maestro-update.sh --pin <pre-rename-sha>` (например откат на 1.2.2) применит канон
-из старого коммита с `skills/maestro-init`, но rename-aware merge всё равно вычистит `skills/maestro-init`
-в целевом agpack.yml — при этом `agpack sync` упадёт с FetchError на `skills/maestro-new` (нет в старом
-репо). Обход — ручной путь 3 (вернуть `path: skills/maestro-init`). Документировать в changelog.
+**Rollback (M-9):** `maestro-update.sh --pin <pre-rename-sha>` (например откат на 1.2.2) — канон
+читается из нового пути `maestro-install/agpack.yml`, которого в старом коммите нет → `|| true` →
+merge-блок (и rename-aware drop) пропускается целиком. `skills/maestro-init` при этом не воскрешается
+(нет канона), но и `skills/maestro-new` не добавляется; `agpack sync` после отката упадёт с FetchError
+на `skills/maestro-new` (нет в старом репо). Обход — ручной путь 3 (вернуть `path: skills/maestro-init`).
+Документировать в changelog.
 
 **Self-hosted stale-очистка (M-11):** после push→sync в авторском `.opencode/` останутся stale
 `commands/maestro.md` и `skills/maestro-init/` (скрипты очистки нацелены на целевые проекты, авторский
