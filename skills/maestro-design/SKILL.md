@@ -1,6 +1,6 @@
 ---
 name: maestro-design
-description: Use to produce design, spec, scaffold and roadmap for a project after /maestro-init setup — generates spec via primary brainstorm + custodian Q/A, code scaffold via TDD, and docs/roadmap.md
+description: Use to produce design, spec, scaffold and roadmap for a project after /maestro-new setup — generates spec via primary brainstorm + custodian Q/A, code scaffold via TDD, and docs/roadmap.md
 ---
 
 ## Гейт 0 — Проверка плагина maestro-bootstrap (обязательный)
@@ -42,12 +42,11 @@ description: Use to produce design, spec, scaffold and roadmap for a project aft
 ## Overview
 
 Команда `/maestro-design` выполняет дизайн/архитектуру, создание каркаса кода
-(scaffold) и roadmap для проекта, у которого уже есть setup (`/maestro-init`):
+(scaffold) и roadmap для проекта, у которого уже есть setup (`/maestro-new`):
 `docs/project-context.md` и конфигурация maestro.
 
-**Разделение:** `/maestro-init` — только setup (контекст + конфиг + проверки).
-Дизайн, scaffold и roadmap — здесь, в `/maestro-design`. Зафиксировано в
-`specs/maestro-init-tasks-plan.md`.
+**Разделение:** `/maestro-new` — только setup (контекст + конфиг + проверки).
+Дизайн, scaffold и roadmap — здесь, в `/maestro-design`.
 
 **Язык:** все HITL-вопросы, варианты и сообщения пользователю — только на русском.
 
@@ -61,10 +60,10 @@ description: Use to produce design, spec, scaffold and roadmap for a project aft
 
 ## Предусловия
 
-### Предусловие 0. Проверка, что выполнен `/maestro-init`
+### Предусловие 0. Проверка, что выполнен `/maestro-new`
 
 Если проект **новый** или в нём **ранее не применялся** скилл `maestro`, сначала
-проверить, выполнялась ли команда `/maestro-init`. Признаки того, что init **был**
+проверить, выполнялась ли команда `/maestro-new`. Признаки того, что init **был**
 выполнен:
 
 - `docs/project-context.md` существует;
@@ -72,7 +71,7 @@ description: Use to produce design, spec, scaffold and roadmap for a project aft
 - `.maestro/last-run.md` существует (свод setup).
 
 **Если хотя бы один признак отсутствует** (проект не проходил init) → HITL:
-- (a) выполнить `/maestro-init` (setup: контекст + конфиг + проверки) **перед**
+- (a) выполнить `/maestro-new` (setup: контекст + конфиг + проверки) **перед**
   `/maestro-design`;
 - (b) пропустить и продолжить `/maestro-design` (дизайн без полного setup);
 - (c) отмена.
@@ -82,7 +81,7 @@ description: Use to produce design, spec, scaffold and roadmap for a project aft
 
 ### Другие предусловия
 
-- `/maestro-init` выполнен: есть `docs/project-context.md` (источник контекста).
+- `/maestro-new` выполнен: есть `docs/project-context.md` (источник контекста).
 - **Модели агентов наследуются** из `.opencode/opencode.json` или global
   (настроены на init или вручную).
   `/maestro-design` **НЕ переспрашивает модели.**
@@ -149,8 +148,8 @@ description: Use to produce design, spec, scaffold and roadmap for a project aft
 
 | Ситуация | Действие |
 |---|---|
-| project-context.md отсутствует (init не выполнялся) | HITL: (a) выполнить `/maestro-init` / (b) продолжить без / (c) отмена (Предусловие 0) |
-| init выполнен, но project-context.md всё равно нет | Сообщить: запустите `/maestro-init` сначала |
+| project-context.md отсутствует (init не выполнялся) | HITL: (a) выполнить `/maestro-new` / (b) продолжить без / (c) отмена (Предусловие 0) |
+| init выполнен, но project-context.md всё равно нет | Сообщить: запустите `/maestro-new` сначала |
 | spec: revise | Вернуться к дизайн-диалогу (повторить brainstorm primary + custodian Q/A при необходимости), повторить |
 | scaffold: BUILD/TEST упал | HITL: fix-loop / skip с подтверждением |
 | Модели агентов не настроены | Предупредить; предложить настроить `agent.*` в `.opencode/opencode.json` или global |

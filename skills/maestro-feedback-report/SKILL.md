@@ -60,7 +60,7 @@ description: Сбор фактуры по прошлым процессам maes
 Проанализируй ход текущей сессии и зафиксируй качественную фактуру:
 
 - Какие фичи/задачи обрабатывались через maestro (или его команды:
-  `@maestro`, `@maestro-init`, `@maestro-design`).
+   `@maestro-init`, `@maestro-new`, `@maestro-design`).
 - HITL-гейты: какие пройдены, где буксовали, где были отмены/повторы.
 - Ключевые решения, шаги, отклонения от плана.
 - Стопоры и проблемы, замеченные по ходу.
@@ -112,7 +112,7 @@ description: Сбор фактуры по прошлым процессам maes
 - Session ID: <id>
 - Дата: <YYYY-MM-DD>
 - Фичи/задачи: <список>
-- Команды maestro: <@maestro, @maestro-init, @maestro-design ...>
+- Команды maestro: <@maestro-init, @maestro-new, @maestro-design ...>
 
 ## Ход процесса
 <chronology: шаги, гейты, решения>
@@ -162,4 +162,4 @@ description: Сбор фактуры по прошлым процессам maes
 ## Завершение
 
 - Сообщи: «Отчёт сохранён в `<путь>`».
-- **Автокоммит НЕ требуется:** `.maestro/feedback-reports/` — эфемерное (весь `.maestro/` в `.gitignore`, see `skills/maestro-init/SKILL.md`). Коммит отчёта — на усмотрение пользователя.
+- **Автокоммит НЕ требуется:** `.maestro/feedback-reports/` — эфемерное (весь `.maestro/` в `.gitignore`, see `skills/maestro-new/SKILL.md`). Коммит отчёта — на усмотрение пользователя.

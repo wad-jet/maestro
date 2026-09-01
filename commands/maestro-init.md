@@ -1,25 +1,24 @@
 ---
-description: Инициализация нового проекта: project-context.md (14 категорий), конфигурация maestro (maestro.json, .gitignore, plugin+models в .opencode/opencode.json или global), каталоги, проверка superpowers и плагина
+description: Вход в pipeline maestro — сквозная реализация фич/багфиксов (design → spec → plan → SDD → review → docs)
 ---
-Загрузи skill `maestro-init` (tool: skill) и следуй SKILL.md из `skills/maestro-init/`.
 
-`/maestro-init` — setup-фаза bootstrap нового проекта, НЕ системный `/init`
-opencode (тот создаёт AGENTS.md). НЕ выполняет дизайн/скаффолд/роадмап — они
-в отдельной команде `/maestro-design`. Действия:
-1. Предусловие: если `AGENTS.md` нет — предложить выполнить встроенный `/init`.
-2. Проверка `docs/project-context.md` + запрос git-решения (без автокоммитов).
-3. Собрать контекст по 14 категориям -> `docs/project-context.md`.
-4. Конфигурация: `maestro.json` (trust/access_policy/confidential/sanitizer_whitelist),
-   плагин + модели агентов по M1 (`.opencode/opencode.json` или global), `.gitignore`
-   (весь `.maestro/` и `.opencode/`),
-   `regression/` структура. Каталоги: `.maestro/`,
-   `docs/superpowers/{specs,plans}/`. **Задача 3 требует скилл `maestro-assistant`
-   (жёсткий gate): если его нет — установить и продолжить, иначе прерывание.**
-   Правила/канон конфига — из `skills/maestro-assistant/SKILL.md`.
-5. Проверка скилов superpowers (пробник через `skill` tool; при отсутствии —
-   предложить установку через HITL).
-6. Проверка плагина `maestro-bootstrap` (не блокер).
+# @maestro-init
 
-После завершения setup — напомнить про `/maestro-design` для дизайна/скаффолда/роадмапа.
+Загрузи skill `maestro` (tool: skill) и следуй pipeline из SKILL.md.
+Координируй субагентов (custodian, haiku, sonnet, opus, fable, code-reviewer, sanitizer)
+на каждом этапе.
 
-Все HITL-вопросы и сообщения пользователю — только на русском.
+Работает в любой primary-сессии — привязки к конкретному агенту нет.
+
+## Ключевые правила
+
+- Следуй HITL gates строго
+- Все HITL gates, вопросы и сообщения пользователю — ТОЛЬКО на русском языке
+- После утверждения плана (шаг 12) — один коммит `docs: design + plan for <feature-name>`
+- После SDD (шаг 13) — per-task code коммиты
+- Финальное ревью (шаг 16) — диспатч code-reviewer
+
+## Связанные команды
+
+- `@regression` — реестр рисков регрессии
+- `@maestro-new` — bootstrap нового проекта

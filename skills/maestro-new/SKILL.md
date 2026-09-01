@@ -1,5 +1,5 @@
 ---
-name: maestro-init
+name: maestro-new
 description: Use when bootstrapping a NEW project with maestro — generates docs/project-context.md (14 categories), maestro config (maestro.json, .gitignore, plugin+models in .opencode/opencode.json or global), regression/ structure, and verifies prerequisites (AGENTS.md, superpowers, plugin)
 ---
 
@@ -7,19 +7,19 @@ description: Use when bootstrapping a NEW project with maestro — generates doc
 
 ## Overview
 
-Сквозная инициализация нового проекта для maestro. Команда `/maestro-init`
+Сквозная инициализация нового проекта для maestro. Команда `/maestro-new`
 запускает этот скилл в любой primary-сессии. Цель — подготовить проект к работе
 pipeline maestro: есть `docs/project-context.md` (источник контекста шага 0),
 конфигурация maestro (`maestro.json` + `.gitignore` + плагин/модели в
 `.opencode/opencode.json` или глобально),
 структура `regression/` и проверенные предусловия (AGENTS.md, superpowers, плагин).
 
-**ВНИМАНИЕ:** `/maestro-init` выполняет **только setup-фазу**. Дизайн, scaffold
+**ВНИМАНИЕ:** `/maestro-new` выполняет **только setup-фазу**. Дизайн, scaffold
 и roadmap — в отдельной команде `/maestro-design` (скилл `maestro-design`). Это разделение
-зафиксировано в `specs/maestro-init-tasks-plan.md`.
+разделение setup и дизайна зафиксировано в спецификации пайплайна.
 
 **Мы НЕ переопределяем встроенный `/init` opencode** (тот создаёт `AGENTS.md`).
-`/maestro-init` — отдельная команда.
+`/maestro-new` — отдельная команда.
 
 **Язык:** все HITL-вопросы, варианты и сообщения пользователю — только на русском.
 
@@ -42,7 +42,7 @@ pipeline maestro: есть `docs/project-context.md` (источник конт�
 
 - Если `AGENTS.md` отсутствует → HITL:
   (a) выполнить встроенный `/init` (системный setup), затем вернуться
-  (b) пропустить и продолжить `/maestro-init`
+  (b) пропустить и продолжить `/maestro-new`
   (c) отмена
 
 ### 2. Проверка docs/project-context.md (задача 2)
@@ -104,7 +104,7 @@ pipeline maestro: есть `docs/project-context.md` (источник конт�
 ## Задача 3. Конфигурация maestro
 
 На основе контекста (§3 стек, §5 домены, §12 безопасность) сгенерировать конфиги
-идемпотентно (см. `specs/init-idempotency-plan.md` для деталей).
+идемпотентно.
 
 ### 3а. Подготовка каталогов
 
@@ -124,7 +124,7 @@ pipeline maestro: есть `docs/project-context.md` (источник конт�
   `maestro.json` (четыре секции: `trust` / `access_policy` / `confidential` / `sanitizer_whitelist`;
   полный JSON-канон — в `skills/maestro-assistant/SKILL.md`).
 - **Скилла нет** → HITL-сообщение «необходимо установить скилл `maestro-assistant` для
-  продолжения» и **жёсткое прерывание задачи 3 и всего процесса `/maestro-init`** (не переходить
+  продолжения» и **жёсткое прерывание задачи 3 и всего процесса `/maestro-new`** (не переходить
   к 4–5, без fallback-деградации). Идемпотентно: проверка выполняется только если задача 3
   реально генерирует/обновляет конфиг; при пропуске задачи (конфиг уже есть) — не проверяется.
 

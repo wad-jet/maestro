@@ -77,7 +77,7 @@ Interactive — агент комментирует находки по ходу
 
 ## When to Use
 
-- Пользователь вызвал `@maestro` для работы над фичей, багфиксом или задачей из спринта.
+- Пользователь вызвал `@maestro-init` для работы над фичей, багфиксом или задачей из спринта.
 
 **Когда НЕ использовать (redirect после вызова):**
 - Trivial fix (1-2 строки) — перенаправить на `@haiku` с TDD напрямую
@@ -150,8 +150,8 @@ Interactive — агент комментирует находки по ходу
       — Читает docs/project-context.md (если существует)
       — Если файла нет: HITL-диалог для создания по 14 категориям
         (включая секцию 14 — Commands, см. ниже). Перечень категорий —
-        см. `skills/maestro-init/init-context.md`; для нового проекта рекомендуется
-        команда `/maestro-init` (создаёт context + дизайн + scaffold + roadmap).
+        см. `skills/maestro-new/init-context.md`; для нового проекта рекомендуется
+        команда `/maestro-new` (создаёт context + конфиг; дизайн/scaffold/roadmap — `/maestro-design`).
       — Если файл есть: HITL-подтверждение актуальности
             — Устанавливает PROJECT_CONTEXT (переменная сессии)
             — Извлекает команды из секции 14 (Commands):
@@ -1547,7 +1547,7 @@ active ── отмена (Gate: отмена) ──→ released (status: canc
 
 - Spec файлы: `docs/superpowers/specs/YYYY-MM-DD-<feature-name>-design.md`
 - Plan файлы: `docs/superpowers/plans/YYYY-MM-DD-<feature-name>-plan.md`
-- Roadmap: `docs/roadmap.md` (MVP + этапы развития; создаётся `/maestro-init`
+- Roadmap: `docs/roadmap.md` (MVP + этапы развития; создаётся `/maestro-design`
   для новых проектов) — вход для планирования спринтов
 - SDD progress: `.maestro/sdd/progress.md` (в `.gitignore`, весь `.maestro/`)
 - Regression registry: `regression/entries/YYYY-MM-DD-<feature-name>.md`

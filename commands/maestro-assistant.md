@@ -23,4 +23,4 @@ description: Консультации и настройка maestro-конфиг
 - После правки `maestro.json` — сообщить, что изменения вступят в силу после перезапуска opencode.
 - Доступ к `docs/confidential/**` — закрыт (primary deny).
 - Если запрос требует изменения кода/spec/плана или запуска pipeline — редирект:
-  `@maestro` (фича/багфикс/SDD), `/maestro-design` (дизайн/scaffold/roadmap), `@regression` (регрессия).
+  `@maestro-init` (фича/багфикс/SDD), `/maestro-design` (дизайн/scaffold/roadmap), `@regression` (регрессия).

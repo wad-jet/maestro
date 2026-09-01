@@ -42,7 +42,7 @@ description: Проверить всех сабагентов maestro реаль
 trusted-агента (см. `SECURITY.md` → P1/P3).
 
 **Предусловие:** шаг выполняется в **target-приложении**, где существует
-`docs/confidential/**` (создаётся `/maestro-init`). Если пути нет — пропусти этот
+`docs/confidential/**` (создаётся `/maestro-new`). Если пути нет — пропусти этот
 шаг и укажи в сводке `confidential-invariant: skipped (нет docs/confidential)`.
 
 Шаги:

@@ -1,6 +1,6 @@
 ---
 name: maestro-assistant
-description: Use when the user asks for help configuring maestro, organizing project structure/context, or wants to consult the rules of maestro (trust, access_policy, confidential, sanitizer_whitelist, opencode.json models, project-context, pipeline structure). Also loaded by maestro-init (tasks 2/3/3a) and maestro (pipeline config questions). Not for feature implementation.
+description: Use when the user asks for help configuring maestro, organizing project structure/context, or wants to consult the rules of maestro (trust, access_policy, confidential, sanitizer_whitelist, opencode.json models, project-context, pipeline structure). Also loaded by maestro-new (tasks 2/3/3a) and maestro-init (pipeline config questions). Not for feature implementation.
 ---
 
 # Maestro Assistant — конфигурация, структура и консультации по maestro
@@ -18,8 +18,8 @@ description: Use when the user asks for help configuring maestro, organizing pro
 
 - Пользователь вызывает `/maestro-assistant <запрос>` для настройки конфигурации maestro,
   организации структуры/контекста, консультации по правилам.
-- `/maestro-init` (задачи 2/3/3а) загружает этот скилл и следует его правилам.
-- `@maestro` по ходу pipeline загружает этот скилл при вопросах конфигурации/процессов.
+- `/maestro-new` (задачи 2/3/3а) загружает этот скилл и следует его правилам.
+- `@maestro-init` по ходу pipeline загружает этот скилл при вопросах конфигурации/процессов.
 
 ## Полномочия и границы
 
@@ -35,7 +35,7 @@ description: Use when the user asks for help configuring maestro, organizing pro
 - **Плагин-гейт НЕ требуется** для консультаций (правит конфиг, не гоняет confidential
   через pipeline).
 - **Редирект (MIN-4):** если запрос требует изменения кода/spec/плана или запуска pipeline →
-  `@maestro` (фича/багфикс/SDD), `/maestro-design` (дизайн/scaffold/roadmap), `@regression`
+  `@maestro-init` (фича/багфикс/SDD), `/maestro-design` (дизайн/scaffold/roadmap), `@regression`
   (регрессия). Только конфиг/структура/контекст/консультация обрабатываются здесь.
 
 ## Канон `maestro.json` (источник истины)
@@ -79,7 +79,7 @@ description: Use when the user asks for help configuring maestro, organizing pro
 - **`confidential`** — защита конфиденциальных путей (жёстче access_policy). Дефолт
   `paths: ["docs/confidential/**"]`; trusted читает по умолчанию, запись/редактирование deny
   (выдаются явно). Primary/untrusted — всегда deny.
-- **`expected_version`** — ожидаемая версия дистрибутива maestro (пишется `maestro-update.sh` / `/maestro-init`). Опционально; плагин зеркалирует её в `.maestro/expected-version` и предупреждает при рассинхроне с фактической.
+- **`expected_version`** — ожидаемая версия дистрибутива maestro (пишется `maestro-update.sh` / `/maestro-new`). Опционально; плагин зеркалирует её в `.maestro/expected-version` и предупреждает при рассинхроне с фактической.
 - **`confidential.paths`** — принимает папки, отдельные файлы по полному имени
   и по маске, включая корневую папку. Сегментная семантика: `**` = 0+ сегментов
   (покрывает корень), `*`/`?` — в пределах сегмента (не через `/`), маска без `/`
@@ -156,7 +156,7 @@ description: Use when the user asks for help configuring maestro, organizing pro
 
 | Ситуация | Действие |
 |---|---|
-| Запрос требует реализации кода/spec/плана | Редирект: `@maestro` / `/maestro-design` / `@regression` (MIN-4) |
+| Запрос требует реализации кода/spec/плана | Редирект: `@maestro-init` / `/maestro-design` / `@regression` (MIN-4) |
 | Запрос на работу с содержимым `docs/confidential/**` | Отказ: доступ закрыт для primary; через trusted-агент |
 | Плагин не загружен | Работаем (гейт не требуется); при правке security-секций — напоминание о fail-open (см. OP-1/IMP-3) |
 | `maestro.json` правился | Сообщить о перезапуске (OP-1) |
