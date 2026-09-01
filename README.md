@@ -13,10 +13,10 @@
 | Компонент | Описание |
 |---|---|
 | **Скилл `maestro`** | Спецификация pipeline (фичи / багфиксы / баг-дебаг) — `skills/maestro/SKILL.md` |
-| **Команда `/maestro`** | Точка входа — загружает скилл и стартует pipeline |
+| **Команда `/maestro-init`** | Точка входа в пайплайн — загружает скилл и стартует pipeline |
 | **Субагенты** | `design`, `haiku`, `sonnet`, `opus`, `fable`, `code-reviewer`, `sanitizer` |
 | **Плагин** | `maestro-bootstrap` — санитайзинг промптов, file access control, audit-логи |
-| **Команды** | `/maestro`, `/maestro-init`, `/maestro-design`, `/regression`, `/test-agents` |
+| **Команды** | `/maestro-init`, `/maestro-new`, `/maestro-design`, `/regression`, `/test-agents` |
 
 ## Maestro vs superpowers напрямую
 
@@ -25,7 +25,7 @@
 использованием superpowers напрямую — это выбор между «всё включено» и «ручной
 сборкой».
 
-| Аспект | Maestro (`/maestro`) | Superpowers напрямую |
+| Аспект | Maestro (`/maestro-init`) | Superpowers напрямую |
 |---|---|---|
 | **Scope** | Полный цикл фичи: design → spec → plan → SDD → review → docs | Отдельный этап (план, реализация, ревью и т.д.) |
 | **Оркестрация** | Автоматическая: orchestrator сам диспатчит субагентов по маршруту | Ручная: вы решаете, какой скил и когда вызвать |
@@ -50,19 +50,19 @@
 
 ### 1. Настройте проект
 
-**Самый простой способ — скрипт `maestro-init.sh`** (новый или существующий проект,
+**Самый простой способ — скрипт `maestro-install.sh`** (новый или существующий проект,
 где maestro ранее не применялся). Он устанавливает `agpack`, создаёт `agpack.yml`,
 запускает `agpack sync`, подключает плагин `maestro-bootstrap` и загружает
 `maestro-update.sh` (для будущих обновлений):
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/wad-jet/maestro/main/maestro-init.sh -o maestro-init.sh
-bash maestro-init.sh
+curl -fsSL https://raw.githubusercontent.com/wad-jet/maestro/main/maestro-install.sh -o maestro-install.sh
+bash maestro-install.sh
 ```
 
 > Предусловия: bash (macOS/Linux), python3 ≥ 3.11, git. Windows — запускайте через
 > WSL или Git Bash. После скрипта — перезапустите OpenCode и выполните
-> `/maestro-init` (см. шаг 3 ниже).
+> `/maestro-new` (см. шаг 3 ниже).
 
 Установить `maestro` можно также через **agpack** (вручную) или **копированием**.
 Подробная инструкция с `agpack.yml`, картой путей и подключением плагина —
@@ -105,17 +105,23 @@ bash maestro-init.sh
 
 | Команда | Для кого | Что делает |
 |---|---|---|
-| `/maestro-init` | Новый и существующий | Создаёт `project-context.md`, `maestro.json`, `.gitignore`, каталоги `.maestro/`, `regression/`; для существующего — детектит context и merge-ит конфиги |
+| `/maestro-new` | Новый и существующий | Создаёт `project-context.md`, `maestro.json`, `.gitignore`, каталоги `.maestro/`, `regression/`; для существующего — детектит context и merge-ит конфиги |
 | `/maestro-design` | Новый (опционально) | Дизайн + spec + scaffold + roadmap |
 
-- **Новый проект:** `/maestro-init` → `/maestro-design` → `/maestro`
-- **Существующий:** `/maestro-init` → `/maestro`
+- **Новый проект:** `/maestro-new` → `/maestro-design` → `/maestro-init`
+- **Существующий:** `/maestro-new` → `/maestro-init`
+
+> **Внимание (v2.0.0):** команда `/maestro-init` теперь — **вход в пайплайн фич**
+> (ранее была bootstrap). Bootstrap нового проекта — `/maestro-new`. Старая команда
+> `/maestro` удалена. При переходе обновите `agpack.yml` целевого проекта
+> (`skills/maestro-init` → `skills/maestro-new`) или перезапустите `maestro-install.sh`/
+> `maestro-update.sh` — они сделают это автоматически.
 
 Подробности — [Настройка проекта](manual_docs/tutorials/setup-project.md).
 
 #### Настройка моделей агентов по тирам
 
-M1-воркфлоу (`/maestro-init`) задаёт **7 отдельных HITL-вопросов** (по одному на
+M1-воркфлоу (`/maestro-new`) задаёт **7 отдельных HITL-вопросов** (по одному на
 агента — гибкость выбора): `design` и `sanitizer` могут получить разные модели, но
 **одна модель тоже допустима** (см. выше). Для каждого агента предложение
 формируется из каскада:
@@ -149,7 +155,7 @@ Trusted по роли: `design` + `sanitizer` (обоим доступен `docs
 **Рекомендуемый способ — централизованная глобальная настройка.** Настроить
 `agent.{design,haiku,sonnet,opus,fable,code-reviewer,sanitizer}` (model +
 `temperature`) один раз в `~/.config/opencode/opencode.json` — новые проекты
-наследуют значения, `/maestro-init` предлагает «оставить из global» первым
+наследуют значения, `/maestro-new` предлагает «оставить из global» первым
 вариантом. Project `.opencode/opencode.json` переопределяет global при нужде в
 индивидуальном наборе. Корневой `opencode.json` не используется.
 
@@ -183,7 +189,7 @@ Trusted по роли: `design` + `sanitizer` (обоим доступен `docs
 В любой сессии OpenCode:
 
 ```bash
-/maestro "Реализуй экспорт в CSV с пагинацией"
+/maestro-init "Реализуй экспорт в CSV с пагинацией"
 ```
 
 Оркестратор проведёт через HITL-гейты: контекст → pre-flight → категория фичи → spec (если сложная) → план → реализация → ревью → merge.
@@ -203,9 +209,9 @@ Trusted по роли: `design` + `sanitizer` (обоим доступен `docs
 
 ```
 agents/          — конфиги субагентов (design, haiku, sonnet, opus, fable, code-reviewer, sanitizer)
-commands/        — @command конфиги (/maestro, /maestro-init, /regression, /test-agents)
+commands/        — @command конфиги (/maestro-init, /maestro-new, /regression, /test-agents)
 plugins/         — maestro-bootstrap (ESM-плагин: sanitize, access_policy, observability)
-skills/          — скиллы (maestro, maestro-init, maestro-design, manual-docs — generic user-docs)
+skills/          — скиллы (maestro, maestro-new, maestro-design, manual-docs — generic user-docs)
 specs/           — дизайн-спеки и план-ы этого репо (never in root!)
 manual_docs/     — пользовательская документация скилла (Diátaxis)
 ```

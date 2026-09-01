@@ -41,7 +41,7 @@
   **non-functional** (не fallback): confidential-deny + sanitize промпта. Для
   sanitizer — рекурсия (Ур.1 маскирует raw до него). Это fail-closed по
   дизайну: доступ блокируется, агент не может выполнять свою роль.
-- **P5.** Плагин `maestro-bootstrap` обязателен (гейт на входе `/maestro`). При
+- **P5.** Плагин `maestro-bootstrap` обязателен (гейт на входе `/maestro-init`). При
   отключённом плагине защита fail-open — признанный риск (см. §5).
 - **P6.** `maestro.json` (в т.ч. `sanitizer_whitelist.patterns`) НЕ выносится
   из-под `access_policy` — конфиг остаётся под контролем доступа (fail-closed).
