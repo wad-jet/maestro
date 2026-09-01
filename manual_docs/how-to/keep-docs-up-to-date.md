@@ -29,11 +29,11 @@
 | Маршрут багфикса (debug sub-pipeline) | `how-to/run-a-bugfix.md` |
 | HITL-гейты / варианты ответов | `reference/hitl-gates.md` |
 | Категории фич / матрица сигналов | `reference/feature-classification.md` |
-| Модели / tier / субагенты | `reference/model-selection.md`, `explanation/agents-and-trust.md` |
+| Модели / tier / субагенты | `reference/model-selection.md`, `explanation/agents-and-trust.md`, `how-to/choose-models.md` |
 | Команды (`@command`) | `reference/commands.md` |
 | `/maestro-assistant` (конфиг/структура/контекст) | `reference/commands.md`, `reference/config.md`, `explanation/agents-and-trust.md` |
 | `/maestro-init` / `/maestro-design` (setup, конфиг, модели) | `tutorials/setup-project.md`, `reference/commands.md` |
-| Trust / санитайзер | `explanation/agents-and-trust.md` |
+| Trust / санитайзер | `explanation/agents-and-trust.md`, `how-to/choose-models.md` |
 | Обновление/доставка до версии (skills + plugin, контроль) | `how-to/update-maestro.md` |
 | Security Review / sanitizer-сабагент / file access control | `explanation/agents-and-trust.md`, `reference/model-selection.md`, `reference/hitl-gates.md` |
 | Реестр регрессии | `how-to/use-regression-registry.md` |
