@@ -1,5 +1,6 @@
 .worktrees/
 .opencode/
+.claude/
 .maestro/
 .agpack.lock.yml
 TODO.md
