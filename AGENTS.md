@@ -13,7 +13,7 @@ This is the **authoring repo** for the OpenCode `maestro` system (the "maestro" 
 - `skills/maestro-assistant/SKILL.md` — `/maestro-assistant` skill: consultation & config/structure/context organization for maestro (single source of config rules). Self-contained; loaded by `/maestro-new` (tasks 2/3/3a) and `/maestro-init` (pipeline config questions).
 - `skills/manual-docs/SKILL.md` — generic user-docs skill (доки целевого приложения, Diátaxis), загружается на шаге 14 пайплайна maestro. Отдельно от правила синхронизации `manual_docs/` самого maestro (ниже).
 - `plugins/maestro-bootstrap/` — ESM OpenCode plugin.
-- `specs/*.md` — design specs and implementation plans for work on this repo (kebab-case: `<topic>.md` for spec, `<topic>-plan.md` for plan). **Rule: all feature/bugfix design docs (specs AND plans) must be created in `specs/`, never in the repo root.**
+- `specs/*.md` — **legacy** design specs and implementation plans for past work on this repo (kebab-case: `<topic>.md` for spec, `<topic>-plan.md` for plan). **New work (2026-09-02):** design docs are no longer created here. For **future** features/bugfixes on this repo, produce spec + plan via the **brainstorming skill** into `docs/superpowers/` (spec: `docs/superpowers/specs/YYYY-MM-DD-<feature-name>-design.md`; plan: `docs/superpowers/plans/YYYY-MM-DD-<feature-name>-plan.md`), never in the repo root or `specs/`. Keep `specs/` as historical record; do not add new files to it.
 - `SECURITY.md` — **internal security (ИБ) standard** for the maestro skill (trust model, ИБ requirements P1–P5, invariants, testing). Not part of `manual_docs/`. It is the source of truth for security decisions; specs/plans reference it.
 
 ## Gotchas

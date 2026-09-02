@@ -37,6 +37,11 @@
 
 ### Изменено
 
+- **Конвенция spec/plan для authoring-репо.** Папка `specs/` объявлена **legacy**:
+  новые фичи/багфиксы этого репо производят spec+plan через **скилл `brainstorming`**
+  в `docs/superpowers/` (`specs/YYYY-MM-DD-<feature>-design.md`,
+  `plans/YYYY-MM-DD-<feature>-plan.md`), не в `specs/` и не в корне. `specs/`
+  остаётся историческим рекордом; новых файлов туда не добавлять (см. `AGENTS.md`).
 - **`SECURITY.md` §4/§5 (R10).** Добавлен нативный permission-bastion и policies в
   контрмеры; пункт «fail-open без плагина» смягчён (нативный baseline остаётся при
   отключённом плагине; sanitizer/enforcement плагина по-прежнему требуют плагина,
