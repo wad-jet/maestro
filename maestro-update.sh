@@ -3,7 +3,7 @@
 # maestro-update.sh — обновление maestro в целевом проекте.
 #
 # Обновляет скилы/команды/агенты (agpack sync), очищает кэш плагина OpenCode,
-# мержит актуальные записи в agpack.yml, пишет expected_version в maestro.json.
+# мержит актуальные записи в agpack.yml.
 #
 # Совместимость: bash 3.2+ (macOS); Windows — через WSL/Git Bash.
 #
@@ -26,7 +26,7 @@ die()  { printf '\033[1;31m[maestro-update] ОШИБКА:\033[0m %s\n' "$*" >&2;
 
 usage() {
   cat <<'USAGE'
-maestro-update — обновление maestro (скилы + плагин + expected_version).
+maestro-update — обновление maestro (скилы + плагин).
 
 Использование:
   bash maestro-update.sh [--pin <sha>] [--global] [--help]
@@ -235,32 +235,7 @@ else
   info "удалено записей кэша: $MATCHED"
 fi
 
-# --- 5. Запись expected_version в maestro.json --------------------------------
-
-if [[ -f "maestro.json" ]]; then
-  python3 - "$TARGET_VERSION" <<'PY'
-import json, sys
-p = "maestro.json"
-target = sys.argv[1]
-try:
-    with open(p, "r", encoding="utf-8") as f:
-        content = f.read().strip()
-        if content:
-            data = json.loads(content)
-except (json.JSONDecodeError, OSError) as e:
-    sys.stderr.write("maestro-update: не могу прочитать %s: %s\n" % (p, e))
-    sys.exit(1)
-data["expected_version"] = target
-with open(p, "w", encoding="utf-8") as f:
-    json.dump(data, f, ensure_ascii=False, indent=2)
-    f.write("\n")
-print("maestro-update: expected_version = %s записан в maestro.json" % target)
-PY
-else
-  warn "maestro.json не найден — expected_version не записан (выполните /maestro-new)"
-fi
-
-# --- 6. Пин версии (опционально) ---------------------------------------------
+# --- 5. Пин версии (опционально) ---------------------------------------------
 
 GLOBAL_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/opencode.json"
 if [[ "$GLOBAL_MODE" -eq 1 ]]; then
@@ -309,13 +284,12 @@ cat <<EOT
 
 [maestro-update] Готово.
   - целевая версия: $TARGET_VERSION
-  - expected_version записан в maestro.json (если он существует)
   - кэш плагина очищен
   - плагин: $PLUGIN_SPEC${PIN:+#$PIN}
 
 Что дальше:
   1. Перезапустите opencode (обязательно — плагин загрузится заново).
-  2. Проверьте версию: /maestro-version  (должна быть $TARGET_VERSION)
+  2. Проверьте версию: /maestro-version  (покажет фактическую версию плагина)
 
 Русский — рабочий язык. Источник: $REPO_URL
 EOT

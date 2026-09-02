@@ -112,9 +112,9 @@ bash/glob/grep — нативные permissions. Файл `maestro.json` (сек
 
 > **`maestro.json` остаётся за `access_policy`** — конфиг не выносится из-под
 > контроля доступа (fail-closed, см. [`SECURITY.md`](../../../SECURITY.md) → P6).
-> Расширение `isPluginMetaFile` касается **только двух semver-метафайлов**
-> (`.maestro/plugin-version`, `.maestro/expected-version`) — предупреждение о
-> версии использует их, не ослабляя доступ к конфигу.
+> Расширение `isPluginMetaFile` касается **только одного semver-метафайла**
+> (`.maestro/plugin-version`) — `/maestro-version` использует его, не ослабляя
+> доступ к конфигу.
 
 ### Revise-цикл: opus-правки + оркестратор (шаг 10b)
 

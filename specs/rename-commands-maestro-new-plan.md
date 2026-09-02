@@ -443,7 +443,7 @@ Expected: `maestro-init` остаётся только в значении па�
 
 - [ ] **Step 1: `package.json`**: `"version": "2.0.0"`.
 
-- [ ] **Step 2: `maestro.json`**: `expected_version` **НЕ менять** — остаётся 1.2.2 (фактически установленная версия; `maestro-update.sh` не запускался). Актуализируется только самим скриптом при его запуске (правило из `skills/maestro-assistant/SKILL.md`).
+- [ ] **Step 2: `maestro.json`**: `expected_version` **убрать** — версия дистрибутива не хранится в конфиге проекта. `/maestro-version` показывает фактическую версию плагина из `.maestro/plugin-version`; плагин не зеркалирует `expected-version` и не предупреждает о рассинхроне.
 
 - [ ] **Step 3: changelog-секция `[2026-09-01]`** (см. Task 13 Step 3) — финальная форма с версией 2.0.0.
 

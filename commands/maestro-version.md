@@ -1,27 +1,19 @@
 ---
-description: Показать версию плагина maestro-bootstrap и расхождение с ожидаемой (из .maestro/plugin-version и .maestro/expected-version)
+description: Показать версию плагина maestro-bootstrap (из .maestro/plugin-version)
 ---
 
 # /maestro-version
 
-Покажи пользователю версию плагина `maestro-bootstrap` и, если она расходится с
-ожидаемой, предупреди.
+Покажи пользователю фактическую версию плагина `maestro-bootstrap`.
 
 ## Действия
 
-1. Прочитай `.maestro/plugin-version` (фактическая версия) через `read`.
-2. Прочитай `.maestro/expected-version` (ожидаемая версия) через `read`.
-3. Если `.maestro/plugin-version` отсутствует или пуст — сообщи:
+1. Прочитай `.maestro/plugin-version` (фактическая версия загруженного плагина)
+   через `read`.
+2. Если `.maestro/plugin-version` отсутствует или пуст — сообщи:
    "Плагин maestro-bootstrap не инициализирован или версия неизвестна."
    (файл пишется только при успешной инициализации плагина — признак сбоя init).
-4. Если версии равны — сообщи:
+3. Иначе сообщи:
    "Подключён плагин maestro-bootstrap версии `<версия>`."
-5. Если `.maestro/expected-version` отсутствует — сообщи фактическую версию без
-   предупреждения (поле `expected_version` не задано в maestro.json).
-6. Если версии различаются — сообщи:
-   "Подключён плагин maestro-bootstrap версии `<фактическая>`, ожидается
-   `<ожидаемая>` (из maestro.json). Выполните `maestro-update.sh` (или `git pull`
-   в авторском репо при ручной установке), затем перезапустите opencode. Если
-   `maestro-update.sh` уже выполнен — просто перезапустите opencode."
 
 Все сообщения пользователю — только на русском языке.

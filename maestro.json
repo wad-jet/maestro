@@ -3,7 +3,6 @@
     "custodian": true,
     "sanitizer": true
   },
-  "expected_version": "1.2.2",
   "access_policy": {
     "version": 1,
     "default": "ask",

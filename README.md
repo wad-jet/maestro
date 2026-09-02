@@ -86,16 +86,15 @@ bash maestro-install.sh
 Версия **и плагина, и скилов — единая** (корневой `package.json → version`).
 
 - **Рекомендуемый способ — `maestro-update.sh`:** одна команда определяет целевую
-  версию, запускает `agpack sync`, очищает кэш плагина, пишет `expected_version`;
-  опционально `--pin <sha>`.
+  версию, запускает `agpack sync`, очищает кэш плагина; опционально `--pin <sha>`.
 - **Скиллы/команды/агенты:** `agpack sync` (либо вручную из репозитория).
 - **Плагин:** кэшируется в `~/.cache/opencode/packages/` и НЕ обновляется при
   перезапуске OpenCode — перезапуск сам по себе не подтянет новую версию. Кэш
   очищает `maestro-update.sh`; при ручном обновлении — очистить кэш вручную
   (`rm -rf ~/.cache/opencode/packages/maestro-bootstrap@git+https:...`) + перезапуск.
   Для фиксации коммита — fragment `#<commit-sha>`.
-- **Контроль версии:** `/maestro-version` — показывает рассинхрон фактической
-  (`.maestro/plugin-version`) с ожидаемой (`.maestro/expected-version`) версией.
+- **Контроль версии:** `/maestro-version` — показывает фактическую версию
+  плагина (`.maestro/plugin-version`).
 
 Подробно — [Обновление maestro](manual_docs/how-to/update-maestro.md).
 

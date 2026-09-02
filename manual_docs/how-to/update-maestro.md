@@ -42,7 +42,7 @@
 **Вариант 0 — через `maestro-update.sh` (рекомендуется):**
 
 Одна команда делает всё: определяет целевую версию, запускает `agpack sync`,
-очищает кэш плагина (см. Шаг 2), пишет `expected_version` в `maestro.json`.
+очищает кэш плагина (см. Шаг 2).
 Опционально — закрепить конкретный коммит через `--pin <sha>`.
 
 ```bash
@@ -120,9 +120,7 @@ rm -rf ~/.cache/opencode/packages/maestro-bootstrap@git+https:...
 
 1. **Перезапустите OpenCode.** До перезапуска `.maestro/plugin-version` содержит
    старую версию (файл перезаписывается при init).
-2. Выполните `/maestro-version` — покажет версию из `.maestro/plugin-version` и
-   сравнит её с ожидаемой из `.maestro/expected-version`. При рассинхроне — команда
-   предупредит об этом.
+2. Выполните `/maestro-version` — покажет фактическую версию из `.maestro/plugin-version`.
 3. Сверьте с ожидаемой версией из `package.json` (это версия и скилов, и плагина).
    Расхождение → скилы/плагин не той версии.
 4. Если команда сообщает «не инициализирован или версия неизвестна» — плагин не
@@ -144,4 +142,4 @@ rm -rf ~/.cache/opencode/packages/maestro-bootstrap@git+https:...
 - [Настройка проекта для maestro](../tutorials/setup-project.md)
 - [Кастомизация скилла](customize-maestro.md)
 - [Команды](../reference/commands.md) — `/maestro-version`
-- [Конфигурация](../reference/config.md) — `.maestro/plugin-version`, `.maestro/expected-version`
+- [Конфигурация](../reference/config.md) — `.maestro/plugin-version`

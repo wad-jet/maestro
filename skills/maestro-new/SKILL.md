@@ -133,13 +133,6 @@ pipeline maestro: есть `docs/project-context.md` (источник конт�
 `sanitizer_whitelist` из §3/§12. Идемпотентность: при существовании `maestro.json` — diff по
 секциям; merge сохраняет пользовательские правки; если файла нет — создаётся целиком.
 
-**`expected_version`** (дополнительное поле `maestro.json`, опционально): при создании/обновлении
-`maestro.json` записать `expected_version` = актуальную версию дистрибутива maestro. Брать **из HEAD
-авторского репо `wad-jet/maestro`** — сеть, temp-клон по образцу `maestro-update.sh`
-(`git clone -q --depth 1 https://github.com/wad-jet/maestro.git "$TMP_DIR"`; версия — поле
-`version` из `$TMP_DIR/package.json`). **НЕ из кэша** — иначе устаревший кэш «легализуется» как
-ожидаемая версия. Если сеть недоступна или файл отсутствует — поле не пишется (не блокирует задачу).
-
 ### Плагин + модели агентов (без корневого `opencode.json`)
 
 Корневой `opencode.json` **не создаётся**. Плагин и модели живут в merge-конфиге
