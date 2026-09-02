@@ -79,7 +79,7 @@ description: Use when the user asks for help configuring maestro, organizing pro
 - **`confidential`** — защита конфиденциальных путей (жёстче access_policy). Дефолт
   `paths: ["docs/confidential/**"]`; trusted читает по умолчанию, запись/редактирование deny
   (выдаются явно). Primary/untrusted — всегда deny.
-- **`expected_version`** — ожидаемая версия дистрибутива maestro (пишется `maestro-update.sh` / `/maestro-new`). Опционально; плагин зеркалирует её в `.maestro/expected-version` и предупреждает при рассинхроне с фактической.
+- **`expected_version`** — ожидаемая версия дистрибутива maestro (пишется `maestro-update.sh` / `/maestro-new`). Опционально; плагин зеркалирует её в `.maestro/expected-version` и предупреждает при рассинхроне с фактической. **Правило: не менять `expected_version` вручную при bump'е версии `package.json`** — значение актуализирует только `maestro-update.sh` в момент его запуска (берёт `version` из `package.json` репозитория). До запуска скрипта `expected_version` должен отражать фактически установленную версию (может не совпадать с версией следующего релиза).
 - **`confidential.paths`** — принимает папки, отдельные файлы по полному имени
   и по маске, включая корневую папку. Сегментная семантика: `**` = 0+ сегментов
   (покрывает корень), `*`/`?` — в пределах сегмента (не через `/`), маска без `/`

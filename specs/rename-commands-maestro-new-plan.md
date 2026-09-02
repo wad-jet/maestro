@@ -443,7 +443,7 @@ Expected: `maestro-init` остаётся только в значении па�
 
 - [ ] **Step 1: `package.json`**: `"version": "2.0.0"`.
 
-- [ ] **Step 2: `maestro.json`**: `"expected_version": "2.0.0"`.
+- [ ] **Step 2: `maestro.json`**: `expected_version` **НЕ менять** — остаётся 1.2.2 (фактически установленная версия; `maestro-update.sh` не запускался). Актуализируется только самим скриптом при его запуске (правило из `skills/maestro-assistant/SKILL.md`).
 
 - [ ] **Step 3: changelog-секция `[2026-09-01]`** (см. Task 13 Step 3) — финальная форма с версией 2.0.0.
 
@@ -517,7 +517,7 @@ git commit -m "docs: design + plan for rename commands maestro-init/maestro"
 
 ## Task 19: код-коммиты (шаг 13, SDD)
 
-После SDD — per-task code коммиты (Tasks 1–14), стиль репо (`refactor(commands): ...`, `docs(...): ...`, `chore(version): bump to 2.0.0`, `chore(config): sync expected_version`). Один сводный рефактор-коммит возможен по решению оркестратора.
+После SDD — per-task code коммиты (Tasks 1–14), стиль репо (`refactor(commands): ...`, `docs(...): ...`, `chore(version): bump to 2.0.0`). Один сводный рефактор-коммит возможен по решению оркестратора.
 
 ---
 
