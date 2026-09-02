@@ -51,7 +51,9 @@ not found»), т.к. каталог удалён из репозитория. П
 3. Вручную в `agpack.yml`: `path: skills/maestro-init` → `path: skills/maestro-new`.
 
 После обновления скрипты также удаляют устаревшие `.opencode/commands/maestro.md`
-и `.opencode/skills/maestro-init/` (agpack не удаляет их автоматически).
+и `.opencode/skills/maestro-init/` (agpack не удаляет их автоматически). Эфемерный
+`.maestro/expected-version` (если существовал) больше не используется плагином —
+его можно удалить вручную (файл инертен).
 
 **Откат (`--pin` на старую версию):** при `maestro-update.sh --pin <sha-до-2.0.0>`
 канон старого коммита не содержит `maestro-install/agpack.yml`, поэтому

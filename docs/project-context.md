@@ -104,7 +104,7 @@ design-доки этого репо лежат в `specs/` (корень, пра
 ## 10. Тестирование
 
 - **Unit (плагин):** встроенный Node test runner — `node --test
-  plugins/maestro-bootstrap/index.test.js` (171 тест).
+  plugins/maestro-bootstrap/index.test.js` (173 теста).
 - **QA-чеклист (e2e-смоук):** `./maestro-sandbox.sh` создаёт `.sandbox/` (фиктивное
   целевое приложение), чеклист `docs/testing/maestro-sandbox-checklist.md`.
 - Команды тестирования зафиксированы в §14.

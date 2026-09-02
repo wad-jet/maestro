@@ -41,7 +41,7 @@ risk: HIGH
 - `path`: `plugins/maestro-bootstrap/index.test.js`
 - `run`: `node --test plugins/maestro-bootstrap/index.test.js`
 - `workdir`: корень репо
-- Ожидание: 176/176 pass.
+- Ожидание: 173/173 pass.
 
 ### 5. Синтаксис скриптов
 
