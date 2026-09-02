@@ -14,7 +14,7 @@
 |---|---|
 | **Скилл `maestro`** | Спецификация pipeline (фичи / багфиксы / баг-дебаг) — `skills/maestro/SKILL.md` |
 | **Команда `/maestro-init`** | Точка входа в пайплайн — загружает скилл и стартует pipeline |
-| **Субагенты** | `design`, `haiku`, `sonnet`, `opus`, `fable`, `code-reviewer`, `sanitizer` |
+| **Субагенты** | `custodian`, `haiku`, `sonnet`, `opus`, `fable`, `code-reviewer`, `sanitizer` |
 | **Плагин** | `maestro-bootstrap` — санитайзинг промптов, file access control, audit-логи |
 | **Команды** | `/maestro-init`, `/maestro-new`, `/maestro-design`, `/regression`, `/test-agents` |
 
@@ -121,7 +121,7 @@ bash maestro-install.sh
 #### Настройка моделей агентов по тирам
 
 M1-воркфлоу (`/maestro-new`) задаёт **7 отдельных HITL-вопросов** (по одному на
-агента — гибкость выбора): `design` и `sanitizer` могут получить разные модели, но
+агента — гибкость выбора): `custodian` и `sanitizer` могут получить разные модели, но
 **одна модель тоже допустима** (см. выше). Для каждого агента предложение
 формируется из каскада:
 
@@ -134,13 +134,13 @@ M1-воркфлоу (`/maestro-new`) задаёт **7 отдельных HITL-в
 следствие (по способности к рассуждению), не единственный критерий (`fable` —
 модальность, `sanitizer` — доверие). Контекст задаёт конкретная модель, не тир.
 Trust — доверие (`maestro.json → trust`), атрибут безопасности, не мощность.
-Trusted по роли: `design` + `sanitizer` (обоим доступен `docs/confidential/**`),
+Trusted по роли: `custodian` + `sanitizer` (обоим доступен `docs/confidential/**`),
 но это **разные агенты** (модели могут быть разными, но одна модель тоже допустима
 на усмотрение пользователя — например, одна локальная/изолированная для обоих).
 
 | Агент | Tier (роль) | Trusted? |
 |---|---|---|
-| `design` | opus (spec formation, архитектура) | ✅ |
+| `custodian` | opus (Q/A-брокер по confidential) | ✅ |
 | `sanitizer` | своя модель (security review) | ✅ |
 | `opus` | opus (spec review) | ❌ |
 | `code-reviewer` | opus (code review) | ❌ |
@@ -152,7 +152,7 @@ Trusted по роли: `design` + `sanitizer` (обоим доступен `docs
 уровням конфигурации (merge), с приоритетом project > global.
 
 **Рекомендуемый способ — централизованная глобальная настройка.** Настроить
-`agent.{design,haiku,sonnet,opus,fable,code-reviewer,sanitizer}` (model +
+`agent.{custodian,haiku,sonnet,opus,fable,code-reviewer,sanitizer}` (model +
 `temperature`) один раз в `~/.config/opencode/opencode.json` — новые проекты
 наследуют значения, `/maestro-new` предлагает «оставить из global» первым
 вариантом. Project `.opencode/opencode.json` переопределяет global при нужде в
@@ -172,7 +172,7 @@ Trusted по роли: `design` + `sanitizer` (обоим доступен `docs
 После настройки моделей убедитесь, что каждый сабагент реально диспатчится и
 модель доступна — командой `/test-agents`:
 
-- диспатч каждого из 7 сабагентов (`design`, `haiku`, `sonnet`, `opus`, `fable`,
+- диспатч каждого из 7 сабагентов (`custodian`, `haiku`, `sonnet`, `opus`, `fable`,
   `code-reviewer`, `sanitizer`) тривиальной тестовой задачей «верни OK и своё имя»;
 - сводная таблица `OK / FAIL` по каждому агенту с причиной при ошибке (недоступна
   модель, ошибка провайдера, таймаут);
@@ -207,7 +207,7 @@ Trusted по роли: `design` + `sanitizer` (обоим доступен `docs
 ## Структура
 
 ```
-agents/          — конфиги субагентов (design, haiku, sonnet, opus, fable, code-reviewer, sanitizer)
+agents/          — конфиги субагентов (custodian, haiku, sonnet, opus, fable, code-reviewer, sanitizer)
 commands/        — @command конфиги (/maestro-init, /maestro-new, /regression, /test-agents)
 plugins/         — maestro-bootstrap (ESM-плагин: sanitize, access_policy, observability)
 skills/          — скиллы (maestro, maestro-new, maestro-design, manual-docs — generic user-docs)
