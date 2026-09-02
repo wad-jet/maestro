@@ -24,7 +24,7 @@ sanitizer).
    «2-й эшелон» переведён из рекомендации в стандарт init.
 5. `SECURITY.md` §4/§5 отражают нативный baseline (fail-open смягчён); P6 (plugin-version)
    не меняется (R7 в Этапе B).
-6. Сравнение-черновик (`.maestro/security-comparison-draft.md`) и changelog синхронизированы.
+6. changelog синхронизирован.
 7. `custodian`/`sanitizer` имеют per-agent `read`/`glob`/`grep` allow для confidential
    (frontmatter + init-конфиг) — trusted-канал не ломается нативным deny (R2-конфиг).
 
@@ -95,8 +95,9 @@ sanitizer).
   sanitizer и enforcement плагина по-прежнему требуют плагина (P5-гейт сохраняется).
 - P6 (plugin-version) — не менять (R7 в Этапе B).
 
-### Task 7 — Сравнение-черновик (R10)
-**Файл:** `.maestro/security-comparison-draft.md` (временный черновик исследования, не в git).
+### Task 7 — Корректировка сравнения (R10)
+**Файл:** предварительный черновик сравнения подходов безопасности (не входит в
+репозиторий; временные данные для подготовки спецификации).
 
 Добавить примечание о реализованном Этапе A (нативный baseline) со ссылкой на spec;
 отметить, что вывод «fail-open» в §5 смягчён.
@@ -111,8 +112,7 @@ sanitizer).
 ### Task 9 — Per-agent trusted-исключения (R2-конфиг, C1)
 **Файлы:** `agents/custodian.md`, `agents/sanitizer.md`, `skills/maestro-new/SKILL.md`,
 `skills/maestro-assistant/SKILL.md`, `manual_docs/reference/config.md`,
-`manual_docs/explanation/agents-and-trust.md`, `SECURITY.md`, сравнение-черновик
-(`.maestro/security-comparison-draft.md`).
+`manual_docs/explanation/agents-and-trust.md`, `SECURITY.md`.
 
 - `agents/custodian.md`, `agents/sanitizer.md`: добавить per-agent `read`/`glob`/`grep`
   `{"docs/confidential/*": "allow"}` (frontmatter).
@@ -121,7 +121,7 @@ sanitizer).
 - `skills/maestro-assistant/SKILL.md` канон: per-agent exceptions (двухканально:
   frontmatter + merge-config); enforcement плагина остаётся defense-in-depth.
 - Док-синк (config.md таблица, agents-and-trust.md модель доверия, SECURITY.md §4/§5,
-  сравнение-черновик §5, changelog).
+  changelog).
 - V1 (merge agent-vs-global) — runtime-верификация pending (fixture-попытка 2026-09-02
   заблокирована недоступностью провайдера); fallback при провале — скоупить нативный
   confidential-deny из Этапа A.

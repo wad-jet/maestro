@@ -4,16 +4,17 @@
 
 - Дата: 2026-09-02. Версия: 2. Тип: **spec** (proposal, не план реализации).
 - Репо: `maestro-agent` (authoring).
-- Основано на: независимом исследовании `.maestro/security-comparison-draft.md`
-  (§5 «Избыточность и комплементарность»; временный черновик, не в git) +
+- Основано на: предварительном исследовании сравнения подходов безопасности
+  (Claude Code / OpenCode vs Maestro; временный черновик, не входит в репозиторий) +
   верификации доков OpenCode (Permissions / Agents / Policies,
   2026-09-02) + аудите текущих инструкций maestro по нативным permissions.
 - v2: добавлено расщепление на фазы A/B (решение HITL 2026-09-02, §5).
 
 ## 1. Проблематика
 
-Сравнение в `.maestro/security-comparison-draft.md` §5 выявило, что часть контрмер плагина
-`maestro-bootstrap` дублирует нативный permission-слой OpenCode, а часть — остаётся
+Сравнение подходов безопасности (предварительное исследование) выявило, что часть
+контрмер плагина `maestro-bootstrap` дублирует нативный permission-слой OpenCode,
+а часть — остаётся
 уникальной. Дополнительно обнаружен главный пробел: **нативные permissions не
 настраиваются на этапе инициализации проекта** (`/maestro-new`, `@maestro-init`
 задают только `plugin` + модели `agent.*.model`), поэтому fail-open риск плагина
@@ -124,8 +125,7 @@ deny и per-agent allow и наоборот (иначе дрейф).
 ### R10 — Синхронизация доков (по правилу AGENTS.md)
 
 `SECURITY.md` (§4 контрмеры, §5 — пункт fail-open смягчается),
-(сравнение-черновик §5 — корректировка F1), `manual_docs/`
-(`agents-and-trust.md`, `config.md`, `model-selection.md`), changelog.
+`manual_docs/` (`agents-and-trust.md`, `config.md`, `model-selection.md`), changelog.
 
 ## 4. Точки верификации (V1–V4)
 
@@ -200,5 +200,6 @@ R1+R4 → R5 → R6 → R8 → R10.
 - OpenCode Agents: https://opencode.ai/docs/agents/
 - OpenCode Policies: https://opencode.ai/docs/ru/policies/
 - Внутренний стандарт ИБ: `SECURITY.md`
-- Сравнение (временный черновик исследования, эфемерный): `.maestro/security-comparison-draft.md` (не в git; использован при подготовке данной спецификации)
+- Предварительное исследование сравнения подходов безопасности (Claude Code /
+  OpenCode vs Maestro; временный черновик, не входит в репозиторий)
 - Реализация плагина: `plugins/maestro-bootstrap/core.js`, `plugins/maestro-bootstrap/index.js`

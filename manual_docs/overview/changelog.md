@@ -33,7 +33,7 @@
   `config.md` и `agents-and-trust.md`.
 - **Сравнение безопасности** — временный черновик исследования (Claude Code /
   OpenCode / Maestro), использован при подготовке spec `specs/native-permissions-rebalance.md`;
-  в git не входит (эфемерный, `.maestro/security-comparison-draft.md`).
+  в репозиторий не входит (эфемерный).
 
 ### Изменено
 
