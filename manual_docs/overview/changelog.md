@@ -7,6 +7,35 @@
 > Хронология составлена по истории authoring-репо `maestro-agent`. Даты
 > приблизительные (по коммитам).
 
+## [2026-09-02]
+
+### Добавлено
+
+- **Нативный permission-бастион OpenCode (Этап A, R1+R4).** `/maestro-new` пишет
+  deny-baseline для confidential (`read`/`edit`: `docs/confidential/*` + `.env`,
+  `*.pem`, `*.key`, `*.crt`, `*.p12`, `*.pfx`) и 2-й эшелон для `bash`/`glob`/`grep`
+  в merge-config — fail-closed baseline на уровне ядра OpenCode, не зависящий от
+  плагина. Канон — в скилле `maestro-assistant`. R2/R3 (trusted-исключения нативно,
+  retire `access_policy`) — Этап B, после V1-верификации.
+- **Policies для P4 (R5).** Опциональный `experimental.policies` (`provider.use`) —
+  enforced deny/allow провайдеров в ядре для изолированных моделей trusted-агентов
+  (дополнение к рекомендации локальной модели). В `/maestro-new` + `model-selection.md`.
+- **Native-permission канон (R6).** Секция в скилле `maestro-assistant`:
+  семантика (`*` пересекает `/`, last-match-wins, `edit` gates write/edit/apply_patch),
+  глобальные deny, per-agent exceptions (trusted-исключения — Этап B), правила
+  порядка/идемпотентности.
+- **Документированы `doom_loop` guard и `@`-invocation caveat (R8)** — в
+  `config.md` и `agents-and-trust.md`.
+- **Сравнение безопасности** — новый справочник `SECURITY-COMPARISON.md`
+  (Claude Code / OpenCode / Maestro) + spec `specs/native-permissions-rebalance.md`.
+
+### Изменено
+
+- **`SECURITY.md` §4/§5 (R10).** Добавлен нативный permission-bastion и policies в
+  контрмеры; пункт «fail-open без плагина» смягчён (нативный baseline остаётся при
+  отключённом плагине; sanitizer/enforcement плагина по-прежнему требуют плагина,
+  P5-гейт сохраняется).
+
 ## [2026-09-01]
 
 ### Изменено

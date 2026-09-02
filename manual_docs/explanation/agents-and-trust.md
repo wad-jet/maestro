@@ -152,25 +152,26 @@ opus затрагивает помеченную `из confidential` секци�
 `bash cat`, `grep -r`, `glob` — эти тулы плагином не покрываются (пути из
 bash-команд ненадёжно извлекаются).
 
-**Рекомендуемый 2-й эшелон защиты — нативные permissions OpenCode**
-(`.opencode/agents/*.md` + `.opencode/opencode.json`/global), чтобы закрыть
-`bash`/`glob`/`grep` для confidential-путей:
+**Нативный permission-бастион OpenCode (стандарт init, Этап A).** `/maestro-new`
+пишет нативный deny-baseline для confidential + 2-й эшелон в merge-config
+(`.opencode/opencode.json`/global) — **обязательная часть init**, а не рекомендация:
 
 ```json
 {
   "permission": {
-    "bash": {
-      "*cat*confidential*": "deny",
-      "*grep*confidential*": "deny",
-      "*ls*confidential*": "deny",
-      "*glob*confidential*": "deny"
-    }
+    "read": { "*": "allow", "docs/confidential/*": "deny", "*.env": "deny", "*.env.*": "deny", "*.pem": "deny", "*.key": "deny", "*.crt": "deny", "*.p12": "deny", "*.pfx": "deny" },
+    "edit": { "*": "allow", "docs/confidential/*": "deny", "*.env": "deny", "*.env.*": "deny", "*.pem": "deny", "*.key": "deny", "*.crt": "deny", "*.p12": "deny", "*.pfx": "deny" },
+    "bash": { "*": "ask", "*cat*confidential*": "deny", "*grep*confidential*": "deny", "*ls*confidential*": "deny", "*glob*confidential*": "deny" },
+    "glob": { "*": "allow", "docs/confidential/*": "deny" },
+    "grep": { "*": "allow", "docs/confidential/*": "deny" }
   }
 }
 ```
 
-Два слоя работают независимо: плагин закрывает `read/write/edit`, native
-permissions OpenCode закрывают `bash/glob/grep`. При настройке вынесите
+Два слоя работают независимо: плагин закрывает `read/write/edit` (по имени/trust),
+native permissions OpenCode закрывают `bash/glob/grep` + дают fail-closed baseline
+в ядре (не зависит от плагина). Канон и семантика (`*` пересекает `/`,
+last-match-wins) — в скилле `maestro-assistant`. При настройке вынесите
 `docs/confidential/**` из `access_policy.allow`, чтобы избежать путаницы
 (confidential технически выигрывает, но явная настройка читается яснее).
 
@@ -180,30 +181,40 @@ permissions OpenCode закрывают `bash/glob/grep`. При настрой�
 - **Trust не наследуется** вложенными субагентами: даже если trusted-субагент
   диспатчит вложенного, вложенный оценивается по своему имени и получает deny,
   если не в `trust`.
+- **`@`-invocation (R8):** пользователь может вызвать любой сабагент напрямую через
+  `@`-меншн, даже при `task: deny` у агентов (включая `@custodian` с доступом к
+  `docs/confidential/**`). Приемлемо — **человек = источник доверия**; но вывод
+  `@custodian` вручную видит primary, что следует осознавать.
+- **`doom_loop` guard (R8):** OpenCode переспрашивает при повторении одинакового
+  вызова тула 3 раза (`ask` по умолчанию) — не конфликтует с pipeline, служит
+  индикатором зацикливания.
 - **Отдельные файлы и маски в `paths`:** `confidential.paths` принимает не
   только папки, но и отдельные файлы по полному имени и по маске, включая
   корневую папку проекта (напр. `maestro.json`, `*.env`, `**/*.pem`). Маска без
   `/` закрывает только корневые файлы; `**` — корень и вложенные; `*`/`?` — в
-  пределах одного сегмента. Контроль применяется к `read`/`write`/`edit`;
-  `bash`/`glob`/`grep` остаются вне перехвата (fail-open).
+пределах одного сегмента. Контроль применяется к `read`/`write`/`edit`;
+   `bash`/`glob`/`grep` плагином **не перехватываются** — их закрывает нативный
+   permission-бастион (стандарт init, см. выше).
 - **Пути нормализуются** перед матчингом: absolute / `./` / relative / `..`
   сводятся к каноническому проект-относительному виду, поэтому
   `/abs/.../docs/confidential/x.md`, `./docs/confidential/x.md` и
   `docs/Confidential/...` (case-вариант) блокируются наравне с
   `docs/confidential/...`. Листинг самой директории `docs/confidential` тоже
-  блокируется. `bash`/`glob`/`grep` по-прежнему не покрываются плагином —
-  используйте нативные permissions OpenCode (2-й эшелон).
+  блокируется. `bash`/`glob`/`grep` по-прежнему не покрываются плагином — их
+  закрывает нативный permission-бастион OpenCode (стандарт init).
 
-> **⚠️ Риск: данные confidential открыты при отключённом плагине.** Вся защита
-> `confidential` (как и `access_policy` и sanitizer) реализована в плагине
-> `maestro-bootstrap` и **не является файловой защитой ОС (не chmod/ACL)**. Это
-> fail-open: при отключённом или незагруженном плагине `read`/`write`/`edit` в
-> `docs/confidential/**` выполняются без ограничений. Если данные в
+> **⚠️ Риск: данные confidential при отключённом плагине — частично смягчён.**
+> Sanitizer и trusted-исключения (enforcement плагина) реализованы в плагине
+> `maestro-bootstrap` и **не являются файловой защитой ОС (не chmod/ACL)**.
+> При отключённом/незагруженном плагине **sanitizer и access_policy не работают**,
+> однако **файловая защита confidential частично сохраняется**: нативный
+> permission-бастион (read/edit/bash/glob/grep deny, стандарт init) действует в
+> ядре OpenCode независимо от плагина. Тем не менее, если данные в
 > `docs/confidential/` действительно конфиденциальны и их раскрытие недопустимо
-> даже без плагина — это **не** достаточный барьер: дополнительно ограничьте
-> права каталога средствами ОС (read-only / владелец) или репозитория (git-crypt,
-> отдельный приватный submodule/remote). Confidential — это защита от untrusted-
-> агентов **при работающем плагине**, не универсальная защита данных.
+> даже при отключённом плагине — это **не** достаточный барьер: дополнительно
+> ограничьте права каталога средствами ОС (read-only / владелец) или репозитория
+> (git-crypt, отдельный приватный submodule/remote). Confidential — защита от
+> untrusted-агентов, не универсальная защита данных.
 
 **⚠️ Чего делать НЕ надо — НЕ добавлять рабочие spec/plan пути в `paths`.**
 Каталоги `docs/superpowers/specs/**` и `docs/superpowers/plans/**` являются

@@ -97,6 +97,62 @@ description: Use when the user asks for help configuring maestro, organizing pro
 - **`access_policy.deny`:** секреты (`*.env`, `*.env.*`, `*.{pem,key,cert,secret}`).
 - **`sanitizer_whitelist`:** по §12; `extra_uri_schemes` из §3.
 
+## Канон нативных permissions OpenCode (R6)
+
+Второй слой защиты — **нативные permissions OpenCode** в merge-config
+(`.opencode/opencode.json` или global `~/.config/opencode/opencode.json`). Канон
+инline здесь (как и канон `maestro.json`), чтобы assistant мог генерировать/чинить
+нативный слой последовательно. Идемпотентно: только добавлять, не перезаписывать.
+
+### Семантика (ключевые отличия от плагина)
+
+- **`*` пересекает `/`** (в отличие от сегментной `confGlobMatch` плагина):
+  `docs/confidential/*` покрывает вложенные пути.
+- **Last-match-wins:** порядок правил критичен — catch-all (`"*"`) **первым**,
+  специфичные правила **после** (иначе catch-all перекроет deny).
+- Нативный `edit` gates `write`/`edit`/`apply_patch`; `read` gates `read` — покрытие
+  `read`/`write`/`edit` плагина паритетно.
+- Нативный `ask` промптит пользователя напрямую (настоящий per-call HITL) — в
+  отличие от плагинового паттерна «error → оркестратор решает».
+
+### Глобальные deny (R1+R4) — эталон конфигурации init
+
+Генерируется `/maestro-new`; assistant поддерживает/чинит:
+
+```json
+{
+  "permission": {
+    "read": { "*": "allow", "docs/confidential/*": "deny", "*.env": "deny", "*.env.*": "deny", "*.pem": "deny", "*.key": "deny", "*.crt": "deny", "*.p12": "deny", "*.pfx": "deny" },
+    "edit": { "*": "allow", "docs/confidential/*": "deny", "*.env": "deny", "*.env.*": "deny", "*.pem": "deny", "*.key": "deny", "*.crt": "deny", "*.p12": "deny", "*.pfx": "deny" },
+    "bash": { "*": "ask", "*cat*confidential*": "deny", "*grep*confidential*": "deny", "*ls*confidential*": "deny", "*glob*confidential*": "deny" },
+    "glob": { "*": "allow", "docs/confidential/*": "deny" },
+    "grep": { "*": "allow", "docs/confidential/*": "deny" }
+  }
+}
+```
+
+### Per-agent exceptions
+
+- **Механика тулов** — нативные per-agent permissions (`agent.<name>.permission` или
+  frontmatter `permission:`): `edit`/`bash`/`task`/`webfetch` per роль (канон в
+  `manual_docs/reference/config.md`, «Агенты: модели»).
+- **Trusted-исключения по данным** (allow-внутри-deny для `custodian`/`sanitizer` к
+  `docs/confidential/*`) — **пока остаются в плагине** (`confidential.trusted`).
+  Нативная реализация (per-agent `read` allow поверх глобального deny) — **Этап B**,
+  после V1-верификации merge-семантики. Не реализовывать до этого.
+
+### Правила вывода
+
+- **`access_policy` → `permission.read`** (когда R3 в Этапе B): deny>ask>allow →
+  last-match-wins с catch-all первым. Пока `access_policy` остаётся активным
+  механизмом плагина; нативный слой — дополнение (bash/glob/grep + read-baseline).
+- **Не добавлять** `docs/superpowers/{specs,plans}/*` в deny (двухролевые).
+- **Policies (P4, R5):** `experimental.policies` (`provider.use`) — глобальный
+  deny/allow провайдеров; global приоритетнее project; не перезаписывать.
+- **OP-1:** после правки native-permission конфига — рестарт opencode.
+- **OP-4:** ослабление security-слоя (deny→allow в нативном конфиге) — адресный
+  diff + явное HITL-подтверждение.
+
 ## Операционные гарантии (OP)
 
 - **OP-1 — перезапуск после правки `maestro.json`:** после записи любых изменений

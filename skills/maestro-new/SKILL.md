@@ -150,6 +150,104 @@ OpenCode (`.opencode/opencode.json` или глобальный `~/.config/openc
 - **Модели агентов** — в `.opencode/opencode.json` (gitignored) или глобально,
   по M1 (см. ниже). **Плейсхолдеры запрещены.**
 
+### Нативный permission-бастион OpenCode (R1+R4)
+
+Помимо плагина, `/maestro-new` пишет **нативный permission-конфиг** в merge-config
+(`.opencode/opencode.json` или глобальный `~/.config/opencode/opencode.json`) —
+fail-closed baseline, не зависящий от плагина. Идемпотентно: только добавлять ключи,
+**не перезаписывать существующий контент**, не дублировать уже присутствующие правила.
+
+**R1 — deny-baseline для confidential (read/edit).** Паритет built-in confidential
+плагина, на уровне ядра OpenCode (fail-closed даже без плагина):
+
+```json
+{
+  "permission": {
+    "read": {
+      "*": "allow",
+      "docs/confidential/*": "deny",
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "*.pem": "deny",
+      "*.key": "deny",
+      "*.crt": "deny",
+      "*.p12": "deny",
+      "*.pfx": "deny"
+    },
+    "edit": {
+      "*": "allow",
+      "docs/confidential/*": "deny",
+      "*.env": "deny",
+      "*.env.*": "deny",
+      "*.pem": "deny",
+      "*.key": "deny",
+      "*.crt": "deny",
+      "*.p12": "deny",
+      "*.pfx": "deny"
+    }
+  }
+}
+```
+
+**R4 — 2-й эшелон (bash/glob/grep) — обязателен, не рекомендация.** Закрывает
+пробел плагина (он не перехватывает `bash`/`glob`/`grep`):
+
+```json
+{
+  "permission": {
+    "bash": {
+      "*": "ask",
+      "*cat*confidential*": "deny",
+      "*grep*confidential*": "deny",
+      "*ls*confidential*": "deny",
+      "*glob*confidential*": "deny"
+    },
+    "glob": { "*": "allow", "docs/confidential/*": "deny" },
+    "grep": { "*": "allow", "docs/confidential/*": "deny" }
+  }
+}
+```
+
+**Правила вывода:**
+- **Порядок правил (last-match-wins):** catch-all (`"*": "allow"` / `"*": "ask"`) —
+  **первым**, специфичные deny — **после** (иначе catch-all перекроет deny).
+- **Семантика `*`:** в opencode `*` **пересекает `/`** (в отличие от сегментной
+  `confGlobMatch` плагина). `docs/confidential/*` покрывает вложенные пути.
+- **HITL-гейт:** показать diff-merge перед записью; (a) approve — (b) правки — (c) отмена.
+- **OP-1:** после записи сообщить о необходимости перезапуска opencode.
+- **Не добавлять** `docs/superpowers/{specs,plans}/*` в deny — они двухролевые
+  (см. agents-and-trust.md); native-baseline касается только confidential-ДАННЫХ.
+
+### Policies для P4 (R5, опционально)
+
+**Enforce P4** (trusted-агенты на изолированных моделях) через нативные policies
+OpenCode — enforced в ядре, в отличие от merge-конфига `agent.*.model` (не enforced
+в рантайме). Опциональный HITL-шаг: спросить, хочет ли пользователь ограничить
+провайдеров.
+
+Если да — записать `experimental.policies` (`provider.use`) в merge-config,
+идемпотентно, не перезаписывая существующее:
+
+```json
+{
+  "experimental": {
+    "policies": [
+      { "effect": "deny", "action": "provider.use", "resource": "*" },
+      { "effect": "allow", "action": "provider.use", "resource": "anthropic" },
+      { "effect": "allow", "action": "provider.use", "resource": "openai" }
+    ]
+  }
+}
+```
+
+**Правила:**
+- Global-конфиг приоритетнее project (репозиторий не может re-enable запрещённый
+  глобально провайдер). Запись в project разрешена только с HITL-подтверждением.
+- `resource` — ID провайдера; `*`/`?` — wildcard. Порядок: широкий deny первым,
+  специфичные allow после (last-match-wins).
+- Это **enforce-дополнение** к рекомендации локальной модели для `custodian`/
+  `sanitizer` (см. `model-selection.md` → P4); не заменяет выбор `agent.*.model`.
+
 ### M1 — выбор моделей агентов (7 отдельных HITL-вопросов)
 
 **Оси Tier и Trust ортогональны.** Trusted — атрибут безопасности, не мощность.

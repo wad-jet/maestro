@@ -208,6 +208,15 @@ Maestro не полагается на auto-classifier: все существе�
 
 ## 5. Избыточность и комплементарность плагина относительно OpenCode
 
+> **Статус реализации (2026-09-02, Этап A).** На основе рекомендаций
+> `specs/native-permissions-rebalance.md` реализован Этап A: `/maestro-new` пишет
+> нативный deny-baseline (`read`/`edit`) + 2-й эшелон (`bash`/`glob`/`grep`) +
+> опциональные policies для P4; канон — в `maestro-assistant`. Это смягчает
+> «fail-open без плагина» (см. §3.3, §3.8, §5.4): файловая защита confidential
+> более не зависит исключительно от плагина. R2/R3/R7/R9 — Этап B (после V1),
+> требуют runtime-верификации. Плагин остаётся владельцем sanitizer и
+> trusted-исключений по данным.
+
 Разбор механизмов плагина `maestro-bootstrap` (`core.js`, `index.js`) против
 нативных возможностей OpenCode (`permission`, `policies`, агентные правила).
 
