@@ -437,6 +437,9 @@ deny. Trust не наследуется вложенными субагента�
     "custodian": {
       "model": "opus",
       "permission": {
+        "read": { "*": "allow", "docs/confidential/*": "allow" },
+        "glob": { "*": "allow", "docs/confidential/*": "allow" },
+        "grep": { "*": "allow", "docs/confidential/*": "allow" },
         "edit": "deny",
         "bash": "deny",
         "task": "deny",
@@ -446,6 +449,9 @@ deny. Trust не наследуется вложенными субагента�
     "sanitizer": {
       "model": "opus",
       "permission": {
+        "read": { "*": "allow", "docs/confidential/*": "allow" },
+        "glob": { "*": "allow", "docs/confidential/*": "allow" },
+        "grep": { "*": "allow", "docs/confidential/*": "allow" },
         "edit": "deny",
         "bash": "deny",
         "task": "deny",
@@ -501,15 +507,15 @@ deny. Trust не наследуется вложенными субагента�
 }
 ```
 
-| Ключ сабагента | Рекомендуемая модель | `edit` | `bash` | `hidden` | Роль |
-|---|---|---|---|---|---|
-| `custodian` | opus | deny | deny | true | Q/A-брокер по confidential (trusted), не пишет spec |
-| `sanitizer` | opus (или безопасная) | deny | deny | true | Security review (trusted) |
-| `haiku` | haiku | allow | allow | true | Механические задачи SDD |
-| `sonnet` | sonnet | allow | allow | true | Интеграционные задачи SDD, task-reviewer |
-| `opus` | opus | deny | deny | true | Spec review, архитектура |
-| `fable` | fable | deny | deny | true | Пример, метафоры, объяснения |
-| `code-reviewer` | opus | deny | allow | false | Финальное ревью ветки |
+| Ключ сабагента | Рекомендуемая модель | `read`/`glob`/`grep` (confidential) | `edit` | `bash` | `hidden` | Роль |
+|---|---|---|---|---|---|---|
+| `custodian` | opus | **allow** | deny | deny | true | Q/A-брокер по confidential (trusted), не пишет spec |
+| `sanitizer` | opus (или безопасная) | **allow** | deny | deny | true | Security review (trusted) |
+| `haiku` | haiku | (default) | allow | allow | true | Механические задачи SDD |
+| `sonnet` | sonnet | (default) | allow | allow | true | Интеграционные задачи SDD, task-reviewer |
+| `opus` | opus | (default) | deny | deny | true | Spec review, архитектура |
+| `fable` | fable | (default) | deny | deny | true | Пример, метафоры, объяснения |
+| `code-reviewer` | opus | (default) | deny | allow | false | Финальное ревью ветки |
 
 > **Нативный permission-бастион (R1+R4).** Помимо плагина, init пишет нативный
 > deny-baseline для confidential (`read`/`edit`) и 2-й эшелон для `bash`/`glob`/

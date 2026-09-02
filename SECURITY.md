@@ -53,12 +53,16 @@
 - **Плагин `maestro-bootstrap`:** confidential deny (по имени/структуре сессии,
   fail-closed), sanitize промпта (Уровень 1, авто-маскирование), access_policy
   (HITL на `read`), аудит-лог.
-- **Нативный permission-бастион OpenCode (R1+R4):** `/maestro-new` пишет в
-  merge-config deny-baseline для `docs/confidential/*` + built-in паттернов
-  (`read`/`edit`) и эвристические deny для `bash`/`glob`/`grep` — fail-closed на
-  уровне ядра OpenCode для `read`/`edit` (не зависит от плагина). `glob`/`grep`
-  матчат аргумент-паттерн (не пути-результаты) — best-effort слой, не абсолютный
-  барьер (Этап A; R2/R3 — Этап B после V1).
+- **Нативный permission-бастион OpenCode (R1+R4+R2-конфиг, Этап A):**
+  `/maestro-new` пишет в merge-config deny-baseline для `docs/confidential/*` +
+  built-in паттернов (`read`/`edit`) и эвристические deny для `bash`/`glob`/`grep` —
+  fail-closed на уровне ядра OpenCode для `read`/`edit` (не зависит от плагина).
+  `glob`/`grep` матчат аргумент-паттерн (не пути-результаты) — best-effort слой.
+  **Trusted-агенты** (`custodian`/`sanitizer`) получают **per-agent `read`/`glob`/
+  `grep` allow** для confidential-путей (agent rules take precedence) — необходимое
+  trusted-исключение поверх глобального deny (R2-конфиг, Этап A); enforcement
+  плагина остаётся defense-in-depth. Runtime-верификация merge-семантики — V1
+  (pending). Оставшаяся половина R2/R3 — Этап B после V1.
 - **Policies для P4 (R5, опционально):** `experimental.policies` (`provider.use`) —
   enforced deny/allow провайдеров в ядре для изолированных моделей trusted-агентов.
 - **Сабагент `sanitizer`** (trusted, read-only): Уровень 2 — пометки
@@ -70,12 +74,13 @@
 - **Не OS-барьер.** Защита — в плагине и нативном конфиге, не файловая (не chmod/ACL).
 - **Fail-open без плагина — частично смягчён (Этап A).** При отключённом плагине
   **файловая защита confidential для `read`/`edit` сохраняется** (нативный
-  deny-baseline в ядре). Эвристические deny `bash`/`glob`/`grep` остаются, но
-  закрывают только прямое указание паттерна (широкие паттерны-обход не
-  блокируются). **Sanitizer** и **enforcement плагина** (trusted-исключения по
-  данным, access_policy) по-прежнему требуют плагина → P5-гейт сохраняется.
-  R2/R3 (Этап B, после V1) переносят trusted-исключения нативно, снижая
-  зависимость от плагина дальше.
+  deny-baseline в ядре), а **trusted-агенты (`custodian`/`sanitizer`) сохраняют
+  доступ** через нативный per-agent `read`/`glob`/`grep` allow (R2-конфиг, Этап A).
+  Эвристические deny `bash`/`glob`/`grep` остаются, но закрывают только прямое
+  указание паттерна (широкие паттерны-обход не блокируются). **Sanitizer** и
+  **enforcement плагина** (access_policy, проверка trusted-канала по сессии)
+  по-прежнему требуют плагина → P5-гейт сохраняется. Удаление enforcement из
+  плагина (оставшаяся половина R2/R3) — Этап B после V1.
 - **Доверие по имени, не по модели.** Действует при нескомпрометированном конфиге.
 - **Один уровень вложенности.** Trust не наследуется вложенными сабагентами.
 - **P5-гейт — инструкция (не enforcement).** Жёсткий STOP исполняется

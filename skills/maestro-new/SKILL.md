@@ -152,10 +152,14 @@ OpenCode (`.opencode/opencode.json` или глобальный `~/.config/openc
 
 ### Нативный permission-бастион OpenCode (R1+R4)
 
-Помимо плагина, `/maestro-new` пишет **нативный permission-конфиг** в merge-config
-(`.opencode/opencode.json` или глобальный `~/.config/opencode/opencode.json`) —
+Помимо плагина, `/maestro-new` пишет **нативный permission-конфиг** в merge-config —
 fail-closed baseline, не зависящий от плагина. Идемпотентно: только добавлять ключи,
 **не перезаписывать существующий контент**, не дублировать уже присутствующие правила.
+
+**Placement (I4):** deny для `docs/confidential/*` — **только в project**
+`.opencode/opencode.json` (maestro-конвенциональный путь, не должен влиять на
+не-maestro проекты). В глобальный `~/.config/opencode/opencode.json` — максимум
+паритет built-in секретов (`.env`, `*.pem`, `*.key` и т.п.), не `docs/confidential/*`.
 
 **R1 — deny-baseline для confidential (read/edit).** Паритет built-in confidential
 плагина, на уровне ядра OpenCode (fail-closed даже без плагина):
@@ -230,6 +234,46 @@ confidential-путям. **Семантика:** `bash` матчится по с
 - **Не добавлять** `docs/superpowers/{specs,plans}/*` в deny — они двухролевые
   (см. agents-and-trust.md); native-baseline касается только confidential-ДАННЫХ.
 
+### Per-agent trusted-исключения (конфигурационная половина R2, Этап A)
+
+**Обязательно** — без этого глобальный deny R1 ломает trusted-канал: `custodian`/
+`sanitizer` читают confidential через `read`/`glob`/`grep`, а нативный глобальный
+deny применяется ко всем агентам, и плагин **не может** override нативный deny.
+Per-agent `allow` (agent rules take precedence) даёт trusted-агентам доступ поверх
+глобального deny. Семантика подтверждена доками OpenCode; runtime-верификация
+(merge agent-vs-global) — V1 (см. spec, pending).
+
+Записать per-agent `read`/`glob`/`grep` allow для `custodian` и `sanitizer` в
+merge-config (`agent.<name>.permission`), идемпотентно:
+
+```json
+{
+  "agent": {
+    "custodian": {
+      "permission": {
+        "read": { "*": "allow", "docs/confidential/*": "allow" },
+        "glob": { "*": "allow", "docs/confidential/*": "allow" },
+        "grep": { "*": "allow", "docs/confidential/*": "allow" }
+      }
+    },
+    "sanitizer": {
+      "permission": {
+        "read": { "*": "allow", "docs/confidential/*": "allow" },
+        "glob": { "*": "allow", "docs/confidential/*": "allow" },
+        "grep": { "*": "allow", "docs/confidential/*": "allow" }
+      }
+    }
+  }
+}
+```
+
+**Ограничение:** это нативная конфигурация доступа, но **enforcement плагина
+остаётся** (defense-in-depth): `confidential.trusted[read]` и fail-closed deny
+для untrusted не удаляются. Нативное trusted-исключение — необходимый мост поверх
+нативного глобального deny; если runtime-V1 покажет, что agent allow не
+перекрывает global deny → fallback: скоупить нативный confidential-deny из Этапа A
+(оставить built-in секреты + bash-эвристики), положившись на плагин (см. spec, V1).
+
 ### Policies для P4 (R5, опционально)
 
 **Enforce P4** (trusted-агенты на изолированных моделях) через нативные policies
@@ -259,6 +303,12 @@ OpenCode — enforced в ядре, в отличие от merge-конфига `
   специфичные allow после (last-match-wins).
 - Это **enforce-дополнение** к рекомендации локальной модели для `custodian`/
   `sanitizer` (см. `model-selection.md` → P4); не заменяет выбор `agent.*.model`.
+- **Ограничение (I1):** policies **глобальны** (на весь инстанс), не per-agent —
+  не выражают «trusted — локальные, untrusted — внешние»; они enforce более строгую
+  **глобальную** политику (allowlist провайдеров), совместимую с P4.
+- **Кросс-проверка (I1):** before записи — allowlist провайдеров должен **⊇**
+  провайдеров всех выбранных `agent.*.model` (из M1), иначе deny ломает агента.
+  Проверить и предупредить HITL при расхождении.
 
 ### M1 — выбор моделей агентов (7 отдельных HITL-вопросов)
 

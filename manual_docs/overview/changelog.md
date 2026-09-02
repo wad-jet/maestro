@@ -17,8 +17,11 @@
   эвристические deny для `bash`/`glob`/`grep` в merge-config — fail-closed baseline
   для `read`/`edit` на уровне ядра OpenCode, не зависящий от плагина. `glob`/`grep`
   матчат аргумент-паттерн (не пути-результаты) — эвристический слой. Канон — в
-  скилле `maestro-assistant`. R2/R3 (trusted-исключения нативно, retire
-  `access_policy`) — Этап B, после V1-верификации.
+  скилле `maestro-assistant`. **R2-конфиг (trusted-исключения нативно, Этап A):**
+  `custodian`/`sanitizer` получают per-agent `read`/`glob`/`grep` allow для
+  confidential (необходимо поверх глобального deny — иначе нативный deny ломает
+  trusted-канал); enforcement плагина остаётся defense-in-depth. Удаление
+  enforcement из плагина и R3 — Этап B, после V1.
 - **Policies для P4 (R5).** Опциональный `experimental.policies` (`provider.use`) —
   enforced deny/allow провайдеров в ядре для изолированных моделей trusted-агентов
   (дополнение к рекомендации локальной модели). В `/maestro-new` + `model-selection.md`.

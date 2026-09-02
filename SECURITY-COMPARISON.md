@@ -211,12 +211,17 @@ Maestro не полагается на auto-classifier: все существе�
 > **Статус реализации (2026-09-02, Этап A).** На основе рекомендаций
 > `specs/native-permissions-rebalance.md` реализован Этап A: `/maestro-new` пишет
 > нативный deny-baseline (`read`/`edit`) + эвристические deny (`bash`/`glob`/`grep`) +
-> опциональные policies для P4; канон — в `maestro-assistant`. Это смягчает
-> «fail-open без плагина» (см. §3.3, §3.8, §5.4): файловая защита confidential
-> через `read`/`edit` более не зависит исключительно от плагина (`glob`/`grep`
-> матчат аргумент-паттерн — эвристический слой, не абсолютный барьер). R2/R3/R7/R9 —
-> Этап B (после V1), требуют runtime-верификации. Плагин остаётся владельцем
-> sanitizer и trusted-исключений по данным.
+> опциональные policies для P4; канон — в `maestro-assistant`. **R2-конфиг
+> (trusted-исключения нативно) включён в Этап A** после Spec Review C1 — `custodian`/
+> `sanitizer` получают per-agent `read`/`glob`/`grep` allow, иначе нативный deny
+> ломает trusted-канал (плагин не может override нативный deny). Enforcement
+> плагина остаётся defense-in-depth. Это смягчает «fail-open без плагина» (см. §3.3,
+> §3.8, §5.4): файловая защита confidential через `read`/`edit` не зависит
+> исключительно от плагина, а trusted-доступ сохраняется нативно (`glob`/`grep`
+> матчат аргумент-паттерн — эвристический слой). Оставшаяся половина R2 (удаление
+> enforcement) / R3/R7/R9 — Этап B (после V1), требуют runtime-верификации V1
+> (pending). Плагин остаётся владельцем sanitizer и проверки trusted-канала по
+> сессии.
 
 Разбор механизмов плагина `maestro-bootstrap` (`core.js`, `index.js`) против
 нативных возможностей OpenCode (`permission`, `policies`, агентные правила).

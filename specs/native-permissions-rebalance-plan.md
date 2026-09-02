@@ -2,13 +2,16 @@
 
 ## Контекст
 
-Реализация Этапа A из `specs/native-permissions-rebalance.md` (v2): R1/R4/R5/R6/R8/R10 —
-нативный fail-closed baseline + 2-й эшелон + policies для P4 + native-канон +
-документирование + синхронизация доков. **Ноль изменений кода плагина**
-(`core.js`/`index.js` не трогаются). R2/R3/R7/R9 — отложены (Этап B, после V1).
+Реализация Этапа A из `specs/native-permissions-rebalance.md` (v2): R1/R2-конфиг/
+R4/R5/R6/R8/R10 — нативный fail-closed baseline + per-agent trusted-исключения +
+2-й эшелон + policies для P4 + native-канон + документирование + синхронизация
+доков. **Ноль изменений кода плагина** (`core.js`/`index.js` не трогаются).
+R2-enforcement/R3/R7/R9 — отложены (Этап B, после V1).
 
 Scope-решение HITL (2026-09-02): низкорисковая фаза — только skill-инструкции +
-канон + docs, доставляемые в целевое приложение.
+канон + docs, доставляемые в целевое приложение. **R2-конфиг включён в Этап A
+после Spec Review C1** (без него нативный deny ломает trusted-канал custodian/
+sanitizer).
 
 ## Критерий готовности
 
@@ -22,6 +25,8 @@ Scope-решение HITL (2026-09-02): низкорисковая фаза — 
 5. `SECURITY.md` §4/§5 отражают нативный baseline (fail-open смягчён); P6 (plugin-version)
    не меняется (R7 в Этапе B).
 6. `SECURITY-COMPARISON.md` и changelog синхронизированы.
+7. `custodian`/`sanitizer` имеют per-agent `read`/`glob`/`grep` allow для confidential
+   (frontmatter + init-конфиг) — trusted-канал не ломается нативным deny (R2-конфиг).
 
 ## Задачи
 
@@ -103,9 +108,27 @@ Scope-решение HITL (2026-09-02): низкорисковая фаза — 
   нативный baseline (read/edit) как часть стандартной конфигурации.
 - changelog: запись об Этапе A.
 
+### Task 9 — Per-agent trusted-исключения (R2-конфиг, C1)
+**Файлы:** `agents/custodian.md`, `agents/sanitizer.md`, `skills/maestro-new/SKILL.md`,
+`skills/maestro-assistant/SKILL.md`, `manual_docs/reference/config.md`,
+`manual_docs/explanation/agents-and-trust.md`, `SECURITY.md`, `SECURITY-COMPARISON.md`.
+
+- `agents/custodian.md`, `agents/sanitizer.md`: добавить per-agent `read`/`glob`/`grep`
+  `{"docs/confidential/*": "allow"}` (frontmatter).
+- `skills/maestro-new/SKILL.md`: init генерирует `agent.<name>.permission` allow для
+  custodian/sanitizer (необходимо поверх глобального deny — иначе trusted-канал ломается).
+- `skills/maestro-assistant/SKILL.md` канон: per-agent exceptions (двухканально:
+  frontmatter + merge-config); enforcement плагина остаётся defense-in-depth.
+- Док-синк (config.md таблица, agents-and-trust.md модель доверия, SECURITY.md §4/§5,
+  SECURITY-COMPARISON.md §5, changelog).
+- V1 (merge agent-vs-global) — runtime-верификация pending (fixture-попытка 2026-09-02
+  заблокирована недоступностью провайдера); fallback при провале — скоупить нативный
+  confidential-deny из Этапа A.
+
 ## Проверка
 
 - Консистентность: `skills/` ↔ `manual_docs/` ↔ `SECURITY.md` (правило AGENTS.md).
 - Отсутствие изменений в `plugins/maestro-bootstrap/core.js`, `index.js` (Этап B).
-- Отсутствие trusted-исключений нативно (R2 — Этап B, V1).
+- Trusted-исключения нативно присутствуют для `custodian`/`sanitizer` (R2-конфиг,
+  Этап A); enforcement плагина НЕ удалён (R2-enforcement — Этап B, V1).
 - Ссылки на секции не сломаны.

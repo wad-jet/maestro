@@ -43,11 +43,20 @@ Trust-статус управляет **двумя** измерениями за
 
 | Уровень | Sanitize промпта | File access control |
 |---|---|---|
-| **trusted** (`maestro.json` → `trust` = `true`) | **skip** | **skip** (без ограничений по `access_policy`); доступ к `confidential` — по `confidential.trusted.<tool>` |
-| **untrusted** (default) | Security Review (Ур.1 + Ур.2) | перехват `read` по access-policy (ask → блок); доступ к `confidential` — **всегда deny** |
+| **trusted** (`maestro.json` → `trust` = `true`) | **skip** | **skip** (без ограничений по `access_policy`); доступ к `confidential` — по `confidential.trusted.<tool>`; **нативный per-agent `read`/`glob`/`grep` allow** поверх глобального deny (R2-конфиг, Этап A) |
+| **untrusted** (default) | Security Review (Ур.1 + Ур.2) | перехват `read` по access-policy (ask → блок); доступ к `confidential` — **всегда deny** (нативный глобальный deny + плагин) |
 
 > File access control применяется ко всем сабагентам; trusted-skip для file
 > access — ограничен (требует верификации перехвата child-сессий, C2).
+>
+> **Нативное trusted-исключение (R2-конфиг, Этап A).** Нативный глобальный deny
+> `docs/confidential/*` (R1) применяется ко всем агентам, включая `custodian`/
+> `sanitizer`, а плагин не может override нативный deny. Поэтому trusted-агенты
+> получают **per-agent `read`/`glob`/`grep` allow** для confidential-путей (agent
+> rules take precedence) — в `agents/custodian.md`, `agents/sanitizer.md` и в
+> merge-config. Enforcement плагина (`confidential.trusted[read]`) остаётся как
+> defense-in-depth. Runtime-верификация merge-семантики (agent allow vs global
+> deny) — V1 (pending).
 
 ### trust-config → maestro.json
 

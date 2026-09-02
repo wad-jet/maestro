@@ -144,18 +144,34 @@ description: Use when the user asks for help configuring maestro, organizing pro
   frontmatter `permission:`): `edit`/`bash`/`task`/`webfetch` per роль (канон в
   `manual_docs/reference/config.md`, «Агенты: модели»).
 - **Trusted-исключения по данным** (allow-внутри-deny для `custodian`/`sanitizer` к
-  `docs/confidential/*`) — **пока остаются в плагине** (`confidential.trusted`).
-  Нативная реализация (per-agent `read` allow поверх глобального deny) — **Этап B**,
-  после V1-верификации merge-семантики. Не реализовывать до этого.
+  `docs/confidential/*`) — **конфигурационная половина R2 в Этапе A**: per-agent
+  `read`/`glob`/`grep` allow поверх глобального deny (agent rules take precedence).
+  Двухканально:
+  - **frontmatter** агентов `agents/custodian.md`, `agents/sanitizer.md` (доставляются
+    как часть скилла) — `permission.read/glob/grep: {"docs/confidential/*": "allow"}`;
+  - **merge-config** — init пишет эквивалент в `agent.<name>.permission`.
+  Enforcement плагина (`confidential.trusted[read]`) остаётся как defense-in-depth,
+  НЕ удаляется. Оставшаяся половина R2 (удаление enforcement из плагина) — Этап B,
+  после V1. Ограничение: если runtime-V1 покажет, что agent allow не перекрывает
+  global deny → fallback: скоупить нативный confidential-deny из Этапа A
+  (оставить built-in секреты + bash-эвристики).
 
 ### Правила вывода
 
 - **`access_policy` → `permission.read`** (когда R3 в Этапе B): deny>ask>allow →
   last-match-wins с catch-all первым. Пока `access_policy` остаётся активным
   механизмом плагина; нативный слой — дополнение (bash/glob/grep + read-baseline).
+- **Sync-правило двойного источника (I3):** confidential-пути живут в двух местах —
+  `maestro.json → confidential.paths` (плагин) и нативные `permission.read`/`edit`
+  deny (merge-config). **Любое изменение `confidential.paths` зеркалируется в
+  нативные deny и наоборот** (и для per-agent allow `custodian`/`sanitizer`).
+  Дрейф — дефект; проверять при правке любой из сторон.
 - **Не добавлять** `docs/superpowers/{specs,plans}/*` в deny (двухролевые).
 - **Policies (P4, R5):** `experimental.policies` (`provider.use`) — глобальный
   deny/allow провайдеров; global приоритетнее project; не перезаписывать.
+  **Кросс-проверка (I1):** allowlist провайдеров должен ⊇ провайдеров всех
+  выбранных `agent.*.model` (иначе deny ломает агента); policies глобальны — не
+  выражают «trusted — локальные, untrusted — внешние».
 - **OP-1:** после правки native-permission конфига — рестарт opencode.
 - **OP-4:** ослабление security-слоя (deny→allow в нативном конфиге) — адресный
   diff + явное HITL-подтверждение.

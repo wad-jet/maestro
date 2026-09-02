@@ -3,6 +3,15 @@ description: Security review — поиск и пометка чувствите
 mode: subagent
 hidden: true
 permission:
+  read:
+    "*": "allow"
+    "docs/confidential/*": "allow"
+  glob:
+    "*": "allow"
+    "docs/confidential/*": "allow"
+  grep:
+    "*": "allow"
+    "docs/confidential/*": "allow"
   edit: deny
   bash: deny
   task: deny
