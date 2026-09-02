@@ -114,6 +114,13 @@ description: Use when the user asks for help configuring maestro, organizing pro
   `read`/`write`/`edit` плагина паритетно.
 - Нативный `ask` промптит пользователя напрямую (настоящий per-call HITL) — в
   отличие от плагинового паттерна «error → оркестратор решает».
+- **`glob`/`grep` матчат аргумент-паттерн, не пути-результаты.** `glob` — по
+  glob-паттерну, `grep` — по regex-аргументу. Deny-правило `docs/confidential/*`
+  блокирует только прямое указание паттерна; широкие паттерны-обход
+  (`glob("docs/**/*.md")`, `grep("secret","docs/")`) не блокируются. Это
+  **best-effort слой**; основной fail-closed — `read`/`edit`.
+- **Не вводить глобальный `"*": "ask"` для `bash`** — эскалирует каждый bash-вызов
+  в per-call HITL (противоречит не-форсированию плагина). Только точечные deny.
 
 ### Глобальные deny (R1+R4) — эталон конфигурации init
 
@@ -122,9 +129,9 @@ description: Use when the user asks for help configuring maestro, organizing pro
 ```json
 {
   "permission": {
-    "read": { "*": "allow", "docs/confidential/*": "deny", "*.env": "deny", "*.env.*": "deny", "*.pem": "deny", "*.key": "deny", "*.crt": "deny", "*.p12": "deny", "*.pfx": "deny" },
-    "edit": { "*": "allow", "docs/confidential/*": "deny", "*.env": "deny", "*.env.*": "deny", "*.pem": "deny", "*.key": "deny", "*.crt": "deny", "*.p12": "deny", "*.pfx": "deny" },
-    "bash": { "*": "ask", "*cat*confidential*": "deny", "*grep*confidential*": "deny", "*ls*confidential*": "deny", "*glob*confidential*": "deny" },
+    "read": { "*": "allow", "docs/confidential/*": "deny", "*.env": "deny", "*.env.*": "deny", "*.env.example": "allow", "*.pem": "deny", "*.key": "deny", "*.crt": "deny", "*.p12": "deny", "*.pfx": "deny" },
+    "edit": { "*": "allow", "docs/confidential/*": "deny", "*.env": "deny", "*.env.*": "deny", "*.env.example": "allow", "*.pem": "deny", "*.key": "deny", "*.crt": "deny", "*.p12": "deny", "*.pfx": "deny" },
+    "bash": { "*": "allow", "*cat*confidential*": "deny", "*grep*confidential*": "deny", "*ls*confidential*": "deny", "*glob*confidential*": "deny" },
     "glob": { "*": "allow", "docs/confidential/*": "deny" },
     "grep": { "*": "allow", "docs/confidential/*": "deny" }
   }

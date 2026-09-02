@@ -159,9 +159,9 @@ bash-команд ненадёжно извлекаются).
 ```json
 {
   "permission": {
-    "read": { "*": "allow", "docs/confidential/*": "deny", "*.env": "deny", "*.env.*": "deny", "*.pem": "deny", "*.key": "deny", "*.crt": "deny", "*.p12": "deny", "*.pfx": "deny" },
-    "edit": { "*": "allow", "docs/confidential/*": "deny", "*.env": "deny", "*.env.*": "deny", "*.pem": "deny", "*.key": "deny", "*.crt": "deny", "*.p12": "deny", "*.pfx": "deny" },
-    "bash": { "*": "ask", "*cat*confidential*": "deny", "*grep*confidential*": "deny", "*ls*confidential*": "deny", "*glob*confidential*": "deny" },
+    "read": { "*": "allow", "docs/confidential/*": "deny", "*.env": "deny", "*.env.*": "deny", "*.env.example": "allow", "*.pem": "deny", "*.key": "deny", "*.crt": "deny", "*.p12": "deny", "*.pfx": "deny" },
+    "edit": { "*": "allow", "docs/confidential/*": "deny", "*.env": "deny", "*.env.*": "deny", "*.env.example": "allow", "*.pem": "deny", "*.key": "deny", "*.crt": "deny", "*.p12": "deny", "*.pfx": "deny" },
+    "bash": { "*": "allow", "*cat*confidential*": "deny", "*grep*confidential*": "deny", "*ls*confidential*": "deny", "*glob*confidential*": "deny" },
     "glob": { "*": "allow", "docs/confidential/*": "deny" },
     "grep": { "*": "allow", "docs/confidential/*": "deny" }
   }
@@ -169,11 +169,15 @@ bash-команд ненадёжно извлекаются).
 ```
 
 Два слоя работают независимо: плагин закрывает `read/write/edit` (по имени/trust),
-native permissions OpenCode закрывают `bash/glob/grep` + дают fail-closed baseline
-в ядре (не зависит от плагина). Канон и семантика (`*` пересекает `/`,
-last-match-wins) — в скилле `maestro-assistant`. При настройке вынесите
-`docs/confidential/**` из `access_policy.allow`, чтобы избежать путаницы
-(confidential технически выигрывает, но явная настройка читается яснее).
+нативные permissions OpenCode дают fail-closed baseline в ядре для `read`/`edit`
+(не зависит от плагина). `bash`/`glob`/`grep` — **эвристический слой**: `glob`/
+`grep` матчат аргумент-паттерн, не пути-результаты, поэтому закрывают только
+прямое указание паттерна `confidential`, а широкие паттерны-обход
+(`glob("docs/**/*.md")`) — нет; основной барьер — `read`/`edit`. Канон и
+семантика (`*` пересекает `/`, last-match-wins) — в скилле `maestro-assistant`.
+При настройке вынесите `docs/confidential/**` из `access_policy.allow`, чтобы
+избежать путаницы (confidential технически выигрывает, но явная настройка
+читается яснее).
 
 **Прочее:**
 - **Смена `maestro.json`** — требует рестарта opencode (конфиг читается при
@@ -193,23 +197,25 @@ last-match-wins) — в скилле `maestro-assistant`. При настрой�
   корневую папку проекта (напр. `maestro.json`, `*.env`, `**/*.pem`). Маска без
   `/` закрывает только корневые файлы; `**` — корень и вложенные; `*`/`?` — в
 пределах одного сегмента. Контроль применяется к `read`/`write`/`edit`;
-   `bash`/`glob`/`grep` плагином **не перехватываются** — их закрывает нативный
-   permission-бастион (стандарт init, см. выше).
+   `bash`/`glob`/`grep` плагином **не перехватываются** — для них нативный
+   permission-бастион (стандарт init, см. выше), эвристический слой.
 - **Пути нормализуются** перед матчингом: absolute / `./` / relative / `..`
   сводятся к каноническому проект-относительному виду, поэтому
   `/abs/.../docs/confidential/x.md`, `./docs/confidential/x.md` и
   `docs/Confidential/...` (case-вариант) блокируются наравне с
   `docs/confidential/...`. Листинг самой директории `docs/confidential` тоже
-  блокируется. `bash`/`glob`/`grep` по-прежнему не покрываются плагином — их
-  закрывает нативный permission-бастион OpenCode (стандарт init).
+блокируется. `bash`/`glob`/`grep` по-прежнему не покрываются плагином — для
+   них нативный permission-бастион OpenCode (стандарт init, эвристический слой).
 
 > **⚠️ Риск: данные confidential при отключённом плагине — частично смягчён.**
 > Sanitizer и trusted-исключения (enforcement плагина) реализованы в плагине
 > `maestro-bootstrap` и **не являются файловой защитой ОС (не chmod/ACL)**.
 > При отключённом/незагруженном плагине **sanitizer и access_policy не работают**,
-> однако **файловая защита confidential частично сохраняется**: нативный
-> permission-бастион (read/edit/bash/glob/grep deny, стандарт init) действует в
-> ядре OpenCode независимо от плагина. Тем не менее, если данные в
+> однако **файловая защита confidential для `read`/`edit` сохраняется**: нативный
+> deny-baseline (стандарт init) действует в ядре OpenCode независимо от плагина.
+> Эвристические deny `bash`/`glob`/`grep` остаются, но закрывают только прямое
+> указание паттерна (широкие паттерны-обход не блокируются). Тем не менее, если
+> данные в
 > `docs/confidential/` действительно конфиденциальны и их раскрытие недопустимо
 > даже при отключённом плагине — это **не** достаточный барьер: дополнительно
 > ограничьте права каталога средствами ОС (read-only / владелец) или репозитория

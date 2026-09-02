@@ -57,8 +57,9 @@ fail-closed бастионом ядра OpenCode.
 
 `/maestro-new` / `@maestro-init` пишут в merge-config нативные deny:
 `permission.read` + `permission.edit` для `docs/confidential/*` + built-in паттернов
-(`.env`, `*.env.*`, `*.pem`, `*.key`, `*.crt`, `*.p12`, `*.pfx`). Файловая защита
-перестаёт зависеть от наличия плагина.
+(`.env`, `*.env.*`, `*.pem`, `*.key`, `*.crt`, `*.p12`, `*.pfx`; `.env.example` —
+allow, паритет с ядром). Файловая защита `read`/`edit` перестаёт зависеть от
+наличия плагина (fail-closed в ядре).
 
 ### R2 (high) — Trusted-исключения нативно
 
@@ -75,7 +76,10 @@ maestro-assistant.
 ### R4 (medium) — 2-й эшелон из рекомендации в обязанность
 
 Bash deny-паттерны (`*cat*confidential*` и т.п.) + `glob`/`grep` deny для
-confidential — писать при init, не только документировать.
+confidential — писать при init, не только документировать. **Реализация (уточнено
+при review):** только точечные deny, без глобального `"*": "ask"` для bash (иначе
+каждый bash-вызов — per-call HITL); `glob`/`grep` матчат аргумент-паттерн, не
+пути-результаты — эвристический слой, не абсолютный барьер.
 
 ### R5 (medium) — Policies для P4
 

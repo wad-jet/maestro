@@ -168,6 +168,7 @@ fail-closed baseline, не зависящий от плагина. Идемпо�
       "docs/confidential/*": "deny",
       "*.env": "deny",
       "*.env.*": "deny",
+      "*.env.example": "allow",
       "*.pem": "deny",
       "*.key": "deny",
       "*.crt": "deny",
@@ -179,6 +180,7 @@ fail-closed baseline, не зависящий от плагина. Идемпо�
       "docs/confidential/*": "deny",
       "*.env": "deny",
       "*.env.*": "deny",
+      "*.env.example": "allow",
       "*.pem": "deny",
       "*.key": "deny",
       "*.crt": "deny",
@@ -189,14 +191,21 @@ fail-closed baseline, не зависящий от плагина. Идемпо�
 }
 ```
 
-**R4 — 2-й эшелон (bash/glob/grep) — обязателен, не рекомендация.** Закрывает
-пробел плагина (он не перехватывает `bash`/`glob`/`grep`):
+**R4 — 2-й эшелон (bash/glob/grep) — закрывает пробел плагина.** Плагин не
+перехватывает `bash`/`glob`/`grep`; нативный слой добавляет эвристические deny по
+confidential-путям. **Семантика:** `bash` матчится по строке команды (эвристика),
+`glob`/`grep` — по **аргументу-паттерну**, а не по путям-результатам → закрывают
+только прямое указание паттерна `confidential`, широкие паттерны-обход (напр.
+`glob("docs/**/*.md")`) не блокируются. Это **best-effort слой**, не абсолютный
+барьер; основной fail-closed — `read`/`edit` (R1). Не вводим глобальный
+`"*": "ask"` для bash — он эскалировал бы каждый bash-вызов в per-call HITL
+(противоречит не-форсированию плагина); только точечные deny:
 
 ```json
 {
   "permission": {
     "bash": {
-      "*": "ask",
+      "*": "allow",
       "*cat*confidential*": "deny",
       "*grep*confidential*": "deny",
       "*ls*confidential*": "deny",
@@ -209,10 +218,13 @@ fail-closed baseline, не зависящий от плагина. Идемпо�
 ```
 
 **Правила вывода:**
-- **Порядок правил (last-match-wins):** catch-all (`"*": "allow"` / `"*": "ask"`) —
+- **Порядок правил (last-match-wins):** catch-all (`"*": "allow"`) —
   **первым**, специфичные deny — **после** (иначе catch-all перекроет deny).
 - **Семантика `*`:** в opencode `*` **пересекает `/`** (в отличие от сегментной
   `confGlobMatch` плагина). `docs/confidential/*` покрывает вложенные пути.
+- **Ограничение glob/grep:** они матчат аргумент-паттерн, не пути-результаты —
+  не считать их полной защитой от обхода через `glob`/`grep`; основной барьер —
+  `read`/`edit` (R1).
 - **HITL-гейт:** показать diff-merge перед записью; (a) approve — (b) правки — (c) отмена.
 - **OP-1:** после записи сообщить о необходимости перезапуска opencode.
 - **Не добавлять** `docs/superpowers/{specs,plans}/*` в deny — они двухролевые

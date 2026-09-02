@@ -13,10 +13,12 @@
 
 - **Нативный permission-бастион OpenCode (Этап A, R1+R4).** `/maestro-new` пишет
   deny-baseline для confidential (`read`/`edit`: `docs/confidential/*` + `.env`,
-  `*.pem`, `*.key`, `*.crt`, `*.p12`, `*.pfx`) и 2-й эшелон для `bash`/`glob`/`grep`
-  в merge-config — fail-closed baseline на уровне ядра OpenCode, не зависящий от
-  плагина. Канон — в скилле `maestro-assistant`. R2/R3 (trusted-исключения нативно,
-  retire `access_policy`) — Этап B, после V1-верификации.
+  `*.pem`, `*.key`, `*.crt`, `*.p12`, `*.pfx`; `.env.example` — allow) и
+  эвристические deny для `bash`/`glob`/`grep` в merge-config — fail-closed baseline
+  для `read`/`edit` на уровне ядра OpenCode, не зависящий от плагина. `glob`/`grep`
+  матчат аргумент-паттерн (не пути-результаты) — эвристический слой. Канон — в
+  скилле `maestro-assistant`. R2/R3 (trusted-исключения нативно, retire
+  `access_policy`) — Этап B, после V1-верификации.
 - **Policies для P4 (R5).** Опциональный `experimental.policies` (`provider.use`) —
   enforced deny/allow провайдеров в ядре для изолированных моделей trusted-агентов
   (дополнение к рекомендации локальной модели). В `/maestro-new` + `model-selection.md`.
