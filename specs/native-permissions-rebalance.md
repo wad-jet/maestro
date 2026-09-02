@@ -4,14 +4,15 @@
 
 - Дата: 2026-09-02. Версия: 2. Тип: **spec** (proposal, не план реализации).
 - Репо: `maestro-agent` (authoring).
-- Основано на: независимом исследовании `SECURITY-COMPARISON.md` (§5 «Избыточность и
-  комплементарность») + верификации доков OpenCode (Permissions / Agents / Policies,
+- Основано на: независимом исследовании `.maestro/security-comparison-draft.md`
+  (§5 «Избыточность и комплементарность»; временный черновик, не в git) +
+  верификации доков OpenCode (Permissions / Agents / Policies,
   2026-09-02) + аудите текущих инструкций maestro по нативным permissions.
 - v2: добавлено расщепление на фазы A/B (решение HITL 2026-09-02, §5).
 
 ## 1. Проблематика
 
-Сравнение в `SECURITY-COMPARISON.md` §5 выявило, что часть контрмер плагина
+Сравнение в `.maestro/security-comparison-draft.md` §5 выявило, что часть контрмер плагина
 `maestro-bootstrap` дублирует нативный permission-слой OpenCode, а часть — остаётся
 уникальной. Дополнительно обнаружен главный пробел: **нативные permissions не
 настраиваются на этапе инициализации проекта** (`/maestro-new`, `@maestro-init`
@@ -30,8 +31,8 @@ fail-closed бастионом ядра OpenCode.
   config, and agent rules take precedence»*. Значит нативно выражается
   **allow-внутри-deny**: глобально `permission.read: {"docs/confidential/*": "deny"}` +
   `agent.custodian.permission.read: {"docs/confidential/*": "allow"}` → custodian
-  читает, остальные (включая primary) — нет. **Опровергает** утверждение
-  SECURITY-COMPARISON.md §5.2/§5.5 «per-agent rules не дают allow-внутри-deny».
+  читает, остальные (включая primary) — нет. **Опровергает** утверждение из
+  сравнения (§5.2/§5.5 «per-agent rules не дают allow-внутри-deny»).
   (Оговорка: точная granular-семантика мержа требует runtime-верификации — V1.)
 - **F2.** Нативный `edit` gates `write`/`edit`/`apply_patch`; `read` gates `read` —
   полное покрытие `read`/`write`/`edit` из confidential-секции плагина.
@@ -123,7 +124,7 @@ deny и per-agent allow и наоборот (иначе дрейф).
 ### R10 — Синхронизация доков (по правилу AGENTS.md)
 
 `SECURITY.md` (§4 контрмеры, §5 — пункт fail-open смягчается),
-`SECURITY-COMPARISON.md` §5 (корректировка F1), `manual_docs/`
+(сравнение-черновик §5 — корректировка F1), `manual_docs/`
 (`agents-and-trust.md`, `config.md`, `model-selection.md`), changelog.
 
 ## 4. Точки верификации (V1–V4)
@@ -157,7 +158,7 @@ granular-правил не верифицирована в рантайме; п�
 | R5 (medium) | `experimental.policies` (provider.use) для P4 | `skills/maestro-new/SKILL.md`, `skills/maestro-assistant/SKILL.md`, `manual_docs/reference/model-selection.md` |
 | R6 (medium) | Native-permission канон в maestro-assistant | `skills/maestro-assistant/SKILL.md` |
 | R8 (low) | Документировать doom_loop + @-invocation caveat | `manual_docs/` |
-| R10 | Синхронизация доков | `SECURITY.md`, `SECURITY-COMPARISON.md`, `manual_docs/` (config, agents-and-trust, model-selection, changelog) |
+| R10 | Синхронизация доков | `SECURITY.md`, `manual_docs/` (config, agents-and-trust, model-selection, changelog) |
 
 **Критерий этапа A:** покрывает F4 (init не настраивает нативные permissions), F5
 (нет native-канона) и C1 (trusted-канал не ломается нативным deny — через
@@ -190,7 +191,6 @@ R1+R4 → R5 → R6 → R8 → R10.
 - `manual_docs/reference/config.md`, `manual_docs/explanation/agents-and-trust.md` — R8, R10, R2-конфиг.
 - `manual_docs/overview/changelog.md` — R10.
 - `SECURITY.md` — R10 (§4 контрмеры, §5 ограничения — fail-open смягчается нативным baseline; R2-конфиг).
-- `SECURITY-COMPARISON.md` — R10 (отметка о scope split + R2-конфиг).
 
 Этап B файлы (не трогаются в этапе A): `plugins/maestro-bootstrap/core.js`, `index.js`.
 
@@ -200,5 +200,5 @@ R1+R4 → R5 → R6 → R8 → R10.
 - OpenCode Agents: https://opencode.ai/docs/agents/
 - OpenCode Policies: https://opencode.ai/docs/ru/policies/
 - Внутренний стандарт ИБ: `SECURITY.md`
-- Сравнение: `SECURITY-COMPARISON.md`
+- Сравнение (временный черновик исследования, эфемерный): `.maestro/security-comparison-draft.md` (не в git; использован при подготовке данной спецификации)
 - Реализация плагина: `plugins/maestro-bootstrap/core.js`, `plugins/maestro-bootstrap/index.js`

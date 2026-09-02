@@ -27,12 +27,13 @@
   (дополнение к рекомендации локальной модели). В `/maestro-new` + `model-selection.md`.
 - **Native-permission канон (R6).** Секция в скилле `maestro-assistant`:
   семантика (`*` пересекает `/`, last-match-wins, `edit` gates write/edit/apply_patch),
-  глобальные deny, per-agent exceptions (trusted-исключения — Этап B), правила
-  порядка/идемпотентности.
+  глобальные deny, per-agent exceptions (**trusted-исключения R2-конфиг — Этап A**),
+  правила порядка/идемпотентности + sync-правило двойного источника.
 - **Документированы `doom_loop` guard и `@`-invocation caveat (R8)** — в
   `config.md` и `agents-and-trust.md`.
-- **Сравнение безопасности** — новый справочник `SECURITY-COMPARISON.md`
-  (Claude Code / OpenCode / Maestro) + spec `specs/native-permissions-rebalance.md`.
+- **Сравнение безопасности** — временный черновик исследования (Claude Code /
+  OpenCode / Maestro), использован при подготовке spec `specs/native-permissions-rebalance.md`;
+  в git не входит (эфемерный, `.maestro/security-comparison-draft.md`).
 
 ### Изменено
 
