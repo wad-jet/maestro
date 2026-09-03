@@ -18,7 +18,8 @@
         -> (a) да
 Шаг 1:  HITL: "Что делаем? (f) feature — (b) bugfix"
         -> (f) feature
-Шаг 2:  HITL: "Подтверждаем старт? (a) да — pre-flight и старт — (b) отмена"
+Шаг 2:  HITL: "Подтверждаем старт? Рекомендую (a) да, потому что маршрут и
+        режим только что выбраны — (a) да — (b) отмена"
         -> (a) да
 Шаг 3:  Pre-flight: git clean, на develop, не в worktree
 Шаг 4:  HITL: "Изолировать в worktree? (a) worktree — (b) git checkout -b"
@@ -33,13 +34,15 @@
 Шаг 9:  HITL: предложен Spec Review (фича сложная) -> подтверждено
         - Диспатч opus-сабагента (subagent_type=opus, mode=spec)
         - Spec Review: verdict "approve"
-Шаг 10: HITL: spec утверждён -> (a) Approve
+Шаг 10: HITL: рекомендую (a) Approve, потому что вердикт ревью approve
+        -> (a) Approve
 Шаг 11: writing-plans -> Plan (3 tasks)
         - Task 1: DTO + endpoint handler (механический -> haiku)
         - Task 2: Activation business logic (интеграционный -> sonnet)
         - Task 3: Integration test + fixtures (механический -> haiku)
         - Regression risk: public API -> MEDIUM. Сценарий в entry.
-Шаг 12: HITL: план утверждён -> (a) Approve
+Шаг 12: HITL: рекомендую (a) Approve, потому что quality-проверки плана
+        пройдены -> (a) Approve
         - Создаётся entries/2026-07-31-resource-activation.md (status: active)
 Шаг 13: SDD
         - Task 1 (haiku): DONE, commits [abc123]; review (sonnet) -> approved
@@ -52,8 +55,11 @@
 Шаг 15: тесты, coverage, lint pass
 Шаг 15a: build pass
 Шаг 16: requesting-code-review -> final review (opus)
-        - 2 minor findings -> fix-субагент -> approved
-Шаг 17: HITL: pre-PR -> (a) Approve merge
+        - 2 minor findings (naming, error message) -> approved
+          (только-Minor — вердикт Approved без fix-диспатча); findings ->
+          follow-up (non-blocking)
+Шаг 17: HITL: рекомендую (a) Approve merge, потому что только follow-up issues,
+        тесты зелёные -> (a) Approve merge
 Шаг 18: finishing-a-development-branch -> merge to base (--no-ff)
 ```
 
