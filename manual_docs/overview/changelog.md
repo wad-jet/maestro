@@ -7,6 +7,19 @@
 > Хронология составлена по истории authoring-репо `maestro-agent`. Даты
 > приблизительные (по коммитам).
 
+## [2026-09-03]
+
+### Изменено
+
+- **Ревью: Minor больше не порождает циклы (P1.1+P1.2).** Во всех трёх
+  контурах (spec review / task review / финальное code review) Minor-находки
+  не обосновывают blocking-вердикт: `revise`/`Needs fixes` — только
+  Critical/Important; только-Minor-ревью возвращает approve/Approved. Fast-path
+  на шаге 10: контрольное ревью с пустыми C/I-бакетами → гейт 10 с дефолтом
+  (a) Approve без нового раунда; Minor → spec-follow-up (не блокирует).
+  Плато-guard для незакрытых повторяющихся C/I — без изменений (2 раунда).
+  Спека: `docs/superpowers/specs/2026-09-03-review-minor-noise-design.md`.
+
 ## [2026-09-02]
 
 ### Добавлено
