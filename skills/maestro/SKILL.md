@@ -1709,9 +1709,11 @@ Pipeline не имеет механизма cross-repo координации (�
         $OBSERVABILITY_COVERAGE_COMMAND pass
 Шаг 15a: [agent] $BUILD_COMMAND — сборка проходит
 Шаг 16: [agent] requesting-code-review -> final review (opus)
-        - Reviewer: 2 minor findings (naming, error message)
-        - [agent] dispatch ONE fix-субагента с обоими findings -> fix -> approved
-Шаг 17: -- HITL: pre-PR, пользователь approves merge --
+        - Reviewer: 2 minor findings (naming, error message) -> approved
+          (только-Minor — вердикт Approved без fix-диспатча); findings ->
+          follow-up (non-blocking)
+Шаг 17: -- HITL: pre-PR (follow-up-список: 2 Minor, не блокирует merge),
+        пользователь approves merge --
 Шаг 18: [agent] finishing-a-development-branch -> merge to base (--no-ff)
 ```
 
