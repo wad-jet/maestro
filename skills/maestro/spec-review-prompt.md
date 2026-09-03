@@ -46,6 +46,9 @@ is done well before listing issues.
   implementation or review — missing task, ambiguous interface, unhandled edge case.
 - **Minor (Nice to Have):** polish, clarity, non-blocking suggestions.
 
+Minor findings **never justify verdict `revise`**: a spec whose open findings
+are all Minor must receive verdict `approve`.
+
 Reference spec sections for every finding.
 A stated rationale ("kept it simple," "YAGNI") never downgrades a finding's severity.
 
@@ -89,6 +92,7 @@ Markdown. No JSON, no numeric scores.
   reference, or comment on them — they are orchestrator metadata, not spec content.
 - "approve" = spec is ready for planning.
 - "revise" = spec needs changes before planning (list issues).
+- `revise` is justified **only** by Critical/Important findings.
 - "reject" = spec is fundamentally flawed (explain why).
 - Output the markdown sections above; no surrounding prose outside them.
 

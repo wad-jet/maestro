@@ -43,7 +43,7 @@ project context, запускает pre-flight, определяет катег�
 | 8.5 | Context changes | Оркестратор оценивает, изменил ли spec проект контекст + фиксирует spec-follow-up. Применяется после аппрува плана. |
 | 8.6 | Security Review | Сабагент `sanitizer` (trusted) проверяет spec на чувствительные данные. При находках → HITL: вычистить / принять риск / стоп. Полный прогон — на первичной записи и при вовлечении trusted-контура (OQ-2) |
 | 9 | Spec Review | Независимый ревью spec от `opus` (untrusted, read-only). Для арх. фич — обязателен |
-| 10 | Spec gate | Approve → к плану · Revise → правки opus + оркестратор применяет (Ур.1), повторный review; 8.6 только при trusted-контуре · Reject → стоп. Особый случай (нужен confidential) → HITL custodian/follow-up |
+| 10 | Spec gate | Approve → к плану · Revise → правки opus + оркестратор применяет (Ур.1), повторный review; после контрольного ревью с пустыми C/I-бакетами (только Minor) — fast-path: дефолт (a) Approve, Minor → follow-up; 8.6 только при trusted-контуре · Reject → стоп. Особый случай (нужен confidential) → HITL custodian/follow-up |
 | 11 | Plan | Создание плана задач: tasks, Project Context Changes, spec-follow-up, regression risk |
 | 12 | Plan gate | Approve (коммит spec+plan+regression-entry) · Revise · Cancel |
 | 13 | SDD | Реализация: субагенты haiku/sonnet по сложности, per-task review (sonnet), progress log |

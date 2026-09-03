@@ -317,7 +317,8 @@ Interactive — агент комментирует находки по ходу
           в плане (шаг 11) и применены автоматически после аппрува плана
           (шаг 12a).
         — **Spec-follow-up (OQ-5):** оркестратор фиксирует spec-follow-up из
-          особого случая шага 10b (вариант (b)) и плато OQ-4 (вариант (c)) как
+          особого случая шага 10b (вариант (b)), плато OQ-4 (вариант (c)) и
+          Minor-находок fast-path (шаг 10) как
           **отдельный pending-список** (рядом с `pending context changes` /
           `pending cross-cutting changes`), с пометкой причины («не хватает
           контекста» / «несущественно/scope»). Каждый follow-up помечается
@@ -423,6 +424,8 @@ Interactive — агент комментирует находки по ходу
             становятся stale (hash меняется) → при необходимости 8.6/9
             перезапускаются. Если для правки требуется confidential-контекст
             (opus не видит его) → HITL-эскалация (см. ниже «Особый случай»).
+            **После контрольного ревью:** пустые бакеты Critical/Important
+            (только Minor) → fast-path — см. «Сходимость Revise» ниже.
         (c) Reject — фича отменяется, STOP
 
         **Особый случай (правка требует confidential-контекста).**
@@ -444,12 +447,34 @@ Interactive — агент комментирует находки по ходу
         метаданные без значений; единственный мост из confidential-контура —
         вызов trusted `custodian` (a) по Q/A или HITL-решение (b).
 
-        **Сходимость Revise (OQ-4, guard плато).** Оркестратор ведёт счётчик
-        раундов Revise и список новых Critical/Important на каждом (на базе
-        `previous_findings`, см. шаг 9 / spec-review-prompt). Если **2
-        последовательных раунда** opus не добавили ни одного **нового**
-        Critical/Important (только повторяют/уточняют прошлые) → оркестратор
-        поднимает HITL: «Достигнуто плато: 2 раунда без новых Critical/Important.
+        **Сходимость Revise (OQ-4): fast-path и плато.** Оркестратор ведёт
+        счётчик раундов Revise и список новых Critical/Important на каждом
+        (на базе `previous_findings`, см. шаг 9 / spec-review-prompt).
+
+        **Fast-path (только-Minor):** триггер — пустые бакеты Critical и
+        Important в контрольном ревью (контрольное ревью — ревью после
+        применения правок; пустые C/I-бакеты означают: все прошлые
+        Critical/Important закрыты, новых нет, открытые находки — только
+        Minor) → новый раунд ревью НЕ запускается. Оркестратор сразу выводит
+        гейт 10 с дефолт-предложением **(a) Approve**; Minor-список
+        показывается пользователю и фиксируется как **spec-follow-up**
+        (OQ-5, шаг 8.5: «не блокирует Approve» → транслируется в задачи
+        плана на шаге 11). Minor-список фиксируется по последнему
+        контрольному ревью, с дедупликацией против уже зафиксированных
+        follow-up.
+
+        **Расхождение вердикта и бакетов.** Правила для LLM — не гарантия:
+        если вердикт spec-ревью (первичного или контрольного) — `revise`,
+        но бакеты
+        Critical/Important пусты, источник истины — бакеты →
+        fast-path всё
+        равно срабатывает (гейт 10 с дефолтом (a) Approve) с пометкой
+        пользователю о расхождении.
+
+        **Плато (незакрытые повторяющиеся).** Если **2 последовательных
+        раунда** opus не добавили ни одного **нового** Critical/Important,
+        но прошлые остались незакрытыми → оркестратор поднимает HITL:
+        «Достигнуто плато: 2 раунда без новых Critical/Important.
         (a) Approve spec / (b) продолжить ещё / (c) follow-up оставшиеся».
         Новый Critical/Important **обнуляет** счётчик «2 раунда». Повторяющиеся
         не-закрытые замечания НЕ считаются «новыми».
@@ -548,6 +573,15 @@ Interactive — агент комментирует находки по ходу
             `subagent_type=sonnet` (интеграционный)
           - Claude Code: Agent tool с `model=haiku` или `model=sonnet`
          — Task review: `subagent_type=sonnet` (OpenCode) / `model=sonnet` (Claude Code)
+          — **Калибровка вердикта при диспатче task-reviewer:** оркестратор
+            добавляет в промпт (англ., в тон task-reviewer-prompt.md):
+            «Minor items are never grounds for "Needs fixes"; a task whose
+            open findings are all Minor must be reported Approved.» Вставка —
+            только семантика вердикта; формулировки класса «flag only …» /
+            «at most Minor» запрещены анти-pre-judging правилом внешнего
+            SDD-скилла (не подавлять находки). Внешний fix-loop срабатывает
+            только на spec ❌ / Critical/Important и подтверждённые ⚠️ —
+            Minor-находки в него не попадают.
          — Если task зависит от другого (например, endpoint без тестов), указать:
            "Note: tests for this code may fail until Task N is completed — это ожидаемо"
          — Добавить codebase-pattern чеклист из implementer-prompt.md в контекст
@@ -705,8 +739,10 @@ Feature:
 - Шаг 10 — **Особый случай Revise** (правке/вопросу нужен confidential-контекст):
   (a) решает trusted `custodian` (Q/A-агрегат, без значений) / (b) follow-up /
   (c) отмена (см. шаг 10b, «Особый случай»)
-- Шаг 10 — **Сходимость Revise** (плато: 2 раунда без новых Critical/Important):
-  (a) Approve spec / (b) продолжить ещё / (c) follow-up оставшиеся (см. шаг 10b)
+- Шаг 10 — **Сходимость Revise** (fast-path: пустые C/I-бакеты контрольного
+  ревью → дефолт (a) Approve, Minor → follow-up; плато: 2 раунда без новых
+  Critical/Important при незакрытых повторах → (a) Approve / (b) продолжить /
+  (c) follow-up оставшиеся) (см. шаг 10b)
 - Шаг 12 — plan утверждён (approve/revise/cancel)
 - Шаг 17 — pre-PR (approve merge/fix/cancel)
 - Security Review (Точка 2) — при находке sanitizer перед untrusted-диспатчем
@@ -1424,16 +1460,22 @@ hash: <sha256 содержимого spec без блоков maestro:*>
 - Концептуально пересекается только «correctness + test strategy», но на разных
   объектах (spec vs код). Реальное code-review-пересечение (b)+(c) — намеренное.
 
+**Инвариант вердиктов (P1.1):** во всех трёх контурах Minor-находки не
+обосновывают blocking-вердикт (`revise` / `Needs fixes`); ревью с открытыми
+находками только Minor возвращает approve/Approved. Словарь контура (c)
+(Yes/No/With fixes) эквивалентен словарю агента `code-reviewer.md`
+(Approved/Needs fixes/Reject).
+
 ## Обработка сбоев
 
 | Ситуация | Действие |
 |---|---|
 | **HITL шаг 2: skip (interactive)** | Pre-flight пропускается: bugfix → D1; feature → шаг 5 (имя ветки). В efficient (b) — отмена → STOP. Cleanup не требуется (ветка ещё не создана). |
 | **HITL шаг 1.5: отмена (1.5c)** | STOP — pipeline завершён. Пользователь отказался от запуска. |
-| **Spec gate: revise (10b)** | re-dispatch `opus` (untrusted) для правок, оркестратор применяет их к spec (Ур.1, Слой 5); повторный Spec Review (шаг 9). При необходимости confidential-контекста — HITL: (a) trusted `custodian` (Q/A-агрегат) / (b) follow-up. Повторный 8.6 только при вовлечении trusted-контура (OQ-2). |
+| **Spec gate: revise (10b)** | re-dispatch `opus` (untrusted) для правок, оркестратор применяет их к spec (Ур.1, Слой 5); повторный Spec Review (шаг 9); после контрольного ревью с пустыми C/I-бакетами (только Minor) — fast-path: гейт 10 с дефолтом (a) Approve без нового раунда (Minor → spec-follow-up). При необходимости confidential-контекста — HITL: (a) trusted `custodian` (Q/A-агрегат) / (b) follow-up. Повторный 8.6 только при вовлечении trusted-контура (OQ-2). |
 | **Внешний spec невалидный (шаг 7d)** | Пустой / нечитаемый / не содержит требований → HITL: (a) создать заново через шаг 8 (brainstorm primary + custodian Q/A) / (b) указать другой путь / (c) отмена |
 | **Plan gate: revise (12b)** | Вернуться к шагу 11 (writing-plans), доработать план |
-| **Spec review: revise** | re-dispatch `opus` для правок, оркестратор применяет их (Ур.1); при необходимости confidential-контекста — HITL: (a) trusted `custodian` / (b) follow-up. Повторить review (шаг 9); 8.6 только при trusted-контуре (OQ-2). |
+| **Spec review: revise** | re-dispatch `opus` для правок, оркестратор применяет их (Ур.1); повторить review (шаг 9); после контрольного ревью с пустыми C/I-бакетами (только Minor) — fast-path: гейт 10 с дефолтом (a) Approve (Minor → spec-follow-up); 8.6 только при trusted-контуре (OQ-2). |
 | **Spec review: reject** | Эскалация к пользователю: пересмотр требований или отмена фичи |
 | **`custodian`/`sanitizer`: `confidential:deny`** | Агент untrusted (проверить `maestro.json` → `trust`: absent/`false`) — он non-functional без доверия. Предупредить: "custodian/sanitizer не trusted (проверьте `maestro.json` → `trust`), без доверия агент не может выполнять свою роль" → HITL: (a) обновить конфиг и перезапустить / (b) стоп. Не ретраить как обычную ошибку сабагента. |
 | **Gate: отмена (шаги 7c, 10c, 12c, 17c, D7b)** | STOP + cleanup: удалить feature-ветку (`git branch -D <branch>`) и worktree (`git worktree remove <path>`), если создан. Решение оставить в `regression/cancelled-features.md` (в git) для последующей архивации. **Regression cleanup:** если `entries/<YYYY-MM-DD-<feature>>.md` существует → `git mv entries/X.md released/X.md`, `status: cancelled`, `released: <дата>`, дописать решение в `regression/cancelled-features.md` и закоммитить оба файла (`chore(regression): <feature> cancelled`) (только после шага 12a; до 12a entry ещё не создан — no-op). |
@@ -1709,9 +1751,11 @@ Pipeline не имеет механизма cross-repo координации (�
         $OBSERVABILITY_COVERAGE_COMMAND pass
 Шаг 15a: [agent] $BUILD_COMMAND — сборка проходит
 Шаг 16: [agent] requesting-code-review -> final review (opus)
-        - Reviewer: 2 minor findings (naming, error message)
-        - [agent] dispatch ONE fix-субагента с обоими findings -> fix -> approved
-Шаг 17: -- HITL: pre-PR, пользователь approves merge --
+        - Reviewer: 2 minor findings (naming, error message) -> approved
+          (только-Minor — вердикт Approved без fix-диспатча); findings ->
+          follow-up (non-blocking)
+Шаг 17: -- HITL: pre-PR (follow-up-список: 2 Minor, не блокирует merge),
+        пользователь approves merge --
 Шаг 18: [agent] finishing-a-development-branch -> merge to base (--no-ff)
 ```
 

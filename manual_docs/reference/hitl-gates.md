@@ -31,7 +31,7 @@ Decision gates (шаги 10, 12, 17) — явный вопрос с вариан
 | 8.6 | Spec security review (при находке sanitizer) | (a) вычистить и продолжить · (b) продолжить как есть (принять риск) · (c) стоп |
 | 10 | Spec утверждён | (a) Approve · (b) Revise → правки opus, оркестратор применяет (Ур.1), повторный review · (c) Reject |
 | 10 | Особый случай Revise (правке нужен confidential) | (a) trusted `custodian` (Q/A-агрегат) · (b) follow-up · (c) отмена |
-| 10 | Сходимость Revise (плато: 2 раунда без новых Critical/Important) | (a) Approve spec · (b) продолжить ещё · (c) follow-up оставшиеся |
+| 10 | Сходимость Revise — fast-path (контрольное ревью закрыло все Critical/Important, только Minor → дефолт (a) Approve, Minor → follow-up) · плато (2 раунда без новых Critical/Important при незакрытых повторах) | (a) Approve · (b) продолжить ещё · (c) follow-up оставшиеся |
 | 12 | Plan утверждён | (a) Approve · (b) Revise → шаг 11 · (c) отмена |
 | 17 | Pre-PR | (a) Approve merge · (b) Fix → шаг 13 · (c) отмена. Gate показывает список открытых issues (open + follow-up) с severity из шага 16; если открытых нет — (b) помечается «только follow-up, не блокирует» |
 
