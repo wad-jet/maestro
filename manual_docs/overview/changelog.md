@@ -11,6 +11,10 @@
 
 > **Версия 2.1.0** — Minor-релиз: волна P1 (ревью-процесс maestro): P1.1+P1.2 (Minor не блокирует + fast-path Approve) и P1.3 (дефолты на decision gates).
 
+### Добавлено
+
+- **How-to «Управление конфиденциальными путями»** (`how-to/manage-confidential-paths.md`): документирован use case добавления пути к `confidential.paths` через `/maestro-assistant` — двойное зеркалирование I3 (`maestro.json` + нативные permissions), адресный diff «стало vs было», HITL-гейт, OP-1 (перезапуск opencode), семантика масок, запрет на добавление spec/plan путей.
+
 ### Изменено
 
 - **Ревью: Minor больше не порождает циклы (P1.1+P1.2).** Во всех трёх
