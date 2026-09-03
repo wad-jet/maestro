@@ -571,6 +571,15 @@ Interactive — агент комментирует находки по ходу
             `subagent_type=sonnet` (интеграционный)
           - Claude Code: Agent tool с `model=haiku` или `model=sonnet`
          — Task review: `subagent_type=sonnet` (OpenCode) / `model=sonnet` (Claude Code)
+          — **Калибровка вердикта при диспатче task-reviewer:** оркестратор
+            добавляет в промпт (англ., в тон task-reviewer-prompt.md):
+            «Minor items are never grounds for "Needs fixes"; a task whose
+            open findings are all Minor must be reported Approved.» Вставка —
+            только семантика вердикта; формулировки класса «flag only …» /
+            «at most Minor» запрещены анти-pre-judging правилом внешнего
+            SDD-скилла (не подавлять находки). Внешний fix-loop срабатывает
+            только на spec ❌ / Critical/Important и подтверждённые ⚠️ —
+            Minor-находки в него не попадают.
          — Если task зависит от другого (например, endpoint без тестов), указать:
            "Note: tests for this code may fail until Task N is completed — это ожидаемо"
          — Добавить codebase-pattern чеклист из implementer-prompt.md в контекст
