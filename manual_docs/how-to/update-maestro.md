@@ -113,6 +113,8 @@ rm -rf ~/.cache/opencode/packages/maestro-bootstrap@git+https:...
 > переименование `skills/maestro-init` → `skills/maestro-new` (v2.0.0), которое
 > скрипт обрабатывает автоматически. Конвенция: каждый новый
 > компонент (skill/command/agent) релиза добавляется в `maestro-install/agpack.yml`.
+> Этот же канон читает и `maestro-install.sh` при первичной установке — единый
+> источник зависимостей для обоих скриптов.
 
 ### Шаг 3: Контроль обновления
 

@@ -29,9 +29,11 @@ curl -fsSL https://raw.githubusercontent.com/wad-jet/maestro/main/maestro-instal
 bash maestro-install.sh          # опции: --global (плагин в global-конфиг), --help
 ```
 
-> Предусловия: bash (macOS/Linux), python3 ≥ 3.11, git. Windows — через WSL или Git Bash
-> (глобальный opencode-путь может отличаться). Содержимое `agpack.yml` встроено в
-> скрипт; коммиченный `maestro-install/agpack.yml` — справочная копия для доков.
+> Предусловия: bash (macOS/Linux), python3 ≥ 3.11, git, curl или wget, сеть.
+> Windows — через WSL или Git Bash (глобальный opencode-путь может отличаться).
+> Содержимое `agpack.yml` скрипт скачивает из канона `maestro-install/agpack.yml`
+> репозитория (тот же источник, что использует `maestro-update.sh`), — единый
+> источник зависимостей без дублирования в скрипте.
 > Детали — в разделе «Быстрый старт» README репозитория.
 
 После скрипта — перезапустите OpenCode и выполните [Настройку проекта](../tutorials/setup-project.md)
