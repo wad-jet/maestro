@@ -20,8 +20,8 @@
 #              (по умолчанию — в .opencode/opencode.json проекта)
 #   --help     краткая справка и выход
 #
-# Содержимое agpack.yml встроено heredoc-ом (самодостаточный скрипт).
-# Коммиченный maestro-install/agpack.yml — справочная копия для доков.
+# Содержимое agpack.yml скачивается из канона maestro-install/agpack.yml в репозитории
+# (тот же источник, что читает maestro-update.sh при merge-add новых компонентов).
 set -euo pipefail
 
 # --- Константы -------------------------------------------------------------
@@ -30,6 +30,19 @@ PLUGIN_SPEC="maestro-bootstrap@git+https://github.com/wad-jet/maestro.git"
 REPO_URL="https://github.com/wad-jet/maestro"
 RAW_URL="https://raw.githubusercontent.com/wad-jet/maestro/main/maestro-install.sh"
 MAESTRO_UPDATE_RAW_URL="https://raw.githubusercontent.com/wad-jet/maestro/main/maestro-update.sh"
+AGPACK_YML_RAW_URL="https://raw.githubusercontent.com/wad-jet/maestro/main/maestro-install/agpack.yml"
+
+# fetch <url> <dest> — скачивание через curl (приоритет) или wget.
+# Возвращает 0 при успехе, ненулевой код при неудаче.
+fetch() {
+  if command -v curl >/dev/null 2>&1; then
+    curl -fsSL "$1" -o "$2"
+  elif command -v wget >/dev/null 2>&1; then
+    wget -qO "$2" "$1"
+  else
+    return 1
+  fi
+}
 
 # --- Вспомогательные функции ----------------------------------------------
 
@@ -133,39 +146,19 @@ fi
 
 info "agpack: $AGPACK"
 
-# --- 3. Создание agpack.yml (идемпотентно, heredoc) --------------------------
+# --- 3. Создание agpack.yml (идемпотентно, скачивание канона) ----------------
 
 if [ -f "agpack.yml" ]; then
   info "agpack.yml уже существует — пропускаю создание (не перезаписываю)."
 else
-  info "создаю agpack.yml..."
-  cat > agpack.yml <<'YAML'
-targets:
-  - opencode
-
-dependencies:
-  skills:
-    - url: https://github.com/wad-jet/maestro
-      path: skills/maestro
-    - url: https://github.com/wad-jet/maestro
-      path: skills/maestro-new
-    - url: https://github.com/wad-jet/maestro
-      path: skills/maestro-design
-    - url: https://github.com/wad-jet/maestro
-      path: skills/maestro-assistant
-    - url: https://github.com/wad-jet/maestro
-      path: skills/maestro-feedback-report
-    - url: https://github.com/wad-jet/maestro
-      path: skills/manual-docs
-    - url: https://github.com/obra/superpowers
-      path: skills
-  commands:
-    - url: https://github.com/wad-jet/maestro
-      path: commands
-  agents:
-    - url: https://github.com/wad-jet/maestro
-      path: agents
-YAML
+  info "скачиваю agpack.yml из канона ($AGPACK_YML_RAW_URL)..."
+  if fetch "$AGPACK_YML_RAW_URL" "agpack.yml.tmp"; then
+    mv "agpack.yml.tmp" "agpack.yml"
+    info "agpack.yml создан из канона maestro-install/agpack.yml."
+  else
+    rm -f "agpack.yml.tmp"
+    die "не удалось скачать agpack.yml ($AGPACK_YML_RAW_URL). Требуются curl или wget и сеть; скачайте файл вручную и повторите."
+  fi
 fi
 
 # --- 3a. Миграция agpack.yml (rename skills/maestro-init -> skills/maestro-new) ---
@@ -242,14 +235,10 @@ PY
 
 # --- 6. Загрузка maestro-update.sh (идемпотентно, всегда перезаписывает) -----
 
-if command -v curl >/dev/null 2>&1; then
-  info "загружаю maestro-update.sh..."
-  curl -fsSL "$MAESTRO_UPDATE_RAW_URL" -o maestro-update.sh \
-    || warn "не удалось загрузить maestro-update.sh (curl): продолжаю без него — скачайте вручную: $MAESTRO_UPDATE_RAW_URL"
-elif command -v wget >/dev/null 2>&1; then
-  info "загружаю maestro-update.sh (wget)..."
-  wget -qO maestro-update.sh "$MAESTRO_UPDATE_RAW_URL" \
-    || warn "не удалось загрузить maestro-update.sh (wget): продолжаю без него — скачайте вручную: $MAESTRO_UPDATE_RAW_URL"
+if fetch "$MAESTRO_UPDATE_RAW_URL" "maestro-update.sh"; then
+  info "maestro-update.sh загружен."
+elif command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1; then
+  warn "не удалось загрузить maestro-update.sh: продолжаю без него — скачайте вручную: $MAESTRO_UPDATE_RAW_URL"
 else
   warn "не найден 'curl'/'wget' — maestro-update.sh не загружен. Скачайте вручную: $MAESTRO_UPDATE_RAW_URL"
 fi
@@ -259,7 +248,7 @@ fi
 cat <<EOT
 
 [maestro-install] Готово. База для maestro подготовлена.
-  - agpack.yml: создан/существующий
+  - agpack.yml: создан из канона maestro-install/agpack.yml / существующий
   - .opencode/: развёрнуты skills/commands/agents (agpack sync)
   - плагин: $PLUGIN_SPEC → $CONFIG_FILE
   - maestro-update.sh: загружен (для будущих обновлений maestro)

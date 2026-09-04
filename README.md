@@ -60,9 +60,9 @@ curl -fsSL https://raw.githubusercontent.com/wad-jet/maestro/main/maestro-instal
 bash maestro-install.sh
 ```
 
-> Предусловия: bash (macOS/Linux), python3 ≥ 3.11, git. Windows — запускайте через
-> WSL или Git Bash. После скрипта — перезапустите OpenCode и выполните
-> `/maestro-new` (см. шаг 3 ниже).
+> Предусловия: bash (macOS/Linux), python3 ≥ 3.11, git, curl или wget, сеть.
+> Windows — запускайте через WSL или Git Bash. После скрипта — перезапустите
+> OpenCode и выполните `/maestro-new` (см. шаг 3 ниже).
 
 Установить `maestro` можно также через **agpack** (вручную) или **копированием**.
 Подробная инструкция с `agpack.yml`, картой путей и подключением плагина —
