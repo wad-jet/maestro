@@ -19,6 +19,9 @@ PLUGIN_SPEC="maestro-bootstrap@git+https://github.com/wad-jet/maestro.git"
 TMP_DIR="$(mktemp -d 2>/dev/null || mktemp -d -t maestro-update)"
 trap 'rm -rf "$TMP_DIR"' EXIT
 
+SCRIPT_PATH="${BASH_SOURCE[0]}"
+ORIG_ARGS=("$@")   # сохранить до парсинга флагов — для re-exec после самообновления
+
 say()  { printf '%s\n' "$*"; }
 info() { printf '\033[1;34m[maestro-update]\033[0m %s\n' "$*"; }
 warn() { printf '\033[1;33m[maestro-update] ВНИМАНИЕ:\033[0m %s\n' "$*"; }
@@ -77,6 +80,74 @@ else
   MAESTRO_INSTALL_AGPACK="$(cat "$TMP_DIR/maestro-install/agpack.yml" 2>/dev/null || true)"
 fi
 info "целевая версия: $TARGET_VERSION"
+
+# --- 2a. Самопроверка версии скрипта -----------------------------------------
+
+if [ "${MAESTRO_UPDATE_SELF_UPDATED:-}" != "1" ]; then
+  info "проверяю актуальность maestro-update.sh..."
+  TARGET_SCRIPT="$TMP_DIR/update-target.sh"
+  git_show_ok=1
+  if [[ -n "$PIN" ]]; then
+    git -C "$TMP_DIR" show "$PIN:maestro-update.sh" > "$TARGET_SCRIPT" 2>/dev/null || git_show_ok=0
+  else
+    git -C "$TMP_DIR" show "HEAD:maestro-update.sh" > "$TARGET_SCRIPT" 2>/dev/null || git_show_ok=0
+  fi
+  if [ "$git_show_ok" -eq 0 ] || [ ! -s "$TARGET_SCRIPT" ]; then
+    rm -f "$TARGET_SCRIPT"
+    info "maestro-update.sh отсутствует в целевой версии — самопроверка пропущена"
+  else
+    cmp_rc=0
+    cmp -s "$SCRIPT_PATH" "$TARGET_SCRIPT" || cmp_rc=$?
+    case "$cmp_rc" in
+      0)
+        info "maestro-update.sh актуален"
+        ;;
+      2)
+        warn "нечитаемый файл для сравнения — самопроверка пропущена"
+        ;;
+      *)
+        if [ ! -t 0 ]; then
+          die "самобновление недоступно в неинтерактивном режиме; обновите вручную: $REPO_URL (maestro-update.sh) и повторите"
+        fi
+        say ""
+        say "[maestro-update] maestro-update.sh отличается от целевой версии ($TARGET_VERSION)."
+        say "  (a) Самообновить скрипт и перезапустить (рекомендую)"
+        say "  (b) Продолжить текущим скриптом"
+        say "  (c) Стоп"
+        while :; do
+          printf '[maestro-update] выбор (a/b/c): '
+          read -r choice || die "ответ не получен — остановлено"
+          case "$choice" in
+            a|b|c) break ;;
+            *) info "введите a, b или c" ;;
+          esac
+        done
+        case "$choice" in
+          a)
+            SELF_TMP="$SCRIPT_PATH.tmp.$$"
+            if ! cp "$TARGET_SCRIPT" "$SELF_TMP"; then
+              rm -f "$SELF_TMP"
+              die "не удалось записать новый maestro-update.sh ($SCRIPT_PATH не writable?)"
+            fi
+            if ! mv "$SELF_TMP" "$SCRIPT_PATH"; then
+              rm -f "$SELF_TMP"
+              die "не удалось заменить maestro-update.sh"
+            fi
+            rm -rf "$TMP_DIR"
+            exec env MAESTRO_UPDATE_SELF_UPDATED=1 bash "$SCRIPT_PATH" ${ORIG_ARGS[@]+"${ORIG_ARGS[@]}"}
+            ;;
+          b)
+            warn "продолжаю текущим maestro-update.sh (расхождение не устранено)"
+            ;;
+          c)
+            warn "останавливаюсь (выбор пользователя)"
+            exit 1
+            ;;
+        esac
+        ;;
+    esac
+  fi
+fi
 
 # --- 3. Merge-add канонических записей в agpack.yml + agpack sync ------------
 
