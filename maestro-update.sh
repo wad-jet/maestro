@@ -147,6 +147,8 @@ if [ "${MAESTRO_UPDATE_SELF_UPDATED:-}" != "1" ]; then
         ;;
     esac
   fi
+else
+  info "самопроверка пропущена (скрипт только что самообновлён)"
 fi
 
 # --- 3. Merge-add канонических записей в agpack.yml + agpack sync ------------
