@@ -40,7 +40,7 @@ Decision gates (шаги 2, 7, 10, 12, 17) — явный вопрос с вар
 | 10 | Особый случай Revise (правке нужен confidential) | (a) trusted `custodian` (Q/A-агрегат) · (b) follow-up · (c) отмена |
 | 10 | Сходимость Revise — fast-path (контрольное ревью закрыло все Critical/Important, только Minor → дефолт (a) Approve, Minor → follow-up) · плато (2 раунда без новых Critical/Important при незакрытых повторах) | (a) Approve · (b) продолжить ещё · (c) follow-up оставшиеся |
 | 12 | Plan утверждён | (a) Approve · (b) Revise → шаг 11 · (c) отмена |
-| 17 | Pre-PR | (a) Approve merge · (b) Fix → шаг 13 · (c) отмена. Gate показывает список открытых issues (open + follow-up) с severity из шага 16; если открытых нет — (b) помечается «только follow-up, не блокирует». **«Test results»** — фактический вывод `$TEST_COMMAND`: команда, exit code, summary-строки (например `tests 173, pass 173, fail 0`), а не утверждение «тесты прошли». Если тесты не выполнялись в текущей сессии — оркестратор выполняет их до гейта. |
+| 17 | Pre-PR | (a) Approve merge · (b) Fix → шаг 13 · (c) отмена. Gate показывает список открытых issues (open + follow-up) с severity из шага 16; если открытых нет — (b) помечается «только follow-up, не блокирует». **«Test results»** — фактический вывод `$TEST_COMMAND`: команда, exit code, summary-строки (например `tests 173, pass 173, fail 0`), а не утверждение «тесты прошли». Если тесты не выполнялись в текущей сессии — оркестратор выполняет их до гейта; исключение — осознанный пропуск на шаге 15 (багфикс probe==fix / low-risk фича ≤2 файла): вместо вывода «Тесты пропущены на шаге 15 (low-risk), coverage = <N%>». |
 
 ## 📖 Security-гейты (помимо feature/bugfix)
 
