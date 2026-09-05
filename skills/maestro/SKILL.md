@@ -708,6 +708,10 @@ Interactive — агент комментирует находки по ходу
 🟡 17. -- HITL GATE: pre-PR --
       Оркестратор ПОКАЗЫВАЕТ: git log, test results, coverage status
       **и список открытых issues (open + follow-up) с severity** из шага 16.
+      «Test results» — фактический вывод выполнения `$TEST_COMMAND`:
+      команда, exit code, summary-строки (например `tests 173, pass 173,
+      fail 0`), а не утверждение «тесты прошли». Если тесты не выполнялись
+      в текущей сессии — оркестратор выполняет их до гейта.
       **Secret-scan pre-PR (SEC-3):** перед гейтом оркестратор прогоняет
       отрицательный grep по `git diff <base>..HEAD` на секреты
       (`sk-`, `AKIA[0-9A-Z]{16}`, `-----BEGIN`, `client_secret`, `token=`/`key=`)
