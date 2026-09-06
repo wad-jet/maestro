@@ -26,6 +26,15 @@ test("sqlite upsert/search/delete", async () => {
   await st.dispose();
 });
 
+test("sqlite dimension mismatch throws", async () => {
+  const st = createStorage({ type: "sqlite", options: { dbPath: "file:memdb_dim?mode=memory&cache=shared" }, modelId: "m", dim: 3 });
+  await st.init();
+  await st.upsert([mkEntry("s1", "k1", "t1")]); // dim 3
+  await st.dispose();
+  const st2 = createStorage({ type: "sqlite", options: { dbPath: "file:memdb_dim?mode=memory&cache=shared" }, modelId: "m", dim: 4 });
+  await assert.rejects(() => st2.init(), /dimension mismatch/);
+});
+
 test("qdrant backend not implemented", () => {
   assert.throws(() => createStorage({ type: "qdrant", modelId: "m", dim: 3 }), /NOT_IMPLEMENTED/);
 });

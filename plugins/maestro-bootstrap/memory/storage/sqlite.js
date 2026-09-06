@@ -35,6 +35,13 @@ export class SqliteStorage {
       throw new Error(`model mismatch: stored=${row.value} expected=${this.modelId}`);
     }
     this.db.prepare("INSERT OR IGNORE INTO meta (name, value) VALUES ('model_id', ?)").run(this.modelId);
+    const dimRow = this.db.prepare("SELECT value FROM meta WHERE name = 'dim'").get();
+    if (dimRow && parseInt(dimRow.value, 10) !== this.dim) {
+      this.db.close();
+      this.db = null;
+      throw new Error(`dimension mismatch: stored=${dimRow.value} expected=${this.dim}`);
+    }
+    this.db.prepare("INSERT OR IGNORE INTO meta (name, value) VALUES ('dim', ?)").run(this.dim);
   }
 
   async dispose() {
@@ -48,6 +55,9 @@ export class SqliteStorage {
       VALUES (@session_id, @key, @origin_project_hash, @title, @summary, @decisions, @embedding, @model_id, @author, @time_first, @time_last, @version)`);
     const tx = this.db.transaction((es) => {
       for (const e of es) {
+        if (e.embedding.length !== this.dim) {
+          throw new Error(`embedding length ${e.embedding.length} does not match expected dimension ${this.dim}`);
+        }
         ins.run({
           ...e,
           embedding: Buffer.from(e.embedding.buffer),
