@@ -1,6 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createStorage } from "./storage.js";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 
 function mkEntry(session_id, key, title) {
   return {
@@ -11,28 +14,77 @@ function mkEntry(session_id, key, title) {
 }
 
 test("sqlite upsert/search/delete", async () => {
-  const st = createStorage({ type: "sqlite", options: { dbPath: ":memory:" }, modelId: "m", dim: 3 });
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
+  try {
+    await st.init();
+    await st.upsert([mkEntry("s1", "k1", "t1"), mkEntry("s2", "k2", "t2")]);
+    const hits = await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 2, min_score: 0.5, key: "k1" });
+    assert.equal(hits.length, 1);
+    assert.equal(hits[0].entry.session_id, "s1");
+    assert.equal(hits[0].entry.title, "t1");
+    await st.delete("s1");
+    const hits2 = await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 2, min_score: 0.5, key: "k1" });
+    assert.equal(hits2.length, 0);
+    const sts = await st.stats();
+    assert.equal(sts.entries, 1);
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("search below min_score returns empty", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
+  try {
+    await st.init();
+    await st.upsert([mkEntry("s1", "k1", "t1")]);
+    // orthogonal-ish vector: large negative → very low cosine similarity
+    const hits = await st.search(new Float32Array([-0.1, -0.2, -0.3]), { top_k: 2, min_score: 0.5, key: "k1" });
+    assert.equal(hits.length, 0);
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("search requires key", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
+  try {
+    await st.init();
+    await assert.rejects(() => st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 2, min_score: 0.5 }), /key required/);
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("sqlite model mismatch throws", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const dbPath = join(dir, "memory.db");
+  const st = createStorage({ type: "sqlite", options: { dbPath: dbPath }, modelId: "m", dim: 3 });
   await st.init();
-  await st.upsert([mkEntry("s1", "k1", "t1"), mkEntry("s2", "k2", "t2")]);
-  const hits = await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 2, min_score: 0.5, key: "k1" });
-  assert.equal(hits.length, 1);
-  assert.equal(hits[0].entry.session_id, "s1");
-  assert.equal(hits[0].entry.title, "t1");
-  await st.delete("s1");
-  const hits2 = await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 2, min_score: 0.5, key: "k1" });
-  assert.equal(hits2.length, 0);
-  const sts = await st.stats();
-  assert.equal(sts.entries, 1);
   await st.dispose();
+  const st2 = createStorage({ type: "sqlite", options: { dbPath }, modelId: "m2", dim: 3 });
+  await assert.rejects(() => st2.init(), /model mismatch/);
+  // st2.db may or may not be null depending on error path — safe no-op
+  await st2.dispose();
+  rmSync(dir, { recursive: true, force: true });
 });
 
 test("sqlite dimension mismatch throws", async () => {
-  const st = createStorage({ type: "sqlite", options: { dbPath: "file:memdb_dim?mode=memory&cache=shared" }, modelId: "m", dim: 3 });
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const dbPath = join(dir, "memory.db");
+  const st = createStorage({ type: "sqlite", options: { dbPath }, modelId: "m", dim: 3 });
   await st.init();
   await st.upsert([mkEntry("s1", "k1", "t1")]); // dim 3
   await st.dispose();
-  const st2 = createStorage({ type: "sqlite", options: { dbPath: "file:memdb_dim?mode=memory&cache=shared" }, modelId: "m", dim: 4 });
+  const st2 = createStorage({ type: "sqlite", options: { dbPath }, modelId: "m", dim: 4 });
   await assert.rejects(() => st2.init(), /dimension mismatch/);
+  await st2.dispose();
+  rmSync(dir, { recursive: true, force: true });
 });
 
 test("qdrant backend not implemented", () => {
