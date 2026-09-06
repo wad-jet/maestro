@@ -6,3 +6,5 @@
 .agpack.lock.yml
 TODO.md
 .sandbox/
+node_modules/
+package-lock.json
