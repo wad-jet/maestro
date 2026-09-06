@@ -1606,6 +1606,8 @@ git commit -m "feat(memory): E2E sandbox smoke + invariant tests"
 
 ## Self-Review
 
+**Task 9/11 key-contract decision (from Task 3 review):** `storage.search()` requires a non-empty `key` (throws otherwise). Recall and `memory_search` MUST pass the effective project key (derived via `deriveProjectKey` + `resolveEffectiveKey`), NOT `null`/`undefined`. The Recall class gets a `key` in its constructor and uses it in `storage.search`. `memory_search` resolves the current session's project key (via `client.session.get` → directory → git remote or `deriveProjectKey`).
+
 **Spec coverage:**
 - §1 (overview) → Tasks 1-16.
 - §2.1 components → Tasks 1-13.
