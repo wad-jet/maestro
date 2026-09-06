@@ -1,10 +1,16 @@
 export class PgVectorStorage {
-  constructor({ pool, table, dim }) {
+  constructor({ pool, table, dim, modelId }) {
     this.pool = pool;
     this.table = table;
     this.dim = dim;
+    this.modelId = modelId;
   }
   async init() {
+    try {
+      await this.pool.query(`CREATE EXTENSION IF NOT EXISTS vector`);
+    } catch {
+      throw new Error("CREATE EXTENSION vector — требуется расширение pgvector (см. how-to)");
+    }
     await this.pool.query(`CREATE TABLE IF NOT EXISTS ${this.table} (
       session_id TEXT PRIMARY KEY,
       key TEXT NOT NULL,
@@ -24,6 +30,12 @@ export class PgVectorStorage {
   async dispose() { await this.pool.end?.(); }
   async upsert(entries) {
     for (const e of entries) {
+      if (e.embedding.length !== this.dim) {
+        throw new Error(`embedding length ${e.embedding.length} does not match expected dimension ${this.dim}`);
+      }
+      if (e.model_id !== this.modelId) {
+        throw new Error(`model_id mismatch: expected=${this.modelId} got=${e.model_id} — переиндексируйте (см. how-to)`);
+      }
       await this.pool.query(
         `INSERT INTO ${this.table} (session_id, key, origin_project_hash, title, summary, decisions, embedding, model_id, author, time_first, time_last, version)
          VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)

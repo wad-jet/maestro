@@ -99,3 +99,9 @@ test("qdrant factory rejects missing client", async () => {
   // init should fail without a valid client
   await assert.rejects(() => st.init(), /client|collectionExists/);
 });
+
+test("pgvector factory rejects missing pool", async () => {
+  const st = createStorage({ type: "pgvector", options: { table: "m" }, modelId: "m1", dim: 3 });
+  assert.equal(st.constructor.name, "PgVectorStorage");
+  await assert.rejects(() => st.init(), /pgvector/);
+});
