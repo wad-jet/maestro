@@ -6,12 +6,27 @@ function fakeClient() {
   const calls = [];
   return {
     calls,
-    collectionExists: async (name) => { calls.push(["exists", name]); return false; },
-    createCollection: async (name, opts) => { calls.push(["create", name, opts]); },
-    upsert: async (name, { points }) => { calls.push(["upsert", name, points.length]); },
-    search: async (name, q) => { calls.push(["search", name, q]); return { result: [{ id: "s1", score: 0.9, payload: { title: "t", summary: "s", decisions: "[]", key: "k" } }] }; },
-    delete: async (name, ids) => { calls.push(["delete", name, ids]); },
-    count: async (name) => { calls.push(["count", name]); return { result: { count: 1 } }; },
+    collectionExists: async (name) => {
+      calls.push(["exists", name]);
+      return { exists: false };
+    },
+    createCollection: async (name, opts) => {
+      calls.push(["create", name, opts]);
+    },
+    upsert: async (name, { points }) => {
+      calls.push(["upsert", name, points.length]);
+    },
+    query: async (name, q) => {
+      calls.push(["query", name, q]);
+      return { points: [{ id: "s1", score: 0.9, payload: { title: "t", summary: "s", decisions: "[]", key: "k" } }] };
+    },
+    delete: async (name, opts) => {
+      calls.push(["delete", name, opts]);
+    },
+    count: async (name) => {
+      calls.push(["count", name]);
+      return { count: 1 };
+    },
   };
 }
 
@@ -25,14 +40,18 @@ test("qdrant init creates collection with dim from model", async () => {
   assert.equal(create[2].vectors.distance, "Cosine");
 });
 
-test("qdrant search always sends key payload filter", async () => {
+test("qdrant search uses query with key payload filter", async () => {
   const c = fakeClient();
   const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
   await st.init();
   await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0.35, key: "k1" });
-  const search = c.calls.find(([k]) => k === "search");
-  assert.ok(search);
-  assert.deepEqual(search[2].filter.must[0], { key: "key", match: { value: "k1" } });
+  const query = c.calls.find(([k]) => k === "query");
+  assert.ok(query);
+  // query uses { nearest: vector } structure; Float32Array→Array.from() adds precision noise
+  const nearest = query[2].query.nearest;
+  assert.equal(nearest.length, 3);
+  assert.ok(nearest.every((v, i) => Math.abs(v - [0.1, 0.2, 0.3][i]) < 1e-6));
+  assert.deepEqual(query[2].filter.must[0], { key: "key", match: { value: "k1" } });
 });
 
 test("qdrant search requires key", async () => {
@@ -73,9 +92,9 @@ test("qdrant upsert maps entries to points with payload", async () => {
 
 test("qdrant search parses decisions and returns scored results", async () => {
   const c = fakeClient();
-  c.search = async (name, q) => {
-    c.calls.push(["search", name, q]);
-    return { result: [{ id: "p1", score: 0.85, payload: { title: "t1", summary: "s1", decisions: '["dec"]', key: "k1" } }] };
+  c.query = async (name, q) => {
+    c.calls.push(["query", name, q]);
+    return { points: [{ id: "p1", score: 0.85, payload: { title: "t1", summary: "s1", decisions: '["dec"]', key: "k1" } }] };
   };
   const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
   await st.init();
@@ -87,31 +106,47 @@ test("qdrant search parses decisions and returns scored results", async () => {
   assert.equal(res[0].entry.embedding, undefined);
 });
 
-test("qdrant delete searches by session_id then deletes points", async () => {
+test("qdrant delete uses query then delete with points selector", async () => {
   const c = fakeClient();
-  c.search = async (name, q) => {
-    c.calls.push(["search", name, q]);
-    return { result: [{ id: "s1_0" }, { id: "s1_1" }] };
+  c.query = async (name, q) => {
+    c.calls.push(["query", name, q]);
+    return { points: [{ id: "s1_0" }, { id: "s1_1" }] };
   };
   const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
   await st.init();
   await st.delete("s1");
   const deleteCall = c.calls.find(([k]) => k === "delete");
   assert.ok(deleteCall);
-  assert.deepEqual(deleteCall[2], ["s1_0", "s1_1"]);
+  assert.deepEqual(deleteCall[2], { points: ["s1_0", "s1_1"] });
 });
 
 test("qdrant delete with no matching points does not call delete", async () => {
   const c = fakeClient();
-  c.search = async (name, q) => {
-    c.calls.push(["search", name, q]);
-    return { result: [] };
+  c.query = async (name, q) => {
+    c.calls.push(["query", name, q]);
+    return { points: [] };
   };
   const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
   await st.init();
   await st.delete("s99");
   const deleteCall = c.calls.find(([k]) => k === "delete");
   assert.equal(deleteCall, undefined);
+});
+
+test("qdrant delete adds key filter when provided (spec isolation)", async () => {
+  const c = fakeClient();
+  c.query = async (name, q) => {
+    c.calls.push(["query", name, q]);
+    return { points: [{ id: "s1_0" }] };
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  await st.delete("s1", { key: "k1" });
+  const query = c.calls.find(([k]) => k === "query");
+  assert.ok(query);
+  // session_id via query: { match }, key via filter: { must }
+  assert.deepEqual(query[2].query, { match: { key: "session_id", value: "s1" } });
+  assert.deepEqual(query[2].filter, { must: [{ key: "key", match: { value: "k1" } }] });
 });
 
 test("qdrant stats returns entry count", async () => {
@@ -126,7 +161,7 @@ test("qdrant dispose is no-op", async () => {
   const c = fakeClient();
   const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
   await st.init();
-  await st.dispose(); // should not throw
+  await st.dispose();
 });
 
 test("qdrant search with empty key throws", async () => {
@@ -134,4 +169,16 @@ test("qdrant search with empty key throws", async () => {
   const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
   await st.init();
   await assert.rejects(() => st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "" }), /key required/);
+});
+
+test("qdrant search query uses nearest vector structure", async () => {
+  const c = fakeClient();
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  await st.search(new Float32Array([1, 2, 3]), { top_k: 5, min_score: 0.7, key: "test" });
+  const query = c.calls.find(([k]) => k === "query");
+  assert.ok(query);
+  assert.equal(query[2].limit, 5);
+  assert.equal(query[2].score_threshold, 0.7);
+  assert.deepEqual(query[2].query, { nearest: [1, 2, 3] });
 });

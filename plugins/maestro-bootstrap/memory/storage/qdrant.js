@@ -7,7 +7,7 @@ export class QdrantStorage {
   }
 
   async init() {
-    const exists = await this.client.collectionExists(this.collection);
+    const { exists } = await this.client.collectionExists(this.collection);
     if (!exists) {
       await this.client.createCollection(this.collection, {
         vectors: { size: this.dim, distance: "Cosine" },
@@ -42,33 +42,36 @@ export class QdrantStorage {
     if (typeof key !== "string" || !key) {
       throw new Error("search: key required");
     }
-    const res = await this.client.search(this.collection, {
-      vector: Array.from(embedding),
+    const res = await this.client.query(this.collection, {
+      query: { nearest: Array.from(embedding) },
       limit: top_k,
       score_threshold: min_score,
       filter: { must: [{ key: "key", match: { value: key } }] },
       with_payload: true,
     });
-    return (res.result ?? []).map((r) => ({
+    return (res.points ?? []).map((r) => ({
       entry: { ...r.payload, embedding: undefined, decisions: JSON.parse(r.payload.decisions) },
       score: r.score,
     }));
   }
 
-  async delete(session_id) {
-    const existing = await this.client.search(this.collection, {
-      filter: { must: [{ key: "session_id", match: { value: session_id } }] },
+  async delete(session_id, { key } = {}) {
+    const q = { match: { key: "session_id", value: session_id } };
+    const filter = key ? { must: [{ key: "key", match: { value: key } }] } : undefined;
+    const existing = await this.client.query(this.collection, {
+      query: q,
       limit: 100,
+      filter,
       with_payload: false,
     });
-    const ids = (existing.result ?? []).map((r) => r.id);
+    const ids = (existing.points ?? []).map((r) => r.id);
     if (ids.length) {
-      await this.client.delete(this.collection, ids);
+      await this.client.delete(this.collection, { points: ids });
     }
   }
 
   async stats() {
-    const r = await this.client.count(this.collection);
-    return { entries: r.result?.count ?? 0 };
+    const { count } = await this.client.count(this.collection);
+    return { entries: count };
   }
 }

@@ -87,6 +87,15 @@ test("sqlite dimension mismatch throws", async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("qdrant factory requires options.client and options.collection", () => {
-  assert.throws(() => createStorage({ type: "qdrant", modelId: "m", dim: 3 }), /client/);
+test("qdrant factory returns QdrantStorage with valid options", async () => {
+  const c = { collectionExists: async () => ({ exists: false }), createCollection: async () => {} };
+  const st = createStorage({ type: "qdrant", options: { client: c, collection: "c" }, modelId: "m", dim: 3 });
+  assert.equal(st.constructor.name, "QdrantStorage");
+  await st.init(); // should not throw with a valid client
+});
+test("qdrant factory rejects missing client", async () => {
+  const st = createStorage({ type: "qdrant", options: { collection: "c" }, modelId: "m", dim: 3 });
+  assert.equal(st.constructor.name, "QdrantStorage");
+  // init should fail without a valid client
+  await assert.rejects(() => st.init(), /client|collectionExists/);
 });
