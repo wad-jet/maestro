@@ -868,6 +868,7 @@ export function makeBoundedMap(max = 1024) {
     },
     delete: (k) => m.delete(k),
     size: () => m.size,
+    clear: () => m.clear(),
   };
 }
 
