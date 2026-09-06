@@ -34,6 +34,22 @@ test("effective key", () => {
   assert.equal(resolveEffectiveKey({ projectHash: "ph", namespace: null }), "ph");
   assert.equal(resolveEffectiveKey({ projectHash: "ph", namespace: "team" }), "team");
 });
+test("centralized_confidential invalid value disables", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, storage: { type: "qdrant", centralized_confidential: "bogus" }, identity: "x" } });
+  assert.equal(cfg.enabled, false);
+});
+test("centralized_confidential allow enables with identity", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, storage: { type: "qdrant", centralized_confidential: "allow" }, identity: "x" } });
+  assert.equal(cfg.enabled, true);
+});
+test("explicit enabled false disables", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: false } });
+  assert.equal(cfg.enabled, false);
+});
+test("non-object storage does not throw", () => {
+  assert.equal(loadMemoryConfig({ memory: { enabled: true, storage: "sqlite" } }).enabled, true);
+  assert.equal(loadMemoryConfig({ memory: { enabled: true, storage: null } }).enabled, true);
+});
 test("dir name sanitized", () => {
   assert.match(sanitizeDirName("a/b c"), /^[0-9a-f]{16}$/);
 });
