@@ -87,6 +87,6 @@ test("sqlite dimension mismatch throws", async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
-test("qdrant backend not implemented", () => {
-  assert.throws(() => createStorage({ type: "qdrant", modelId: "m", dim: 3 }), /NOT_IMPLEMENTED/);
+test("qdrant factory requires options.client and options.collection", () => {
+  assert.throws(() => createStorage({ type: "qdrant", modelId: "m", dim: 3 }), /client/);
 });
