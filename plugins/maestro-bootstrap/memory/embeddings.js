@@ -17,15 +17,15 @@ export class Embedder {
       }
       this.pipeline = await transformers.pipeline("feature-extraction", this.model, { cache_dir: this.cacheDir, dtype: "q8" });
     }
-    const out = await this.pipeline(["warmup"]);
+    const out = await this.pipeline(["warmup"], { pooling: "mean", normalize: true });
     this._dim = this._dim ?? out.data.length;
     this.ready = true;
   }
   async embed(text) {
     if (!this.ready) await this.init();
-    const out = await this.pipeline([text]);
+    const out = await this.pipeline([text], { pooling: "mean", normalize: true });
     return new Float32Array(out.data);
   }
-  get dim() { return this._dim ?? 384; }
+  get dim() { return this._dim; }
   get modelId() { return this.model; }
 }
