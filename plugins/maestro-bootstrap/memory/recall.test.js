@@ -32,3 +32,13 @@ test("recall ignores non-first messages", async () => {
   await r.onChatMessage({ sessionID: "s1", text: "hello" });
   assert.equal(await r.systemBlock({ sessionID: "s1" }), null);
 });
+test("systemBlock with undefined sessionID returns null", async () => {
+  const r = new Recall({ embeddings: { embed: async () => new Float32Array([0.1, 0.2, 0.3]) }, storage: { search: async () => [] }, topK: 3, minScore: 0.35, key: "p", getUserMessageCount: async () => 1 });
+  assert.equal(await r.systemBlock({ sessionID: undefined }), null);
+});
+test("embed-error → empty buffer → null from systemBlock", async () => {
+  const storage = { search: async () => [] };
+  const r = new Recall({ embeddings: { embed: async () => { throw new Error("embed fail"); } }, storage, topK: 3, minScore: 0.35, key: "project-key", getUserMessageCount: async () => 1 });
+  await r.onChatMessage({ sessionID: "s1", text: "hello" });
+  assert.equal(await r.systemBlock({ sessionID: "s1" }), null);
+});
