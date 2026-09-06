@@ -1,22 +1,38 @@
-import { sanitize } from "../core.js";
+import { sanitize, confGlobMatch } from "../core.js";
+
+function extractPathToken(line) {
+  const m = line.match(/^([^:\s]+)/);
+  return m ? m[1] : null;
+}
 
 function isConfidentialLine(line, patterns) {
-  return patterns.some((p) => line.includes(p.replace("/**", "")));
+  const token = extractPathToken(line);
+  if (!token) return false;
+  return patterns.some((p) => confGlobMatch(p.toLowerCase(), token.toLowerCase()));
+}
+
+function maskLines(text, { confidentialPatterns = [] } = {}) {
+  return String(text)
+    .split("\n")
+    .map((l) => (isConfidentialLine(l, confidentialPatterns) ? "[confidential]" : l))
+    .join("\n");
 }
 
 export function maskTranscript(text, { confidentialPatterns = [] } = {}) {
-  const lines = String(text)
-    .split("\n")
-    .map((l) => (isConfidentialLine(l, confidentialPatterns) ? "[confidential]" : l));
-  return sanitize(lines.join("\n"), {}).text;
+  const filtered = maskLines(text, { confidentialPatterns });
+  return filtered.trim() ? sanitize(filtered, {}).text : "";
 }
 
 export function maskEntry(entry, { confidentialPatterns = [] } = {}) {
-  const mask = (s) => (typeof s === "string" ? sanitize(s, {}).text : s);
+  const maskField = (s) => {
+    if (typeof s !== "string") return s;
+    const filtered = maskLines(s, { confidentialPatterns });
+    return sanitize(filtered, {}).text;
+  };
   return {
     ...entry,
-    title: mask(entry.title),
-    summary: mask(entry.summary),
-    decisions: entry.decisions?.map(mask) ?? [],
+    title: maskField(entry.title),
+    summary: maskField(entry.summary),
+    decisions: entry.decisions?.map(maskField) ?? [],
   };
 }
