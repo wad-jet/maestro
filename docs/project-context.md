@@ -35,6 +35,10 @@
 - **Инструменты:** git, `agpack` (доставка скиллов/команд/агентов в `.opencode/`),
   bash (скрипты `maestro-install.sh`, `maestro-sandbox.sh`).
 - **Менеджер:** npm (только для плагина, `package.json`).
+- **Текущая версия дистрибутива:** `2.5.0` (корневой `package.json → version`; единая
+  для скиллов и плагина, см. `manual_docs/how-to/update-maestro.md`).
+- **Memory layer:** опциональный модуль плагина (векторная память сессий); НЕ часть
+  стандартной установки, включается по запросу (spec memory §4.1).
 
 ## 4. Архитектура
 
@@ -57,6 +61,9 @@
 ## 5. Домены / модули
 
 - `plugins/maestro-bootstrap/` — логика плагина (core.js, index.js, тесты).
+- `plugins/maestro-bootstrap/memory/` — **опциональный** модуль памяти сессий
+  (векторное хранилище, эмбеддинги, саммаризатор, recall, memory_search); не часть
+  стандартной установки, включается по запросу (§3.5 spec memory).
 - `skills/` — скилл-спеки и поддерживающие промпты/схемы.
 - `agents/` + `commands/` — определения субагентов и точек входа.
 - `docs/` — project-context, тестовая документация (testing/), каталоги пайплайна
@@ -129,6 +136,9 @@
 - **Секреты:** `.env`, `*.env.*`, `*.{pem,key,cert,secret}` — deny (built-in + config).
 - **Санитайзинг:** маскировка чувствительных данных перед untrusted-диспатчем
   (`sanitizer_whitelist`).
+- **Память (memory layer):** `centralized_confidential: forbid` по умолчанию —
+  проект с `confidential.paths` пишет память только в локальный sqlite; маскирование
+  `sanitize()` до и после саммаризации (правила — spec memory §5).
 - Источник истины — `SECURITY.md` (требования P1–P5).
 
 ## 13. Мониторинг и observability
