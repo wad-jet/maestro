@@ -6,7 +6,7 @@ export function canonicalizeRemote(rawUrl) {
   if (s.includes("://")) {
     const url = new URL(s);
     host = url.hostname.toLowerCase();
-    path = url.pathname.replace(/^\//, "");
+    path = url.pathname.replace(/^\//, "").toLowerCase();
   } else if (s.includes(":")) {
     const idx = s.indexOf(":");
     host = s.slice(0, idx).split("@").pop().toLowerCase();

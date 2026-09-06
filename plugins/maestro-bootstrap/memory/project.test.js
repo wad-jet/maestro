@@ -31,3 +31,9 @@ test("derive falls back to dir hash", () => {
   assert.equal(r.source, "dir");
   assert.equal(r.hash, projectHashFromDir("/home/u/a"));
 });
+test("credentials stripped", () => {
+  assert.equal(canonicalizeRemote("https://user:pass@github.com/org/repo.git"), "github.com/org/repo");
+});
+test("dir hash differs for same basename different parent", () => {
+  assert.notEqual(projectHashFromDir("/home/u/a"), projectHashFromDir("/other/u/a"));
+});
