@@ -213,7 +213,8 @@ export class SqliteStorage {
     }
 
     // RRF fusion (k=60): merge vector + FTS ranks через общий хелпер.
-    return fuseRrf(vectorHits, ftsHits.length ? [ftsHits] : [], { fetchEntry: (sid) => this.get(sid) });
+    const fused = await fuseRrf(vectorHits, ftsHits.length ? [ftsHits] : [], { fetchEntry: (sid) => this.get(sid) });
+    return fused.slice(0, top_k);
   }
 
   async delete(session_id) {

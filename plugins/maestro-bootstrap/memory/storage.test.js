@@ -305,6 +305,27 @@ test("fts ranking: strong keyword match ranks before weak match", async () => {
   }
 });
 
+test("hybrid search caps fused results to top_k when vector+text both contribute", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
+  try {
+    await st.init();
+    // s3 — слабый вектор (ортогонален → отсекается min_score), но сильнейший
+    // FTS-матч. s1/s2 — сильные векторы. Без cap фьюжн вернул бы 3 хита
+    // (s1, s2 из вектора + s3 из FTS); с cap — ровно top_k.
+    await st.upsert([
+      mkEntry("s1", "k1", "OAuth token refresh", { summary: "OAuth OAuth OAuth flow", embedding: new Float32Array([1, 0, 0]) }),
+      mkEntry("s2", "k1", "OAuth cache", { summary: "OAuth tokens", embedding: new Float32Array([0.9, 0.1, 0]) }),
+      mkEntry("s3", "k1", "OAuth OAuth OAuth OAuth", { summary: "OAuth OAuth OAuth OAuth OAuth", embedding: new Float32Array([0, 1, 0]) }),
+    ]);
+    const hits = await st.search(new Float32Array([1, 0, 0]), { top_k: 2, min_score: 0.5, key: "k1", query: "OAuth" });
+    assert.equal(hits.length, 2, "fused hybrid result must be capped to top_k");
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("fts stays in sync after delete", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mem-"));
   const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
