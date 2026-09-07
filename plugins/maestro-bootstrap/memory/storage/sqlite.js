@@ -129,6 +129,24 @@ export class SqliteStorage {
     this.db.prepare("DELETE FROM memory WHERE session_id = ?").run(session_id);
   }
 
+  async deleteByFilter({ key, session_id, author, before }) {
+    if (typeof key !== "string" || !key) throw new Error("deleteByFilter: key required");
+    const conds = ["key = @key"];
+    const params = { key };
+    if (session_id !== undefined) { conds.push("session_id = @session_id"); params.session_id = session_id; }
+    if (author !== undefined) { conds.push("author = @author"); params.author = author; }
+    if (before !== undefined) { conds.push("time_last <= @before"); params.before = before; }
+    const info = this.db.prepare(`DELETE FROM memory WHERE ${conds.join(" AND ")}`).run(params);
+    return info.changes;
+  }
+
+  async prune({ key, olderThanDays }) {
+    if (typeof key !== "string" || !key) throw new Error("prune: key required");
+    const cutoff = Date.now() - olderThanDays * 86400_000;
+    const info = this.db.prepare("DELETE FROM memory WHERE key = ? AND time_last < ?").run(key, cutoff);
+    return info.changes;
+  }
+
   async stats() {
     const r = this.db.prepare("SELECT COUNT(*) c FROM memory").get();
     return { entries: r.c };

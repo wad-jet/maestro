@@ -58,6 +58,22 @@ export class PgVectorStorage {
     return res.rows.map((r) => ({ entry: { ...r, embedding: undefined, decisions: JSON.parse(r.decisions) }, score: Number(r.score) }));
   }
   async delete(session_id) { await this.pool.query(`DELETE FROM ${this.table} WHERE session_id = $1`, [session_id]); }
+  async deleteByFilter({ key, session_id, author, before }) {
+    if (typeof key !== "string" || !key) throw new Error("deleteByFilter: key required");
+    const conds = ["key = $1"];
+    const params = [key];
+    let i = 2;
+    if (session_id !== undefined) { conds.push(`session_id = $${i++}`); params.push(session_id); }
+    if (author !== undefined) { conds.push(`author = $${i++}`); params.push(author); }
+    if (before !== undefined) { conds.push(`time_last <= $${i++}`); params.push(before); }
+    const res = await this.pool.query(`DELETE FROM ${this.table} WHERE ${conds.join(" AND ")} RETURNING session_id`, params);
+    return res.rows.length;
+  }
+  async prune({ key, olderThanDays }) {
+    if (typeof key !== "string" || !key) throw new Error("prune: key required");
+    const cutoff = Date.now() - olderThanDays * 86400_000;
+    return this.deleteByFilter({ key, before: cutoff });
+  }
   async stats() { const r = await this.pool.query(`SELECT count(*) FROM ${this.table}`); return { entries: Number(r.rows[0].count) }; }
   async get(session_id) {
     const r = await this.pool.query(`SELECT * FROM ${this.table} WHERE session_id = $1`, [session_id]);

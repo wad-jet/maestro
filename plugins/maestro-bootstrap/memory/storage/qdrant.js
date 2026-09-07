@@ -74,6 +74,23 @@ export class QdrantStorage {
     });
   }
 
+  async deleteByFilter({ key, session_id, author, before }) {
+    if (typeof key !== "string" || !key) throw new Error("deleteByFilter: key required");
+    const must = [{ key: "key", match: { value: key } }];
+    if (session_id !== undefined) must.push({ key: "session_id", match: { value: session_id } });
+    if (author !== undefined) must.push({ key: "author", match: { value: author } });
+    if (before !== undefined) must.push({ key: "time_last", range: { lte: before } });
+    const { count } = await this.client.count(this.collection, { filter: { must } });
+    await this.client.delete(this.collection, { filter: { must } });
+    return count;
+  }
+
+  async prune({ key, olderThanDays }) {
+    if (typeof key !== "string" || !key) throw new Error("prune: key required");
+    const cutoff = Date.now() - olderThanDays * 86400_000;
+    return this.deleteByFilter({ key, before: cutoff });
+  }
+
   async stats() {
     const { count } = await this.client.count(this.collection);
     return { entries: count };

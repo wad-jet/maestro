@@ -5,11 +5,12 @@ import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-function mkEntry(session_id, key, title) {
+function mkEntry(session_id, key, title, extra = {}) {
   return {
     session_id, key, origin_project_hash: key, title, summary: "s",
     decisions: [], embedding: new Float32Array([0.1, 0.2, 0.3]),
     model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1,
+    ...extra,
   };
 }
 
@@ -100,6 +101,80 @@ test("sqlite get returns entry or null", async () => {
     assert.deepStrictEqual(found.decisions, []);
     const notFound = await st.get("nonexistent");
     assert.equal(notFound, null);
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("sqlite deleteByFilter deletes within key by author", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
+  try {
+    await st.init();
+    await st.upsert([
+      mkEntry("s1", "k1", "t1", { author: "a" }),
+      mkEntry("s2", "k2", "t2", { author: "a" }),
+      mkEntry("s3", "k1", "t3", { author: "b" }),
+    ]);
+    const n = await st.deleteByFilter({ key: "k1", author: "a" });
+    assert.equal(n, 1); // only s1 (k1 + author a), not s2 (k2) nor s3 (k1 author b)
+    assert.equal(await st.get("s1"), null);
+    assert.ok(await st.get("s2"));
+    assert.ok(await st.get("s3"));
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("sqlite deleteByFilter before date", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
+  try {
+    await st.init();
+    await st.upsert([
+      mkEntry("s1", "k1", "t1", { time_last: 100 }),
+      mkEntry("s2", "k1", "t2", { time_last: 200 }),
+    ]);
+    const n = await st.deleteByFilter({ key: "k1", before: 150 });
+    assert.equal(n, 1); // only s1 (time_last 100 <= 150)
+    assert.equal(await st.get("s1"), null);
+    assert.ok(await st.get("s2"));
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("sqlite deleteByFilter requires key", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
+  try {
+    await st.init();
+    await assert.rejects(() => st.deleteByFilter({ author: "a" }), /key required/);
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("sqlite prune removes old entries", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
+  try {
+    await st.init();
+    const now = Date.now();
+    await st.upsert([
+      mkEntry("s1", "k1", "t1", { time_last: now - 40 * 86400_000 }), // 40d old
+      mkEntry("s2", "k1", "t2", { time_last: now - 1 * 86400_000 }),   // 1d old
+      mkEntry("s3", "k2", "t3", { time_last: now - 40 * 86400_000 }), // 40d old, other key
+    ]);
+    const n = await st.prune({ key: "k1", olderThanDays: 30 });
+    assert.equal(n, 1); // only s1 (k1, 40d old)
+    assert.equal(await st.get("s1"), null);
+    assert.ok(await st.get("s2"));
+    assert.ok(await st.get("s3"));
   } finally {
     await st.dispose();
     rmSync(dir, { recursive: true, force: true });

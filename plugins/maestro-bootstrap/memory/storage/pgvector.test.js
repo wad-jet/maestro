@@ -102,3 +102,47 @@ test("pgvector upsert rejects wrong embedding dimension", async () => {
     model_id: "m1", author: "a1", time_first: 1, time_last: 2, version: 1,
   }]), /embedding length.*does not match/);
 });
+
+test("pgvector deleteByFilter returns count from RETURNING", async () => {
+  const p = fakePool();
+  p.query = async (sql, params) => {
+    p.calls.push([sql, params]);
+    if (sql.startsWith("DELETE")) return { rows: [{ session_id: "s1" }, { session_id: "s2" }] };
+    return { rows: [] };
+  };
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3 });
+  await st.init();
+  const n = await st.deleteByFilter({ key: "k1", author: "a" });
+  assert.equal(n, 2);
+  const del = p.calls.find(([sql]) => sql.startsWith("DELETE"));
+  assert.ok(del);
+  assert.ok(del[0].includes("RETURNING session_id"));
+  assert.equal(del[1][0], "k1");
+  assert.equal(del[1][1], "a");
+});
+
+test("pgvector deleteByFilter requires key", async () => {
+  const p = fakePool();
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3 });
+  await st.init();
+  await assert.rejects(() => st.deleteByFilter({ author: "a" }), /key required/);
+});
+
+test("pgvector prune filters by time_last", async () => {
+  const p = fakePool();
+  p.query = async (sql, params) => {
+    p.calls.push([sql, params]);
+    if (sql.startsWith("DELETE")) return { rows: [{ session_id: "s1" }] };
+    return { rows: [] };
+  };
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3 });
+  await st.init();
+  const before = Date.now();
+  const n = await st.prune({ key: "k1", olderThanDays: 30 });
+  assert.equal(n, 1);
+  const del = p.calls.find(([sql]) => sql.startsWith("DELETE"));
+  assert.ok(del);
+  assert.ok(del[0].includes("time_last <= $2"));
+  assert.equal(del[1][0], "k1");
+  assert.ok(del[1][1] <= before - 30 * 86400_000);
+});

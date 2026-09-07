@@ -188,3 +188,57 @@ test("qdrant search query uses nearest vector structure", async () => {
   assert.equal(query[2].score_threshold, 0.7);
   assert.deepEqual(query[2].query, { nearest: [1, 2, 3] });
 });
+
+test("qdrant deleteByFilter uses filter-based delete with key", async () => {
+  const c = fakeClient();
+  c.count = async (name, opts) => {
+    c.calls.push(["count", name, opts]);
+    return { count: 3 };
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  const n = await st.deleteByFilter({ key: "k1", author: "a" });
+  assert.equal(n, 3);
+  const countCall = c.calls.find(([k]) => k === "count");
+  assert.ok(countCall);
+  assert.deepEqual(countCall[2].filter.must, [
+    { key: "key", match: { value: "k1" } },
+    { key: "author", match: { value: "a" } },
+  ]);
+  const deleteCall = c.calls.find(([k]) => k === "delete");
+  assert.ok(deleteCall);
+  assert.deepEqual(deleteCall[2], {
+    filter: {
+      must: [
+        { key: "key", match: { value: "k1" } },
+        { key: "author", match: { value: "a" } },
+      ],
+    },
+  });
+});
+
+test("qdrant deleteByFilter requires key", async () => {
+  const c = fakeClient();
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  await assert.rejects(() => st.deleteByFilter({ author: "a" }), /key required/);
+});
+
+test("qdrant prune filters by time_last", async () => {
+  const c = fakeClient();
+  c.count = async (name, opts) => {
+    c.calls.push(["count", name, opts]);
+    return { count: 2 };
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  const before = Date.now();
+  const n = await st.prune({ key: "k1", olderThanDays: 30 });
+  assert.equal(n, 2);
+  const deleteCall = c.calls.find(([k]) => k === "delete");
+  assert.ok(deleteCall);
+  const must = deleteCall[2].filter.must;
+  assert.deepEqual(must[0], { key: "key", match: { value: "k1" } });
+  assert.equal(must[1].key, "time_last");
+  assert.ok(must[1].range.lte <= before - 30 * 86400_000);
+});
