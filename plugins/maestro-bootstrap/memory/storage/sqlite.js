@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
+import { fuseRrf } from "./rrf.js";
 
 // Whitelist of scan-able columns (mirrors the `memory` table schema). Default
 // scan returns everything EXCEPT embedding (large); embedding is opt-in.
@@ -211,30 +212,8 @@ export class SqliteStorage {
       }
     }
 
-    // RRF fusion (k=60): merge vector + FTS ranks.
-    const K = 60;
-    const merged = new Map(); // session_id -> { rrf, entry, score }
-    vectorHits.forEach((h, i) => {
-      const cur = merged.get(h.entry.session_id) || { rrf: 0, entry: h.entry, score: h.score };
-      cur.rrf += 1 / (K + i + 1);
-      merged.set(h.entry.session_id, cur);
-    });
-    for (let i = 0; i < ftsHits.length; i++) {
-      const r = ftsHits[i];
-      const cur = merged.get(r.session_id) || { rrf: 0, entry: null, score: 0.5 };
-      cur.rrf += 1 / (K + i + 1);
-      if (!cur.entry) {
-        cur.entry = await this.get(r.session_id);
-        cur.score = 0.5; // FTS-only hit: low display score
-      }
-      merged.set(r.session_id, cur);
-    }
-
-    return [...merged.values()]
-      .filter((h) => h.entry)
-      .sort((a, b) => b.rrf - a.rrf)
-      .slice(0, top_k)
-      .map((h) => ({ entry: h.entry, score: h.score }));
+    // RRF fusion (k=60): merge vector + FTS ranks через общий хелпер.
+    return fuseRrf(vectorHits, ftsHits.length ? [ftsHits] : [], { fetchEntry: (sid) => this.get(sid) });
   }
 
   async delete(session_id) {
