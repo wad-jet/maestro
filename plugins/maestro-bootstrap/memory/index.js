@@ -26,6 +26,7 @@ try {
   const schema = {
     string: () => ({ _type: "string", describe() { return this; }, optional() { return this; } }),
     number: () => ({ _type: "number", describe() { return this; }, optional() { return this; } }),
+    boolean: () => ({ _type: "boolean", describe() { return this; }, optional() { return this; } }),
   };
   const toolFn = (input) => input;
   toolFn.schema = schema;
@@ -365,6 +366,9 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
               top_k: args.limit ?? config.top_k,
               min_score: config.min_score,
               key: effectiveKey,
+              // C-1: pass the text query so the sqlite backend runs the FTS
+              // hybrid path (not just vector-only). Mirrors memory_recall_preview.
+              query: args.query,
             };
             if (args.date_from !== undefined) searchOpts.date_from = args.date_from;
             if (args.date_to !== undefined) searchOpts.date_to = args.date_to;
@@ -456,7 +460,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
           "Импорт записей памяти из JSONL (полная схема v1). Валидация всех записей атомарно (схема + model_id/dim); каждая запись повторно маскируется перед записью. replace: true — очистить активный проект перед импортом.",
         args: {
           path: tool.schema.string().describe("путь к файлу JSONL"),
-          replace: tool.schema.string().optional().describe("true — очистить активный key перед импортом"),
+          replace: tool.schema.boolean().optional().describe("true — очистить активный key перед импортом"),
         },
         execute: async (args, ctx) => {
           try {
@@ -566,7 +570,14 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             const clusters = clusterEntries(usable, threshold);
             const graph = buildGraph(usable, threshold, 500);
 
-            const out = [`Записей: ${entries}`];
+            // I-4: prepend active key / backend / model so `@maestro-memory`
+            // can report them without guessing (command template requires them).
+            const out = [
+              `Key: ${effectiveKey}`,
+              `Бэкенд: ${config.storage.type}`,
+              `Модель: ${embeddings.modelId}`,
+              `Записей: ${entries}`,
+            ];
             out.push("По авторам:");
             for (const [a, n] of [...byAuthor.entries()].sort((x, y) => y[1] - x[1])) out.push(`  ${a}: ${n}`);
             out.push("По датам:");

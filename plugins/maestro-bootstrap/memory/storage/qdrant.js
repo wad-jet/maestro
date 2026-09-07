@@ -121,7 +121,10 @@ export class QdrantStorage {
       with_payload: true,
       with_vector: true,
     });
-    const cols = fields && fields.length ? fields : DEFAULT_SCAN_FIELDS;
+    // Field whitelist (mirrors sqlite/pg): only requested SCAN_FIELDS are read
+    // from payload; embedding is handled separately from the vector.
+    const cols = (fields && fields.length ? fields : DEFAULT_SCAN_FIELDS).filter((f) => SCAN_FIELDS.includes(f));
+    if (!cols.length) throw new Error("scan: no valid fields requested");
     const wantEmbedding = cols.includes("embedding");
     return (res.points ?? []).map((p) => {
       const out = {};

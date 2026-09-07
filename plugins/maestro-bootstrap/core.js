@@ -56,13 +56,17 @@ export function getGitConfig(root, exec = execSync) {
       stdio: ["ignore", "pipe", "ignore"],
     });
     const lines = String(out ?? "").split("\n");
+    // I-3: `git config --list` prints in increasing precedence (system → global
+    // → local), so the LAST occurrence of a key is the highest-precedence value
+    // (what `git config --get` would return). Last-match-wins: overwrite on each
+    // match instead of keeping the first (lowest-precedence) line.
     for (const line of lines) {
       const eq = line.indexOf("=");
       if (eq === -1) continue;
       const key = line.slice(0, eq);
       const value = line.slice(eq + 1).trim();
-      if (key === "user.name" && result.name === null) result.name = value || null;
-      else if (key === "remote.origin.url" && result.remote === null) result.remote = value || null;
+      if (key === "user.name") result.name = value || null;
+      else if (key === "remote.origin.url") result.remote = value || null;
     }
   } catch {
     /* fail-soft: git отсутствует → null */

@@ -82,7 +82,11 @@ export class SqliteStorage {
         );
         const tx = db.transaction((rs) => {
           for (const r of rs) {
-            ftsIns.run(r.session_id, r.key, r.title, r.summary, JSON.parse(r.decisions).join(" "));
+            // Upgrade-path robustness: a legacy row may hold malformed decisions
+            // JSON; fall back to an empty array rather than aborting the backfill.
+            let parsed;
+            try { parsed = JSON.parse(r.decisions); } catch { parsed = []; }
+            ftsIns.run(r.session_id, r.key, r.title, r.summary, parsed.join(" "));
           }
           db.prepare("INSERT OR REPLACE INTO meta (name, value) VALUES ('fts_backfilled', '1')").run();
         });
@@ -182,8 +186,9 @@ export class SqliteStorage {
       return vectorHits;
     }
 
-    // FTS hits (best-first by bm25 rank). time_last/author live only in
-    // `memory`, so date/author filters join back to it (FTS schema unchanged).
+    // FTS hits (best-first by bm25 rank — SMALLER bm25 = better match, so ASC).
+    // time_last/author live only in `memory`, so date/author filters join back
+    // to it (FTS schema unchanged).
     const tokens = query.split(/\s+/).filter(Boolean);
     let ftsHits = [];
     if (tokens.length) {
@@ -198,7 +203,7 @@ export class SqliteStorage {
           `SELECT memory_fts.session_id, bm25(memory_fts) AS rank
            FROM memory_fts JOIN memory ON memory.session_id = memory_fts.session_id
            WHERE ${ftsConds.join(" AND ")}
-           ORDER BY bm25(memory_fts) DESC`,
+           ORDER BY bm25(memory_fts)`,
         ).all(...ftsParams);
         ftsHits = ftsRows.slice(0, top_k);
       } catch (err) {
@@ -284,7 +289,11 @@ export class SqliteStorage {
   async get(session_id) {
     const r = this.db.prepare("SELECT * FROM memory WHERE session_id = ?").get(session_id);
     if (!r) return null;
-    return { ...r, embedding: undefined, decisions: JSON.parse(r.decisions) };
+    // Upgrade-path robustness: guard malformed decisions JSON (used by the FTS
+    // merge line-fetch for FTS-only hits).
+    let parsed;
+    try { parsed = JSON.parse(r.decisions); } catch { parsed = []; }
+    return { ...r, embedding: undefined, decisions: parsed };
   }
 }
 

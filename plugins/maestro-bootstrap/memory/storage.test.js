@@ -281,6 +281,30 @@ test("hybrid search returns FTS match even with low vector similarity", async ()
   }
 });
 
+test("fts ranking: strong keyword match ranks before weak match", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
+  try {
+    await st.init();
+    // The weak match has an orthogonal vector (cosine 0 → filtered out of the
+    // vector path by min_score), so it can only surface via FTS. The strong
+    // match has a high-similarity vector AND a strong keyword match. If FTS
+    // ranking is correct (ASC bm25), the strong match must rank first.
+    await st.upsert([
+      mkEntry("weak", "k1", "Cache invalidation", { summary: "mentions oauth once", embedding: new Float32Array([0, 1, 0]) }),
+      mkEntry("strong", "k1", "OAuth token refresh", { summary: "OAuth OAuth OAuth flow", embedding: new Float32Array([1, 0, 0]) }),
+    ]);
+    const hits = await st.search(new Float32Array([1, 0, 0]), { top_k: 5, min_score: 0.5, key: "k1", query: "OAuth" });
+    assert.ok(hits.length >= 2, "both matches must be surfaced (weak via FTS)");
+    const idx = (sid) => hits.findIndex((h) => h.entry.session_id === sid);
+    assert.ok(idx("strong") !== -1 && idx("weak") !== -1, "both entries present");
+    assert.ok(idx("strong") < idx("weak"), "strong keyword match must rank before weak match");
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("fts stays in sync after delete", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mem-"));
   const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });

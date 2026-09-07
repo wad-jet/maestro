@@ -481,6 +481,7 @@ test("memory_search passes filters and project", async () => {
       "URL project must be canonicalized+hashed before search",
     );
     assert.equal(typeof seen[0].key, "string");
+    assert.equal(seen[0].query, "x", "FTS query must be passed to search (hybrid path)");
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
@@ -947,7 +948,7 @@ test("I-4: import rejects key mismatch atomically; replace not executed", async 
       root: dir,
       deps: { storage, embeddings: mkMockEmbeddings() },
     });
-    const impRes = await hooks.tool.memory_import.execute({ path: exportPath, replace: "true" }, { sessionID: "s1" });
+    const impRes = await hooks.tool.memory_import.execute({ path: exportPath, replace: true }, { sessionID: "s1" });
     assert.match(impRes, /key не совпадает|невалидна/i, "must reject mismatched key");
     assert.equal(deleteCalled, false, "replace must NOT run on key mismatch");
 
@@ -985,7 +986,7 @@ test("I-5: import with replace:true yields exactly the exported set", async () =
     let stats = await storage.stats({ key: "k" });
     assert.equal(stats.entries, 1, "one entry deleted before replace-import");
 
-    const impRes = await hooks.tool.memory_import.execute({ path: exportPath, replace: "true" }, { sessionID: "s1" });
+    const impRes = await hooks.tool.memory_import.execute({ path: exportPath, replace: true }, { sessionID: "s1" });
     assert.match(impRes, /Импортировано 2 запис/);
     stats = await storage.stats({ key: "k" });
     assert.equal(stats.entries, 2, "replace-import must restore exactly the exported set");
@@ -1216,6 +1217,9 @@ test("memory_stats_detail clusters via scan", async () => {
     assert.match(res, /Кластеры/, "must include clusters section");
     assert.match(res, /размер 3/, "3 similar entries must cluster together");
     assert.match(res, /размер 1/, "orthogonal entry must be its own cluster");
+    assert.match(res, /Key:/, "must include active key");
+    assert.match(res, /Бэкенд: sqlite/, "must include backend type");
+    assert.match(res, /Модель: m/, "must include embedding model");
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
@@ -1379,6 +1383,24 @@ test("git-config dedup: distinct roots get separate exec; fail-soft on git absen
   } finally {
     rmSync(dirA, { recursive: true, force: true });
     rmSync(dirB, { recursive: true, force: true });
+  }
+});
+
+test("git-config precedence: last occurrence wins (system → global → local)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-git-prec-"));
+  try {
+    // `git config --list` prints in increasing precedence (system → global →
+    // local), so the LAST user.name/remote.origin.url line is the effective one.
+    const spyExec = () =>
+      "user.name=system-user\n" +
+      "remote.origin.url=https://github.com/system/repo.git\n" +
+      "user.name=local-user\n" +
+      "remote.origin.url=https://github.com/local/repo.git\n";
+    const cfg = getGitConfig(dir, spyExec);
+    assert.equal(cfg.name, "local-user", "last user.name (local scope) must win");
+    assert.equal(cfg.remote, "https://github.com/local/repo.git", "last remote.origin.url must win");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
   }
 });
 
