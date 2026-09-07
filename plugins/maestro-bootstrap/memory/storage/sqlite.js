@@ -1,14 +1,39 @@
-import Database from "better-sqlite3";
+import { join } from "node:path";
+import { pathToFileURL } from "node:url";
+import { createRequire } from "node:module";
+
+/**
+ * Lazy-load better-sqlite3, resolving from `moduleDir/node_modules`
+ * (self-provisioned module) with a fallback to the bare specifier (repo
+ * node_modules — tests / dev). Плагин живёт в кэше без node_modules, поэтому
+ * статический импорт не резолвится; зависимость ставится в module_dir.
+ * ESM не поддерживает directory-import, поэтому entry резолвится через
+ * createRequire (уважает package.json main/exports) и импортируется по файлу.
+ */
+async function loadBetterSqlite3(moduleDir) {
+  if (moduleDir) {
+    try {
+      const require = createRequire(join(moduleDir, "package.json"));
+      const resolved = require.resolve("better-sqlite3");
+      return (await import(pathToFileURL(resolved).href)).default;
+    } catch {
+      /* fall through to bare import */
+    }
+  }
+  return (await import("better-sqlite3")).default;
+}
 
 export class SqliteStorage {
-  constructor({ dbPath, modelId, dim }) {
+  constructor({ dbPath, modelId, dim, moduleDir }) {
     this.dbPath = dbPath;
     this.modelId = modelId;
     this.dim = dim;
+    this.moduleDir = moduleDir;
     this.db = null;
   }
 
   async init() {
+    const Database = await loadBetterSqlite3(this.moduleDir);
     let db = new Database(this.dbPath);
     try {
       db.pragma("journal_mode = WAL");

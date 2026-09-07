@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createStorage } from "./storage.js";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -100,6 +100,34 @@ test("sqlite get returns entry or null", async () => {
     assert.deepStrictEqual(found.decisions, []);
     const notFound = await st.get("nonexistent");
     assert.equal(notFound, null);
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("sqlite lazy-loads better-sqlite3 from moduleDir/node_modules", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  // Stub better-sqlite3 in moduleDir/node_modules — init must resolve from there.
+  const nm = join(dir, "node_modules", "better-sqlite3");
+  mkdirSync(nm, { recursive: true });
+  writeFileSync(join(nm, "package.json"), JSON.stringify({ name: "better-sqlite3", main: "index.js" }));
+  writeFileSync(
+    join(nm, "index.js"),
+    "module.exports = function StubDatabase(){ throw new Error('stub-better-sqlite3-loaded'); };",
+  );
+  const st = createStorage({
+    type: "sqlite",
+    options: { dbPath: join(dir, "memory.db"), moduleDir: dir },
+    modelId: "m",
+    dim: 3,
+  });
+  try {
+    await assert.rejects(
+      () => st.init(),
+      /stub-better-sqlite3-loaded/,
+      "must load better-sqlite3 from moduleDir/node_modules",
+    );
   } finally {
     await st.dispose();
     rmSync(dir, { recursive: true, force: true });

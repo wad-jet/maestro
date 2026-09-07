@@ -1,9 +1,12 @@
 import { execSync } from "node:child_process";
 import os from "node:os";
 import { join, dirname } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import { createRequire } from "node:module";
 import { mkdirSync } from "node:fs";
-import { makeBoundedMap } from "../core.js";
+import { makeBoundedMap, readPluginVersion } from "../core.js";
 import { loadMemoryConfig, resolveEffectiveKey, resolveIdentity, sanitizeDirName } from "./config.js";
+import { ensureModule } from "./provision.js";
 import { createStorage } from "./storage.js";
 import { Embedder } from "./embeddings.js";
 import { Indexer } from "./indexer.js";
@@ -46,6 +49,28 @@ function gitConfig(root, key) {
   } catch {
     return null;
   }
+}
+
+/**
+ * Lazy-import a heavy dependency, resolving it from `moduleDir/node_modules`
+ * (self-provisioned module) with a fallback to the bare specifier (repo
+ * node_modules — tests / dev). Плагин живёт в кэше без node_modules, поэтому
+ * статические импорты better-sqlite3/@qdrant/pg не резолвятся; зависимости
+ * ставятся пользователем в module_dir (`npm install`). ESM не поддерживает
+ * directory-import, поэтому entry резолвится через createRequire (уважает
+ * package.json main/exports) и импортируется по файлу.
+ */
+async function loadFromModuleDir(moduleDir, pkg) {
+  if (moduleDir) {
+    try {
+      const require = createRequire(join(moduleDir, "package.json"));
+      const resolved = require.resolve(pkg);
+      return await import(pathToFileURL(resolved).href);
+    } catch {
+      /* fall through to bare import */
+    }
+  }
+  return await import(pkg);
 }
 
 /**
@@ -114,13 +139,23 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     const dbPath = join(memoryDataDir, sanitizeDirName(effectiveKey), "memory.db");
     const statePath = join(memoryDataDir, "state.json");
 
+    // Self-provisioning: копируем исходники модуля в module_dir и пишем
+    // package.json (single-writer). Fail-soft: если не удалось — продолжаем
+    // (модуль может уже быть на месте; ошибки init обработает storage).
+    const srcDir = fileURLToPath(new URL(".", import.meta.url));
+    const version = readPluginVersion();
+    if (version) {
+      const provisioned = ensureModule({ moduleDir, srcDir, version });
+      if (!provisioned) log?.warn?.("memory: self-provisioning failed");
+    }
+
     // I4: конструируем клиенты централизованных бэкендов из конфига.
     let storageOptions = { ...(config.storage[config.storage.type] ?? {}) };
     if (config.storage.type === "qdrant") {
       storageOptions.collection = storageOptions.collection ?? "maestro_memory";
       let QdrantClient;
       try {
-        ({ QdrantClient } = await import("@qdrant/js-client-rest"));
+        ({ QdrantClient } = await loadFromModuleDir(moduleDir, "@qdrant/js-client-rest"));
       } catch {
         log?.error?.("memory: qdrant client not installed — run npm install in " + moduleDir);
         return {};
@@ -133,7 +168,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       storageOptions.table = storageOptions.table ?? "maestro_memory";
       let pg;
       try {
-        ({ default: pg } = await import("pg"));
+        ({ default: pg } = await loadFromModuleDir(moduleDir, "pg"));
       } catch {
         log?.error?.("memory: pg client not installed — run npm install in " + moduleDir);
         return {};
@@ -143,6 +178,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       });
     } else {
       storageOptions.dbPath = dbPath;
+      storageOptions.moduleDir = moduleDir;
     }
 
     const storage = deps.storage ?? createStorage({

@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registerMemoryHooks } from "./index.js";
@@ -109,6 +109,28 @@ test("messages.transform stays undefined", async () => {
   try {
     const hooks = await registerMemoryHooks({ client: mkClient(), config: mkConfig(dir), log: silentLog, root: dir });
     assert.equal(hooks["experimental.chat.messages.transform"], undefined);
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── self-provisioning ──────────────────────────────────────────────────
+
+test("self-provisioning creates module_dir with package.json", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-hooks-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const hooks = await registerMemoryHooks({ client: mkClient(), config: mkConfig(dir), log: silentLog, root: dir });
+    const moduleDir = join(dir, "memory", "module");
+    assert.ok(existsSync(join(moduleDir, "package.json")), "module_dir package.json must be created");
+    const pkg = JSON.parse(readFileSync(join(moduleDir, "package.json"), "utf8"));
+    assert.equal(pkg.name, "maestro-memory");
+    assert.equal(pkg.type, "module");
+    assert.match(pkg.version, /^\d+\.\d+\.\d+$/);
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
