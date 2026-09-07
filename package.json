@@ -17,7 +17,6 @@
     "@huggingface/transformers": "^3.0.0",
     "@qdrant/js-client-rest": "^1.9.0",
     "better-sqlite3": "^11.5.0",
-    "pg": "^8.13.0",
-    "sqlite-vec": "^0.1.6"
+    "pg": "^8.13.0"
   }
 }

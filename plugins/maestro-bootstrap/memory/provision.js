@@ -11,7 +11,6 @@ import { join, basename } from "node:path";
 
 const DEPS = {
   "better-sqlite3": "^11.5.0",
-  "sqlite-vec": "^0.1.6",
   "@qdrant/js-client-rest": "^1.19.0",
   "pg": "^8.13.0",
   "@huggingface/transformers": "^3.0.0",

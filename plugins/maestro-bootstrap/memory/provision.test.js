@@ -61,7 +61,6 @@ test("ensureModule creates dir, writes package.json, copies sources", () => {
   assert.equal(pkg.private, true);
   assert.ok(pkg.dependencies);
   assert.equal(pkg.dependencies["better-sqlite3"], "^11.5.0");
-  assert.equal(pkg.dependencies["sqlite-vec"], "^0.1.6");
   assert.equal(pkg.dependencies["@qdrant/js-client-rest"], "^1.19.0");
   assert.equal(pkg.dependencies["pg"], "^8.13.0");
   assert.equal(pkg.dependencies["@huggingface/transformers"], "^3.0.0");
@@ -129,6 +128,15 @@ test("ensureModule returns false on failure", () => {
   const ok = ensureModule({ moduleDir: fileAsDir, srcDir: src, version: "1.0.0" });
   assert.equal(ok, false);
   rmSync(dir, { recursive: true, force: true });
+});
+
+test("provision manifest does not include sqlite-vec", () => {
+  const { src, mod } = mkDirs();
+  writeFileSync(join(src, "index.js"), "export const x=1;");
+  ensureModule({ moduleDir: mod, srcDir: src, version: "1.0.0" });
+  const pkg = JSON.parse(readFileSync(join(mod, "package.json"), "utf8"));
+  assert.equal(pkg.dependencies["sqlite-vec"], undefined);
+  cleanup({ src, mod });
 });
 
 test("ensureModule excludes node_modules from src when copying", () => {
