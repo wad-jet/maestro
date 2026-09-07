@@ -65,6 +65,30 @@ description: Use when the user asks for help configuring maestro, organizing pro
     "patterns": [],
     "extra_fields": [],
     "extra_uri_schemes": []
+  },
+  "memory": {
+    "enabled": true,
+    "auto_recall": true,
+    "embedding_model": "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
+    "summarizer_model": null,
+    "identity": null,
+    "identity_env": null,
+    "namespace": null,
+    "module_dir": null,
+    "idle_debounce_min": 10,
+    "min_new_messages": 3,
+    "backfill_window_days": 30,
+    "backfill_max_per_start": 5,
+    "retry_interval_min": 60,
+    "top_k": 3,
+    "min_score": 0.35,
+    "summarize_timeout_ms": 120000,
+    "storage": {
+      "type": "sqlite",
+      "qdrant": { "url": "https://qdrant.internal:6333", "api_key_env": "MAESTRO_MEMORY_QDRANT_KEY", "collection": "maestro_memory" },
+      "pgvector": { "connection_string_env": "MAESTRO_MEMORY_PG_DSN", "table": "maestro_memory" },
+      "centralized_confidential": "forbid"
+    }
   }
 }
 ```
@@ -96,6 +120,59 @@ description: Use when the user asks for help configuring maestro, organizing pro
 - **`access_policy.allow`:** из §3 (стек) + §5 (домены): каталоги исходников + расширения языков.
 - **`access_policy.deny`:** секреты (`*.env`, `*.env.*`, `*.{pem,key,cert,secret}`).
 - **`sanitizer_whitelist`:** по §12; `extra_uri_schemes` из §3.
+
+### Секция `memory` (опциональный memory layer)
+
+**Опциональный модуль** плагина (векторная память сессий). НЕ часть стандартной
+установки; включается только по явному запросу HITL (или по маркеру
+`enabled.flag` от `maestro-install.sh`). **Default:** секции нет / `enabled: false`
+→ память полностью off (хуки не регистрируются, зависимости не загружаются,
+LLM-вызовов нет). Канон JSON — inline выше (поле `memory`).
+
+Семантика ключей (полный справочник — `manual_docs/reference/memory.md`):
+
+- **`enabled`** — единственный выключатель. `true` → плагин при старте
+  self-provisions `module_dir` (создаёт каталог, пишет `package.json`
+  single-writer, копирует исходники); пользователь выполняет `npm install` в
+  `module_dir` и перезапускает opencode.
+- **`auto_recall`** — авто-вспоминание (первое сообщение top-level primary
+  сессии → блок `## Контекст из памяти maestro` в system prompt). `false` —
+  только ручной `memory_search`.
+- **`embedding_model`** — локальная модель эмбеддингов (transformers.js, dim 384,
+  RU+EN, q8 ~120 МБ, кэш). Смена → переиндексация.
+- **`summarizer_model`** — модель фонового саммаризатора; `null` → модель
+  саммаризируемой сессии.
+- **`identity` / `identity_env`** — подпись записей (`author`), **не
+  access-control**. Источник: `identity_env` (env-переменная, per-machine) → git
+  `user.name` → OS username. `identity` в `maestro.json` — только явный override
+  (сервисный аккаунт). Не класть per-user значения в коммитимый `maestro.json`.
+- **`namespace`** — переопределяет ключ памяти `key` (monorepo / связанные
+  репозитории). Смена namespace = потеря доступа к старым записям.
+- **`module_dir`** — каталог кода модуля; `null` → `<data-dir>/maestro/memory/module`.
+- **`storage.type`** — `sqlite` (default, локальный) | `qdrant` | `pgvector`
+  (централизованные). Централизованные требуют **резолвнутую identity** (иначе
+  память off + лог) и `url`+`api_key_env` (qdrant) / `connection_string_env`
+  (pgvector). API-ключ — только через ссылку на env, никогда plaintext.
+- **`storage.centralized_confidential`** — `forbid` (default): проект с
+  `confidential.paths` пишет память только в локальный sqlite (failover +
+  warning); `allow` — осознанный HITL-выбор.
+
+Правила вывода (для `/maestro-new` и консультаций):
+
+- Секция `memory` добавляется в `maestro.json` **только** если: (а) пользователь
+  явно запросил память, или (б) существует маркер
+  `<data-dir>/maestro/memory/enabled.flag` (поставлен `maestro-install.sh`).
+  Без этого — секцию НЕ добавлять (никакого silent opt-in).
+- При добавлении — минимальный канон `{ "enabled": true }` (все остальные ключи
+  — дефолты); расширять только по запросу HITL (бэкенд, namespace, identity_env,
+  модели).
+- `centralized_confidential` — всегда `forbid`, если проект имеет
+  `confidential.paths`; `allow` — только по явному HITL-подтверждению (осознанный
+  риск).
+- `identity_env` — имя env-переменной (напр. `MAESTRO_MEMORY_IDENTITY`), не
+  значение; `identity` — только для сервисных аккаунтов.
+- После правки `memory` — **OP-1** (перезапуск opencode) + напоминание про
+  `npm install` в `module_dir` при первом включении.
 
 ## Канон нативных permissions OpenCode (R6)
 

@@ -140,6 +140,36 @@ pipeline maestro: есть `docs/project-context.md` (источник конт�
 `sanitizer_whitelist` из §3/§12. Идемпотентность: при существовании `maestro.json` — diff по
 секциям; merge сохраняет пользовательские правки; если файла нет — создаётся целиком.
 
+### Секция `memory` (опциональный memory layer)
+
+Память — **опциональный модуль** плагина; секция `memory` в `maestro.json`
+добавляется **только** при выполнении одного из условий:
+
+1. **Маркер `enabled.flag`** — проверить наличие
+   `<data-dir>/maestro/memory/enabled.flag` (ставится опциональным шагом
+   `maestro-install.sh` «Подключить memory layer? (y/N)»). `<data-dir>`:
+   `$XDG_DATA_HOME` → macOS `~/Library/Application Support` → `~/.local/share`;
+   далее `/maestro/memory/enabled.flag`. Маркер — персистентный machine-level
+   default: каждый последующий `/maestro-new` в любом проекте машины добавляет
+   секцию `memory`; отключается удалением файла.
+2. **Явный запрос HITL** — пользователь просит включить память.
+
+Если ни одно условие не выполнено — секцию `memory` **не добавлять** (никакого
+silent opt-in).
+
+При добавлении — HITL-опрос (по канону `maestro-assistant`, секция `memory`):
+
+- **Бэкенд:** `sqlite` (default, локальный) / `qdrant` / `pgvector`
+  (централизованные — требуют identity и env-ссылки на ключ/DSN).
+- **Командная память:** `identity_env` (имя env-переменной) и `namespace`
+  (monorepo / связанные репозитории) — по запросу.
+- **`centralized_confidential`:** всегда `forbid`, если проект имеет
+  `confidential.paths`; `allow` — только по явному HITL-подтверждению.
+
+Минимальный канон при добавлении: `{ "enabled": true }` (остальные ключи —
+дефолты). После записи — напомнить про `npm install` в `module_dir`
+(`<data-dir>/maestro/memory/module/`) и перезапуск opencode (OP-1).
+
 ### Плагин + модели агентов (без корневого `opencode.json`)
 
 Корневой `opencode.json` **не создаётся**. Плагин и модели живут в merge-конфиге

@@ -7,6 +7,33 @@
 > Хронология составлена по истории authoring-репо `maestro-agent`. Даты
 > приблизительные (по коммитам).
 
+## [2026-09-06]
+
+### Добавлено
+
+- **Memory layer (опциональная векторная память сессий).** Плагин
+  `maestro-bootstrap` получил опциональный модуль `plugins/maestro-bootstrap/memory/`:
+  авто-саммаризация завершённых сессий (фоновая сессия `[maestro-memory]`,
+  удаляется после ответа), семантический поиск через инструмент `memory_search`
+  и авто-вспоминание релевантного контекста в новых сессиях (блок
+  `## Контекст из памяти maestro` в system prompt). Бэкенды: локальный sqlite
+  (default, per-key `<data-dir>/maestro/memory/<hash>/memory.db`), централизованные
+  qdrant/pgvector. **Default off:** нет секции `memory` / `enabled: false` →
+  память полностью выключена (хуки не регистрируются, зависимости не
+  загружаются, LLM-вызовов нет; zero-dep default плагина сохранён). Включается
+  секцией `memory` в `maestro.json`; `maestro-install.sh` получил опциональный
+  шаг (маркер `enabled.flag` + preflight npm/bun). Self-provisioning кода модуля
+  (`module_dir`, single-writer `package.json`, `"type": "module"`), `node_modules`
+  и данные переживают `maestro-update.sh`. Безопасность: маскирование
+  `sanitize()` до и после LLM, confidential-пути не индексируются,
+  `centralized_confidential: forbid` по умолчанию (failover на sqlite), identity
+  ≠ access-control, framing против prompt-injection. Спека:
+  `docs/superpowers/specs/2026-09-06-maestro-memory-design.md`. Документация:
+  `manual_docs/reference/memory.md`, `manual_docs/how-to/enable-memory.md`,
+  обновлены `config.md`, `agents-and-trust.md`, `model-selection.md`,
+  `SECURITY.md` (§5a), канон `maestro-assistant` (секция `memory`),
+  `maestro-new` (чтение маркера).
+
 ## [2026-09-05]
 
 ### Изменено

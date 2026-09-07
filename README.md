@@ -16,6 +16,7 @@
 | **Команда `/maestro-init`** | Точка входа в пайплайн — загружает скилл и стартует pipeline |
 | **Субагенты** | `custodian`, `haiku`, `sonnet`, `opus`, `fable`, `code-reviewer`, `sanitizer` |
 | **Плагин** | `maestro-bootstrap` — санитайзинг промптов, file access control, audit-логи |
+| **Память (опционально)** | Memory layer плагина — векторная память сессий (`memory_search`, авто-вспоминание); включается секцией `memory` в `maestro.json` |
 | **Команды** | `/maestro-init`, `/maestro-new`, `/maestro-design`, `/regression`, `/test-agents` |
 
 ## Maestro vs superpowers напрямую
@@ -201,6 +202,17 @@ Trusted по роли: `custodian` + `sanitizer` (обоим доступен `d
 → маршрут `0→6→7(b)→11→13→16→18`. Сжатая запись опускает шаги 14/15/15a для
 краткости — **шаг 14 (обновление пользовательской документации) обязателен**
 для всех категорий (для простых пропускаются только шаги 8-10).
+
+## Память maestro (опциональный модуль)
+
+Плагин `maestro-bootstrap` содержит опциональный **memory layer** — локальную
+векторную память сессий: авто-саммаризация завершённых сессий, семантический
+поиск (`memory_search`) и авто-вспоминание релевантного контекста в новых
+сессиях. **Не входит в стандартную установку** (нулевой footprint по умолчанию);
+включается секцией `memory` в `maestro.json` (`enabled: true`). Бэкенды: локальный
+sqlite (default) или централизованные qdrant/pgvector. Подробнее —
+[Как включить память](manual_docs/how-to/enable-memory.md) и
+[Память maestro (reference)](manual_docs/reference/memory.md).
 
 ## Docs
 

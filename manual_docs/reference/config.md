@@ -364,6 +364,79 @@ deny. Trust не наследуется вложенными субагента�
 "extra_uri_schemes": ["kafka", "custom-proto", "zookeeper"]
 ```
 
+### Секция `memory` (опциональный memory layer)
+
+Векторная память сессий плагина `maestro-bootstrap`: авто-саммаризация,
+`memory_search`, авто-вспоминание. **Опциональный модуль** — не входит в
+стандартную установку; включается явно. **Default:** секции нет **или**
+`enabled: false` → память полностью выключена (хуки не регистрируются,
+зависимости не загружаются, LLM-вызовов нет).
+
+```json
+{
+  "memory": {
+    "enabled": true,
+    "auto_recall": true,
+    "embedding_model": "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
+    "summarizer_model": null,
+    "identity": null,
+    "identity_env": null,
+    "namespace": null,
+    "module_dir": null,
+    "idle_debounce_min": 10,
+    "min_new_messages": 3,
+    "backfill_window_days": 30,
+    "backfill_max_per_start": 5,
+    "retry_interval_min": 60,
+    "top_k": 3,
+    "min_score": 0.35,
+    "summarize_timeout_ms": 120000,
+    "storage": {
+      "type": "sqlite",
+      "qdrant": { "url": "https://qdrant.internal:6333", "api_key_env": "MAESTRO_MEMORY_QDRANT_KEY", "collection": "maestro_memory" },
+      "pgvector": { "connection_string_env": "MAESTRO_MEMORY_PG_DSN", "table": "maestro_memory" },
+      "centralized_confidential": "forbid"
+    }
+  }
+}
+```
+
+| Ключ | Тип | Дефолт | Описание |
+|---|---|---|---|
+| `enabled` | `boolean` | `false` | Включает память. Нет секции / `false` → полностью off |
+| `auto_recall` | `boolean` | `true` | Авто-вспоминание: первое сообщение top-level primary сессии → блок контекста в system prompt |
+| `embedding_model` | `string` | `Xenova/paraphrase-multilingual-MiniLM-L12-v2` | Модель эмбеддингов (transformers.js, dim 384, RU+EN, q8 ~120 МБ, кэш локально) |
+| `summarizer_model` | `string` \| `null` | `null` | Модель фонового саммаризатора; `null` → модель саммаризируемой сессии |
+| `identity` | `string` \| `null` | `null` | Явный override identity (напр. сервисный аккаунт) |
+| `identity_env` | `string` \| `null` | `null` | Имя env-переменной с identity (per-machine, не в общем `maestro.json`) |
+| `namespace` | `string` \| `null` | `null` | Переопределяет ключ памяти `key` (monorepo / связанные репозитории) |
+| `module_dir` | `string` \| `null` | `null` | Каталог кода модуля; `null` → `<data-dir>/maestro/memory/module` |
+| `idle_debounce_min` | `number` | `10` | Debounce индексации после `session.idle` (минуты) |
+| `min_new_messages` | `number` | `3` | Мин. новых сообщений с последнего саммари для повторной индексации |
+| `backfill_window_days` | `number` | `30` | Окно backfill при первом включении |
+| `backfill_max_per_start` | `number` | `5` | Cap саммаризаций за один старт плагина |
+| `retry_interval_min` | `number` | `60` | Интервал ретрая упавшей сессии (минуты) |
+| `top_k` | `number` | `3` | Число результатов поиска / авто-вспоминания |
+| `min_score` | `number` | `0.35` | Порог косинусной близости |
+| `summarize_timeout_ms` | `number` | `120000` | Таймаут цепочки «саммаризация → эмбеддинг → запись» |
+| `storage.type` | `string` | `sqlite` | Бэкенд: `sqlite` \| `qdrant` \| `pgvector` |
+| `storage.qdrant.url` | `string` | — | URL Qdrant (обязателен для `type: qdrant`) |
+| `storage.qdrant.api_key_env` | `string` | — | Имя env-переменной с API-ключом (никогда plaintext) |
+| `storage.qdrant.collection` | `string` | `maestro_memory` | Коллекция Qdrant |
+| `storage.pgvector.connection_string_env` | `string` | — | Имя env-переменной с DSN Postgres (обязателен для `type: pgvector`) |
+| `storage.pgvector.table` | `string` | `maestro_memory` | Таблица pgvector |
+| `storage.centralized_confidential` | `string` | `forbid` | `forbid` — проект с `confidential.paths` не пишет в централизованный бэкенд (failover на sqlite + warning); `allow` — разрешить |
+
+**Валидация:** некорректный `storage.type` / отсутствие URL / нерезолвнутая
+identity для централизованного бэкенда → память off + лог (`disabled_reason`),
+сессии работают (fail-soft). Централизованные бэкенды требуют identity
+(`identity` → `identity_env` → git `user.name`).
+
+> Полный справочник (бэкенды, изоляция key/namespace/identity, `memory_search`,
+> индексация, расположение данных, ESM-контракт) — в
+> [Память maestro (reference)](memory.md). Включение — в
+> [Как включить память](../how-to/enable-memory.md).
+
 ## 📄 opencode.json (`.opencode/opencode.json` или global)
 
 Корневой `opencode.json` в проекте **не используется**. Плагин и модели агентов
