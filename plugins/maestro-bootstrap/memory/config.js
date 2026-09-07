@@ -16,6 +16,7 @@ export const DEFAULTS = {
   retry_interval_min: 60,
   top_k: 3,
   min_score: 0.35,
+  summarize_timeout_ms: 120000,
   storage: { type: "sqlite", centralized_confidential: "forbid" },
 };
 

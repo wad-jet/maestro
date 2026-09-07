@@ -1,3 +1,10 @@
+import { createHash } from "node:crypto";
+
+function uuidFrom(s) {
+  const h = createHash("sha256").update(s).digest("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-a${h.slice(17, 20)}-${h.slice(20, 32)}`;
+}
+
 export class QdrantStorage {
   constructor({ client, collection, modelId, dim }) {
     this.client = client;
@@ -19,7 +26,8 @@ export class QdrantStorage {
 
   async upsert(entries) {
     const points = entries.map((e, i) => ({
-      id: `${e.session_id}_${i}`,
+      // I-3: deterministic UUID v5-like from sha256 (must be u64 or UUID, not string)
+      id: uuidFrom(`${e.session_id}_${e.version}`),
       vector: Array.from(e.embedding),
       payload: {
         session_id: e.session_id,
@@ -55,19 +63,13 @@ export class QdrantStorage {
     }));
   }
 
+  // C-2: direct filter delete (no query-based point lookup)
   async delete(session_id, { key } = {}) {
-    const q = { match: { key: "session_id", value: session_id } };
-    const filter = key ? { must: [{ key: "key", match: { value: key } }] } : undefined;
-    const existing = await this.client.query(this.collection, {
-      query: q,
-      limit: 100,
-      filter,
-      with_payload: false,
+    await this.client.delete(this.collection, {
+      filter: {
+        must: [{ key: "session_id", match: { value: session_id } }, ...(key ? [{ key: "key", match: { value: key } }] : [])],
+      },
     });
-    const ids = (existing.points ?? []).map((r) => r.id);
-    if (ids.length) {
-      await this.client.delete(this.collection, { points: ids });
-    }
   }
 
   async stats() {
@@ -75,14 +77,15 @@ export class QdrantStorage {
     return { entries: count };
   }
 
+  // C-2: filter-only query for get()
   async get(session_id) {
     const res = await this.client.query(this.collection, {
-      query: { match: { key: "session_id", value: session_id } },
+      filter: { must: [{ key: "session_id", match: { value: session_id } }] },
       limit: 1,
       with_payload: true,
     });
-    const point = (res.points ?? [])[0];
-    if (!point) return null;
-    return { ...point.payload, embedding: undefined, decisions: JSON.parse(point.payload.decisions) };
+    const p = res.points?.[0];
+    if (!p) return null;
+    return { ...p.payload, embedding: undefined, decisions: JSON.parse(p.payload.decisions) };
   }
 }

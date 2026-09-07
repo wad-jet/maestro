@@ -125,19 +125,19 @@ test("qdrant get returns entry or null", async () => {
     collectionExists: async () => ({ exists: false }),
     createCollection: async () => {},
     upsert: async (_, { points }) => { storedPayload = points[0]?.payload ?? null; },
-    query: async (col, { query, limit, with_payload }) => {
-      // For get: query is a filter { match: { key, value } }
-      if (query?.match?.key === "session_id") {
-        const sid = query.match.value;
+    query: async (col, { filter, limit, with_payload }) => {
+      // get: filter-only query { must: [{ key, match: { value } }] }
+      if (filter?.must?.[0]?.key === "session_id") {
+        const sid = filter.must[0].match.value;
         if (sid === "s1" && storedPayload) {
           // Return raw payload (decisions is still a JSON string — get will parse it)
-          const payload = with_payload ? storedPayload : null;
-          return { points: payload ? [{ id: "s1_0", payload }] : [] };
+          return { points: [{ id: "uuid", payload: storedPayload }] };
         }
         return { points: [] };
       }
       return { points: [] };
     },
+    delete: async () => {},
     count: async () => ({ count: 0 }),
   };
   const st = createStorage({ type: "qdrant", options: { client: c, collection: "c" }, modelId: "m", dim: 3 });
@@ -156,4 +156,37 @@ test("pgvector factory rejects missing pool", async () => {
   const st = createStorage({ type: "pgvector", options: { table: "m" }, modelId: "m1", dim: 3 });
   assert.equal(st.constructor.name, "PgVectorStorage");
   await assert.rejects(() => st.init(), /pgvector/);
+});
+
+test("pgvector get returns entry or null", async () => {
+  const rows = [];
+  const pool = {
+    query: async (sql, params) => {
+      if (sql.includes("SELECT count")) return { rows: [{ count: 0 }] };
+      if (sql.includes("CREATE")) return { rows: [] };
+      if (sql.includes("INSERT")) return { rows: [] };
+      if (sql.includes("DELETE")) return { rows: [] };
+      if (sql.includes("SELECT * FROM m WHERE session_id")) {
+        const sid = params[0];
+        const found = rows.find((r) => r.session_id === sid);
+        return { rows: found ? [found] : [] };
+      }
+      return { rows: [] };
+    },
+  };
+  const st = createStorage({ type: "pgvector", options: { pool, table: "m" }, modelId: "m", dim: 3 });
+  await st.init();
+  // Manually insert a row (simulate upsert)
+  rows.push({
+    session_id: "s1", key: "k1", origin_project_hash: "k1", title: "t1",
+    summary: "s", decisions: JSON.stringify([]),
+    model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1,
+  });
+  const found = await st.get("s1");
+  assert.ok(found);
+  assert.equal(found.session_id, "s1");
+  assert.equal(found.title, "t1");
+  assert.deepStrictEqual(found.decisions, []);
+  const notFound = await st.get("nonexistent");
+  assert.equal(notFound, null);
 });

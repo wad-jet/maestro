@@ -178,10 +178,10 @@ test("indexer onSessionIdle guards null sessionID", async () => {
 
 // ── C1 — model from assistant message ────────────────────────────────
 
-test("indexer extracts model from last assistant message (C1)", async () => {
+test("indexer extracts model from last assistant message (C-1)", async () => {
   const client = mkClient([
     { info: { role: "user" }, parts: [{ type: "text", text: "hello" }] },
-    { info: { role: "assistant", provider: "google", model: "gemini-2.0" }, parts: [{ type: "text", text: "hi" }] },
+    { info: { role: "assistant", providerID: "google", modelID: "gemini-2.0" }, parts: [{ type: "text", text: "hi" }] },
   ]);
   const storage = mkStorage(client);
   let capturedModel = null;
@@ -458,6 +458,40 @@ test("indexer onStartup caps backfill at backfill_max_per_start (I5)", async () 
   await idx.onStartup();
   await new Promise((r) => setTimeout(r, 100));
   assert.equal(client.upserts.length, 3, "only 3 sessions backfilled (cap)");
+  idx.dispose();
+});
+
+// ── Queue-after-error ───────────────────────────────────────────────
+
+test("indexer queued session runs after first _run throws (queue-after-error)", async () => {
+  let summaryCalls = [];
+  const summarize = async ({ sessionID }) => {
+    summaryCalls.push(sessionID);
+    if (sessionID === "s1") {
+      throw new Error("simulated summarize failure");
+    }
+    return { title: "t", summary: "s", decisions: [] };
+  };
+  const idx = new Indexer({
+    client: mkClient(), config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(null), state: mkState(), summarize,
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+  });
+
+  // First call: acquires lock, throws in summarize (sync) → caught → finally → processes queue → s2 runs
+  const p1 = idx._run("s1");
+  // Second call: queues behind s1 (s1 has running=true)
+  idx._run("s2");
+
+  // s1 throws sync, finally runs sync, processes queue sync → s2 runs sync
+  // But p2 (queued call) returns immediately (just queued). We need to wait for s2 to complete.
+  // Since s2 runs from the recursive _run in finally, it's already scheduled.
+  await p1; // waits for s1's error
+  await new Promise((r) => setImmediate(r)); // yield to let s2 complete from recursive call
+  assert.equal(summaryCalls.length, 2, "s1 failed, s2 ran from queue");
+  assert.equal(summaryCalls[0], "s1");
+  assert.equal(summaryCalls[1], "s2");
   idx.dispose();
 });
 

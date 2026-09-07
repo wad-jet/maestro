@@ -2,15 +2,6 @@ import { maskTranscript, maskEntry } from "./mask.js";
 import { resolveEffectiveKey } from "./config.js";
 import { SESSIONS } from "./summarize.js";
 
-function splitModel(s) {
-  if (!s) return null;
-  if (typeof s === "object") return s;
-  if (typeof s !== "string") return null;
-  const i = s.indexOf("/");
-  if (i === -1) return null;
-  return { providerID: s.slice(0, i), modelID: s.slice(i + 1) };
-}
-
 function withTimeout(p, ms) {
   return Promise.race([
     p,
@@ -56,7 +47,7 @@ export class Indexer {
     try {
       const listResp = await this.client.session.list({});
       const list = (listResp?.data ?? listResp) ?? [];
-      const firstRun = await this.state.getFirstRun();
+      const firstRun = (await this.state.getFirstRun()) ?? Date.now();
       let queued = 0;
       for (const s of list) {
         if (queued >= (this.config.backfill_max_per_start ?? 5)) break;
@@ -117,16 +108,12 @@ export class Indexer {
       const msgResp = await this.client.session.messages({ path: { id: sessionID } });
       const messages = (msgResp?.data ?? msgResp) ?? [];
 
-      // C1: extract model from last assistant message
+      // C-1: extract model from last assistant message — flat fields per SDK types
       let modelRef = null;
       for (let i = messages.length - 1; i >= 0; i--) {
-        const m = messages[i];
-        if (m.info?.provider || m.info?.model) {
-          modelRef = { providerID: m.info.provider ?? null, modelID: m.info.model ?? null };
-          break;
-        }
-        if (m.info?.role === "assistant" && m.info?.provider) {
-          modelRef = { providerID: m.info.provider, modelID: m.info.model ?? null };
+        const info = messages[i]?.info ?? {};
+        if (info.role === "assistant" && info.providerID && info.modelID) {
+          modelRef = { providerID: info.providerID, modelID: info.modelID };
           break;
         }
       }
@@ -151,7 +138,25 @@ export class Indexer {
       // Mask confidential content BEFORE summarize
       const masked = maskTranscript(transcript, { confidentialPatterns: this.confidentialPatterns });
 
-      // C1: pass modelRef to summarize (it may be object from assistant msg)
+      const key = resolveEffectiveKey({ projectHash: this.projectKey.hash, namespace: this.config.namespace ?? null });
+
+      // I1: build entry, mask FIRST, then embed masked content
+      const entry = {
+        session_id: sessionID,
+        key,
+        origin_project_hash: this.projectKey.hash,
+        title: null,
+        summary: null,
+        decisions: null,
+        embedding: null,
+        model_id: this.embeddings.modelId,
+        author: this.author ?? this.config.author ?? "unknown",
+        time_first: sess?.time?.created ?? 0,
+        time_last: sess?.time?.updated ?? 0,
+        version: 0,
+      };
+
+      // Summarize OUTSIDE withTimeout — it can fail with clear errors
       const { title, summary, decisions } = await this.summarize({
         client: this.client,
         sessionID,
@@ -160,34 +165,24 @@ export class Indexer {
         summarizerModel: this.config.summarizer_model ?? null,
       });
 
-      const key = resolveEffectiveKey({ projectHash: this.projectKey.hash, namespace: this.config.namespace ?? null });
+      // I1: update entry with results, then mask
+      entry.title = title;
+      entry.summary = summary;
+      entry.decisions = decisions;
 
-      // I1: build entry, mask FIRST, then embed masked content
-      const entry = {
-        session_id: sessionID,
-        key,
-        origin_project_hash: this.projectKey.hash,
-        title,
-        summary,
-        decisions,
-        embedding: null,
-        model_id: this.embeddings.modelId,
-        author: this.author ?? this.config.author ?? "unknown",
-        time_first: sess?.time?.created ?? 0,
-        time_last: sess?.time?.updated ?? 0,
-        version: 0, // placeholder, set below
-      };
-
+      // G2: re-mask entry before write
       const maskedEntry = maskEntry(entry, { confidentialPatterns: this.confidentialPatterns });
 
-      // I4: wrap summarize+embed+upsert in timeout
+      // Embed AFTER mask + wrap in withTimeout
       const timeoutMs = this.config.summarize_timeout_ms ?? 120_000;
       const work = (async () => {
+        const vec = await this.embeddings.embed(`${maskedEntry.title}\n${maskedEntry.summary}\n${maskedEntry.decisions.join("\n")}`);
+        maskedEntry.embedding = vec;
+
         // G5: version increment via storage.get
         const existing = await this.storage.get(sessionID);
         maskedEntry.version = (existing?.version ?? 0) + 1;
-        const vec = await this.embeddings.embed(`${maskedEntry.title}\n${maskedEntry.summary}\n${maskedEntry.decisions.join("\n")}`);
-        maskedEntry.embedding = vec;
+
         await this.storage.upsert([maskedEntry]);
         await this.state.setSummarized(sessionID);
       })();
