@@ -69,7 +69,7 @@
 | E2 | **S6:** User Review Gate = шаг 10 (не двойное одобрение) | ✅ | **проверка документации/порядка шагов** (структурная, не поведенческий smoke) | |
 | E3 | Доставка в app-репо (S2) | ✅ | custodian/trust/model в целевом приложении | |
 | E4 | superpowers-скиллы не изменены | ✅ | `git status` на `.opencode/skills/` чист | |
-| E5 | Memory layer smoke | ✅ | `memory_index` инициализирован (sqlite backend), `memory_search` tool зарегистрирован, `session.idle` → summary → `memory.db` создан на `.maestro/` | |
+| E5 | Memory layer smoke | ✅ | `- [ ] Memory layer smoke: unit-тесты памяти зелёные (sqlite backend, memory_search tool, session.idle → storage; интеграция registerMemoryHooks).` | |
 
 ---
 

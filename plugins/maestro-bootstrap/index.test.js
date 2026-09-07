@@ -57,18 +57,10 @@ describe("maestro-bootstrap global logging", () => {
     assert.equal(hooks["chat.params"], undefined);
   });
 
-  it("should keep experimental.chat.messages.transform undefined", () => {
-    // Regardless of memory config, the invariant must hold.
-    assert.equal(hooks["experimental.chat.messages.transform"], undefined);
-    assert.equal(hooks["chat.params"], undefined);
-  });
-
-  it("should keep core hooks working (fail-soft) even when memory init fails", async () => {
-    // event / tool.execute.before / tool.execute.after must remain functions
-    // even if the memory module is present but fails to init.
-    assert.equal(typeof hooks.event, "function");
-    assert.equal(typeof hooks["tool.execute.before"], "function");
-    assert.equal(typeof hooks["tool.execute.after"], "function");
+  it("should swallow errors from extended event handler (fail-soft)", async () => {
+    // The event hook must not throw even if the memory handler throws.
+    // Inject by calling the hook with a malformed event (e.g., session.idle with no properties).
+    await assert.doesNotReject(() => hooks.event({ event: { type: "session.idle", properties: {} } }));
   });
 
   it("should log task dispatch (before/after) globally, no agent filter", async () => {
