@@ -81,8 +81,8 @@
 | F2 | deps установлены в `module_dir` | ✅ | в `module_dir` есть `node_modules` с `better-sqlite3` (или `@qdrant/js-client-rest` / `pg`); `npm install` выполнен без ошибок | |
 | F3 | opencode сессия → запрос | ✅ | запущен `bun opencode` в sandbox; пользователь сделал запрос (например, «напомни, о чём мы говорили»); сессия не упала с error memory | |
 | F4 | `memory.db` создан | ✅ | `<data-dir>/maestro/memory/<key-hash>/memory.db` существует; `sqlite3 memory.db ".tables"` показывает `memory` | |
-| F5 | `memory_search` возвращает результат | ✅ | вызов `memory_search` (или через `/maestro-memory search`) возвращает записи (или «Ничего не найдено» — если база пуста); без crash | |
-| F6 | `@maestro-memory` показывает статус | ✅ | вызов `@maestro-memory` (или `@maestro-memory report`) возвращает статус памяти (число записей, кластеры и т.д.); без crash | |
+| F5 | `memory_search` возвращает результат | ✅ | вызов `memory_search` (или через `@maestro-memory`) возвращает записи (или «Ничего не найдено» — если база пуста); без crash | |
+| F6 | `@maestro-memory` показывает статус | ✅ | вызов `@maestro-memory` возвращает статус памяти (число записей, кластеры и т.д.); без crash | |
 | F7 | `memory_forget` триггерит ask-подтверждение | ✅ | вызов `memory_forget` вызывает ask-gate (в TUI появляется запрос подтверждения); permission `ask` запрашивается через merge-config | |
 | F8 | `@maestro-memory-report` генерирует HTML-агрегаты | ✅ | вызов отчёта памяти возвращает агрегированный HTML/текст с кластерами, статистикой, графом; без crash | |
 
