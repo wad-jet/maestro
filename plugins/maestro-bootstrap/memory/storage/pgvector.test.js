@@ -103,6 +103,33 @@ test("pgvector upsert rejects wrong embedding dimension", async () => {
   }]), /embedding length.*does not match/);
 });
 
+test("pgvector search with project uses key IN", async () => {
+  const p = fakePool();
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3 });
+  await st.init();
+  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0.5, key: "k1", project: "other" });
+  const sel = p.calls.find(([sql]) => sql.includes("FROM maestro_memory"));
+  assert.ok(sel);
+  assert.ok(sel[0].includes("key IN ($2, $3)"), `expected key IN ($2, $3), got: ${sel[0]}`);
+  assert.equal(sel[1][1], "k1");
+  assert.equal(sel[1][2], "other");
+});
+
+test("pgvector search filters date/author", async () => {
+  const p = fakePool();
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3 });
+  await st.init();
+  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "k1", date_from: 100, date_to: 500, author: "alice" });
+  const sel = p.calls.find(([sql]) => sql.includes("FROM maestro_memory"));
+  assert.ok(sel);
+  assert.ok(sel[0].includes("time_last >= $3"), sel[0]);
+  assert.ok(sel[0].includes("time_last <= $4"), sel[0]);
+  assert.ok(sel[0].includes("author = $5"), sel[0]);
+  assert.equal(sel[1][2], 100);
+  assert.equal(sel[1][3], 500);
+  assert.equal(sel[1][4], "alice");
+});
+
 test("pgvector deleteByFilter returns count from RETURNING", async () => {
   const p = fakePool();
   p.query = async (sql, params) => {

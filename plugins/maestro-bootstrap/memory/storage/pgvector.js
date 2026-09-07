@@ -1,3 +1,5 @@
+import { resolveSearchKeys } from "../project.js";
+
 export class PgVectorStorage {
   constructor({ pool, table, dim, modelId }) {
     this.pool = pool;
@@ -44,16 +46,32 @@ export class PgVectorStorage {
       );
     }
   }
-  async search(embedding, { top_k = 3, min_score = 0, key }) {
-    if (typeof key !== "string" || !key) throw new Error("search: key required");
+  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project }) {
+    // B2: cross-project opt-in — key IN (current + project key).
+    const keys = resolveSearchKeys({ key, project });
+    const conds = [];
+    const params = [`[${Array.from(embedding)}]`];
+    let i = 2;
+    if (keys.length === 1) {
+      conds.push(`key = $${i++}`);
+      params.push(keys[0]);
+    } else {
+      conds.push(`key IN (${keys.map(() => `$${i++}`).join(", ")})`);
+      params.push(...keys);
+    }
+    if (date_from !== undefined) { conds.push(`time_last >= $${i++}`); params.push(date_from); }
+    if (date_to !== undefined) { conds.push(`time_last <= $${i++}`); params.push(date_to); }
+    if (author !== undefined) { conds.push(`author = $${i++}`); params.push(author); }
+    conds.push(`1 - (embedding <=> $1) >= $${i++}`);
+    params.push(min_score);
     const res = await this.pool.query(
       `SELECT session_id, key, origin_project_hash, title, summary, decisions, model_id, author, time_first, time_last, version,
               1 - (embedding <=> $1) AS score
        FROM ${this.table}
-       WHERE key = $2 AND 1 - (embedding <=> $1) >= $3
+       WHERE ${conds.join(" AND ")}
        ORDER BY embedding <=> $1
-       LIMIT $4`,
-      [`[${Array.from(embedding)}]`, key, min_score, top_k]
+       LIMIT $${i}`,
+      [...params, top_k]
     );
     return res.rows.map((r) => ({ entry: { ...r, embedding: undefined, decisions: JSON.parse(r.decisions) }, score: Number(r.score) }));
   }

@@ -116,6 +116,30 @@ test("qdrant search parses decisions and returns scored results", async () => {
   assert.equal(res[0].entry.embedding, undefined);
 });
 
+test("qdrant search with project uses key-set filter", async () => {
+  const c = fakeClient();
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0.35, key: "k1", project: "other" });
+  const query = c.calls.find(([k]) => k === "query");
+  assert.ok(query);
+  assert.deepEqual(query[2].filter.must[0], { key: "key", match: { any: ["k1", "other"] } });
+});
+
+test("qdrant search filters date/author", async () => {
+  const c = fakeClient();
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "k1", date_from: 100, date_to: 500, author: "alice" });
+  const query = c.calls.find(([k]) => k === "query");
+  assert.ok(query);
+  const must = query[2].filter.must;
+  assert.deepEqual(must[0], { key: "key", match: { value: "k1" } });
+  assert.deepEqual(must[1], { key: "time_last", range: { gte: 100 } });
+  assert.deepEqual(must[2], { key: "time_last", range: { lte: 500 } });
+  assert.deepEqual(must[3], { key: "author", match: { value: "alice" } });
+});
+
 test("qdrant delete uses filter-based delete (no query lookup)", async () => {
   const c = fakeClient();
   const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });

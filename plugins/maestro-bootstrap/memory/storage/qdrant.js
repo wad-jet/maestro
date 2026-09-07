@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { resolveSearchKeys } from "../project.js";
 
 function uuidFrom(s) {
   const h = createHash("sha256").update(s).digest("hex");
@@ -48,15 +49,20 @@ export class QdrantStorage {
     await this.client.upsert(this.collection, { points });
   }
 
-  async search(embedding, { top_k = 3, min_score = 0, key }) {
-    if (typeof key !== "string" || !key) {
-      throw new Error("search: key required");
-    }
+  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project }) {
+    // B2: cross-project opt-in — key-set filter (current + project key).
+    const keys = resolveSearchKeys({ key, project });
+    const must = keys.length === 1
+      ? [{ key: "key", match: { value: keys[0] } }]
+      : [{ key: "key", match: { any: keys } }];
+    if (date_from !== undefined) must.push({ key: "time_last", range: { gte: date_from } });
+    if (date_to !== undefined) must.push({ key: "time_last", range: { lte: date_to } });
+    if (author !== undefined) must.push({ key: "author", match: { value: author } });
     const res = await this.client.query(this.collection, {
       query: { nearest: Array.from(embedding) },
       limit: top_k,
       score_threshold: min_score,
-      filter: { must: [{ key: "key", match: { value: key } }] },
+      filter: { must },
       with_payload: true,
     });
     return (res.points ?? []).map((r) => ({

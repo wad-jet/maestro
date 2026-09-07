@@ -62,6 +62,60 @@ test("search requires key", async () => {
   }
 });
 
+test("search filters by date range", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
+  try {
+    await st.init();
+    await st.upsert([
+      mkEntry("s1", "k1", "t1", { time_last: 100 }),
+      mkEntry("s2", "k1", "t2", { time_last: 1000 }),
+    ]);
+    const hits = await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 5, min_score: 0, key: "k1", date_from: 500 });
+    assert.ok(hits.some((h) => h.entry.session_id === "s2"), "date_from must keep s2");
+    assert.ok(!hits.some((h) => h.entry.session_id === "s1"), "date_from must drop s1");
+    const hits2 = await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 5, min_score: 0, key: "k1", date_to: 500 });
+    assert.ok(hits2.some((h) => h.entry.session_id === "s1"), "date_to must keep s1");
+    assert.ok(!hits2.some((h) => h.entry.session_id === "s2"), "date_to must drop s2");
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("search filters by author", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
+  try {
+    await st.init();
+    await st.upsert([
+      mkEntry("s1", "k1", "t1", { author: "alice" }),
+      mkEntry("s2", "k1", "t2", { author: "bob" }),
+    ]);
+    const hits = await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 5, min_score: 0, key: "k1", author: "alice" });
+    assert.ok(hits.some((h) => h.entry.session_id === "s1"), "author filter must keep alice");
+    assert.ok(!hits.some((h) => h.entry.session_id === "s2"), "author filter must drop bob");
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("search project on sqlite throws clear error", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
+  try {
+    await st.init();
+    await assert.rejects(
+      () => st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 5, min_score: 0, key: "k1", project: "other" }),
+      /централизованн/i,
+    );
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("sqlite model mismatch throws", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mem-"));
   const dbPath = join(dir, "memory.db");

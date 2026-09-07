@@ -5,7 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registerMemoryHooks } from "./index.js";
 import { sanitizeDirName } from "./config.js";
-import { projectHashFromDir } from "./project.js";
+import { projectHashFromDir, projectHashFromRemote } from "./project.js";
 import { SESSIONS } from "./summarize.js";
 
 const silentLog = { debug() {}, info() {}, warn() {}, error() {} };
@@ -447,6 +447,45 @@ test("pgvector without connection_string_env → memory off", async () => {
   });
   assert.equal(hooks.tool, undefined);
   assert.ok(logged.some(([m, e]) => m === "memory: disabled" && e.reason === "pgvector_config_invalid"));
+});
+
+// ── memory_search filters (Task 4) ─────────────────────────────────────
+
+test("memory_search passes filters and project", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-hooks-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    const seen = [];
+    storage.search = async function (vec, opts) { this.searches++; seen.push(opts); return []; };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    const res = await hooks.tool.memory_search.execute(
+      { query: "x", date_from: 100, date_to: 500, author: "alice", project: "https://github.com/foo/bar.git" },
+      { sessionID: "s1" },
+    );
+    assert.equal(seen.length, 1, "storage.search must be called once");
+    assert.equal(seen[0].date_from, 100);
+    assert.equal(seen[0].date_to, 500);
+    assert.equal(seen[0].author, "alice");
+    assert.equal(
+      seen[0].project,
+      projectHashFromRemote("https://github.com/foo/bar.git"),
+      "URL project must be canonicalized+hashed before search",
+    );
+    assert.equal(typeof seen[0].key, "string");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // ── retention (Task 2) ─────────────────────────────────────────────────

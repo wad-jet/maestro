@@ -31,3 +31,35 @@ export function deriveProjectKey({ gitRemote, absPath }) {
   if (gitRemote) return { hash: projectHashFromRemote(gitRemote), source: "remote" };
   return { hash: projectHashFromDir(absPath), source: "dir" };
 }
+
+/**
+ * Resolve a `project` search parameter to a storage key (spec §2.2 B2).
+ * Semantics: namespace | git-remote/URL (canonicalize+hash) | project_hash.
+ * @param {string} project
+ * @returns {string} storage key — namespace as-is, URL/scp → sha256 hash,
+ *   64-hex project_hash as-is.
+ */
+export function resolveProjectKey(project) {
+  const s = String(project).trim();
+  if (!s) throw new Error("search: project required");
+  if (s.includes("://") || s.startsWith("git@")) return projectHashFromRemote(s);
+  if (/^[0-9a-f]{64}$/i.test(s)) return s;
+  return s; // namespace — used directly as key
+}
+
+/**
+ * Build the key-set for a search. Single key by default; when `project` is
+ * given (cross-project opt-in, centralized backends only) → [key, projectKey]
+ * deduped. Key required when project absent.
+ * @param {{ key?: string, project?: string }} opts
+ * @returns {string[]}
+ */
+export function resolveSearchKeys({ key, project }) {
+  if (project !== undefined && project !== null && project !== "") {
+    const projectKey = resolveProjectKey(project);
+    const keys = [key, projectKey].filter((k) => typeof k === "string" && k.length > 0);
+    return [...new Set(keys)];
+  }
+  if (typeof key !== "string" || !key) throw new Error("search: key required");
+  return [key];
+}

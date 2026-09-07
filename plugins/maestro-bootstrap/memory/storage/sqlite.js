@@ -145,14 +145,24 @@ export class SqliteStorage {
     tx(entries);
   }
 
-  async search(embedding, { top_k = 3, min_score = 0, key, query }) {
+  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query }) {
+    // B2: cross-project search is centralized-only (per-key sqlite files would
+    // require opening sibling DBs — new concurrency surface). Explicit error.
+    if (project !== undefined && project !== null && project !== "") {
+      throw new Error("кросс-проектный поиск доступен только для централизованных бэкендов");
+    }
     if (typeof key !== "string" || !key) {
       throw new Error("search: key required");
     }
     if (embedding.length !== this.dim) {
       throw new Error(`embedding length ${embedding.length} does not match expected dimension ${this.dim}`);
     }
-    const rows = this.db.prepare("SELECT * FROM memory WHERE key = ?").all(key);
+    const conds = ["key = ?"];
+    const params = [key];
+    if (date_from !== undefined) { conds.push("time_last >= ?"); params.push(date_from); }
+    if (date_to !== undefined) { conds.push("time_last <= ?"); params.push(date_to); }
+    if (author !== undefined) { conds.push("author = ?"); params.push(author); }
+    const rows = this.db.prepare(`SELECT * FROM memory WHERE ${conds.join(" AND ")}`).all(...params);
     const vectorHits = rows.map((r) => {
       const vec = new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4);
       const score = cosine(embedding, vec);
@@ -164,15 +174,24 @@ export class SqliteStorage {
       return vectorHits;
     }
 
-    // FTS hits (best-first by bm25 rank).
+    // FTS hits (best-first by bm25 rank). time_last/author live only in
+    // `memory`, so date/author filters join back to it (FTS schema unchanged).
     const tokens = query.split(/\s+/).filter(Boolean);
     let ftsHits = [];
     if (tokens.length) {
       const match = tokens.map((t) => `"${t.replace(/"/g, '""')}"*`).join(" ");
+      const ftsConds = ["memory_fts MATCH ?", "memory.key = ?"];
+      const ftsParams = [match, key];
+      if (date_from !== undefined) { ftsConds.push("memory.time_last >= ?"); ftsParams.push(date_from); }
+      if (date_to !== undefined) { ftsConds.push("memory.time_last <= ?"); ftsParams.push(date_to); }
+      if (author !== undefined) { ftsConds.push("memory.author = ?"); ftsParams.push(author); }
       try {
         const ftsRows = this.db.prepare(
-          "SELECT session_id, bm25(memory_fts) AS rank FROM memory_fts WHERE memory_fts MATCH ? AND key = ? ORDER BY bm25(memory_fts) DESC",
-        ).all(match, key);
+          `SELECT memory_fts.session_id, bm25(memory_fts) AS rank
+           FROM memory_fts JOIN memory ON memory.session_id = memory_fts.session_id
+           WHERE ${ftsConds.join(" AND ")}
+           ORDER BY bm25(memory_fts) DESC`,
+        ).all(...ftsParams);
         ftsHits = ftsRows.slice(0, top_k);
       } catch (err) {
         console.error(`[memory] FTS MATCH failed, falling back to vector-only: ${err.message}`);
