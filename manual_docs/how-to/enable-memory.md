@@ -230,7 +230,7 @@ q8 ~120 МБ, ONNX) загружается однократно с HuggingFace �
 
 | Симптом | Причина / действие |
 |---|---|
-| Память не работает, в логе `memory: disabled` с `reason` | Конфигурация невалидна (см. `disabled_reason`: `storage_type_invalid`, `centralized_identity_missing`, `qdrant_config_invalid`, `pgvector_config_invalid`, `centralized_confidential_invalid`, `retention_days_invalid`, `similarity_threshold_invalid`) |
+| Память не работает, в логе `memory: disabled` с `reason` | Конфигурация невалидна (см. `disabled_reason`: `storage_type_invalid`, `centralized_identity_missing`, `qdrant_config_invalid`, `pgvector_config_invalid`, `pgvector_text_search_config_invalid`, `centralized_confidential_invalid`, `retention_days_invalid`, `similarity_threshold_invalid`) |
 | В логе `memory: transformers not installed — run npm install in <module_dir>` | Не выполнена установка deps (шаг 3 краткой инструкции) |
 | В логе `memory: init failed` | Ошибка инициализации (бэкенд недоступен, модель не загрузилась и т.п.) — сессии работают |
 | Блок `## Контекст из памяти maestro` не появляется | Модель эмбеддингов ещё прогревается (первый запуск), либо нет записей выше `min_score`, либо сессия не top-level primary |

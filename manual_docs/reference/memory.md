@@ -87,6 +87,7 @@
 | `storage.qdrant.collection` | `string` | `maestro_memory` | Коллекция Qdrant |
 | `storage.pgvector.connection_string_env` | `string` | — | Имя env-переменной с DSN Postgres (обязателен для `type: pgvector`) |
 | `storage.pgvector.table` | `string` | `maestro_memory` | Таблица pgvector |
+| `storage.pgvector.text_search_config` | `string` | `russian` | Postgres text-search конфигурация для гибридного поиска (только при `type: pgvector`). Валидация: `/^[a-z][a-z0-9_]*$/`, ≤63 символа. Default `russian` — стеммер; на кастомных PG без `russian`-конфига — fail-loud |
 | `storage.centralized_confidential` | `string` | `forbid` | `forbid` (default) — проект с `confidential.paths` не пишет в централизованный бэкенд → failover на локальный sqlite + warning; `allow` — разрешить (осознанный риск) |
 
 ### Валидация и деградация конфигурации
@@ -116,16 +117,40 @@
   совместимы с любым бэкендом. `model_id` пишется в метаданные; при несовпадении
   модели/размерности на бэкенде — ошибка с инструкцией переиндексации (без тихой
   порчи).
-- **Гибридный поиск (FTS5) — только sqlite.** qdrant/pgvector — векторный поиск
-  (payload text-match — вне scope v2).
-- **Кросс-проектный поиск (`project`) — только централизованные бэкенды**
-  (единая коллекция/таблица с key-фильтром); на sqlite — явная ошибка.
 - Переключение бэкенда **не мигрирует** данные автоматически; миграция — через
   `memory_export` → `memory_import` (JSONL с embedding, см.
   [Как включить память](../how-to/enable-memory.md)).
 - `centralized_confidential: forbid` (default): проект, где сконфигурирован
   `confidential.paths`, пишет память **только в локальный sqlite** (failover +
-  warning в лог). `allow` — осознанный HITL-выбор владельца проекта.
+  warning в лог). Маскирование защищает **raw-confidential** от передачи открыто
+  untrusted LLM и от выхода за машину в полном виде; **санизированные** данные
+  могут храниться/читаться где угодно. `forbid` — консервативный local-first
+  дефолт (failover на sqlite + warning); `allow` — осознанный opt-in владельца
+  проекта.
+
+### Паритет-матрица бэкендов (v3a)
+
+Гибридный текстовый поиск и кросс-проектный поиск работают на **всех** бэкендах
+(v3a). Различия — только в механике лексического ранжирования:
+
+| Возможность | sqlite | pgvector | qdrant |
+|---|---|---|---|
+| Гибридный поиск (текст + вектор) | ✅ FTS5 + RRF | ✅ `tsvector` + `ts_rank` + RRF | ✅ payload full-text + RRF |
+| Кросс-проектный поиск (`project`) | ✅ | ✅ | ✅ |
+| Морфология | unicode61 без стемминга | `russian` стеммер (конфигурируемо через `text_search_config`) | word-токенизация (`min_token_len: 2` — односимвольные токены отбрасываются) |
+
+- **qdrant-ограничение:** текстовая ветка без bm25-порядка (filter-leg) —
+  лексические совпадения всплывают через RRF, а не точный bm25-ранг.
+- **Операционные оговорки (pg):** `ALTER ADD COLUMN ... STORED` = table rewrite +
+  ACCESS EXCLUSIVE lock (важно для shared-серверов); generated-колонка индексирует
+  JSON-текст `decisions` — токенизация эквивалентна `join(" ")` (пунктуация —
+  разделители).
+- **Известные ограничения:**
+  - Латентное допущение `model_id` на centralized: разные модели в одной
+    коллекции → мусорное ранжирование молча (без ошибки).
+  - Остаточный prompt-injection от локально подложенной sibling-БД (нужен write
+    в data-dir; митигация — framing).
+  - pg fallback на `russian` fail-loud на кастомных PG без `russian`-конфига.
 
 ## 🔑 Изоляция: key, project_hash, namespace, identity
 

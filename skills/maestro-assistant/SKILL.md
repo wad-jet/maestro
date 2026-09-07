@@ -159,6 +159,10 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
 - **`storage.centralized_confidential`** — `forbid` (default): проект с
   `confidential.paths` пишет память только в локальный sqlite (failover +
   warning); `allow` — осознанный HITL-выбор.
+- **`storage.pgvector.text_search_config`** — Postgres text-search конфигурация
+  для гибридного поиска, default `"russian"` (стеммер). Только при
+  `type: pgvector`. Валидация: `/^[a-z][a-z0-9_]*$/`, ≤63 символа; на кастомных
+  PG без `russian`-конфига — fail-loud.
 - **`retention_days`** — TTL записей: `null` (default) — выключено (данные не
   удаляются молча); положительное число — prune при старте (записи старше N
   дней по `time_last`). Некорректное значение → память off + лог.

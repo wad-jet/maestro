@@ -45,6 +45,31 @@
     write/boundary-tools → ask), `README.md`, `plugins/maestro-bootstrap/README.md`,
     `AGENTS.md`, `docs/project-context.md`.
 
+- **Memory layer v3a: паритет бэкендов.** Выровнен сценарный паритет трёх
+  бэкендов памяти (`sqlite`/`qdrant`/`pgvector`):
+  - **Гибридный текстовый поиск** теперь работает на всех бэкендах: sqlite —
+    FTS5 + RRF; pgvector — generated `tsvector`-колонка + GIN + `ts_rank` + RRF;
+    qdrant — payload full-text index + RRF (текстовая ветка без bm25-порядка,
+    filter-leg).
+  - **Кросс-проектный поиск (`project`)** — на всех бэкендах: sqlite читает
+    соседние БД read-only (fail-soft, сверка `model_id`/dim), централизованные —
+    через key-фильтр.
+  - **Новый ключ `storage.pgvector.text_search_config`** (default `"russian"`,
+    стеммер; конфигурируемо; валидация `/^[a-z][a-z0-9_]*$/`, ≤63; только при
+    `type: pgvector`; на кастомных PG без `russian`-конфига — fail-loud).
+  - **Уточнён рационал `centralized_confidential`:** маскирование защищает
+    **raw-confidential** от передачи открыто untrusted LLM и от выхода за машину
+    в полном виде; **санизированные** данные могут храниться/читаться где угодно.
+    `forbid` — консервативный local-first дефолт (failover на sqlite + warning);
+    `allow` — осознанный opt-in владельца. Поведение не меняется.
+  - Спека: `docs/superpowers/specs/2026-09-07-maestro-memory-v3a-design.md`.
+    Документация: `manual_docs/reference/memory.md` (паритет-матрица, морфология,
+    ограничения), `manual_docs/reference/config.md`, `manual_docs/how-to/enable-memory.md`
+    (`disabled_reason`), `manual_docs/explanation/agents-and-trust.md`,
+    `manual_docs/reference/model-selection.md`, `SECURITY.md` (§5a), канон
+    `maestro-assistant`, `plugins/maestro-bootstrap/README.md`,
+    `docs/project-context.md`, `docs/testing/maestro-sandbox-checklist.md` (F9–F11).
+
 ## [2026-09-06]
 
 ### Добавлено

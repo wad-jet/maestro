@@ -268,9 +268,11 @@ untrusted работают по очищенным артефактам, а до
 - **Гейт централизованных бэкендов.** `centralized_confidential: forbid`
   (default): проект, где сконфигурирован `confidential.paths`, пишет память
   **только в локальный sqlite** (failover + warning в лог). Основание — P1
-  (confidential — только trusted) + fail-closed локальная граница. `allow` —
-  осознанный HITL-выбор владельца проекта (Level-1-санизированные данные на
-  стороннем сервере — вне текущей модели доверия).
+  (confidential — только trusted) + fail-closed локальная граница. Маскирование
+  защищает **raw-confidential** от передачи открыто untrusted LLM и от выхода за
+  машину в полном виде; **санизированные** данные могут храниться/читаться где
+  угодно. `forbid` — консервативный local-first дефолт (failover на sqlite +
+  warning); `allow` — осознанный opt-in владельца проекта.
 - **Identity ≠ access-control.** `identity`/`identity_env`/git `user.name` —
   только **подпись записей** (`author`, атрибуция в поиске). Клиентский плагин
   не имеет границы учётных записей: любой член команды с ключом читает всю

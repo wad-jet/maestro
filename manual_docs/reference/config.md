@@ -431,6 +431,7 @@ deny. Trust не наследуется вложенными субагента�
 | `storage.qdrant.collection` | `string` | `maestro_memory` | Коллекция Qdrant |
 | `storage.pgvector.connection_string_env` | `string` | — | Имя env-переменной с DSN Postgres (обязателен для `type: pgvector`) |
 | `storage.pgvector.table` | `string` | `maestro_memory` | Таблица pgvector |
+| `storage.pgvector.text_search_config` | `string` | `russian` | Postgres text-search конфигурация для гибридного поиска (только при `type: pgvector`). Валидация: `/^[a-z][a-z0-9_]*$/`, ≤63 символа; default `russian` — стеммер; на кастомных PG без `russian`-конфига — fail-loud |
 | `storage.centralized_confidential` | `string` | `forbid` | `forbid` — проект с `confidential.paths` не пишет в централизованный бэкенд (failover на sqlite + warning); `allow` — разрешить |
 
 **Валидация:** некорректный `storage.type` / отсутствие URL / нерезолвнутая

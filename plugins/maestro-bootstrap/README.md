@@ -257,7 +257,11 @@ untrusted, access-policy не enforced, дефолтные sanitizer-прави�
   требуют резолвнутую identity (`identity` → `identity_env` → git `user.name`).
 - **`centralized_confidential`:** `forbid` (default) — проект с
   `confidential.paths` пишет память только в локальный sqlite (failover +
-  warning); `allow` — осознанный риск.
+  warning). Маскирование защищает **raw-confidential** от передачи открыто
+  untrusted LLM и от выхода за машину в полном виде; **санизированные** данные
+  могут храниться/читаться где угодно. `forbid` — консервативный local-first
+  дефолт (failover на sqlite + warning); `allow` — осознанный opt-in владельца
+  проекта.
 - **`retention_days`:** `null` (default) — выключено; число — TTL записей
   (prune при старте, лог количества удалённых).
 - **`similarity_threshold`:** порог cosine для кластеров/графа в
