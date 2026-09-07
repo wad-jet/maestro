@@ -271,6 +271,15 @@ do_create() {
   # Каталог для эфемерных артефактов maestro.
   mkdir -p "$SANDBOX/.maestro"
 
+  # --- Memory layer smoke (опционально) --------------------------------------
+  if [[ -d node_modules ]] && node -e "require.resolve('better-sqlite3')" 2>/dev/null; then
+    echo "[memory] проверка: запускаю смоук-тест памяти (sqlite)..."
+    node --test plugins/maestro-bootstrap/memory/index.test.js 2>&1 | tail -5
+    echo "[memory] смоук завершён (см. выше pass/fail)."
+  else
+    echo "[memory] смоук пропущен: зависимости памяти не установлены (npm install для devDependencies)."
+  fi
+
   say ""
   say "✅ Песочница готова. Чеклист: $CHECKLIST_REL"
   say "   Запускайте сценарии maestro с workdir = корень .sandbox/ ($SANDBOX)."

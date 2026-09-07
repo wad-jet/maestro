@@ -57,6 +57,20 @@ describe("maestro-bootstrap global logging", () => {
     assert.equal(hooks["chat.params"], undefined);
   });
 
+  it("should keep experimental.chat.messages.transform undefined", () => {
+    // Regardless of memory config, the invariant must hold.
+    assert.equal(hooks["experimental.chat.messages.transform"], undefined);
+    assert.equal(hooks["chat.params"], undefined);
+  });
+
+  it("should keep core hooks working (fail-soft) even when memory init fails", async () => {
+    // event / tool.execute.before / tool.execute.after must remain functions
+    // even if the memory module is present but fails to init.
+    assert.equal(typeof hooks.event, "function");
+    assert.equal(typeof hooks["tool.execute.before"], "function");
+    assert.equal(typeof hooks["tool.execute.after"], "function");
+  });
+
   it("should log task dispatch (before/after) globally, no agent filter", async () => {
     await hooks["tool.execute.before"](
       { tool: "task", sessionID: "any-session", callID: "c-task" },
