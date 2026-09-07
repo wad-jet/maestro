@@ -87,8 +87,8 @@ test("fuseRrf: cross-key, two text lists fuse with shared vector list", async ()
   const out = await fuseRrf(vectorHits, textHitLists, {
     fetchEntry: async (sid) => all[sid],
   });
-  // k1a: 1/61 + 1/62 = 0.0325; k1b: 1/61 = 0.0164; k2a: 1/61 = 0.0164; k2b: 1/62 = 0.0161
-  assert.deepEqual(out.map((h) => h.entry.session_id), ["k1a", "k1b", "k2a", "k2b"]);
+  // k1a: 1/61 + 1/62 = 0.0325; k1b: 1/61 = 0.0164; k2b: 1/61 = 0.0164; k2a: 1/62 = 0.0161
+  assert.deepEqual(out.map((h) => h.entry.session_id), ["k1a", "k1b", "k2b", "k2a"]);
 });
 ```
 
