@@ -1124,5 +1124,33 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
       log.info("plugin disposing", {});
     },
   };
+
+  // Memory module (опционально): tool `memory_search`, chat.message,
+  // experimental.chat.system.transform, event-дополнения (session.idle /
+  // session.deleted). Fail-soft: любая ошибка инициализации → лог + {}.
+  // Инвариант: `experimental.chat.messages.transform` НЕ присваивается.
+  let memoryHooks = {};
+  try {
+    const { registerMemoryHooks } = await import("./memory/index.js");
+    memoryHooks = await registerMemoryHooks({ client, config, log, root });
+  } catch (err) {
+    log.error("memory: init failed", { error: err instanceof Error ? err.message : String(err) });
+  }
+  plugin.tool = { ...(memoryHooks.tool ?? {}) };
+  plugin["chat.message"] = memoryHooks["chat.message"];
+  plugin["experimental.chat.system.transform"] = memoryHooks["experimental.chat.system.transform"];
+  // Расширяем event: сначала существующая логика (session.error/retry), затем memory.
+  const baseEvent = plugin.event;
+  plugin.event = async (input) => {
+    try { await baseEvent(input); } catch {}
+    try { await memoryHooks.event?.(input); } catch {}
+  };
+  // Расширяем dispose: сначала существующая логика, затем memory.
+  const baseDispose = plugin.dispose;
+  plugin.dispose = async () => {
+    try { await baseDispose(); } catch {}
+    try { await memoryHooks.dispose?.(); } catch {}
+  };
+
   return plugin;
 };

@@ -24,9 +24,10 @@ const STORAGE_TYPES = new Set(["sqlite", "qdrant", "pgvector"]);
 
 export function loadMemoryConfig(maestroJson) {
   const m = maestroJson?.memory;
-  if (!m || m.enabled !== true) return { ...DEFAULTS, enabled: false };
+  if (!m) return { ...DEFAULTS, enabled: false, disabled_reason: "no_memory_section" };
+  if (m.enabled !== true) return { ...DEFAULTS, enabled: false, disabled_reason: "explicitly_disabled" };
   const type = m.storage?.type ?? "sqlite";
-  if (!STORAGE_TYPES.has(type)) return { ...DEFAULTS, enabled: false };
+  if (!STORAGE_TYPES.has(type)) return { ...DEFAULTS, enabled: false, disabled_reason: "storage_type_invalid" };
   const centralized = type !== "sqlite";
   const cfg = {
     ...DEFAULTS,
@@ -39,10 +40,10 @@ export function loadMemoryConfig(maestroJson) {
     },
   };
   if (centralized && !resolveIdentity({ config: cfg, env: process.env, gitName: null })) {
-    return { ...DEFAULTS, enabled: false };
+    return { ...DEFAULTS, enabled: false, disabled_reason: "centralized_identity_missing" };
   }
   if (centralized && cfg.storage.centralized_confidential !== "allow" && cfg.storage.centralized_confidential !== "forbid") {
-    return { ...DEFAULTS, enabled: false };
+    return { ...DEFAULTS, enabled: false, disabled_reason: "centralized_confidential_invalid" };
   }
   return cfg;
 }
