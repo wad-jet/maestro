@@ -488,7 +488,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             // Атомарность: все строки валидны → применяем. Сначала re-mask.
             const masked = entries.map((e) => maskEntry(e, { confidentialPatterns: maestroConfig?.confidential?.paths ?? [] }));
             // I-4: replace выполняется только после успешной валидации всех строк.
-            if (args.replace === "true" || args.replace === true) {
+            if (args.replace === true) {
               await storage.deleteByFilter({ key: effectiveKey });
             }
             const upserts = masked.map((e) => ({

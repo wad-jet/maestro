@@ -265,6 +265,7 @@ test("qdrant prune filters by time_last", async () => {
   assert.deepEqual(must[0], { key: "key", match: { value: "k1" } });
   assert.equal(must[1].key, "time_last");
   assert.ok(must[1].range.lte >= before - 30 * 86400_000);
+  assert.ok(must[1].range.lte <= before - 30 * 86400_000 + 5000);
 });
 
 test("qdrant stats key-scoped", async () => {
