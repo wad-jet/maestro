@@ -24,6 +24,11 @@ export const DEFAULTS = {
 
 const STORAGE_TYPES = new Set(["sqlite", "qdrant", "pgvector"]);
 
+// Имя конфигурации полнотекстового поиска Postgres (pgvector). Допустимы
+// только строчные идентификаторы: /^[a-z][a-z0-9_]*$/ и длина ≤ 63 байт
+// (лимит идентификаторов Postgres). Fallback — "russian".
+const TEXT_SEARCH_CONFIG_RE = /^[a-z][a-z0-9_]*$/;
+
 function mergedConfig(m) {
   const type = m.storage?.type ?? "sqlite";
   return {
@@ -32,10 +37,28 @@ function mergedConfig(m) {
     storage: {
       type,
       qdrant: m.storage?.qdrant ?? null,
-      pgvector: m.storage?.pgvector ?? null,
+      pgvector: {
+        ...(m.storage?.pgvector ?? {}),
+        text_search_config: m.storage?.text_search_config ?? m.storage?.pgvector?.text_search_config ?? "russian",
+      },
       centralized_confidential: m.storage?.centralized_confidential ?? "forbid",
     },
   };
+}
+
+/**
+ * text_search_config: валиден только для pgvector. Нерелевантный ключ в
+ * sqlite/qdrant-конфиге НЕ отключает память. Валидация: строка, длина ≤ 63
+ * байта и /^[a-z][a-z0-9_]*$/. Shared by classifyMemoryConfig (zero-dep gate)
+ * и loadMemoryConfig.
+ * @param {object} m  The `memory` config section.
+ * @returns {boolean}  True когда text_search_config валиден (или отсутствует).
+ */
+function pgvectorTextSearchConfigValid(m) {
+  if (m?.storage?.type !== "pgvector") return true;
+  const v = m?.storage?.text_search_config ?? m?.storage?.pgvector?.text_search_config;
+  if (v == null) return true;
+  return typeof v === "string" && v.length <= 63 && TEXT_SEARCH_CONFIG_RE.test(v);
 }
 
 /**
@@ -79,6 +102,7 @@ export function classifyMemoryConfig(maestroJson, { gitName = null } = {}) {
   if (!similarityThresholdValid(m)) return { enabled: false, disabled_reason: "similarity_threshold_invalid" };
   const type = m.storage?.type ?? "sqlite";
   if (!STORAGE_TYPES.has(type)) return { enabled: false, disabled_reason: "storage_type_invalid" };
+  if (!pgvectorTextSearchConfigValid(m)) return { enabled: false, disabled_reason: "pgvector_text_search_config_invalid" };
   const centralized = type !== "sqlite";
   if (centralized) {
     const cfg = mergedConfig(m);
@@ -100,6 +124,18 @@ export function loadMemoryConfig(maestroJson, { gitName = null } = {}) {
 
 export function resolveEffectiveKey({ projectHash, namespace }) {
   return namespace ?? projectHash;
+}
+
+/**
+ * Эффективная конфигурация полнотекстового поиска Postgres: валидный
+ * конфигурированный text_search_config ИЛИ fallback "russian". Используется
+ * Task 3 (pgvector-запросы) для выбора конфигурации to_tsvector.
+ * @param {object} config  Merged memory config (loadMemoryConfig output).
+ * @returns {string}  Валидный text_search_config или "russian".
+ */
+export function resolveEffectiveTextConfig(config) {
+  const v = config?.storage?.pgvector?.text_search_config;
+  return (typeof v === "string" && v.length <= 63 && TEXT_SEARCH_CONFIG_RE.test(v)) ? v : "russian";
 }
 
 export function resolveIdentity({ config, env, gitName }) {

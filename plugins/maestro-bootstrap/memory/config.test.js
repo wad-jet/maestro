@@ -94,3 +94,27 @@ test("classifyMemoryConfig catches invalid similarity_threshold", () => {
   assert.equal(c.enabled, false);
   assert.equal(c.disabled_reason, "similarity_threshold_invalid");
 });
+
+test("text_search_config default russian", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, storage: { type: "pgvector" }, identity: "x" } });
+  assert.equal(cfg.storage.pgvector.text_search_config, "russian");
+});
+
+test("text_search_config invalid value disables only for pgvector", () => {
+  const cfg = { memory: { enabled: true, storage: { type: "pgvector", text_search_config: "Bad Config" }, identity: "x" } };
+  const cls = classifyMemoryConfig(cfg);
+  assert.equal(cls.enabled, false);
+  assert.equal(cls.disabled_reason, "pgvector_text_search_config_invalid");
+  const sql = classifyMemoryConfig({ memory: { enabled: true, storage: { type: "sqlite", text_search_config: "Bad Config" } } });
+  assert.equal(sql.enabled, true);
+});
+
+test("text_search_config length cap 63", () => {
+  const cls = classifyMemoryConfig({ memory: { enabled: true, storage: { type: "pgvector", text_search_config: "a".repeat(64) }, identity: "x" } });
+  assert.equal(cls.disabled_reason, "pgvector_text_search_config_invalid");
+});
+
+test("text_search_config valid custom passes", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, storage: { type: "pgvector", text_search_config: "english" }, identity: "x" } });
+  assert.equal(cfg.storage.pgvector.text_search_config, "english");
+});
