@@ -41,7 +41,10 @@
   стандартной установки, включается по запросу (секция `memory` в `maestro.json`;
   см. `manual_docs/reference/memory.md`). v2: гибридный FTS5-поиск, инструменты
   управления (`memory_forget`/`memory_export`/`memory_import`/`memory_recall_preview`/
-  `memory_stats_detail`), команды `@maestro-memory`/`@maestro-memory-report`.
+  `memory_stats_detail`), команды `@maestro-memory`/`@maestro-memory-report`. v3a:
+  **паритет бэкендов** — гибридный текстовый поиск (pg: tsvector+ts_rank, qdrant:
+  payload full-text) и кросс-проектный поиск (sqlite: read-only соседние БД) на всех
+  трёх бэкендах; ключ `storage.pgvector.text_search_config` (default `russian`).
 
 ## 4. Архитектура
 
