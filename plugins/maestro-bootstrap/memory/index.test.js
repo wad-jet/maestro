@@ -1381,3 +1381,30 @@ test("git-config dedup: distinct roots get separate exec; fail-soft on git absen
     rmSync(dirB, { recursive: true, force: true });
   }
 });
+
+// ── Task 13: ask-gate verification — write-tools registered for permission enforcement ──
+
+test("write-tools registered for permission enforcement (ask-gate contract)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-gate-ask-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+    });
+    // memory_forget, memory_export, memory_import — write-tools covered by the
+    // merge-config permission rule (permission: "ask").  Assert their presence so
+    // that a future refactor cannot silently drop a write-tool registration.
+    assert.ok(hooks.tool && hooks.tool.memory_forget, "memory_forget must be registered");
+    assert.ok(hooks.tool && hooks.tool.memory_export, "memory_export must be registered");
+    assert.ok(hooks.tool && hooks.tool.memory_import, "memory_import must be registered");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
