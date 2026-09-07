@@ -83,3 +83,14 @@ test("classifyMemoryConfig catches invalid retention_days", () => {
   assert.equal(c.enabled, false);
   assert.equal(c.disabled_reason, "retention_days_invalid");
 });
+
+test("similarity_threshold invalid disables", () => {
+  assert.equal(loadMemoryConfig({ memory: { enabled: true, similarity_threshold: 1.5 } }).enabled, false);
+  assert.equal(loadMemoryConfig({ memory: { enabled: true, similarity_threshold: "0.7" } }).enabled, false);
+});
+
+test("classifyMemoryConfig catches invalid similarity_threshold", () => {
+  const c = classifyMemoryConfig({ memory: { enabled: true, similarity_threshold: -0.1 } });
+  assert.equal(c.enabled, false);
+  assert.equal(c.disabled_reason, "similarity_threshold_invalid");
+});
