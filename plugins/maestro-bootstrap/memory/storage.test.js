@@ -394,7 +394,13 @@ test("sqlite lazy-loads better-sqlite3 from moduleDir/node_modules", async () =>
 });
 
 test("qdrant factory returns QdrantStorage with valid options", async () => {
-  const c = { collectionExists: async () => ({ exists: false }), createCollection: async () => {} };
+  const c = {
+    collectionExists: async () => ({ exists: false }),
+    createCollection: async () => {},
+    createPayloadIndex: async () => {},
+    scroll: async () => ({ points: [], next_page_offset: null }),
+    setPayload: async () => {},
+  };
   const st = createStorage({ type: "qdrant", options: { client: c, collection: "c" }, modelId: "m", dim: 3 });
   assert.equal(st.constructor.name, "QdrantStorage");
   await st.init(); // should not throw with a valid client
@@ -411,6 +417,9 @@ test("qdrant get returns entry or null", async () => {
   const c = {
     collectionExists: async () => ({ exists: false }),
     createCollection: async () => {},
+    createPayloadIndex: async () => {},
+    scroll: async () => ({ points: [], next_page_offset: null }),
+    setPayload: async () => {},
     upsert: async (_, { points }) => { storedPayload = points[0]?.payload ?? null; },
     query: async (col, { filter, limit, with_payload }) => {
       // get: filter-only query { must: [{ key, match: { value } }] }

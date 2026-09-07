@@ -1,5 +1,6 @@
 import { createHash } from "node:crypto";
 import { resolveSearchKeys } from "../project.js";
+import { fuseRrf } from "./rrf.js";
 
 // Whitelist of scan-able payload fields. Default scan returns everything EXCEPT
 // embedding (large); embedding is opt-in.
@@ -22,6 +23,14 @@ export class QdrantStorage {
     this.dim = dim;
   }
 
+  // Текстовое представление точки для full-text индекса (payload `text`).
+  // decisions хранится как JSON-строка — парсим с guard'ом на битый JSON.
+  static textOf(p) {
+    let parsed = [];
+    try { parsed = JSON.parse(p.payload?.decisions ?? "[]"); } catch { parsed = []; }
+    return [p.payload?.title ?? "", p.payload?.summary ?? "", parsed.join(" ")].join(" ").trim();
+  }
+
   async init() {
     const { exists } = await this.client.collectionExists(this.collection);
     if (!exists) {
@@ -29,6 +38,36 @@ export class QdrantStorage {
         vectors: { size: this.dim, distance: "Cosine" },
       });
     }
+    // Payload full-text индекс на `text`. Серверы < 1.10 не поддерживают
+    // createPayloadIndex → scan-mode fallback (без индекса, фильтр по is_empty).
+    try {
+      await this.client.createPayloadIndex(this.collection, {
+        field_name: "text",
+        field_schema: { type: "text", tokenizer: "word", min_token_len: 2 },
+      });
+    } catch (err) {
+      console.error(`[memory] qdrant payload text index failed (scan-mode fallback): ${err.message}`);
+    }
+    // Backfill: существующие точки без `text` (добавлены до этой версии) получают
+    // производное поле. Пагинация через next_page_offset.
+    let offset = undefined;
+    do {
+      const res = await this.client.scroll(this.collection, {
+        filter: { must: [{ key: "text", is_empty: true }] },
+        limit: 100,
+        offset,
+        with_payload: true,
+        with_vector: false,
+      });
+      const points = res.points ?? [];
+      const pts = points.filter((p) => p.payload?.title || p.payload?.summary || p.payload?.decisions);
+      if (pts.length) {
+        await this.client.setPayload(this.collection, {
+          points: pts.map((p) => ({ id: p.id, payload: { text: QdrantStorage.textOf(p) } })),
+        });
+      }
+      offset = res.next_page_offset;
+    } while (offset != null);
   }
 
   async dispose() {}
@@ -47,6 +86,9 @@ export class QdrantStorage {
         title: e.title,
         summary: e.summary,
         decisions: JSON.stringify(e.decisions),
+        // Производное текстовое поле для full-text поиска; пересчитывается на
+        // КАЖДОМ upsert (включая re-mask через memory_import).
+        text: [e.title, e.summary, e.decisions.join(" ")].join(" "),
         model_id: e.model_id,
         author: e.author,
         time_first: e.time_first,
@@ -57,8 +99,8 @@ export class QdrantStorage {
     await this.client.upsert(this.collection, { points });
   }
 
-  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project }) {
-    // B2: cross-project opt-in — key-set filter (current + project key).
+  // Общий фильтр для векторной и текстовой веток: key-set + date + author.
+  buildMust({ key, project, date_from, date_to, author }) {
     const keys = resolveSearchKeys({ key, project });
     const must = keys.length === 1
       ? [{ key: "key", match: { value: keys[0] } }]
@@ -66,6 +108,12 @@ export class QdrantStorage {
     if (date_from !== undefined) must.push({ key: "time_last", range: { gte: date_from } });
     if (date_to !== undefined) must.push({ key: "time_last", range: { lte: date_to } });
     if (author !== undefined) must.push({ key: "author", match: { value: author } });
+    return must;
+  }
+
+  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query }) {
+    // B2: cross-project opt-in — key-set filter (current + project key).
+    const must = this.buildMust({ key, project, date_from, date_to, author });
     const res = await this.client.query(this.collection, {
       query: { nearest: Array.from(embedding) },
       limit: top_k,
@@ -73,10 +121,35 @@ export class QdrantStorage {
       filter: { must },
       with_payload: true,
     });
-    return (res.points ?? []).map((r) => ({
+    const vectorHits = (res.points ?? []).map((r) => ({
       entry: { ...r.payload, embedding: undefined, decisions: JSON.parse(r.payload.decisions) },
       score: r.score,
     }));
+
+    // Текстовая ветка: только full-text (full_text_match), фузия через RRF.
+    // Зеркалит key-set/date/author фильтры векторной ветки (buildMust).
+    if (typeof query === "string" && query.trim().length > 0) {
+      let textHits = [];
+      try {
+        const tmust = this.buildMust({ key, project, date_from, date_to, author });
+        tmust.push({ key: "text", full_text_match: { text: query } });
+        // Filter-only leg — БЕЗ `nearest` (не должен быть векторно-упорядочен).
+        const tr = await this.client.query(this.collection, {
+          query: { filter: { must: tmust } },
+          limit: top_k,
+          with_payload: true,
+        });
+        textHits = (tr.points ?? []).map((p) => ({ session_id: p.payload.session_id }));
+      } catch (err) {
+        // Fail-soft: при сбое текстовой ветки возвращаем только векторные хиты.
+        console.error(`[memory] qdrant text leg failed, vector-only fallback: ${err.message}`);
+      }
+      if (!textHits.length) return vectorHits;
+      // C2: кап результата фузии до top_k (паритет с sqlite/pgvector).
+      const fused = await fuseRrf(vectorHits, [textHits], { fetchEntry: (sid) => this.get(sid) });
+      return fused.slice(0, top_k);
+    }
+    return vectorHits;
   }
 
   // C-2: direct filter delete (no query-based point lookup)

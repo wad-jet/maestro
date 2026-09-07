@@ -20,6 +20,16 @@ function fakeClient() {
     createCollection: async (name, opts) => {
       calls.push(["create", name, opts]);
     },
+    createPayloadIndex: async (name, opts) => {
+      calls.push(["createPayloadIndex", name, opts]);
+    },
+    scroll: async (name, opts) => {
+      calls.push(["scroll", name, opts]);
+      return { points: [], next_page_offset: null };
+    },
+    setPayload: async (name, opts) => {
+      calls.push(["setPayload", name, opts]);
+    },
     upsert: async (name, { points }) => {
       calls.push(["upsert", name, points.length]);
     },
@@ -293,8 +303,10 @@ test("qdrant scan scrolls with key filter", async () => {
   const rows = await st.scan({ key: "k1", fields: ["session_id", "title", "decisions"] });
   assert.equal(rows.length, 1);
   assert.deepEqual(rows[0].decisions, ["d1"]);
-  const scrollCall = c.calls.find(([k]) => k === "scroll");
-  assert.deepEqual(scrollCall[2].filter.must, [{ key: "key", match: { value: "k1" } }]);
+  // Последний scroll — это scan (backfill в init() идёт раньше и с is_empty фильтром).
+  const scrollCalls = c.calls.filter(([k]) => k === "scroll");
+  const scanCall = scrollCalls[scrollCalls.length - 1];
+  assert.deepEqual(scanCall[2].filter.must, [{ key: "key", match: { value: "k1" } }]);
 });
 
 test("qdrant scan with embedding returns Float32Array from vector (with_vector)", async () => {
@@ -309,6 +321,163 @@ test("qdrant scan with embedding returns Float32Array from vector (with_vector)"
   assert.equal(rows.length, 1);
   assert.ok(rows[0].embedding instanceof Float32Array, "embedding must be Float32Array");
   assert.ok(rows[0].embedding.every((v, i) => Math.abs(v - [0.1, 0.2, 0.3][i]) < 1e-6));
-  const scrollCall = c.calls.find(([k]) => k === "scroll");
-  assert.equal(scrollCall[2].with_vector, true, "scroll must request vectors");
+  // Последний scroll — это scan (backfill в init() идёт раньше).
+  const scrollCalls = c.calls.filter(([k]) => k === "scroll");
+  const scanCall = scrollCalls[scrollCalls.length - 1];
+  assert.equal(scanCall[2].with_vector, true, "scroll must request vectors");
+});
+
+// --- Task 4: текстовая ветка (payload text + full-text index) ---
+
+test("qdrant upsert adds derived text field (recomputed each time)", async () => {
+  const c = fakeClient();
+  let capturedPoints = null;
+  c.upsert = async (name, { points }) => {
+    c.calls.push(["upsert", name, points.length]);
+    capturedPoints = points;
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  const entry = {
+    session_id: "s1", key: "k1", origin_project_hash: "h1", title: "T",
+    summary: "S", decisions: ["d1", "d2"], embedding: new Float32Array([0.1, 0.2, 0.3]),
+    model_id: "m", author: "alice", time_first: 100, time_last: 200, version: 1,
+  };
+  await st.upsert([entry]);
+  assert.equal(capturedPoints[0].payload.text, "T S d1 d2");
+  // Re-upsert с новыми decisions — text пересчитывается.
+  await st.upsert([{ ...entry, decisions: ["d3"], version: 2 }]);
+  assert.equal(capturedPoints[0].payload.text, "T S d3");
+});
+
+test("qdrant init creates payload text index + backfills empty-text points (paged)", async () => {
+  const c = fakeClient();
+  const setPayloadCalls = [];
+  c.setPayload = async (name, opts) => {
+    c.calls.push(["setPayload", name, opts]);
+    setPayloadCalls.push(opts);
+  };
+  // Пагинация: первая страница возвращает offset, вторая — null.
+  let scrollCount = 0;
+  c.scroll = async (name, opts) => {
+    c.calls.push(["scroll", name, opts]);
+    scrollCount++;
+    if (scrollCount === 1) {
+      return {
+        points: [
+          { id: "p1", payload: { title: "T1", summary: "S1", decisions: '["d1"]' } },
+          { id: "p2", payload: { title: "T2", summary: "S2", decisions: "[]" } },
+        ],
+        next_page_offset: 10,
+      };
+    }
+    return { points: [], next_page_offset: null };
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  // Индекс создан с tokenizer word.
+  const idx = c.calls.find(([k]) => k === "createPayloadIndex");
+  assert.ok(idx, "must create payload index");
+  assert.equal(idx[2].field_name, "text");
+  assert.equal(idx[2].field_schema.type, "text");
+  assert.equal(idx[2].field_schema.tokenizer, "word");
+  // Scroll с is_empty фильтром.
+  const scrollCalls = c.calls.filter(([k]) => k === "scroll");
+  assert.ok(scrollCalls.length >= 2, "must paginate");
+  assert.deepEqual(scrollCalls[0][2].filter.must, [{ key: "text", is_empty: true }]);
+  // setPayload с вычисленным text.
+  assert.equal(setPayloadCalls.length, 1);
+  assert.deepEqual(setPayloadCalls[0].points[0], { id: "p1", payload: { text: "T1 S1 d1" } });
+  assert.deepEqual(setPayloadCalls[0].points[1], { id: "p2", payload: { text: "T2 S2" } });
+});
+
+test("qdrant init: index creation failure → scan-mode fallback, backfill still runs", async () => {
+  const c = fakeClient();
+  const logs = [];
+  const origError = console.error;
+  console.error = (msg) => { logs.push(msg); };
+  let setPayloadCalled = false;
+  c.createPayloadIndex = async () => { throw new Error("unsupported"); };
+  c.setPayload = async (name, opts) => {
+    c.calls.push(["setPayload", name, opts]);
+    setPayloadCalled = true;
+  };
+  c.scroll = async (name, opts) => {
+    c.calls.push(["scroll", name, opts]);
+    return { points: [{ id: "p1", payload: { title: "T1", summary: "S1", decisions: "[]" } }], next_page_offset: null };
+  };
+  try {
+    const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+    await st.init();
+    assert.ok(logs.some((l) => l.includes("scan-mode fallback")), "must log fallback");
+    assert.ok(setPayloadCalled, "backfill must still run");
+  } finally {
+    console.error = origError;
+  }
+});
+
+test("qdrant hybrid: text leg is filter-only (no nearest), full_text_match present, fuses via rrf, capped to top_k", async () => {
+  const c = fakeClient();
+  const textQueries = [];
+  c.query = async (name, q) => {
+    c.calls.push(["query", name, q]);
+    if (q.query && q.query.nearest) {
+      return { points: [{ id: "s1", score: 0.9, payload: { session_id: "s1", title: "t", summary: "s", decisions: "[]", key: "k1" } }] };
+    }
+    if (q.query && q.query.filter && q.query.filter.must.some((m) => m.key === "text")) {
+      textQueries.push(q);
+      return { points: [{ id: "s2", payload: { session_id: "s2" } }] };
+    }
+    // get() — filter-only по session_id.
+    return { points: [{ id: "s2", payload: { session_id: "s2", title: "t2", summary: "s2", decisions: "[]", key: "k1" } }] };
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  const res = await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 2, min_score: 0, key: "k1", query: "OAuth" });
+  // Текстовая ветка: filter-only, БЕЗ nearest.
+  assert.equal(textQueries.length, 1);
+  const tq = textQueries[0];
+  assert.ok(tq.query.filter, "text leg must use query.filter");
+  assert.equal(tq.query.nearest, undefined, "text leg must NOT use nearest");
+  assert.ok(tq.query.filter.must.some((m) => m.key === "text" && m.full_text_match && m.full_text_match.text === "OAuth"));
+  // Фузия: векторный s1 + текстовый s2.
+  assert.ok(res.length >= 2, `expected fused result, got ${res.length}`);
+  const ids = res.map((r) => r.entry.session_id);
+  assert.ok(ids.includes("s1"));
+  assert.ok(ids.includes("s2"));
+  assert.ok(res.length <= 2, `fused result must be capped to top_k, got ${res.length}`);
+});
+
+test("qdrant search: text-leg failure falls back to vector-only", async () => {
+  const c = fakeClient();
+  c.query = async (name, q) => {
+    c.calls.push(["query", name, q]);
+    if (q.query && q.query.nearest) {
+      return { points: [{ id: "s1", score: 0.9, payload: { session_id: "s1", title: "t", summary: "s", decisions: "[]", key: "k1" } }] };
+    }
+    throw new Error("text leg boom");
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  const res = await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "k1", query: "foo" });
+  // Только векторные хиты, без фузии, без throw.
+  assert.equal(res.length, 1);
+  assert.equal(res[0].entry.session_id, "s1");
+});
+
+test("qdrant backfill: malformed decisions JSON falls back to []", async () => {
+  const c = fakeClient();
+  let setPayloadPoints = null;
+  c.setPayload = async (name, opts) => {
+    c.calls.push(["setPayload", name, opts]);
+    setPayloadPoints = opts.points;
+  };
+  c.scroll = async (name, opts) => {
+    c.calls.push(["scroll", name, opts]);
+    return { points: [{ id: "p1", payload: { title: "T1", summary: "S1", decisions: "not-json" } }], next_page_offset: null };
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  // text из title+summary только (decisions не парсится → []).
+  assert.deepEqual(setPayloadPoints[0], { id: "p1", payload: { text: "T1 S1" } });
 });
