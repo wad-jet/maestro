@@ -11,7 +11,7 @@
   },
   "scripts": {
     "test": "node --test plugins/maestro-bootstrap/index.test.js",
-    "test:memory": "node --test plugins/maestro-bootstrap/memory/"
+    "test:memory": "node --test 'plugins/maestro-bootstrap/memory/*.test.js'"
   },
   "devDependencies": {
     "@huggingface/transformers": "^3.0.0",
