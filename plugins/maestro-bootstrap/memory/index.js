@@ -268,6 +268,29 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
           }
         },
       }),
+      memory_forget: tool({
+        description:
+          "Удаление записей памяти maestro по session_id/автору/дате (в пределах активного проекта).",
+        args: {
+          session_id: tool.schema.string().optional().describe("id сессии"),
+          author: tool.schema.string().optional().describe("автор (identity)"),
+          before: tool.schema.number().optional().describe("удалить записи с time_last <= before (epoch ms)"),
+        },
+        execute: async (args, ctx) => {
+          try {
+            // I3: недоступен plugin-созданным сессиям саммаризатора.
+            if (SESSIONS.has(ctx?.sessionID)) return "memory_forget недоступен для служебных сессий.";
+            const { session_id, author, before } = args ?? {};
+            if (session_id === undefined && author === undefined && before === undefined) {
+              return "memory_forget: укажите session_id, author или before";
+            }
+            const n = await storage.deleteByFilter({ key: effectiveKey, session_id, author, before });
+            return `Удалено ${n} записей.`;
+          } catch (err) {
+            return `memory_forget failed: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        },
+      }),
     };
 
     const hooks = {

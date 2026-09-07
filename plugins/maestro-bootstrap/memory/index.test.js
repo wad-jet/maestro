@@ -488,6 +488,118 @@ test("memory_search passes filters and project", async () => {
   }
 });
 
+// ── memory_forget (Task 6) ─────────────────────────────────────────────
+
+test("memory_forget deletes by author and returns count", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-hooks-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.deleteByFilter = async () => 3;
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    const res = await hooks.tool.memory_forget.execute({ author: "alice" }, { sessionID: "s1" });
+    assert.match(res, /Удалено 3 записей/, "must report deleted count");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_forget empty filter errors", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-hooks-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.deleteByFilter = async () => 0;
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    const res = await hooks.tool.memory_forget.execute({}, { sessionID: "s1" });
+    assert.match(res, /укажите session_id, author или before/);
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_forget blocked for [maestro-memory] sessions", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-hooks-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.deleteByFilter = async () => 0;
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    SESSIONS.add("summ-session");
+    try {
+      const res = await hooks.tool.memory_forget.execute({ author: "alice" }, { sessionID: "summ-session" });
+      assert.match(res, /недоступен для служебных сессий/);
+    } finally {
+      SESSIONS.delete("summ-session");
+    }
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_forget passes key and filters to deleteByFilter", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-hooks-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    const seen = [];
+    storage.deleteByFilter = async function (args) { seen.push(args); return 2; };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    await hooks.tool.memory_forget.execute(
+      { session_id: "s9", author: "alice", before: 123 },
+      { sessionID: "s1" },
+    );
+    assert.equal(seen.length, 1, "deleteByFilter must be called once");
+    assert.equal(seen[0].author, "alice");
+    assert.equal(seen[0].session_id, "s9");
+    assert.equal(seen[0].before, 123);
+    assert.equal(typeof seen[0].key, "string");
+    assert.ok(seen[0].key.length > 0, "deleteByFilter must be called with the effective key");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ── retention (Task 2) ─────────────────────────────────────────────────
 
 test("retention_days set → storage.prune called with effective key + logged", async () => {
