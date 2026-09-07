@@ -60,3 +60,15 @@ test("non-object storage does not throw", () => {
 test("dir name sanitized", () => {
   assert.match(sanitizeDirName("a/b c"), /^[0-9a-f]{16}$/);
 });
+test("retention_days default null", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true } });
+  assert.equal(cfg.retention_days, null);
+});
+test("retention_days from config", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, retention_days: 30 } });
+  assert.equal(cfg.retention_days, 30);
+});
+test("retention_days invalid value disables memory", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, retention_days: -5 } });
+  assert.equal(cfg.enabled, false);
+});

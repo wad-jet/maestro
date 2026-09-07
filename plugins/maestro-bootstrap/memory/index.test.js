@@ -44,7 +44,9 @@ function mkClient(overrides = {}) {
 function mkMockStorage() {
   return {
     searches: 0,
+    prunes: [],
     search: async function () { this.searches++; return []; },
+    prune: async function (args) { this.prunes.push(args); return 0; },
     delete: async () => {},
     dispose: async () => {},
     init: async () => {},
@@ -445,4 +447,60 @@ test("pgvector without connection_string_env → memory off", async () => {
   });
   assert.equal(hooks.tool, undefined);
   assert.ok(logged.some(([m, e]) => m === "memory: disabled" && e.reason === "pgvector_config_invalid"));
+});
+
+// ── retention (Task 2) ─────────────────────────────────────────────────
+
+test("retention_days set → storage.prune called with effective key + logged", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-hooks-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.prune = async function (args) { this.prunes.push(args); return 5; };
+    const logged = [];
+    const log = { debug() {}, info: (m, e) => logged.push([m, e]), warn() {}, error() {} };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir, { retention_days: 30 }),
+      log,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    assert.equal(storage.prunes.length, 1, "prune must be called once on startup");
+    assert.equal(storage.prunes[0].olderThanDays, 30);
+    assert.equal(typeof storage.prunes[0].key, "string");
+    assert.ok(storage.prunes[0].key.length > 0, "prune must be called with the effective key");
+    assert.ok(
+      logged.some(([m, e]) => m === "memory: retention pruned" && e.count === 5),
+      "must log retention pruned with count",
+    );
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("retention_days null → storage.prune NOT called", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-hooks-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    assert.equal(storage.prunes.length, 0, "prune must NOT be called when retention_days is null");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

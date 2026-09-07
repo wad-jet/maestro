@@ -16,6 +16,7 @@ export const DEFAULTS = {
   retry_interval_min: 60,
   top_k: 3,
   min_score: 0.35,
+  retention_days: null,
   summarize_timeout_ms: 120000,
   storage: { type: "sqlite", centralized_confidential: "forbid" },
 };
@@ -66,7 +67,12 @@ export function classifyMemoryConfig(maestroJson, { gitName = null } = {}) {
 export function loadMemoryConfig(maestroJson, { gitName = null } = {}) {
   const { enabled, disabled_reason } = classifyMemoryConfig(maestroJson, { gitName });
   if (!enabled) return { ...DEFAULTS, enabled: false, disabled_reason };
-  return mergedConfig(maestroJson.memory);
+  const m = maestroJson.memory;
+  // retention_days: null (off) or a positive number; anything else → disabled.
+  if (m.retention_days != null && (typeof m.retention_days !== "number" || m.retention_days <= 0)) {
+    return { ...DEFAULTS, enabled: false, disabled_reason: "retention_days_invalid" };
+  }
+  return mergedConfig(m);
 }
 
 export function resolveEffectiveKey({ projectHash, namespace }) {

@@ -312,6 +312,16 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     // I6: backfill при старте (fire-and-forget).
     indexer.onStartup().catch(() => {});
 
+    // C2: retention — prune entries older than retention_days at startup.
+    if (typeof config.retention_days === "number" && config.retention_days > 0) {
+      try {
+        const pruned = await storage.prune({ key: effectiveKey, olderThanDays: config.retention_days });
+        if (pruned > 0) log.info("memory: retention pruned", { count: pruned });
+      } catch (err) {
+        log.error("memory: retention prune failed", { error: err instanceof Error ? err.message : String(err) });
+      }
+    }
+
     return hooks;
   } catch (err) {
     log?.error?.("memory: init failed", { error: err instanceof Error ? err.message : String(err) });
