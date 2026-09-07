@@ -355,7 +355,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
           date_to: tool.schema.number().optional().describe("фильтр: конец диапазона time_last (epoch ms)"),
           author: tool.schema.string().optional().describe("фильтр по автору записи"),
           project: tool.schema.string().optional().describe(
-            "кросс-проектный поиск (opt-in): namespace | git-remote/URL | project_hash — только для централизованных бэкендов (qdrant/pgvector)",
+            "кросс-проектный поиск (opt-in): namespace | git-remote/URL | project_hash — доступен на всех бэкендах (sqlite — read-only соседняя БД с fail-soft; qdrant/pg — key-filter)",
           ),
         },
         execute: async (args, ctx) => {
