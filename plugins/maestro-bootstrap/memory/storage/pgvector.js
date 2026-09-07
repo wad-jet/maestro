@@ -83,6 +83,10 @@ export class PgVectorStorage {
       await this.pool.query(`ALTER TABLE ${this.table} ADD COLUMN IF NOT EXISTS fts tsvector GENERATED ALWAYS AS (to_tsvector('${cfg}'::regconfig, coalesce(title,'') || ' ' || coalesce(summary,'') || ' ' || coalesce(decisions,''))) STORED`);
       await this.pool.query(`CREATE INDEX IF NOT EXISTS ${this.table}_fts_idx ON ${this.table} USING gin(fts)`);
     }
+    // M4: индекс может быть потерян при crash между ADD COLUMN и CREATE INDEX
+    // (первый не-атомарный init). Безусловный CREATE INDEX IF NOT EXISTS
+    // восстанавливает его, не трогая живую колонку (silent seq-scan деградация).
+    await this.pool.query(`CREATE INDEX IF NOT EXISTS ${this.table}_fts_idx ON ${this.table} USING gin(fts)`);
     await this.pool.query(`CREATE INDEX IF NOT EXISTS ${this.table}_key_idx ON ${this.table} (key)`);
   }
   async dispose() { await this.pool.end?.(); }

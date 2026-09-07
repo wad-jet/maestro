@@ -379,6 +379,20 @@ test("pgvector init: recreate rolls back on failure (no column loss)", async () 
   assert.ok(!sqls.includes("COMMIT"), "must NOT COMMIT on failure");
 });
 
+test("pgvector init: recreates GIN index unconditionally when column live but index missing", async () => {
+  // Колонка fts уже существует с совпадающим конфигом (expr === russian), но
+  // индекс потерян (crash между ADD COLUMN и CREATE INDEX на первом
+  // не-атомарном init) → init должен выдать CREATE INDEX IF NOT EXISTS
+  // безусловно (M4), не трогая живую колонку.
+  const p = fakePoolHybrid({ expr: "to_tsvector('russian'::regconfig, ...)" });
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, textSearchConfig: "russian" });
+  await st.init();
+  const gin = p.calls.filter(([sql]) => sql.includes("_fts_idx") && sql.includes("USING gin"));
+  assert.ok(gin.length >= 1, "must issue CREATE INDEX on fts even when column already matches config");
+  // Никакого recreate (DROP/ADD) — колонка не трогается.
+  assert.ok(!p.calls.some(([sql]) => sql.includes("DROP COLUMN IF EXISTS fts")), "must not drop live column");
+});
+
 test("pgvector get/scan exclude fts column (explicit list)", async () => {
   const p = fakePoolHybrid();
   const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3 });

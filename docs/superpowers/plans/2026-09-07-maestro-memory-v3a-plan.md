@@ -31,7 +31,7 @@
 - Modify: `plugins/maestro-bootstrap/memory/storage/pgvector.js` — текстовая ветка + generated-колонка.
 - Modify: `plugins/maestro-bootstrap/memory/storage/qdrant.js` — текстовая ветка + payload index.
 - Modify: `plugins/maestro-bootstrap/memory/config.js` — ключ `text_search_config` + валидация.
-- Modify: тесты `rrf.test.js`, `storage/sqlite.test.js`, `storage/pgvector.test.js`, `storage/qdrant.test.js`, `config.test.js`, `index.test.js`.
+- Modify: тесты `rrf.test.js`, `storage.test.js`, `storage/pgvector.test.js`, `storage/qdrant.test.js`, `config.test.js`, `index.test.js`.
 - Docs (cross-cutting): `SECURITY.md`, `manual_docs/reference/memory.md`, `manual_docs/reference/config.md`, `manual_docs/reference/model-selection.md`, `manual_docs/explanation/agents-and-trust.md`, `manual_docs/how-to/enable-memory.md`, `manual_docs/overview/changelog.md`, `plugins/maestro-bootstrap/README.md`, `skills/maestro-assistant/SKILL.md`, `docs/project-context.md`, `docs/testing/maestro-sandbox-checklist.md`.
 
 ---

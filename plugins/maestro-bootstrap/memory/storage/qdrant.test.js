@@ -520,3 +520,18 @@ test("qdrant get excludes derived text field from entry", async () => {
   // Производное поле text не должно протекать в entry (spec §3.6).
   assert.equal(found.text, undefined, "get() must not leak derived text field");
 });
+
+test("qdrant search: vector-leg entry excludes derived text field", async () => {
+  const c = fakeClient();
+  c.query = async (name, q) => {
+    c.calls.push(["query", name, q]);
+    // Векторная ветка возвращает payload С полем text (как в реальном API).
+    return { points: [{ id: "s1", score: 0.9, payload: { session_id: "s1", title: "t", summary: "s", decisions: "[]", key: "k1", text: "t s" } }] };
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  const res = await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "k1" });
+  assert.equal(res.length, 1);
+  assert.equal(res[0].entry.session_id, "s1");
+  assert.equal(res[0].entry.text, undefined, "vector-leg entry must not leak derived text field");
+});

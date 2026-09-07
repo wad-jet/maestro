@@ -290,11 +290,14 @@ export class SqliteStorage {
         const fetch = db.prepare("SELECT * FROM memory WHERE session_id = ?");
         ftsHits = ftsRows.slice(0, top_k).map((r) => {
           const full = fetch.get(r.session_id);
-          if (!full) return { session_id: r.session_id };
+          // M6: memory-строка отсутствует (desync FTS/memory) → пропускаем хит,
+          // не создавая phantom-запись без entry (иначе fuseRrf/рендер упадут
+          // на entry.decisions.join).
+          if (!full) return null;
           let parsed;
           try { parsed = JSON.parse(full.decisions); } catch { parsed = []; }
           return { session_id: r.session_id, entry: { ...full, embedding: undefined, decisions: parsed } };
-        });
+        }).filter(Boolean);
       } catch (err) {
         console.error(`[memory] FTS MATCH failed, falling back to vector-only: ${err.message}`);
       }

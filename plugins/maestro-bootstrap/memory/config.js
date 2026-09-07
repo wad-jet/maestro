@@ -39,7 +39,9 @@ function mergedConfig(m) {
       qdrant: m.storage?.qdrant ?? null,
       pgvector: {
         ...(m.storage?.pgvector ?? {}),
-        text_search_config: m.storage?.text_search_config ?? m.storage?.pgvector?.text_search_config ?? "russian",
+        // M5: только документированный вложенный ключ (spec §4); flat-алиас
+        // storage.text_search_config убран за строгость.
+        text_search_config: m.storage?.pgvector?.text_search_config ?? "russian",
       },
       centralized_confidential: m.storage?.centralized_confidential ?? "forbid",
     },
@@ -56,7 +58,8 @@ function mergedConfig(m) {
  */
 function pgvectorTextSearchConfigValid(m) {
   if (m?.storage?.type !== "pgvector") return true;
-  const v = m?.storage?.text_search_config ?? m?.storage?.pgvector?.text_search_config;
+  // M5: читаем только вложенный ключ (spec §4); flat-алиас убран.
+  const v = m?.storage?.pgvector?.text_search_config;
   if (v == null) return true;
   return typeof v === "string" && v.length <= 63 && TEXT_SEARCH_CONFIG_RE.test(v);
 }

@@ -8,7 +8,7 @@
 - **category:** memory plugin
 - **scenarios:**
   - **sqlite hybrid + cross-project** (`plugins/maestro-bootstrap/memory/storage/sqlite.js`):
-    - run: `node --test plugins/maestro-bootstrap/memory/storage/sqlite.test.js`
+    - run: `node --test plugins/maestro-bootstrap/memory/storage.test.js`
     - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent`
   - **qdrant hybrid** (`plugins/maestro-bootstrap/memory/storage/qdrant.js`):
     - run: `node --test plugins/maestro-bootstrap/memory/storage/qdrant.test.js`

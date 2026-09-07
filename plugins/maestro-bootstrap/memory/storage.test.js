@@ -287,6 +287,39 @@ test("sqlite cross-project: sibling text-only hit gets full entry (embedded)", a
   }
 });
 
+test("sqlite cross-project: sibling FTS row without memory row is skipped (no phantom entry)", async () => {
+  const base = mkdtempSync(join(tmpdir(), "mm-sqlite-xp-"));
+  const dir = (key) => join(base, "maestro", "memory", sanitizeDirName(key));
+  const activeKey = "active"; const other = "other";
+  mkdirSync(dir(activeKey), { recursive: true });
+  mkdirSync(dir(other), { recursive: true });
+  const mk = (key) => new SqliteStorage({ dbPath: join(dir(key), "memory.db"), modelId: "m", dim: 3, moduleDir: null });
+  const active = mk(activeKey); const otherDb = mk(other);
+  try {
+    await otherDb.init();
+    await otherDb.upsert([{ session_id: "o1", key: other, origin_project_hash: "ho", title: "OAuth token refresh", summary: "OAuth OAuth flow", decisions: ["d"], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([0, 1, 0]) }]);
+    // Desync: удаляем memory-строку, оставляя FTS-строку (имитация сбоя).
+    otherDb.db.prepare("DELETE FROM memory WHERE session_id = ?").run("o1");
+    await otherDb.dispose();
+    await active.init();
+    await active.upsert([{ session_id: "a1", key: activeKey, origin_project_hash: "ha", title: "Active", summary: "sum", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([1, 0, 0]) }]);
+    // Поиск с текстовым запросом: FTS-хит o1 без memory-строки должен быть
+    // пропущен — без crash и без phantom-записи (M6).
+    const res = await active.search(new Float32Array([1, 0, 0]), { key: activeKey, project: other, top_k: 10, min_score: 0, query: "OAuth" });
+    const ids = res.map((h) => h.entry.session_id);
+    assert.ok(ids.includes("a1"), "active hit present");
+    assert.ok(!ids.includes("o1"), "sibling FTS hit without memory row must be skipped");
+    // Ни один хит не должен быть phantom ({_source_key} без entry).
+    for (const h of res) {
+      assert.ok(h.entry && h.entry.session_id, "every hit must carry a real entry");
+    }
+  } finally {
+    await active.dispose();
+    await otherDb.dispose();
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test("sqlite model mismatch throws", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mem-"));
   const dbPath = join(dir, "memory.db");

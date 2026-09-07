@@ -131,10 +131,12 @@ export class QdrantStorage {
       filter: { must },
       with_payload: true,
     });
-    const vectorHits = (res.points ?? []).map((r) => ({
-      entry: { ...r.payload, embedding: undefined, decisions: JSON.parse(r.payload.decisions) },
-      score: r.score,
-    }));
+    const vectorHits = (res.points ?? []).map((r) => {
+      // M3: производное поле `text` (для full-text индекса) не должно протекать
+      // в entry векторной ветки (как в get()) — выкидываем через деструктуризацию.
+      const { text, ...rest } = r.payload;
+      return { entry: { ...rest, embedding: undefined, decisions: JSON.parse(rest.decisions) }, score: r.score };
+    });
 
     // Текстовая ветка: только full-text (full_text_match), фузия через RRF.
     // Зеркалит key-set/date/author фильтры векторной ветки (buildMust).

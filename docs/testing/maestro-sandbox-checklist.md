@@ -87,7 +87,7 @@
 | F8 | `@maestro-memory-report` генерирует HTML-агрегаты | ✅ | вызов отчёта памяти возвращает агрегированный HTML/текст с кластерами, статистикой, графом; без crash | |
 | F9 | pgvector hybrid | ✅ | pgvector-проект в sandbox; `memory_search` с текстовым `query` возвращает лексические совпадения (ts_rank); без crash | |
 | F10 | qdrant hybrid | ✅ | qdrant-проект в sandbox; `memory_search` с `query` возвращает full-text совпадения через RRF; без crash | |
-| F11 | sqlite cross-project | ✅ | sqlite-проект; `memory_search { project: <сосед> }` возвращает записи соседа read-only; `origin_project_hash`/source-key в выдаче; без crash | |
+| F11 | sqlite cross-project | ✅ | sqlite-проект; `memory_search { project: <сосед> }` возвращает записи соседа read-only; `origin_project_hash` в выдаче (провенанс); без crash | |
 
 ---
 

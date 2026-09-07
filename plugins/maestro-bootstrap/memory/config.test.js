@@ -101,7 +101,7 @@ test("text_search_config default russian", () => {
 });
 
 test("text_search_config invalid value disables only for pgvector", () => {
-  const cfg = { memory: { enabled: true, storage: { type: "pgvector", text_search_config: "Bad Config" }, identity: "x" } };
+  const cfg = { memory: { enabled: true, storage: { type: "pgvector", pgvector: { text_search_config: "Bad Config" } }, identity: "x" } };
   const cls = classifyMemoryConfig(cfg);
   assert.equal(cls.enabled, false);
   assert.equal(cls.disabled_reason, "pgvector_text_search_config_invalid");
@@ -110,13 +110,21 @@ test("text_search_config invalid value disables only for pgvector", () => {
 });
 
 test("text_search_config length cap 63", () => {
-  const cls = classifyMemoryConfig({ memory: { enabled: true, storage: { type: "pgvector", text_search_config: "a".repeat(64) }, identity: "x" } });
+  const cls = classifyMemoryConfig({ memory: { enabled: true, storage: { type: "pgvector", pgvector: { text_search_config: "a".repeat(64) } }, identity: "x" } });
   assert.equal(cls.disabled_reason, "pgvector_text_search_config_invalid");
 });
 
 test("text_search_config valid custom passes", () => {
-  const cfg = loadMemoryConfig({ memory: { enabled: true, storage: { type: "pgvector", text_search_config: "english" }, identity: "x" } });
+  const cfg = loadMemoryConfig({ memory: { enabled: true, storage: { type: "pgvector", pgvector: { text_search_config: "english" } }, identity: "x" } });
   assert.equal(cfg.storage.pgvector.text_search_config, "english");
+});
+
+test("flat storage.text_search_config alias is dropped (nested key only)", () => {
+  // M5: flat-алиас убран — только вложенный storage.pgvector.text_search_config.
+  const cfg = loadMemoryConfig({ memory: { enabled: true, storage: { type: "pgvector", text_search_config: "english" }, identity: "x" } });
+  assert.equal(cfg.storage.pgvector.text_search_config, "russian", "flat alias must be ignored");
+  const cls = classifyMemoryConfig({ memory: { enabled: true, storage: { type: "pgvector", text_search_config: "Bad Config" }, identity: "x" } });
+  assert.equal(cls.enabled, true, "flat alias must not trigger validation");
 });
 
 test("resolveEffectiveTextConfig: valid passes through, invalid/absent falls back to russian", () => {
