@@ -529,7 +529,7 @@ git commit -m "feat(memory): qdrant hybrid text search (payload text index + rrf
 
 **Files:**
 - Modify: `plugins/maestro-bootstrap/memory/storage/sqlite.js` (search — снять throw, sibling-путь; добавить `sanitizeDirName` import)
-- Test: `plugins/maestro-bootstrap/memory/storage/sqlite.test.js`
+- Test: `plugins/maestro-bootstrap/memory/storage.test.js`
 
 **Interfaces:**
 - Consumes: `fuseRrf` (Task 1), `resolveSearchKeys` (существует в `../project.js`)
@@ -582,7 +582,7 @@ test("sqlite cross-project: missing sibling file is skipped silently", async () 
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `node --test plugins/maestro-bootstrap/memory/storage/sqlite.test.js`
+Run: `node --test plugins/maestro-bootstrap/memory/storage.test.js`
 Expected: FAIL — кросс-проект бросает ошибку (существующий throw).
 
 - [ ] **Step 3: Write minimal implementation**
@@ -632,7 +632,7 @@ Expected: FAIL — кросс-проект бросает ошибку (суще
 
 - [ ] **Step 4: Run test to verify it passes**
 
-Run: `node --test plugins/maestro-bootstrap/memory/storage/sqlite.test.js`
+Run: `node --test plugins/maestro-bootstrap/memory/storage.test.js`
 Expected: PASS (старые + новые).
 
 - [ ] **Step 5: Run full memory + core suites**
@@ -643,7 +643,7 @@ Expected: 220+ memory, 174 core.
 - [ ] **Step 6: Commit**
 
 ```bash
-git add plugins/maestro-bootstrap/memory/storage/sqlite.js plugins/maestro-bootstrap/memory/storage/sqlite.test.js
+git add plugins/maestro-bootstrap/memory/storage/sqlite.js plugins/maestro-bootstrap/memory/storage.test.js
 git commit -m "feat(memory): sqlite cross-project read-only search (fail-soft, model check)"
 ```
 
@@ -716,7 +716,7 @@ git commit -m "docs(memory): backend parity matrix, centralized_confidential rat
 
 - **Risk: MEDIUM** — модули `storage/*.js` (sqlite/qdrant/pgvector) + config (cross-layer: config → storage → tools → docs; аддитивные изменения схем).
 - Scenarios:
-  - `plugins/maestro-bootstrap/memory/storage/sqlite.js` — гибрид/кросс-проект: run `node --test plugins/maestro-bootstrap/memory/storage/sqlite.test.js`
+  - `plugins/maestro-bootstrap/memory/storage/sqlite.js` — гибрид/кросс-проект: run `node --test plugins/maestro-bootstrap/memory/storage.test.js`
   - `plugins/maestro-bootstrap/memory/storage/qdrant.js` — run `node --test plugins/maestro-bootstrap/memory/storage/qdrant.test.js`
   - `plugins/maestro-bootstrap/memory/storage/pgvector.js` — run `node --test plugins/maestro-bootstrap/memory/storage/pgvector.test.js`
   - `plugins/maestro-bootstrap/memory/config.js` — run `node --test plugins/maestro-bootstrap/memory/config.test.js`
