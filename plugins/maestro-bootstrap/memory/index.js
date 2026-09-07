@@ -3,9 +3,10 @@ import os from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { makeBoundedMap, readPluginVersion } from "../core.js";
 import { loadMemoryConfig, resolveEffectiveKey, resolveIdentity, sanitizeDirName } from "./config.js";
+import { maskEntry } from "./mask.js";
 import { ensureModule } from "./provision.js";
 import { createStorage } from "./storage.js";
 import { Embedder } from "./embeddings.js";
@@ -49,6 +50,35 @@ function gitConfig(root, key) {
   } catch {
     return null;
   }
+}
+
+// Schema-v1 fields required for import (mirrors the `memory` table).
+const IMPORT_REQUIRED = [
+  "session_id", "key", "origin_project_hash", "title", "summary", "decisions",
+  "model_id", "author", "time_first", "time_last", "version",
+];
+
+/**
+ * Validate a parsed JSONL entry against schema v1 + model_id/dim match.
+ * Returns an error reason string, or null when valid.
+ * @param {object} e  Parsed entry.
+ * @param {{ modelId: string, dim: number }} embeddings  Storage model identity.
+ * @returns {string|null}
+ */
+function validateImportEntry(e, embeddings) {
+  if (!e || typeof e !== "object") return "не объект";
+  for (const f of IMPORT_REQUIRED) {
+    if (e[f] === undefined || e[f] === null) return `отсутствует поле ${f}`;
+  }
+  if (!Array.isArray(e.decisions)) return "decisions не массив";
+  if (!Array.isArray(e.embedding)) return "embedding не массив";
+  if (e.model_id !== embeddings.modelId) {
+    return `model_id не совпадает (файл=${e.model_id}, хранилище=${embeddings.modelId})`;
+  }
+  if (e.embedding.length !== embeddings.dim) {
+    return `размерность embedding не совпадает (файл=${e.embedding.length}, хранилище=${embeddings.dim})`;
+  }
+  return null;
 }
 
 /**
@@ -288,6 +318,85 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             return `Удалено ${n} записей.`;
           } catch (err) {
             return `memory_forget failed: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        },
+      }),
+      memory_export: tool({
+        description:
+          "Экспорт всех записей памяти активного проекта в JSONL (полная схема v1, включая embedding и model_id). Путь по умолчанию — локальный; путь наружу машины — осознанный выбор пользователя.",
+        args: {
+          path: tool.schema.string().optional().describe("путь к файлу JSONL (по умолчанию — <dataDir>/maestro/memory/export-<key>-<ts>.jsonl)"),
+        },
+        execute: async (args, ctx) => {
+          try {
+            // I3: недоступен plugin-созданным сессиям саммаризатора.
+            if (SESSIONS.has(ctx?.sessionID)) return "memory_export недоступен для служебных сессий.";
+            const fields = [
+              "session_id", "key", "origin_project_hash", "title", "summary", "decisions",
+              "model_id", "author", "time_first", "time_last", "version", "embedding",
+            ];
+            const entries = await storage.scan({ key: effectiveKey, fields });
+            const ts = Date.now();
+            const path = args?.path ?? join(dataDir, "memory", `export-${sanitizeDirName(effectiveKey)}-${ts}.jsonl`);
+            mkdirSync(dirname(path), { recursive: true });
+            const lines = [];
+            // C1: confidential-проект → предупреждение о локальной границе.
+            const confidentialPaths = maestroConfig?.confidential?.paths ?? [];
+            if (confidentialPaths.length > 0) {
+              lines.push("внимание: данные замаскированы, но могут покинуть машину — осознанный выбор");
+            }
+            for (const e of entries) {
+              const emb = e.embedding instanceof Float32Array
+                ? e.embedding
+                : new Float32Array(e.embedding.buffer, e.embedding.byteOffset, e.embedding.byteLength / 4);
+              lines.push(JSON.stringify({ ...e, embedding: Array.from(emb) }));
+            }
+            writeFileSync(path, lines.join("\n") + (lines.length ? "\n" : ""));
+            return `Экспортировано ${entries.length} записей в ${path}`;
+          } catch (err) {
+            return `memory_export failed: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        },
+      }),
+      memory_import: tool({
+        description:
+          "Импорт записей памяти из JSONL (полная схема v1). Валидация всех записей атомарно (схема + model_id/dim); каждая запись повторно маскируется перед записью. replace: true — очистить активный проект перед импортом.",
+        args: {
+          path: tool.schema.string().describe("путь к файлу JSONL"),
+          replace: tool.schema.string().optional().describe("true — очистить активный key перед импортом"),
+        },
+        execute: async (args, ctx) => {
+          try {
+            // I3: недоступен plugin-созданным сессиям саммаризатора.
+            if (SESSIONS.has(ctx?.sessionID)) return "memory_import недоступен для служебных сессий.";
+            if (!args?.path) return "memory_import: укажите path";
+            const raw = readFileSync(args.path, "utf8");
+            const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
+            const entries = [];
+            for (let i = 0; i < lines.length; i++) {
+              let parsed;
+              try {
+                parsed = JSON.parse(lines[i]);
+              } catch {
+                return `memory_import: строка ${i + 1} невалидна: не JSON`;
+              }
+              const reason = validateImportEntry(parsed, embeddings);
+              if (reason) return `memory_import: строка ${i + 1} невалидна: ${reason}`;
+              entries.push(parsed);
+            }
+            // Атомарность: все строки валидны → применяем. Сначала re-mask.
+            const masked = entries.map((e) => maskEntry(e, { confidentialPatterns: maestroConfig?.confidential?.paths ?? [] }));
+            if (args.replace === "true" || args.replace === true) {
+              await storage.deleteByFilter({ key: effectiveKey });
+            }
+            const upserts = masked.map((e) => ({
+              ...e,
+              embedding: new Float32Array(e.embedding),
+            }));
+            await storage.upsert(upserts);
+            return `Импортировано ${upserts.length} записей`;
+          } catch (err) {
+            return `memory_import failed: ${err instanceof Error ? err.message : String(err)}`;
           }
         },
       }),

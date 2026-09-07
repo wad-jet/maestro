@@ -655,3 +655,217 @@ test("retention_days null → storage.prune NOT called", async () => {
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── memory_export / memory_import (Task 7) ─────────────────────────────
+
+// Build a full schema-v1 entry object (embedding as Float32Array).
+function mkFullEntry(overrides = {}) {
+  return {
+    session_id: "s1",
+    key: "k",
+    origin_project_hash: "h",
+    title: "Title",
+    summary: "Summary",
+    decisions: ["d1", "d2"],
+    embedding: new Float32Array([0.1, 0.2, 0.3]),
+    model_id: "m",
+    author: "alice",
+    time_first: 1,
+    time_last: 2,
+    version: 0,
+    ...overrides,
+  };
+}
+
+// Real sqlite storage on a temp file, injected via deps.
+async function mkSqliteStorage(dir) {
+  const { createStorage } = await import("./storage.js");
+  const { mkdirSync } = await import("node:fs");
+  mkdirSync(dir, { recursive: true });
+  const st = createStorage({
+    type: "sqlite",
+    options: { dbPath: join(dir, "mem.db"), moduleDir: join(dir, "memory", "module") },
+    modelId: "m",
+    dim: 3,
+  });
+  await st.init();
+  return st;
+}
+
+test("export writes JSONL; import round-trips with embedding", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-exp-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = await mkSqliteStorage(dir);
+    await storage.upsert([mkFullEntry()]);
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir, { namespace: "k" }),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+
+    const exportPath = join(dir, "export.jsonl");
+    const expRes = await hooks.tool.memory_export.execute({ path: exportPath }, { sessionID: "s1" });
+    assert.match(expRes, /Экспортировано 1 запис/);
+    assert.ok(existsSync(exportPath), "export file must exist");
+
+    // Fresh storage (new db file) → import → search finds it.
+    const storage2 = await mkSqliteStorage(join(dir, "fresh"));
+    const hooks2 = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir, { namespace: "k" }),
+      log: silentLog,
+      root: dir,
+      deps: { storage: storage2, embeddings: mkMockEmbeddings() },
+    });
+    const impRes = await hooks2.tool.memory_import.execute({ path: exportPath }, { sessionID: "s1" });
+    assert.match(impRes, /Импортировано 1 запис/);
+
+    const hits = await storage2.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 5, min_score: 0, key: "k" });
+    assert.equal(hits.length, 1, "imported entry must be searchable");
+    assert.equal(hits[0].entry.title, "Title");
+    assert.deepEqual(hits[0].entry.decisions, ["d1", "d2"]);
+
+    await hooks.dispose?.();
+    await hooks2.dispose?.();
+    await storage.dispose?.();
+    await storage2.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("import re-masks secrets in JSONL", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-mask-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const exportPath = join(dir, "export.jsonl");
+    const entry = mkFullEntry({ summary: "API_KEY=secret123" });
+    const line = JSON.stringify({ ...entry, embedding: Array.from(entry.embedding) });
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(exportPath, line + "\n");
+
+    const storage = await mkSqliteStorage(dir);
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    const impRes = await hooks.tool.memory_import.execute({ path: exportPath }, { sessionID: "s1" });
+    assert.match(impRes, /Импортировано 1 запис/);
+
+    const hits = await storage.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 5, min_score: 0, key: "k" });
+    assert.equal(hits.length, 1);
+    assert.ok(!hits[0].entry.summary.includes("secret123"), "secret must be masked after import");
+    await hooks.dispose?.();
+    await storage.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("import invalid model_id fails atomically", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-model-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const exportPath = join(dir, "export.jsonl");
+    const entry = mkFullEntry({ model_id: "WRONG" });
+    const line = JSON.stringify({ ...entry, embedding: Array.from(entry.embedding) });
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(exportPath, line + "\n");
+
+    const storage = await mkSqliteStorage(dir);
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    const impRes = await hooks.tool.memory_import.execute({ path: exportPath }, { sessionID: "s1" });
+    assert.match(impRes, /невалидна|model_id|не совпадает/i, "must report validation error");
+
+    const stats = await storage.stats({ key: "k" });
+    assert.equal(stats.entries, 0, "nothing must be imported on invalid model_id");
+    await hooks.dispose?.();
+    await storage.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("import without model_id/dim validation rejects", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-nodim-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const exportPath = join(dir, "export.jsonl");
+    const { writeFileSync } = await import("node:fs");
+    // Missing embedding entirely.
+    const { embedding, ...noEmbed } = mkFullEntry();
+    writeFileSync(exportPath, JSON.stringify(noEmbed) + "\n");
+
+    const storage = await mkSqliteStorage(dir);
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    const impRes = await hooks.tool.memory_import.execute({ path: exportPath }, { sessionID: "s1" });
+    assert.match(impRes, /невалидна|embedding/i, "must reject entry missing embedding");
+
+    const stats = await storage.stats({ key: "k" });
+    assert.equal(stats.entries, 0, "nothing must be imported");
+    await hooks.dispose?.();
+    await storage.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("export/import blocked for [maestro-memory] sessions", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-gate-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    SESSIONS.add("summ-session");
+    try {
+      const expRes = await hooks.tool.memory_export.execute({}, { sessionID: "summ-session" });
+      assert.match(expRes, /недоступен для служебных сессий/);
+      const impRes = await hooks.tool.memory_import.execute({ path: "x" }, { sessionID: "summ-session" });
+      assert.match(impRes, /недоступен для служебных сессий/);
+    } finally {
+      SESSIONS.delete("summ-session");
+    }
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
