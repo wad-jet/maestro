@@ -220,7 +220,8 @@ test("pgvector prune filters by time_last", async () => {
   assert.ok(del);
   assert.ok(del[0].includes("time_last <= $2"));
   assert.equal(del[1][0], "k1");
-  assert.ok(del[1][1] <= before - 30 * 86400_000);
+  assert.ok(del[1][1] >= before - 30 * 86400_000);
+  assert.ok(del[1][1] <= before - 30 * 86400_000 + 5000);
 });
 
 test("pgvector stats key-scoped", async () => {
