@@ -233,6 +233,30 @@ else:
     print("maestro-install: плагин добавлен в конфиг opencode")
 PY
 
+# --- 5a. Memory layer (опционально) ------------------------------------------
+
+if [[ -t 0 ]]; then
+  read -r -p "Подключить memory layer (опциональная векторная память сессий)? (y/N) " memory_yn
+  if [[ "${memory_yn,,}" == "y" ]]; then
+    if [[ -n "${XDG_DATA_HOME:-}" ]]; then
+      memory_data_dir="$XDG_DATA_HOME/maestro"
+    elif [[ "$(uname)" == "Darwin" ]]; then
+      memory_data_dir="$HOME/Library/Application Support/maestro"
+    else
+      memory_data_dir="$HOME/.local/share/maestro"
+    fi
+    mkdir -p "$memory_data_dir/memory"
+    touch "$memory_data_dir/memory/enabled.flag"
+    if command -v npm >/dev/null 2>&1 || command -v bun >/dev/null 2>&1; then
+      info "memory layer: маркер установлен ($memory_data_dir/memory/enabled.flag)."
+      echo "  Зависимости установит плагин при первом запуске (см. manual_docs/how-to/enable-memory.md)."
+    else
+      warn "memory layer выбран, но npm/bun не найден в PATH — зависимости установить нечем."
+      echo "  Установите Node.js/npm и повторите, либо включите память позже через maestro-assistant."
+    fi
+  fi
+fi
+
 # --- 6. Загрузка maestro-update.sh (идемпотентно, всегда перезаписывает) -----
 
 if fetch "$MAESTRO_UPDATE_RAW_URL" "maestro-update.sh"; then
