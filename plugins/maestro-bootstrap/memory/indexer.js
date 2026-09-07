@@ -140,42 +140,39 @@ export class Indexer {
 
       const key = resolveEffectiveKey({ projectHash: this.projectKey.hash, namespace: this.config.namespace ?? null });
 
-      // I1: build entry, mask FIRST, then embed masked content
-      const entry = {
-        session_id: sessionID,
-        key,
-        origin_project_hash: this.projectKey.hash,
-        title: null,
-        summary: null,
-        decisions: null,
-        embedding: null,
-        model_id: this.embeddings.modelId,
-        author: this.author ?? this.config.author ?? "unknown",
-        time_first: sess?.time?.created ?? 0,
-        time_last: sess?.time?.updated ?? 0,
-        version: 0,
-      };
-
-      // Summarize OUTSIDE withTimeout — it can fail with clear errors
-      const { title, summary, decisions } = await this.summarize({
-        client: this.client,
-        sessionID,
-        transcript: masked,
-        model: modelRef,
-        summarizerModel: this.config.summarizer_model ?? null,
-      });
-
-      // I1: update entry with results, then mask
-      entry.title = title;
-      entry.summary = summary;
-      entry.decisions = decisions;
-
-      // G2: re-mask entry before write
-      const maskedEntry = maskEntry(entry, { confidentialPatterns: this.confidentialPatterns });
-
-      // Embed AFTER mask + wrap in withTimeout
+      // I1: summarize + embed + upsert ALL inside withTimeout — bounds the LLM-dependent chain
+      // so a hanging client.session.prompt cannot hold this.running (the concurrency lock) forever.
       const timeoutMs = this.config.summarize_timeout_ms ?? 120_000;
       const work = (async () => {
+        // Summarize inside withTimeout (I1) — if client.session.prompt hangs, timeout releases lock
+        const { title, summary, decisions } = await this.summarize({
+          client: this.client,
+          sessionID,
+          transcript: masked,
+          model: modelRef,
+          summarizerModel: this.config.summarizer_model ?? null,
+        });
+
+        // Build entry, mask FIRST, then embed masked content (I1: embed after maskEntry)
+        const entry = {
+          session_id: sessionID,
+          key,
+          origin_project_hash: this.projectKey.hash,
+          title,
+          summary,
+          decisions,
+          embedding: null,
+          model_id: this.embeddings.modelId,
+          author: this.author ?? this.config.author ?? "unknown",
+          time_first: sess?.time?.created ?? 0,
+          time_last: sess?.time?.updated ?? 0,
+          version: 0,
+        };
+
+        // G2: re-mask entry before write (defense-in-depth)
+        const maskedEntry = maskEntry(entry, { confidentialPatterns: this.confidentialPatterns });
+
+        // I1: embed AFTER mask
         const vec = await this.embeddings.embed(`${maskedEntry.title}\n${maskedEntry.summary}\n${maskedEntry.decisions.join("\n")}`);
         maskedEntry.embedding = vec;
 

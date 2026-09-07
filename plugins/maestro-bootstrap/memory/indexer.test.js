@@ -495,6 +495,39 @@ test("indexer queued session runs after first _run throws (queue-after-error)", 
   idx.dispose();
 });
 
+// ── I1 — summarize inside withTimeout (hangs, bounded) ──────────────
+
+test("indexer timeout bounds hanging summarize (I1)", async () => {
+  const client = mkClient();
+  const storage = mkStorage(client);
+  const summarize = async () => {
+    // Hang forever — simulates a stuck client.session.prompt
+    await new Promise(() => {});
+    return { title: "t", summary: "s", decisions: [] };
+  };
+  let failCalled = false;
+  let failSessionId = null;
+  const idx = new Indexer({
+    client, config: mkConfig({ summarize_timeout_ms: 50 }),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage,
+    state: { ...mkState(), recordFail: async (sid) => { failCalled = true; failSessionId = sid; } },
+    summarize,
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+  });
+
+  const start = Date.now();
+  await idx._run("s1");
+  const elapsed = Date.now() - start;
+
+  // Should complete within timeout + small buffer (50ms + 100ms buffer)
+  assert.ok(elapsed >= 40, `timed out fast (expected ~50ms, got ${elapsed}ms)`);
+  assert.ok(elapsed < 300, `completed too slowly (expected <300ms, got ${elapsed}ms)`);
+  assert.ok(failCalled, "recordFail called after timeout");
+  assert.equal(failSessionId, "s1");
+  idx.dispose();
+});
+
 // ── Custom author (M7) ───────────────────────────────────────────────
 
 test("indexer uses explicit author param (M7)", async () => {
