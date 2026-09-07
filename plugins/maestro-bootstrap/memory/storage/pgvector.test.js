@@ -202,3 +202,19 @@ test("pgvector scan returns fields", async () => {
   assert.ok(sel[0].includes("WHERE key=$1"), sel[0]);
   assert.equal(sel[1][0], "k1");
 });
+
+test("pgvector scan without decisions field does not crash", async () => {
+  const p = fakePool();
+  p.query = async (sql, params) => {
+    p.calls.push([sql, params]);
+    if (sql.startsWith("SELECT count")) return { rows: [{ count: "1" }] };
+    if (sql.includes("FROM maestro_memory")) return { rows: [{ session_id: "s1", title: "t1", key: "k1" }] };
+    return { rows: [] };
+  };
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3 });
+  await st.init();
+  const rows = await st.scan({ key: "k1", fields: ["session_id", "title"] });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].title, "t1");
+  assert.equal(rows[0].decisions, undefined);
+});

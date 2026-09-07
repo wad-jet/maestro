@@ -273,8 +273,12 @@ export class SqliteStorage {
   async scan({ key, fields }) {
     if (typeof key !== "string" || !key) throw new Error("scan: key required");
     const cols = (fields && fields.length ? fields : DEFAULT_SCAN_FIELDS).filter((f) => SCAN_FIELDS.includes(f));
+    if (!cols.length) throw new Error("scan: no valid fields requested");
     const rows = this.db.prepare(`SELECT ${cols.join(", ")} FROM memory WHERE key = ?`).all(key);
-    return rows.map((r) => ({ ...r, decisions: JSON.parse(r.decisions) }));
+    return rows.map((r) => {
+      if ("decisions" in r) r.decisions = JSON.parse(r.decisions);
+      return r;
+    });
   }
 
   async get(session_id) {

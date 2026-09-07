@@ -420,6 +420,23 @@ test("scan requires key", async () => {
   await assert.rejects(() => st.scan({}), /key required/);
 });
 
+test("scan without decisions field does not crash", async () => {
+  const st = createStorage({ type: "sqlite", options: { dbPath: ":memory:" }, modelId: "m", dim: 3 });
+  await st.init();
+  await st.upsert([mkEntry("s1", "k1", "t1")]);
+  const rows = await st.scan({ key: "k1", fields: ["title", "author"] });
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].title, "t1");
+  assert.equal(rows[0].decisions, undefined);
+});
+
+test("scan invalid fields throws", async () => {
+  const st = createStorage({ type: "sqlite", options: { dbPath: ":memory:" }, modelId: "m", dim: 3 });
+  await st.init();
+  await st.upsert([mkEntry("s1", "k1", "t1")]);
+  await assert.rejects(() => st.scan({ key: "k1", fields: ["nonexistent"] }), /no valid fields/);
+});
+
 test("pgvector factory rejects missing pool", async () => {
   const st = createStorage({ type: "pgvector", options: { table: "m" }, modelId: "m1", dim: 3 });
   assert.equal(st.constructor.name, "PgVectorStorage");

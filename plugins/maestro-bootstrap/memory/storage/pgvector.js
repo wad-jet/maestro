@@ -108,8 +108,12 @@ export class PgVectorStorage {
   async scan({ key, fields }) {
     if (typeof key !== "string" || !key) throw new Error("scan: key required");
     const cols = (fields && fields.length ? fields : DEFAULT_SCAN_FIELDS).filter((f) => SCAN_FIELDS.includes(f));
+    if (!cols.length) throw new Error("scan: no valid fields requested");
     const res = await this.pool.query(`SELECT ${cols.join(", ")} FROM ${this.table} WHERE key=$1`, [key]);
-    return res.rows.map((r) => ({ ...r, decisions: JSON.parse(r.decisions) }));
+    return res.rows.map((r) => {
+      if ("decisions" in r) r.decisions = JSON.parse(r.decisions);
+      return r;
+    });
   }
   async get(session_id) {
     const r = await this.pool.query(`SELECT * FROM ${this.table} WHERE session_id = $1`, [session_id]);
