@@ -390,7 +390,10 @@ deny. Trust не наследуется вложенными субагента�
     "retry_interval_min": 60,
     "top_k": 3,
     "min_score": 0.35,
+    "similarity_threshold": 0.7,
+    "retention_days": null,
     "summarize_timeout_ms": 120000,
+    "report": { "include_text": false },
     "storage": {
       "type": "sqlite",
       "qdrant": { "url": "https://qdrant.internal:6333", "api_key_env": "MAESTRO_MEMORY_QDRANT_KEY", "collection": "maestro_memory" },
@@ -418,7 +421,10 @@ deny. Trust не наследуется вложенными субагента�
 | `retry_interval_min` | `number` | `60` | Интервал ретрая упавшей сессии (минуты) |
 | `top_k` | `number` | `3` | Число результатов поиска / авто-вспоминания |
 | `min_score` | `number` | `0.35` | Порог косинусной близости |
+| `similarity_threshold` | `number` | `0.7` | Порог косинусной близости для кластеров тем и графа похожести (`memory_stats_detail` / отчёт); диапазон `[0, 1]` |
+| `retention_days` | `number` \| `null` | `null` | TTL записей: prune при старте (записи старше N дней по `time_last`). `null` — выключено |
 | `summarize_timeout_ms` | `number` | `120000` | Таймаут цепочки «саммаризация → эмбеддинг → запись» |
+| `report.include_text` | `boolean` | `false` | Разрешает вставку замаскированных заголовков/summary в HTML-отчёт `@maestro-memory-report`; `false` — только агрегаты (SEC-4b) |
 | `storage.type` | `string` | `sqlite` | Бэкенд: `sqlite` \| `qdrant` \| `pgvector` |
 | `storage.qdrant.url` | `string` | — | URL Qdrant (обязателен для `type: qdrant`) |
 | `storage.qdrant.api_key_env` | `string` | — | Имя env-переменной с API-ключом (никогда plaintext) |
@@ -428,9 +434,31 @@ deny. Trust не наследуется вложенными субагента�
 | `storage.centralized_confidential` | `string` | `forbid` | `forbid` — проект с `confidential.paths` не пишет в централизованный бэкенд (failover на sqlite + warning); `allow` — разрешить |
 
 **Валидация:** некорректный `storage.type` / отсутствие URL / нерезолвнутая
-identity для централизованного бэкенда → память off + лог (`disabled_reason`),
+identity для централизованного бэкенда / некорректный `retention_days` /
+`similarity_threshold` вне `[0, 1]` → память off + лог (`disabled_reason`),
 сессии работают (fail-soft). Централизованные бэкенды требуют identity
 (`identity` → `identity_env` → git `user.name`).
+
+#### Permission-правило для write/boundary-tools (обязательное)
+
+`memory_forget` / `memory_export` / `memory_import` — операции, пересекающие
+границу (удаление, запись файла, запись в память). OpenCode по умолчанию
+разрешает новые тулы, поэтому в merge-config (`.opencode/opencode.json` или
+global `~/.config/opencode/opencode.json`) **обязательно** правило:
+
+```json
+{
+  "permission": {
+    "memory_forget": "ask",
+    "memory_export": "ask",
+    "memory_import": "ask"
+  }
+}
+```
+
+Включение памяти v2 без этого правила — документированный обязательный шаг
+(канон — в скилле `maestro-assistant`). Правило для будущих write/boundary-tools:
+**новые write/boundary-tools → permission `ask`**.
 
 > Полный справочник (бэкенды, изоляция key/namespace/identity, `memory_search`,
 > индексация, расположение данных, ESM-контракт) — в

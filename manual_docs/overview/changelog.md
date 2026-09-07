@@ -7,6 +7,44 @@
 > Хронология составлена по истории authoring-репо `maestro-agent`. Даты
 > приблизительные (по коммитам).
 
+## [2026-09-07]
+
+### Добавлено
+
+- **Memory layer v2: управление, поиск, эксплуатация.** Расширение опционального
+  memory layer плагина `maestro-bootstrap`:
+  - **Инструменты:** `memory_forget` (удаление по `session_id`/`author`/`before`,
+    key-scoped), `memory_export`/`memory_import` (JSONL полной схемы v1 с
+    embedding — миграция между бэкендами; импорт с атомарной валидацией и
+    повторным маскированием), `memory_recall_preview` (dry-run recall для тюнинга
+    `top_k`/`min_score`), `memory_stats_detail` (агрегаты: по авторам/датам,
+    кластеры тем, граф похожести). Все новые тулы недоступны сессиям
+    `[maestro-memory]`.
+  - **Команды:** `@maestro-memory` (статус memory layer, только агрегаты) и
+    `@maestro-memory-report` (самодостаточный статический HTML-отчёт в
+    `.maestro/`, только агрегаты по SEC-4b; `report.include_text: true` —
+    осознанный opt-in на маскированные тексты).
+  - **Поиск:** гибридный FTS5+вектор на sqlite (RRF fusion k=60, backfill при
+    init, sync при всех путях записи/удаления); фильтры `memory_search`
+    (`date_from`/`date_to`/`author`/`project`); кросс-проектный поиск `project` —
+    opt-in, только для централизованных бэкендов (на sqlite — явная ошибка).
+  - **Конфиг:** `retention_days` (TTL, prune при старте; default off),
+    `similarity_threshold` (порог кластеров/графа, default 0.7),
+    `report.include_text` (default false).
+  - **Безопасность:** write/boundary-tools (`memory_forget`/`memory_export`/
+    `memory_import`) — обязательное нативное permission-правило `"ask"` в
+    merge-config; импорт — повторное маскирование каждой записи + permission
+    `ask` (защита от poison-JSONL); экспорт — локальная граница по умолчанию с
+    предупреждением для confidential-проектов; отчёт — только агрегаты (SEC-4b).
+  - **Прочее:** удалён неиспользуемый sqlite-vec; дедупликация git-config
+    вызовов при init; E2E-чеклист реального Bun-прогона.
+  - Спека: `docs/superpowers/specs/2026-09-07-maestro-memory-v2-design.md`.
+    Документация: `manual_docs/reference/memory.md`, `manual_docs/how-to/enable-memory.md`,
+    обновлены `config.md` (permission-правило), `agents-and-trust.md`,
+    `SECURITY.md` (§5a), канон `maestro-assistant` (новые ключи +
+    write/boundary-tools → ask), `README.md`, `plugins/maestro-bootstrap/README.md`,
+    `AGENTS.md`, `docs/project-context.md`.
+
 ## [2026-09-06]
 
 ### Добавлено

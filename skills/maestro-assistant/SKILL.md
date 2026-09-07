@@ -82,7 +82,10 @@ description: Use when the user asks for help configuring maestro, organizing pro
     "retry_interval_min": 60,
     "top_k": 3,
     "min_score": 0.35,
+    "similarity_threshold": 0.7,
+    "retention_days": null,
     "summarize_timeout_ms": 120000,
+    "report": { "include_text": false },
     "storage": {
       "type": "sqlite",
       "qdrant": { "url": "https://qdrant.internal:6333", "api_key_env": "MAESTRO_MEMORY_QDRANT_KEY", "collection": "maestro_memory" },
@@ -156,6 +159,15 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
 - **`storage.centralized_confidential`** — `forbid` (default): проект с
   `confidential.paths` пишет память только в локальный sqlite (failover +
   warning); `allow` — осознанный HITL-выбор.
+- **`retention_days`** — TTL записей: `null` (default) — выключено (данные не
+  удаляются молча); положительное число — prune при старте (записи старше N
+  дней по `time_last`). Некорректное значение → память off + лог.
+- **`similarity_threshold`** — порог косинусной близости для кластеров тем и
+  графа похожести (`memory_stats_detail` / отчёт), default `0.7`, диапазон
+  `[0, 1]`; вне диапазона → память off + лог.
+- **`report.include_text`** — `false` (default): HTML-отчёт `@maestro-memory-report`
+  содержит **только агрегаты** (SEC-4b); `true` — осознанный opt-in на вставку
+  замаскированных заголовков/summary (документированное понижение).
 
 Правила вывода (для `/maestro-new` и консультаций):
 
@@ -165,12 +177,18 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
   Без этого — секцию НЕ добавлять (никакого silent opt-in).
 - При добавлении — минимальный канон `{ "enabled": true }` (все остальные ключи
   — дефолты); расширять только по запросу HITL (бэкенд, namespace, identity_env,
-  модели).
+  модели, retention_days, report).
 - `centralized_confidential` — всегда `forbid`, если проект имеет
   `confidential.paths`; `allow` — только по явному HITL-подтверждению (осознанный
   риск).
 - `identity_env` — имя env-переменной (напр. `MAESTRO_MEMORY_IDENTITY`), не
   значение; `identity` — только для сервисных аккаунтов.
+- **Write/boundary-tools → permission `ask` (обязательное правило).** При
+  включении памяти v2 в merge-config (`.opencode/opencode.json` или global)
+  добавляется нативное правило `permission: { memory_forget: "ask",
+  memory_export: "ask", memory_import: "ask" }` (opencode default для новых
+  тулов — allow, поэтому правило обязательно). Канон для будущих тулов: **новые
+  write/boundary-tools → permission `ask`**.
 - После правки `memory` — **OP-1** (перезапуск opencode) + напоминание про
   `npm install` в `module_dir` при первом включении.
 

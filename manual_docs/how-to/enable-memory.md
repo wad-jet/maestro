@@ -105,9 +105,76 @@
   warning в лог); `allow` — разрешить централизованный бэкенд (осознанный риск,
   только с identity и маскированием).
 
-> **Переключение бэкенда не мигрирует данные.** Ручное средство: удалить
+> **Переключение бэкенда не мигрирует данные автоматически.** Миграция — через
+> `memory_export` → `memory_import` (JSONL полной схемы v1, включая embedding;
+> см. «Миграция между бэкендами» ниже). Ручное средство без миграции: удалить
 > каталог `<data-dir>/maestro/memory/<hash>/` (sqlite) или коллекцию/таблицу
 > (qdrant/pgvector) и включить память заново — начнётся backfill.
+
+### Миграция между бэкендами (экспорт/импорт)
+
+`memory_export` / `memory_import` — штатный путь переноса памяти между бэкендами
+(например, sqlite → qdrant для командной памяти) и резервного копирования:
+
+1. **Экспорт** из исходного бэкенда: `memory_export` (путь по умолчанию —
+   `<data-dir>/maestro/memory/export-<key16hex>-<ts>.jsonl`; можно задать явный
+   `path`). Файл — JSONL полной схемы v1 (включая `embedding` и `model_id`).
+   Для проекта с `confidential.paths` инструмент выведет предупреждение о
+   локальной границе (данные замаскированы, но могут покинуть машину).
+2. **Импорт** в целевой бэкенд: `memory_import({ path })`. Валидация всех строк
+   атомарна (схема v1 + `model_id`/размерность + `key` активного проекта);
+   каждая запись **повторно маскируется** перед записью. `replace: true` —
+   очистить активный `key` перед импортом.
+3. **Permission:** `memory_export`/`memory_import` требуют правила `"ask"` в
+   merge-config (см. [Конфигурация](../reference/config.md)).
+
+> ⚠️ Экспорт/импорт работают **в пределах одного `key`** (активного проекта).
+> Для переноса в другой `namespace`/проект — сначала импорт в тот же key, затем
+> смена namespace (с потерей доступа к старым записям, миграции нет).
+
+### Ретеншен (TTL записей)
+
+`memory.retention_days` — TTL записей: при старте плагина удаляются записи с
+`time_last` старше N дней (лог количества удалённых). **Default `null` —
+выключено** (данные не удаляются молча):
+
+```json
+{
+  "memory": {
+    "enabled": true,
+    "retention_days": 90
+  }
+}
+```
+
+Ретеншен применяется к замаскированным данным (Level-1, не confidential).
+Точечное удаление — через `memory_forget` (по `session_id`/`author`/`before`).
+
+### Отчёт по памяти (`@maestro-memory-report`)
+
+Команда `@maestro-memory-report` генерирует **самодостаточный статический
+HTML-отчёт** (inline CSS/JS, без внешних зависимостей) в
+`.maestro/memory-report-<YYYYMMDD-HHMMSS>.html`: summary (бэкенд/модель/записей),
+timeline-гистограмма по датам, кластеры тем, авторы, граф похожести.
+
+- **Только агрегаты (SEC-4b):** при `memory.report.include_text: false` (default)
+  в HTML не попадают никакие тексты записей (title/summary/decisions) — только
+  числа, имена авторов, даты, размеры кластеров, aggregate-label тем, session_id
+  в графе.
+- `include_text: true` — осознанный opt-in на вставку **замаскированных**
+  заголовков/summary (документированное понижение уровня безопасности).
+- Статус без файла — `@maestro-memory` (агрегаты в чат).
+
+### Тюнинг поиска (dry-run)
+
+`memory_recall_preview({ query })` — **dry-run авто-вспоминания**: тот же путь,
+что у recall (embed → search), возвращает top-k записей со скорами, автором,
+датой, проектом. Назначение — подбор `top_k`/`min_score` без угадывания:
+
+- Слишком много нерелевантных хитов → поднять `min_score`.
+- Не хватает контекста → увеличить `top_k`.
+- Параметры меняются в секции `memory` `maestro.json` (после правки — перезапуск
+  opencode, OP-1).
 
 ### Командная память: identity и namespace
 
@@ -163,11 +230,14 @@ q8 ~120 МБ, ONNX) загружается однократно с HuggingFace �
 
 | Симптом | Причина / действие |
 |---|---|
-| Память не работает, в логе `memory: disabled` с `reason` | Конфигурация невалидна (см. `disabled_reason`: `storage_type_invalid`, `centralized_identity_missing`, `qdrant_config_invalid`, `pgvector_config_invalid`, `centralized_confidential_invalid`) |
+| Память не работает, в логе `memory: disabled` с `reason` | Конфигурация невалидна (см. `disabled_reason`: `storage_type_invalid`, `centralized_identity_missing`, `qdrant_config_invalid`, `pgvector_config_invalid`, `centralized_confidential_invalid`, `retention_days_invalid`, `similarity_threshold_invalid`) |
 | В логе `memory: transformers not installed — run npm install in <module_dir>` | Не выполнена установка deps (шаг 3 краткой инструкции) |
 | В логе `memory: init failed` | Ошибка инициализации (бэкенд недоступен, модель не загрузилась и т.п.) — сессии работают |
 | Блок `## Контекст из памяти maestro` не появляется | Модель эмбеддингов ещё прогревается (первый запуск), либо нет записей выше `min_score`, либо сессия не top-level primary |
 | `memory_search` возвращает «Ничего не найдено» | Память пуста (backfill ещё не прошёл) или запрос ниже порога `min_score` |
+| `memory_search` с `project` на sqlite | Кросс-проектный поиск доступен только для централизованных бэкендов (qdrant/pgvector) |
+| `memory_import` возвращает ошибку с номером строки | Невалидный JSONL / несовпадение `model_id`/размерности / чужой `key` — ничего не импортировано (атомарно) |
+| `memory_forget`/`memory_export`/`memory_import` не выполняются | Не задано permission-правило `"ask"` в merge-config (см. [Конфигурация](../reference/config.md)) |
 
 ## 🔗 Связанные разделы
 

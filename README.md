@@ -207,10 +207,14 @@ Trusted по роли: `custodian` + `sanitizer` (обоим доступен `d
 
 Плагин `maestro-bootstrap` содержит опциональный **memory layer** — локальную
 векторную память сессий: авто-саммаризация завершённых сессий, семантический
-поиск (`memory_search`) и авто-вспоминание релевантного контекста в новых
-сессиях. **Не входит в стандартную установку** (нулевой footprint по умолчанию);
-включается секцией `memory` в `maestro.json` (`enabled: true`). Бэкенды: локальный
-sqlite (default) или централизованные qdrant/pgvector. Подробнее —
+поиск (`memory_search`, гибрид FTS5+вектор на sqlite) и авто-вспоминание
+релевантного контекста в новых сессиях. **Не входит в стандартную установку**
+(нулевой footprint по умолчанию); включается секцией `memory` в `maestro.json`
+(`enabled: true`). Бэкенды: локальный sqlite (default) или централизованные
+qdrant/pgvector. Управление: `memory_forget`, `memory_export`/`memory_import`
+(миграция между бэкендами), `memory_recall_preview` (dry-run тюнинг),
+`memory_stats_detail`; команды `@maestro-memory` (статус) и
+`@maestro-memory-report` (HTML-отчёт, только агрегаты). Подробнее —
 [Как включить память](manual_docs/how-to/enable-memory.md) и
 [Память maestro (reference)](manual_docs/reference/memory.md).
 

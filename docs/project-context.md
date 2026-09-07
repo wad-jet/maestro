@@ -39,7 +39,9 @@
   для скиллов и плагина, см. `manual_docs/how-to/update-maestro.md`).
 - **Memory layer:** опциональный модуль плагина (векторная память сессий); НЕ часть
   стандартной установки, включается по запросу (секция `memory` в `maestro.json`;
-  см. `manual_docs/reference/memory.md`).
+  см. `manual_docs/reference/memory.md`). v2: гибридный FTS5-поиск, инструменты
+  управления (`memory_forget`/`memory_export`/`memory_import`/`memory_recall_preview`/
+  `memory_stats_detail`), команды `@maestro-memory`/`@maestro-memory-report`.
 
 ## 4. Архитектура
 
@@ -64,7 +66,9 @@
 - `plugins/maestro-bootstrap/` — логика плагина (core.js, index.js, тесты).
 - `plugins/maestro-bootstrap/memory/` — **опциональный** модуль памяти сессий
   (векторное хранилище sqlite/qdrant/pgvector, эмбеддинги, саммаризатор, recall,
-  memory_search); не часть стандартной установки, включается по запросу
+  гибридный FTS5-поиск, инструменты `memory_search`/`memory_forget`/
+  `memory_export`/`memory_import`/`memory_recall_preview`/`memory_stats_detail`);
+  не часть стандартной установки, включается по запросу
   (секция `memory` в `maestro.json`; см. `manual_docs/reference/memory.md`).
 - `skills/` — скилл-спеки и поддерживающие промпты/схемы.
 - `agents/` + `commands/` — определения субагентов и точек входа.
@@ -161,3 +165,7 @@ E2E_COMMAND: "./maestro-sandbox.sh"
 LINT_COMMAND: "none"
 DOCS_COVERAGE_COMMAND: "none"
 OBSERVABILITY_COVERAGE_COMMAND: "none"
+
+### Команды памяти (memory layer v2)
+- `@maestro-memory` — статус memory layer (бэкенд, модель, записи, кластеры/граф, тюнинг; только агрегаты).
+- `@maestro-memory-report` — статический HTML-отчёт в `.maestro/` (только агрегаты, SEC-4b; `report.include_text` — opt-in).

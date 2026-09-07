@@ -237,7 +237,10 @@ untrusted, access-policy не enforced, дефолтные sanitizer-прави�
     "retry_interval_min": 60,
     "top_k": 3,
     "min_score": 0.35,
+    "similarity_threshold": 0.7,
+    "retention_days": null,
     "summarize_timeout_ms": 120000,
+    "report": { "include_text": false },
     "storage": {
       "type": "sqlite",
       "qdrant": { "url": "https://qdrant.internal:6333", "api_key_env": "MAESTRO_MEMORY_QDRANT_KEY", "collection": "maestro_memory" },
@@ -255,17 +258,34 @@ untrusted, access-policy не enforced, дефолтные sanitizer-прави�
 - **`centralized_confidential`:** `forbid` (default) — проект с
   `confidential.paths` пишет память только в локальный sqlite (failover +
   warning); `allow` — осознанный риск.
-- **Хуки:** `tool` (`memory_search`), `chat.message`,
+- **`retention_days`:** `null` (default) — выключено; число — TTL записей
+  (prune при старте, лог количества удалённых).
+- **`similarity_threshold`:** порог cosine для кластеров/графа в
+  `memory_stats_detail` (default `0.7`).
+- **`report.include_text`:** `false` (default) — HTML-отчёт только агрегаты
+  (SEC-4b); `true` — осознанный opt-in на маскированные тексты.
+- **Хуки:** `tool` (`memory_search`, `memory_forget`, `memory_export`,
+  `memory_import`, `memory_recall_preview`, `memory_stats_detail`), `chat.message`,
   `experimental.chat.system.transform`, `event` (`session.idle`/`session.deleted`),
   расширенный `dispose`. Инвариант: `experimental.chat.messages.transform` НЕ
   присваивается.
+- **Гибридный поиск (sqlite):** FTS5-таблица `memory_fts` (title+summary+
+  decisions) + векторный KNN, слияние RRF (k=60); backfill при init, sync при
+  всех путях записи/удаления; ошибка MATCH → fallback vector-only + лог.
+- **Фильтры `memory_search`:** `date_from`/`date_to` (time_last), `author`,
+  `project` (кросс-проектный opt-in, **только централизованные бэкенды**;
+  на sqlite — явная ошибка).
+- **Permission (обязательное правило):** `memory_forget`/`memory_export`/
+  `memory_import` — write/boundary-tools; в merge-config пишется
+  `permission: { memory_forget: "ask", memory_export: "ask", memory_import: "ask" }`.
 - **Self-provisioning:** при `enabled: true` плагин создаёт `module_dir`
   (`<data-dir>/maestro/memory/module/`), пишет `package.json` (single-writer,
   `"type": "module"`) и копирует исходники модуля; пользователь выполняет
   `npm install` в `module_dir`. Код обновляется в lockstep с плагином;
   `node_modules` и данные переживают `maestro-update.sh`.
 - **Данные:** `<data-dir>/maestro/memory/` — per-key БД, `state.json`
-  (retry/skip/first-run), кэш модели эмбеддингов. Вне git.
+  (retry/skip/first-run), кэш модели эмбеддингов, экспорт `memory_export`
+  (`export-<key16hex>-<ts>.jsonl`). Вне git.
 - **Установка:** `maestro-install.sh` — опциональный шаг (y/N) ставит маркер
   `<data-dir>/maestro/memory/enabled.flag` + preflight npm/bun (зависимости
   ставит плагин, не install.sh).
@@ -307,10 +327,12 @@ Memory layer (при `memory.enabled: true`):
 
 - `memory: disabled` — память выключена (info, с `reason`: `storage_type_invalid`,
   `centralized_identity_missing`, `qdrant_config_invalid`, `pgvector_config_invalid`,
-  `centralized_confidential_invalid`)
+  `centralized_confidential_invalid`, `retention_days_invalid`,
+  `similarity_threshold_invalid`)
 - `memory: centralized backend forbidden for confidential project — fallback to sqlite` (warn)
 - `memory: init failed` — ошибка инициализации (error; сессии работают)
 - `memory: indexer error` — ошибка индексации сессии (error, с `sessionID`)
+- `memory: retention pruned` — retention удалил записи при старте (info, с `count`)
 - `memory: transformers not installed — run npm install in <module_dir>` (error, actionable)
 
 Security-события доступа (`confidential.access`, `access_policy.blocked`) в
