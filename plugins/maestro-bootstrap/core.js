@@ -22,10 +22,26 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { classifyMemoryConfig } from "./memory/config.js";
 
 const LOG_LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
+
+// Git config lookup (fail-soft). Используется для identity-фоллбека
+// централизованного memory gate (git user.name).
+function gitConfig(root, key) {
+  try {
+    const out = execSync(`git config --get ${key}`, {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    return out.trim() || null;
+  } catch {
+    return null;
+  }
+}
 
 // --- Context Sanitizer (Уровень 1) -----------------------------------------
 
@@ -1133,7 +1149,7 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
   // C1 (zero-dep): импорт memory/index.js (тянет better-sqlite3 через
   // storage/sqlite.js) происходит ТОЛЬКО при memory.enabled === true.
   // Классификация — лёгкий classifyMemoryConfig (без storage-импортов).
-  const memClass = classifyMemoryConfig(config);
+  const memClass = classifyMemoryConfig(config, { gitName: gitConfig(root, "user.name") });
   let memoryHooks = {};
   if (memClass.enabled) {
     try {

@@ -1,6 +1,13 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { QdrantStorage } from "./qdrant.js";
+
+// Mirror of qdrant.js uuidFrom (sha256 → deterministic UUID v5-like).
+function uuidFrom(s) {
+  const h = createHash("sha256").update(s).digest("hex");
+  return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-a${h.slice(17, 20)}-${h.slice(20, 32)}`;
+}
 
 function fakeClient() {
   const calls = [];
@@ -85,6 +92,9 @@ test("qdrant upsert maps entries to points with payload", async () => {
   assert.equal(point.payload.session_id, "s1");
   assert.equal(point.payload.title, "Test");
   assert.deepEqual(point.payload.decisions, JSON.stringify(["d1"]));
+  // Fixed point id per session (NOT per version) — re-summarize overwrites.
+  assert.match(point.id, /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[0-9a-f]{4}-[0-9a-f]{12}$/);
+  assert.equal(point.id, uuidFrom("s1"));
   // Float32Array→Array.from() introduces ~1e-9 precision; use toFixed comparison
   assert.equal(point.vector.length, 3);
   assert.ok(point.vector.every((v, i) => Math.abs(v - [0.1, 0.2, 0.3][i]) < 1e-6));
@@ -106,47 +116,43 @@ test("qdrant search parses decisions and returns scored results", async () => {
   assert.equal(res[0].entry.embedding, undefined);
 });
 
-test("qdrant delete uses query then delete with points selector", async () => {
+test("qdrant delete uses filter-based delete (no query lookup)", async () => {
   const c = fakeClient();
-  c.query = async (name, q) => {
-    c.calls.push(["query", name, q]);
-    return { points: [{ id: "s1_0" }, { id: "s1_1" }] };
-  };
   const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
   await st.init();
   await st.delete("s1");
   const deleteCall = c.calls.find(([k]) => k === "delete");
   assert.ok(deleteCall);
-  assert.deepEqual(deleteCall[2], { points: ["s1_0", "s1_1"] });
+  // C-2: direct filter delete — no points selector, no pre-query.
+  assert.deepEqual(deleteCall[2], { filter: { must: [{ key: "session_id", match: { value: "s1" } }] } });
+  assert.equal(c.calls.some(([k]) => k === "query"), false);
 });
 
-test("qdrant delete with no matching points does not call delete", async () => {
+test("qdrant delete always calls delete with filter (no pre-query needed)", async () => {
   const c = fakeClient();
-  c.query = async (name, q) => {
-    c.calls.push(["query", name, q]);
-    return { points: [] };
-  };
   const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
   await st.init();
   await st.delete("s99");
   const deleteCall = c.calls.find(([k]) => k === "delete");
-  assert.equal(deleteCall, undefined);
+  assert.ok(deleteCall);
+  assert.deepEqual(deleteCall[2], { filter: { must: [{ key: "session_id", match: { value: "s99" } }] } });
 });
 
 test("qdrant delete adds key filter when provided (spec isolation)", async () => {
   const c = fakeClient();
-  c.query = async (name, q) => {
-    c.calls.push(["query", name, q]);
-    return { points: [{ id: "s1_0" }] };
-  };
   const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
   await st.init();
   await st.delete("s1", { key: "k1" });
-  const query = c.calls.find(([k]) => k === "query");
-  assert.ok(query);
-  // session_id via query: { match }, key via filter: { must }
-  assert.deepEqual(query[2].query, { match: { key: "session_id", value: "s1" } });
-  assert.deepEqual(query[2].filter, { must: [{ key: "key", match: { value: "k1" } }] });
+  const deleteCall = c.calls.find(([k]) => k === "delete");
+  assert.ok(deleteCall);
+  assert.deepEqual(deleteCall[2], {
+    filter: {
+      must: [
+        { key: "session_id", match: { value: "s1" } },
+        { key: "key", match: { value: "k1" } },
+      ],
+    },
+  });
 });
 
 test("qdrant stats returns entry count", async () => {

@@ -30,6 +30,13 @@ test("centralized requires identity", () => {
   const cfgWithId = loadMemoryConfig({ memory: { enabled: true, storage: { type: "qdrant" }, identity: "x" } });
   assert.equal(cfgWithId.enabled, true);
 });
+test("centralized accepts git user.name as identity (spec: identity → identity_env → git user.name)", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, storage: { type: "qdrant" } } }, { gitName: "gitusername" });
+  assert.equal(cfg.enabled, true);
+  // no gitName → still disabled
+  const cfgNoGit = loadMemoryConfig({ memory: { enabled: true, storage: { type: "qdrant" } } }, { gitName: null });
+  assert.equal(cfgNoGit.enabled, false);
+});
 test("effective key", () => {
   assert.equal(resolveEffectiveKey({ projectHash: "ph", namespace: null }), "ph");
   assert.equal(resolveEffectiveKey({ projectHash: "ph", namespace: "team" }), "team");

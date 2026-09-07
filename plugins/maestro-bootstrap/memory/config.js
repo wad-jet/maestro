@@ -41,9 +41,10 @@ function mergedConfig(m) {
  * Used by core.js BEFORE any memory module import (zero-dep gate, C1) and
  * re-used by loadMemoryConfig / registerMemoryHooks.
  * @param {object} maestroJson  Parsed maestro.json.
+ * @param {{ gitName?: string|null }} [opts]  Git user.name (identity fallback).
  * @returns {{ enabled: boolean, disabled_reason: string|null }}
  */
-export function classifyMemoryConfig(maestroJson) {
+export function classifyMemoryConfig(maestroJson, { gitName = null } = {}) {
   const m = maestroJson?.memory;
   if (!m) return { enabled: false, disabled_reason: "no_memory_section" };
   if (m.enabled !== true) return { enabled: false, disabled_reason: "explicitly_disabled" };
@@ -52,7 +53,7 @@ export function classifyMemoryConfig(maestroJson) {
   const centralized = type !== "sqlite";
   if (centralized) {
     const cfg = mergedConfig(m);
-    if (!resolveIdentity({ config: cfg, env: process.env, gitName: null })) {
+    if (!resolveIdentity({ config: cfg, env: process.env, gitName })) {
       return { enabled: false, disabled_reason: "centralized_identity_missing" };
     }
     if (cfg.storage.centralized_confidential !== "allow" && cfg.storage.centralized_confidential !== "forbid") {
@@ -62,8 +63,8 @@ export function classifyMemoryConfig(maestroJson) {
   return { enabled: true, disabled_reason: null };
 }
 
-export function loadMemoryConfig(maestroJson) {
-  const { enabled, disabled_reason } = classifyMemoryConfig(maestroJson);
+export function loadMemoryConfig(maestroJson, { gitName = null } = {}) {
+  const { enabled, disabled_reason } = classifyMemoryConfig(maestroJson, { gitName });
   if (!enabled) return { ...DEFAULTS, enabled: false, disabled_reason };
   return mergedConfig(maestroJson.memory);
 }

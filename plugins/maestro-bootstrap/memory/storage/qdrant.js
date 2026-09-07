@@ -26,8 +26,10 @@ export class QdrantStorage {
 
   async upsert(entries) {
     const points = entries.map((e, i) => ({
-      // I-3: deterministic UUID v5-like from sha256 (must be u64 or UUID, not string)
-      id: uuidFrom(`${e.session_id}_${e.version}`),
+      // I-3: deterministic UUID v5-like from sha256 (must be u64 or UUID, not string).
+      // Fixed id per session (NOT per version) — re-summarize (version bump)
+      // overwrites the same point instead of accumulating stale versions.
+      id: uuidFrom(e.session_id),
       vector: Array.from(e.embedding),
       payload: {
         session_id: e.session_id,

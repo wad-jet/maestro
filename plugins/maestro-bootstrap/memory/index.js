@@ -87,7 +87,11 @@ async function loadFromModuleDir(moduleDir, pkg) {
  * @returns {Promise<object>} Hook-объект для слияния в core.js.
  */
 export async function registerMemoryHooks({ client, config: maestroConfig, log, root, deps = {} }) {
-  const config = loadMemoryConfig(maestroConfig);
+  // I-2: identity — identity_env → git user.name → os username (fallback).
+  // gitName резолвится ДО loadMemoryConfig, чтобы централизованный gate
+  // (classifyMemoryConfig) принимал git user.name как identity.
+  const gitName = gitConfig(root, "user.name");
+  const config = loadMemoryConfig(maestroConfig, { gitName });
   if (!config.enabled) {
     // I-3: логируем причину только когда секция `memory` существует, но
     // конфигурация невалидна (не для дефолтного no-section случая).
@@ -122,7 +126,6 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     }
 
     // I-2: identity — identity_env → git user.name → os username (fallback).
-    const gitName = gitConfig(root, "user.name");
     const identity = resolveIdentity({ config, env: process.env, gitName });
     const author = identity ?? config.identity ?? os.userInfo().username;
 
