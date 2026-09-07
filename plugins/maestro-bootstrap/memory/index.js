@@ -59,24 +59,52 @@ const IMPORT_REQUIRED = [
 ];
 
 /**
+ * Normalize an embedding value from any backend into a Float32Array.
+ * sqlite → Buffer (BLOB); qdrant → Float32Array (from vector); pgvector →
+ * Float32Array (parsed from string). Returns null when the value is unusable.
+ * @param {unknown} v
+ * @returns {Float32Array|null}
+ */
+function toF32(v) {
+  if (v instanceof Float32Array) return v;
+  if (Array.isArray(v)) return new Float32Array(v);
+  if (typeof v === "string") {
+    try { return new Float32Array(JSON.parse(v)); } catch { return null; }
+  }
+  if (v?.buffer) return new Float32Array(v.buffer, v.byteOffset, v.byteLength / 4);
+  return null;
+}
+
+/**
  * Validate a parsed JSONL entry against schema v1 + model_id/dim match.
  * Returns an error reason string, or null when valid.
  * @param {object} e  Parsed entry.
- * @param {{ modelId: string, dim: number }} embeddings  Storage model identity.
+ * @param {{ modelId: string, dim: number }} storage  Storage model identity
+ *   (set in constructors on all backends; what upsert enforces).
+ * @param {string} effectiveKey  Active project key (I-4 fail-closed on mismatch).
  * @returns {string|null}
  */
-function validateImportEntry(e, embeddings) {
+function validateImportEntry(e, storage, effectiveKey) {
   if (!e || typeof e !== "object") return "не объект";
   for (const f of IMPORT_REQUIRED) {
     if (e[f] === undefined || e[f] === null) return `отсутствует поле ${f}`;
   }
   if (!Array.isArray(e.decisions)) return "decisions не массив";
   if (!Array.isArray(e.embedding)) return "embedding не массив";
-  if (e.model_id !== embeddings.modelId) {
-    return `model_id не совпадает (файл=${e.model_id}, хранилище=${embeddings.modelId})`;
+  // M-10: numeric time/version fields + finite embedding values.
+  if (typeof e.time_first !== "number") return "time_first не число";
+  if (typeof e.time_last !== "number") return "time_last не число";
+  if (typeof e.version !== "number") return "version не число";
+  if (!e.embedding.every((n) => typeof n === "number" && Number.isFinite(n))) {
+    return "embedding содержит нечисловые/неконечные значения";
   }
-  if (e.embedding.length !== embeddings.dim) {
-    return `размерность embedding не совпадает (файл=${e.embedding.length}, хранилище=${embeddings.dim})`;
+  // I-4: fail-closed — файл от другого проекта не импортируем.
+  if (e.key !== effectiveKey) return "key не совпадает с активным проектом";
+  if (e.model_id !== storage.modelId) {
+    return `model_id не совпадает (файл=${e.model_id}, хранилище=${storage.modelId})`;
+  }
+  if (e.embedding.length !== storage.dim) {
+    return `размерность embedding не совпадает (файл=${e.embedding.length}, хранилище=${storage.dim})`;
   }
   return null;
 }
@@ -336,23 +364,26 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
               "model_id", "author", "time_first", "time_last", "version", "embedding",
             ];
             const entries = await storage.scan({ key: effectiveKey, fields });
+            // M-8: пустой экспорт — понятная ошибка, файл не пишем.
+            if (!entries.length) return "memory_export: нет записей для экспорта";
             const ts = Date.now();
             const path = args?.path ?? join(dataDir, "memory", `export-${sanitizeDirName(effectiveKey)}-${ts}.jsonl`);
             mkdirSync(dirname(path), { recursive: true });
             const lines = [];
-            // C1: confidential-проект → предупреждение о локальной границе.
-            const confidentialPaths = maestroConfig?.confidential?.paths ?? [];
-            if (confidentialPaths.length > 0) {
-              lines.push("внимание: данные замаскированы, но могут покинуть машину — осознанный выбор");
-            }
             for (const e of entries) {
-              const emb = e.embedding instanceof Float32Array
-                ? e.embedding
-                : new Float32Array(e.embedding.buffer, e.embedding.byteOffset, e.embedding.byteLength / 4);
+              // C-1: нормализуем embedding из любого бэкенда в Float32Array.
+              const emb = toF32(e.embedding);
+              if (!emb) return "memory_export: embedding недоступен для экспорта";
               lines.push(JSON.stringify({ ...e, embedding: Array.from(emb) }));
             }
-            writeFileSync(path, lines.join("\n") + (lines.length ? "\n" : ""));
-            return `Экспортировано ${entries.length} записей в ${path}`;
+            writeFileSync(path, lines.join("\n") + "\n");
+            // I-3: предупреждение о локальной границе — в возвращаемой строке,
+            // НЕ в файле (файл остаётся чистым JSONL для round-trip).
+            const confidentialPaths = maestroConfig?.confidential?.paths ?? [];
+            const warning = confidentialPaths.length > 0
+              ? "\nвнимание: данные замаскированы, но могут покинуть машину — осознанный выбор"
+              : "";
+            return `Экспортировано ${entries.length} записей в ${path}${warning}`;
           } catch (err) {
             return `memory_export failed: ${err instanceof Error ? err.message : String(err)}`;
           }
@@ -371,21 +402,26 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             if (SESSIONS.has(ctx?.sessionID)) return "memory_import недоступен для служебных сессий.";
             if (!args?.path) return "memory_import: укажите path";
             const raw = readFileSync(args.path, "utf8");
-            const lines = raw.split("\n").map((l) => l.trim()).filter(Boolean);
+            // M-9: считаем физические строки (включая пустые) для сообщений об ошибках.
+            const physicalLines = raw.split("\n");
             const entries = [];
-            for (let i = 0; i < lines.length; i++) {
+            for (let i = 0; i < physicalLines.length; i++) {
+              const line = physicalLines[i].trim();
+              if (!line) continue;
               let parsed;
               try {
-                parsed = JSON.parse(lines[i]);
+                parsed = JSON.parse(line);
               } catch {
                 return `memory_import: строка ${i + 1} невалидна: не JSON`;
               }
-              const reason = validateImportEntry(parsed, embeddings);
+              // I-2: валидируем против storage.dim/modelId (не embeddings — null до первого embed).
+              const reason = validateImportEntry(parsed, storage, effectiveKey);
               if (reason) return `memory_import: строка ${i + 1} невалидна: ${reason}`;
               entries.push(parsed);
             }
             // Атомарность: все строки валидны → применяем. Сначала re-mask.
             const masked = entries.map((e) => maskEntry(e, { confidentialPatterns: maestroConfig?.confidential?.paths ?? [] }));
+            // I-4: replace выполняется только после успешной валидации всех строк.
             if (args.replace === "true" || args.replace === true) {
               await storage.deleteByFilter({ key: effectiveKey });
             }

@@ -39,19 +39,31 @@ export class PgVectorStorage {
   }
   async dispose() { await this.pool.end?.(); }
   async upsert(entries) {
-    for (const e of entries) {
-      if (e.embedding.length !== this.dim) {
-        throw new Error(`embedding length ${e.embedding.length} does not match expected dimension ${this.dim}`);
+    // M-7: atomic per-file import — wrap the whole batch in a transaction so a
+    // mid-batch failure rolls back everything (nothing partially imported).
+    const client = await this.pool.connect();
+    try {
+      await client.query("BEGIN");
+      for (const e of entries) {
+        if (e.embedding.length !== this.dim) {
+          throw new Error(`embedding length ${e.embedding.length} does not match expected dimension ${this.dim}`);
+        }
+        if (e.model_id !== this.modelId) {
+          throw new Error(`model_id mismatch: expected=${this.modelId} got=${e.model_id} — переиндексируйте (см. how-to)`);
+        }
+        await client.query(
+          `INSERT INTO ${this.table} (session_id, key, origin_project_hash, title, summary, decisions, embedding, model_id, author, time_first, time_last, version)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
+           ON CONFLICT (session_id) DO UPDATE SET title=$4, summary=$5, decisions=$6, embedding=$7, time_last=$11, version=$12`,
+          [e.session_id, e.key, e.origin_project_hash, e.title, e.summary, JSON.stringify(e.decisions), `[${Array.from(e.embedding)}]`, e.model_id, e.author, e.time_first, e.time_last, e.version]
+        );
       }
-      if (e.model_id !== this.modelId) {
-        throw new Error(`model_id mismatch: expected=${this.modelId} got=${e.model_id} — переиндексируйте (см. how-to)`);
-      }
-      await this.pool.query(
-        `INSERT INTO ${this.table} (session_id, key, origin_project_hash, title, summary, decisions, embedding, model_id, author, time_first, time_last, version)
-         VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-         ON CONFLICT (session_id) DO UPDATE SET title=$4, summary=$5, decisions=$6, embedding=$7, time_last=$11, version=$12`,
-        [e.session_id, e.key, e.origin_project_hash, e.title, e.summary, JSON.stringify(e.decisions), `[${Array.from(e.embedding)}]`, e.model_id, e.author, e.time_first, e.time_last, e.version]
-      );
+      await client.query("COMMIT");
+    } catch (err) {
+      try { await client.query("ROLLBACK"); } catch { /* ignore */ }
+      throw err;
+    } finally {
+      client.release();
     }
   }
   async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project }) {
@@ -112,6 +124,10 @@ export class PgVectorStorage {
     const res = await this.pool.query(`SELECT ${cols.join(", ")} FROM ${this.table} WHERE key=$1`, [key]);
     return res.rows.map((r) => {
       if ("decisions" in r) r.decisions = JSON.parse(r.decisions);
+      // C-1: pgvector returns embedding as a string "[0.1,0.2,0.3]"; normalize to Float32Array.
+      if ("embedding" in r && typeof r.embedding === "string") {
+        r.embedding = new Float32Array(JSON.parse(r.embedding));
+      }
       return r;
     });
   }

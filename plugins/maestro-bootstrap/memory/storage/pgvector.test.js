@@ -4,19 +4,25 @@ import { PgVectorStorage } from "./pgvector.js";
 
 function fakePool() {
   const calls = [];
+  const handle = async (sql, params) => {
+    calls.push([sql, params]);
+    // order matters: count(*) before generic "FROM"
+    if (sql.startsWith("SELECT count")) return { rows: [{ count: "2" }] };
+    if (sql.includes("FROM maestro_memory")) return { rows: [{ session_id: "s1", title: "t", summary: "s", decisions: "[]", key: "k", score: 0.9 }] };
+    if (sql.startsWith("CREATE TABLE")) return { rows: [] };
+    if (sql.startsWith("INSERT")) return { rows: [] };
+    if (sql.startsWith("DELETE")) return { rows: [] };
+    if (sql.includes("info_version")) return { rows: [{ extversion: "0.7.0" }] };
+    return { rows: [] };
+  };
+  const client = {
+    query: handle,
+    release: () => {},
+  };
   return {
     calls,
-    query: async (sql, params) => {
-      calls.push([sql, params]);
-      // order matters: count(*) before generic "FROM"
-      if (sql.startsWith("SELECT count")) return { rows: [{ count: "2" }] };
-      if (sql.includes("FROM maestro_memory")) return { rows: [{ session_id: "s1", title: "t", summary: "s", decisions: "[]", key: "k", score: 0.9 }] };
-      if (sql.startsWith("CREATE TABLE")) return { rows: [] };
-      if (sql.startsWith("INSERT")) return { rows: [] };
-      if (sql.startsWith("DELETE")) return { rows: [] };
-      if (sql.includes("info_version")) return { rows: [{ extversion: "0.7.0" }] };
-      return { rows: [] };
-    },
+    query: handle,
+    connect: async () => client,
     end: async () => {},
   };
 }
@@ -61,6 +67,50 @@ test("pgvector upsert captures INSERT ON CONFLICT", async () => {
   assert.ok(ins[0].includes("ON CONFLICT"));
   assert.equal(ins[1][1], "k1");
   assert.equal(ins[1][7], "m1");
+});
+
+test("pgvector upsert wraps batch in transaction (BEGIN/COMMIT)", async () => {
+  const p = fakePool();
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, modelId: "m1" });
+  await st.init();
+  await st.upsert([{
+    session_id: "s1", key: "k1", origin_project_hash: "h1", title: "t1", summary: "s1",
+    decisions: [], embedding: new Float32Array([0.1, 0.2, 0.3]),
+    model_id: "m1", author: "a1", time_first: 1, time_last: 2, version: 1,
+  }]);
+  const sqls = p.calls.map(([sql]) => sql);
+  assert.ok(sqls.includes("BEGIN"), "must BEGIN transaction");
+  assert.ok(sqls.includes("COMMIT"), "must COMMIT transaction");
+  assert.ok(!sqls.includes("ROLLBACK"), "must not ROLLBACK on success");
+});
+
+test("pgvector upsert rolls back on mid-batch failure", async () => {
+  const p = fakePool();
+  // Fail on the second INSERT.
+  let inserts = 0;
+  p.connect = async () => ({
+    query: async (sql, params) => {
+      p.calls.push([sql, params]);
+      if (sql.startsWith("INSERT")) {
+        inserts++;
+        if (inserts === 2) throw new Error("boom");
+      }
+      return { rows: [] };
+    },
+    release: () => {},
+  });
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, modelId: "m1" });
+  await st.init();
+  const mk = (sid) => ({
+    session_id: sid, key: "k1", origin_project_hash: "h1", title: "t", summary: "s",
+    decisions: [], embedding: new Float32Array([0.1, 0.2, 0.3]),
+    model_id: "m1", author: "a1", time_first: 1, time_last: 2, version: 1,
+  });
+  await assert.rejects(() => st.upsert([mk("s1"), mk("s2")]), /boom/);
+  const sqls = p.calls.map(([sql]) => sql);
+  assert.ok(sqls.includes("BEGIN"), "must BEGIN");
+  assert.ok(sqls.includes("ROLLBACK"), "must ROLLBACK on failure");
+  assert.ok(!sqls.includes("COMMIT"), "must NOT COMMIT on failure");
 });
 
 test("pgvector delete", async () => {
@@ -217,4 +267,20 @@ test("pgvector scan without decisions field does not crash", async () => {
   assert.equal(rows.length, 1);
   assert.equal(rows[0].title, "t1");
   assert.equal(rows[0].decisions, undefined);
+});
+
+test("pgvector scan with embedding parses string to Float32Array", async () => {
+  const p = fakePool();
+  p.query = async (sql, params) => {
+    p.calls.push([sql, params]);
+    if (sql.startsWith("SELECT count")) return { rows: [{ count: "1" }] };
+    if (sql.includes("FROM maestro_memory")) return { rows: [{ session_id: "s1", title: "t1", decisions: '["d1"]', key: "k1", embedding: "[0.1,0.2,0.3]" }] };
+    return { rows: [] };
+  };
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3 });
+  await st.init();
+  const rows = await st.scan({ key: "k1", fields: ["session_id", "title", "embedding"] });
+  assert.equal(rows.length, 1);
+  assert.ok(rows[0].embedding instanceof Float32Array, "embedding must be Float32Array");
+  assert.ok(rows[0].embedding.every((v, i) => Math.abs(v - [0.1, 0.2, 0.3][i]) < 1e-6));
 });

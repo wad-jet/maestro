@@ -295,3 +295,19 @@ test("qdrant scan scrolls with key filter", async () => {
   const scrollCall = c.calls.find(([k]) => k === "scroll");
   assert.deepEqual(scrollCall[2].filter.must, [{ key: "key", match: { value: "k1" } }]);
 });
+
+test("qdrant scan with embedding returns Float32Array from vector (with_vector)", async () => {
+  const c = fakeClient();
+  c.scroll = async (name, opts) => {
+    c.calls.push(["scroll", name, opts]);
+    return { points: [{ payload: { session_id: "s1", title: "t1", decisions: '["d1"]', key: "k1" }, vector: [0.1, 0.2, 0.3] }] };
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  const rows = await st.scan({ key: "k1", fields: ["session_id", "title", "embedding"] });
+  assert.equal(rows.length, 1);
+  assert.ok(rows[0].embedding instanceof Float32Array, "embedding must be Float32Array");
+  assert.ok(rows[0].embedding.every((v, i) => Math.abs(v - [0.1, 0.2, 0.3][i]) < 1e-6));
+  const scrollCall = c.calls.find(([k]) => k === "scroll");
+  assert.equal(scrollCall[2].with_vector, true, "scroll must request vectors");
+});

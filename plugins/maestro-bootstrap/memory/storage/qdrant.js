@@ -119,14 +119,22 @@ export class QdrantStorage {
       filter: { must: [{ key: "key", match: { value: key } }] },
       limit: 10000,
       with_payload: true,
+      with_vector: true,
     });
     const cols = fields && fields.length ? fields : DEFAULT_SCAN_FIELDS;
+    const wantEmbedding = cols.includes("embedding");
     return (res.points ?? []).map((p) => {
       const out = {};
       for (const f of cols) {
+        if (f === "embedding") continue;
         if (f in p.payload) out[f] = p.payload[f];
       }
       if ("decisions" in out) out.decisions = JSON.parse(out.decisions);
+      // C-1: embedding lives in the vector (not payload); normalize to Float32Array.
+      if (wantEmbedding) {
+        const vec = p.vector ?? p.payload?.embedding;
+        out.embedding = Array.isArray(vec) ? new Float32Array(vec) : undefined;
+      }
       return out;
     });
   }
