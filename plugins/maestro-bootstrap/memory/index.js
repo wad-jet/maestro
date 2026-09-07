@@ -76,6 +76,78 @@ function toF32(v) {
 }
 
 /**
+ * Cosine similarity between two Float32Array embeddings (normalized vectors
+ * score 1.0; zero-norm guard → 0). Local helper for stats clustering/graph —
+ * O(n²) over scan results (thousands of entries, brute-force is fine).
+ * @param {Float32Array} a
+ * @param {Float32Array} b
+ * @returns {number}
+ */
+function cosine(a, b) {
+  let dot = 0, na = 0, nb = 0;
+  for (let i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    na += a[i] * a[i];
+    nb += b[i] * b[i];
+  }
+  return dot / (Math.sqrt(na) * Math.sqrt(nb) || 1);
+}
+
+/**
+ * Greedy clustering of scan entries by cosine > threshold. Each unassigned
+ * entry starts a cluster; all later entries with cosine > threshold join it.
+ * Theme = representative title (first member's title — masked at-rest).
+ * @param {Array<{session_id: string, title: string, embedding: Float32Array}>} entries
+ * @param {number} threshold
+ * @returns {Array<{size: number, members: Array<[string, string]>, theme: string}>}
+ */
+function clusterEntries(entries, threshold) {
+  const assigned = new Set();
+  const clusters = [];
+  for (let i = 0; i < entries.length; i++) {
+    if (assigned.has(i)) continue;
+    const cluster = {
+      size: 1,
+      members: [[entries[i].session_id, entries[i].title]],
+      theme: entries[i].title,
+    };
+    assigned.add(i);
+    for (let j = i + 1; j < entries.length; j++) {
+      if (assigned.has(j)) continue;
+      if (cosine(entries[i].embedding, entries[j].embedding) > threshold) {
+        cluster.size++;
+        cluster.members.push([entries[j].session_id, entries[j].title]);
+        assigned.add(j);
+      }
+    }
+    clusters.push(cluster);
+  }
+  return clusters;
+}
+
+/**
+ * Pairwise cosine graph edges (unordered pairs, deduped) above threshold,
+ * capped at `cap` edges (report scale guard).
+ * @param {Array<{session_id: string, embedding: Float32Array}>} entries
+ * @param {number} threshold
+ * @param {number} cap
+ * @returns {Array<[string, string, number]>}
+ */
+function buildGraph(entries, threshold, cap = 500) {
+  const edges = [];
+  for (let i = 0; i < entries.length; i++) {
+    for (let j = i + 1; j < entries.length; j++) {
+      const score = cosine(entries[i].embedding, entries[j].embedding);
+      if (score > threshold) {
+        edges.push([entries[i].session_id, entries[j].session_id, score]);
+        if (edges.length >= cap) return edges;
+      }
+    }
+  }
+  return edges;
+}
+
+/**
  * Validate a parsed JSONL entry against schema v1 + model_id/dim match.
  * Returns an error reason string, or null when valid.
  * @param {object} e  Parsed entry.
@@ -433,6 +505,91 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             return `Импортировано ${upserts.length} записей`;
           } catch (err) {
             return `memory_import failed: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        },
+      }),
+      memory_recall_preview: tool({
+        description:
+          "Dry-run recall: top-k записей памяти для запроса со скорами и источниками (title, автор, дата, проект). Тюнинг top_k/min_score без угадывания.",
+        args: {
+          query: tool.schema.string().describe("поисковый запрос"),
+        },
+        execute: async (args, ctx) => {
+          try {
+            // I3: недоступен plugin-созданным сессиям саммаризатора.
+            if (SESSIONS.has(ctx?.sessionID)) return "memory_recall_preview недоступен для служебных сессий.";
+            if (!args?.query) return "memory_recall_preview: укажите query";
+            const vec = await embeddings.embed(args.query);
+            // Тот же путь, что у recall: embed → search (включая FTS-запрос).
+            const hits = await storage.search(vec, {
+              top_k: config.top_k,
+              min_score: config.min_score,
+              key: effectiveKey,
+              query: args.query,
+            });
+            if (!hits.length) return "Ничего не найдено.";
+            const lines = [];
+            for (const h of hits) {
+              const date = new Date(h.entry.time_last).toISOString().slice(0, 10);
+              lines.push(
+                `# ${h.entry.title} (${h.entry.author}, ${date}, score ${h.score.toFixed(2)})\n` +
+                  `${h.entry.summary}\n` +
+                  `Проект: ${h.entry.origin_project_hash} | session_id: ${h.entry.session_id}`,
+              );
+            }
+            return lines.join("\n");
+          } catch (err) {
+            return `memory_recall_preview failed: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        },
+      }),
+      memory_stats_detail: tool({
+        description:
+          "Агрегатная статистика памяти активного проекта: число записей, по авторам, по датам, кластеры тем (cosine > similarity_threshold), граф похожести. Только агрегаты — без summary-текста.",
+        args: {},
+        execute: async (args, ctx) => {
+          try {
+            // I3: недоступен plugin-созданным сессиям саммаризатора.
+            if (SESSIONS.has(ctx?.sessionID)) return "memory_stats_detail недоступен для служебных сессий.";
+            const { entries } = await storage.stats({ key: effectiveKey });
+            const rows = await storage.scan({
+              key: effectiveKey,
+              fields: ["session_id", "title", "embedding", "author", "time_last", "origin_project_hash"],
+            });
+            // C-1: нормализуем embedding из любого бэкенда (sqlite Buffer /
+            // qdrant Float32Array / pgvector string) в Float32Array.
+            const usable = [];
+            for (const r of rows) {
+              const emb = toF32(r.embedding);
+              if (emb) { r.embedding = emb; usable.push(r); }
+            }
+
+            const byAuthor = new Map();
+            const byDate = new Map();
+            for (const r of usable) {
+              byAuthor.set(r.author, (byAuthor.get(r.author) ?? 0) + 1);
+              const d = new Date(r.time_last).toISOString().slice(0, 10);
+              byDate.set(d, (byDate.get(d) ?? 0) + 1);
+            }
+
+            const threshold = config.similarity_threshold ?? 0.7;
+            const clusters = clusterEntries(usable, threshold);
+            const graph = buildGraph(usable, threshold, 500);
+
+            const out = [`Записей: ${entries}`];
+            out.push("По авторам:");
+            for (const [a, n] of [...byAuthor.entries()].sort((x, y) => y[1] - x[1])) out.push(`  ${a}: ${n}`);
+            out.push("По датам:");
+            for (const [d, n] of [...byDate.entries()].sort()) out.push(`  ${d}: ${n}`);
+            out.push("Кластеры:");
+            for (const c of clusters.sort((x, y) => y.size - x.size)) {
+              out.push(`  размер ${c.size}: ${c.members.map(([sid]) => sid).join(", ")} (тема: ${c.theme})`);
+            }
+            out.push(`Граф (рёбер: ${graph.length}):`);
+            for (const [a, b, s] of graph) out.push(`  ${a} <-> ${b}: ${s.toFixed(2)}`);
+            return out.join("\n");
+          } catch (err) {
+            return `memory_stats_detail failed: ${err instanceof Error ? err.message : String(err)}`;
           }
         },
       }),

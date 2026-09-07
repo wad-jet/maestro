@@ -16,6 +16,7 @@ export const DEFAULTS = {
   retry_interval_min: 60,
   top_k: 3,
   min_score: 0.35,
+  similarity_threshold: 0.7,
   retention_days: null,
   summarize_timeout_ms: 120000,
   storage: { type: "sqlite", centralized_confidential: "forbid" },
@@ -49,6 +50,20 @@ function retentionDaysValid(m) {
 }
 
 /**
+ * similarity_threshold: number in [0, 1] (cosine threshold for clusters/graph);
+ * anything else → invalid (memory disabled). Shared by classifyMemoryConfig
+ * (zero-dep gate) and loadMemoryConfig.
+ * @param {object} m  The `memory` config section.
+ * @returns {boolean}  True when similarity_threshold is valid (or absent).
+ */
+function similarityThresholdValid(m) {
+  if (m?.similarity_threshold == null) return true;
+  return typeof m.similarity_threshold === "number"
+    && m.similarity_threshold >= 0
+    && m.similarity_threshold <= 1;
+}
+
+/**
  * Lightweight classification of the memory config — NO storage imports.
  * Used by core.js BEFORE any memory module import (zero-dep gate, C1) and
  * re-used by loadMemoryConfig / registerMemoryHooks.
@@ -61,6 +76,7 @@ export function classifyMemoryConfig(maestroJson, { gitName = null } = {}) {
   if (!m) return { enabled: false, disabled_reason: "no_memory_section" };
   if (m.enabled !== true) return { enabled: false, disabled_reason: "explicitly_disabled" };
   if (!retentionDaysValid(m)) return { enabled: false, disabled_reason: "retention_days_invalid" };
+  if (!similarityThresholdValid(m)) return { enabled: false, disabled_reason: "similarity_threshold_invalid" };
   const type = m.storage?.type ?? "sqlite";
   if (!STORAGE_TYPES.has(type)) return { enabled: false, disabled_reason: "storage_type_invalid" };
   const centralized = type !== "sqlite";

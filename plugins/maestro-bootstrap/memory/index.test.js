@@ -1127,3 +1127,198 @@ test("C-1: export normalizes pgvector scan embedding (string → Float32Array)",
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── Task 8: memory_recall_preview + memory_stats_detail ────────────────
+
+test("memory_recall_preview returns scored hits", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-prev-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    const seen = [];
+    storage.search = async function (vec, opts) { this.searches++; seen.push(opts); return [{
+      entry: { title: "Auth refactor", summary: "Fixed auth flow", author: "alice", time_last: 1700000000000, origin_project_hash: "h1", session_id: "s1" },
+      score: 0.9,
+    }]; };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    const res = await hooks.tool.memory_recall_preview.execute({ query: "auth" }, { sessionID: "s1" });
+    assert.match(res, /Auth refactor/, "must include title");
+    assert.match(res, /alice/, "must include author");
+    assert.match(res, /0\.90/, "must include score");
+    assert.match(res, /Fixed auth flow/, "must include summary (working agent tool)");
+    assert.equal(seen.length, 1, "search must be called once");
+    assert.equal(seen[0].query, "auth", "FTS query must be passed to search");
+    assert.equal(typeof seen[0].key, "string");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_recall_preview empty returns message", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-prev-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.search = async () => [];
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    const res = await hooks.tool.memory_recall_preview.execute({ query: "x" }, { sessionID: "s1" });
+    assert.equal(res, "Ничего не найдено.");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_stats_detail clusters via scan", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-stats-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.stats = async () => ({ entries: 4 });
+    storage.scan = async () => [
+      { session_id: "s1", title: "T1", author: "alice", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]) },
+      { session_id: "s2", title: "T2", author: "alice", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([0.99, 0.01, 0]) },
+      { session_id: "s3", title: "T3", author: "bob", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([0.98, 0.02, 0]) },
+      { session_id: "s4", title: "T4", author: "bob", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([0, 1, 0]) },
+    ];
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    const res = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "s1" });
+    assert.match(res, /Записей: 4/, "must include entries count");
+    assert.match(res, /alice: 2/, "must include by_author");
+    assert.match(res, /bob: 2/, "must include by_author");
+    assert.match(res, /Кластеры/, "must include clusters section");
+    assert.match(res, /размер 3/, "3 similar entries must cluster together");
+    assert.match(res, /размер 1/, "orthogonal entry must be its own cluster");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_stats_detail graph edges above threshold", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-graph-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.stats = async () => ({ entries: 3 });
+    storage.scan = async () => [
+      { session_id: "s1", title: "T1", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]) },
+      { session_id: "s2", title: "T2", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([0.99, 0.01, 0]) },
+      { session_id: "s3", title: "T3", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([0, 1, 0]) },
+    ];
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    const res = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "s1" });
+    assert.match(res, /Граф/, "must include graph section");
+    assert.match(res, /s1.*s2/, "similar pair must be an edge");
+    assert.doesNotMatch(res, /s1.*s3/, "orthogonal pair must NOT be an edge");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("similarity_threshold default 0.7", async () => {
+  const { DEFAULTS } = await import("./config.js");
+  assert.equal(DEFAULTS.similarity_threshold, 0.7);
+});
+
+test("tools blocked for [maestro-memory]", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-gate2-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    SESSIONS.add("summ-session");
+    try {
+      const prev = await hooks.tool.memory_recall_preview.execute({ query: "x" }, { sessionID: "summ-session" });
+      assert.match(prev, /недоступен для служебных сессий/);
+      const stats = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "summ-session" });
+      assert.match(stats, /недоступен для служебных сессий/);
+    } finally {
+      SESSIONS.delete("summ-session");
+    }
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── M-9 follow-up: import reports physical line numbers ────────────────
+
+test("import reports physical line numbers", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-lineno-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const exportPath = join(dir, "export.jsonl");
+    const { writeFileSync } = await import("node:fs");
+    const valid = JSON.stringify({ ...mkFullEntry(), embedding: Array.from(mkFullEntry().embedding) });
+    // line1 valid, line2 EMPTY, line3 invalid → error must mention "строка 3".
+    writeFileSync(exportPath, valid + "\n\nnot-json\n");
+
+    const storage = await mkSqliteStorage(dir);
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir, { namespace: "k" }),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    const res = await hooks.tool.memory_import.execute({ path: exportPath }, { sessionID: "s1" });
+    assert.match(res, /строка 3/, "must report physical line 3 (empty line 2 counted)");
+    const stats = await storage.stats({ key: "k" });
+    assert.equal(stats.entries, 0, "nothing must be imported on invalid line");
+    await hooks.dispose?.();
+    await storage.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
