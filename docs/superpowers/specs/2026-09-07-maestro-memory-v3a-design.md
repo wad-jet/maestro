@@ -88,15 +88,16 @@ GIN; qdrant payload-поле + index); миграция экспорт/импо�
   (идемпотентно: try/catch — на серверах < 1.10 создание индекса упадёт, но `full_text_match` работает и без
   индекса (per-payload scan); при отказе фильтра срабатывает §3.5 vector-only fallback).
 - **Бэкфилл** существующих точек: `scroll` по `text is_empty: true` с **пагинацией `next_page_offset`**
-  (один scroll-вызов возвращает ≤10 точек) → `set_payload` c `text`.
+  (один scroll-вызов возвращает ≤10 точек) → per-point `setPayload(collection, { payload: { text }, points: [id] })`
+  (реальный API: `payload` — один объект, `points` — список id; per-point вызовы + try/catch → лог, init не ломается).
   Самопроверка (нет точек с пустым text → skip), флаг не нужен.
 - **Дублирование текста** в payload (~2× от title+summary+decisions) — принимается и документируется (индексная цена).
 - **Оговорка токенизации:** `min_token_len: 2` отбрасывает односимвольные токены — отметить в паритет-матрице docs.
 
 `search(embedding, { query, … })`:
-- При `query` — вторая ветка: **filter-only запрос БЕЗ `nearest`** (иначе текстовая ветка станет
-  вектор-упорядоченной и продублирует векторный сигнал в RRF):
-  `query: { filter: { must: [key-set, full_text_match({key:"text", text: query}), date/author] } }, limit: top_k`
+- При `query` — вторая ветка: **filter-only запрос БЕЗ `query`-ключа и БЕЗ `nearest`** (у `Query` enum нет
+  `FilterQuery`-варианта — сервер вернул бы 400; корректная форма — top-level `filter`):
+  `filter: { must: [key-set, full_text_match({key:"text", text: query}), date/author] }, limit: top_k`
   → textHits (порядок — как вернёт сервер; ранг по позиции). → `fuseRrf`.
 - **Ограничение ранжирования** (документируется): filter-leg не даёт bm25-порядка — текстовая ветка даёт
   лексическое совпадение (всплывает через RRF), но не точный bm25-ранг.

@@ -421,11 +421,11 @@ test("qdrant init creates payload text index + backfills empty-text points (page
   assert.ok(set.payload.text);
 });
 
-test("qdrant hybrid: text leg is filter-only (no nearest) and fuses via rrf", async () => {
+test("qdrant hybrid: text leg is filter-only (no query/nearest) and fuses via rrf", async () => {
   fakeClient.query = async (coll, opts) => {
-    if (opts.query && opts.query.filter) {
-      assert.ok(!opts.query.nearest, "text leg must not be vector-ordered");
-      assert.ok(JSON.stringify(opts.query.filter).includes("full_text_match"));
+    if (opts.filter && !opts.query) {
+      assert.equal(opts.query, undefined, "text leg must not have query key");
+      assert.ok(JSON.stringify(opts.filter).includes("full_text_match"));
       return { points: [{ payload: { session_id: "s1" } }] };
     }
     return { points: [{ payload: { session_id: "s2", decisions: "[]" }, score: 0.8 }] };
@@ -474,10 +474,17 @@ Expected: FAIL — `text`/index отсутствуют.
     if (points.length) {
       const pts = points.filter((p) => p.payload?.title || p.payload?.summary || p.payload?.decisions);
       if (pts.length) {
-        await this.client.setPayload(this.collection, {
-          payload: { text: "" }, // placeholder; per-point via set_payload with points
-          points: pts.map((p) => ({ id: p.id, payload: { text: textOf(p) } })),
-        });
+        // per-point: payload — один объект, points — список id (реальный API).
+        try {
+          for (const p of pts) {
+            await this.client.setPayload(this.collection, {
+              payload: { text: textOf(p) },
+              points: [p.id],
+            });
+          }
+        } catch (err) {
+          console.error(`[memory] qdrant text backfill failed: ${err.message}`);
+        }
       }
     }
     offset = res.next_page_offset;
@@ -487,8 +494,9 @@ Expected: FAIL — `text`/index отсутствуют.
 - `search`: при `query`:
   ```js
   const textFilter = { must: [...keyMust, { key: "text", full_text_match: { text: query } }, ...dateAuthorMust] };
+  // top-level filter БЕЗ query-ключа (у Query enum нет FilterQuery-варианта).
   const tr = await this.client.query(this.collection, {
-    query: { filter: textFilter },
+    filter: textFilter,
     limit: top_k,
     with_payload: true,
   });
