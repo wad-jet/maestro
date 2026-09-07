@@ -1,5 +1,13 @@
 import { resolveSearchKeys } from "../project.js";
 
+// Whitelist of scan-able columns (mirrors the table schema). Default scan
+// returns everything EXCEPT embedding (large); embedding is opt-in.
+const SCAN_FIELDS = [
+  "session_id", "key", "origin_project_hash", "title", "summary", "decisions",
+  "author", "time_first", "time_last", "version", "model_id", "embedding",
+];
+const DEFAULT_SCAN_FIELDS = SCAN_FIELDS.filter((f) => f !== "embedding");
+
 export class PgVectorStorage {
   constructor({ pool, table, dim, modelId }) {
     this.pool = pool;
@@ -92,7 +100,17 @@ export class PgVectorStorage {
     const cutoff = Date.now() - olderThanDays * 86400_000;
     return this.deleteByFilter({ key, before: cutoff });
   }
-  async stats() { const r = await this.pool.query(`SELECT count(*) FROM ${this.table}`); return { entries: Number(r.rows[0].count) }; }
+  async stats({ key }) {
+    if (typeof key !== "string" || !key) throw new Error("stats: key required");
+    const r = await this.pool.query(`SELECT count(*) FROM ${this.table} WHERE key=$1`, [key]);
+    return { entries: Number(r.rows[0].count) };
+  }
+  async scan({ key, fields }) {
+    if (typeof key !== "string" || !key) throw new Error("scan: key required");
+    const cols = (fields && fields.length ? fields : DEFAULT_SCAN_FIELDS).filter((f) => SCAN_FIELDS.includes(f));
+    const res = await this.pool.query(`SELECT ${cols.join(", ")} FROM ${this.table} WHERE key=$1`, [key]);
+    return res.rows.map((r) => ({ ...r, decisions: JSON.parse(r.decisions) }));
+  }
   async get(session_id) {
     const r = await this.pool.query(`SELECT * FROM ${this.table} WHERE session_id = $1`, [session_id]);
     if (!r.rows[0]) return null;

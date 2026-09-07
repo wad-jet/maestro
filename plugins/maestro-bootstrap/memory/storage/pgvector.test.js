@@ -77,7 +77,7 @@ test("pgvector stats", async () => {
   const p = fakePool();
   const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3 });
   await st.init();
-  const s = await st.stats();
+  const s = await st.stats({ key: "k1" });
   assert.equal(s.entries, 2);
 });
 
@@ -172,4 +172,33 @@ test("pgvector prune filters by time_last", async () => {
   assert.ok(del[0].includes("time_last <= $2"));
   assert.equal(del[1][0], "k1");
   assert.ok(del[1][1] <= before - 30 * 86400_000);
+});
+
+test("pgvector stats key-scoped", async () => {
+  const p = fakePool();
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3 });
+  await st.init();
+  const s = await st.stats({ key: "k1" });
+  assert.equal(s.entries, 2);
+  const countCall = p.calls.find(([sql]) => sql.startsWith("SELECT count"));
+  assert.ok(countCall[0].includes("WHERE key=$1"), countCall[0]);
+  assert.equal(countCall[1][0], "k1");
+});
+
+test("pgvector scan returns fields", async () => {
+  const p = fakePool();
+  p.query = async (sql, params) => {
+    p.calls.push([sql, params]);
+    if (sql.startsWith("SELECT count")) return { rows: [{ count: "1" }] };
+    if (sql.includes("FROM maestro_memory")) return { rows: [{ session_id: "s1", title: "t1", decisions: '["d1"]', key: "k1" }] };
+    return { rows: [] };
+  };
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3 });
+  await st.init();
+  const rows = await st.scan({ key: "k1", fields: ["session_id", "title", "decisions"] });
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0].decisions, ["d1"]);
+  const sel = p.calls.find(([sql]) => sql.includes("FROM maestro_memory"));
+  assert.ok(sel[0].includes("WHERE key=$1"), sel[0]);
+  assert.equal(sel[1][0], "k1");
 });

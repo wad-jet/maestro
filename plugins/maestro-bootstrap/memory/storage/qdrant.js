@@ -1,6 +1,14 @@
 import { createHash } from "node:crypto";
 import { resolveSearchKeys } from "../project.js";
 
+// Whitelist of scan-able payload fields. Default scan returns everything EXCEPT
+// embedding (large); embedding is opt-in.
+const SCAN_FIELDS = [
+  "session_id", "key", "origin_project_hash", "title", "summary", "decisions",
+  "author", "time_first", "time_last", "version", "model_id", "embedding",
+];
+const DEFAULT_SCAN_FIELDS = SCAN_FIELDS.filter((f) => f !== "embedding");
+
 function uuidFrom(s) {
   const h = createHash("sha256").update(s).digest("hex");
   return `${h.slice(0, 8)}-${h.slice(8, 12)}-4${h.slice(13, 16)}-a${h.slice(17, 20)}-${h.slice(20, 32)}`;
@@ -97,9 +105,30 @@ export class QdrantStorage {
     return this.deleteByFilter({ key, before: cutoff });
   }
 
-  async stats() {
-    const { count } = await this.client.count(this.collection);
+  async stats({ key }) {
+    if (typeof key !== "string" || !key) throw new Error("stats: key required");
+    const { count } = await this.client.count(this.collection, {
+      filter: { must: [{ key: "key", match: { value: key } }] },
+    });
     return { entries: count };
+  }
+
+  async scan({ key, fields }) {
+    if (typeof key !== "string" || !key) throw new Error("scan: key required");
+    const res = await this.client.scroll(this.collection, {
+      filter: { must: [{ key: "key", match: { value: key } }] },
+      limit: 10000,
+      with_payload: true,
+    });
+    const cols = fields && fields.length ? fields : DEFAULT_SCAN_FIELDS;
+    return (res.points ?? []).map((p) => {
+      const out = {};
+      for (const f of cols) {
+        if (f in p.payload) out[f] = p.payload[f];
+      }
+      if ("decisions" in out) out.decisions = JSON.parse(out.decisions);
+      return out;
+    });
   }
 
   // C-2: filter-only query for get()

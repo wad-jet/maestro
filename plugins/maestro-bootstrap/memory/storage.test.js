@@ -27,7 +27,7 @@ test("sqlite upsert/search/delete", async () => {
     await st.delete("s1");
     const hits2 = await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 2, min_score: 0.5, key: "k1" });
     assert.equal(hits2.length, 0);
-    const sts = await st.stats();
+    const sts = await st.stats({ key: "k2" });
     assert.equal(sts.entries, 1);
   } finally {
     await st.dispose();
@@ -392,6 +392,32 @@ test("qdrant get returns entry or null", async () => {
   assert.deepStrictEqual(found.decisions, []);
   const notFound = await st.get("nonexistent");
   assert.equal(notFound, null);
+});
+
+test("stats is key-scoped", async () => {
+  const st = createStorage({ type: "sqlite", options: { dbPath: ":memory:" }, modelId: "m", dim: 3 });
+  await st.init();
+  await st.upsert([mkEntry("s1", "k1", "t1"), mkEntry("s2", "k2", "t2")]);
+  const s1 = await st.stats({ key: "k1" });
+  const s2 = await st.stats({ key: "k2" });
+  assert.equal(s1.entries, 1);
+  assert.equal(s2.entries, 1);
+});
+
+test("scan returns requested fields with decisions parsed", async () => {
+  const st = createStorage({ type: "sqlite", options: { dbPath: ":memory:" }, modelId: "m", dim: 3 });
+  await st.init();
+  await st.upsert([{ ...mkEntry("s1", "k1", "t1"), decisions: ["d1"], time_last: 100 }]);
+  const rows = await st.scan({ key: "k1", fields: ["session_id", "title", "author", "time_last", "decisions"] });
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0].decisions, ["d1"]);
+  assert.equal(rows[0].embedding, undefined); // not requested
+});
+
+test("scan requires key", async () => {
+  const st = createStorage({ type: "sqlite", options: { dbPath: ":memory:" }, modelId: "m", dim: 3 });
+  await st.init();
+  await assert.rejects(() => st.scan({}), /key required/);
 });
 
 test("pgvector factory rejects missing pool", async () => {

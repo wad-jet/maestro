@@ -183,7 +183,7 @@ test("qdrant stats returns entry count", async () => {
   const c = fakeClient();
   const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
   await st.init();
-  const s = await st.stats();
+  const s = await st.stats({ key: "k1" });
   assert.equal(s.entries, 1);
 });
 
@@ -265,4 +265,33 @@ test("qdrant prune filters by time_last", async () => {
   assert.deepEqual(must[0], { key: "key", match: { value: "k1" } });
   assert.equal(must[1].key, "time_last");
   assert.ok(must[1].range.lte <= before - 30 * 86400_000);
+});
+
+test("qdrant stats key-scoped", async () => {
+  const c = fakeClient();
+  c.count = async (name, opts) => {
+    c.calls.push(["count", name, opts]);
+    return { count: 1 };
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  const s = await st.stats({ key: "k1" });
+  assert.equal(s.entries, 1);
+  const countCall = c.calls.find(([k]) => k === "count");
+  assert.deepEqual(countCall[2].filter.must, [{ key: "key", match: { value: "k1" } }]);
+});
+
+test("qdrant scan scrolls with key filter", async () => {
+  const c = fakeClient();
+  c.scroll = async (name, opts) => {
+    c.calls.push(["scroll", name, opts]);
+    return { points: [{ payload: { session_id: "s1", title: "t1", decisions: '["d1"]', key: "k1" } }] };
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  const rows = await st.scan({ key: "k1", fields: ["session_id", "title", "decisions"] });
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0].decisions, ["d1"]);
+  const scrollCall = c.calls.find(([k]) => k === "scroll");
+  assert.deepEqual(scrollCall[2].filter.must, [{ key: "key", match: { value: "k1" } }]);
 });

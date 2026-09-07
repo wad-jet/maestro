@@ -2,6 +2,14 @@ import { join } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 
+// Whitelist of scan-able columns (mirrors the `memory` table schema). Default
+// scan returns everything EXCEPT embedding (large); embedding is opt-in.
+const SCAN_FIELDS = [
+  "session_id", "key", "origin_project_hash", "title", "summary", "decisions",
+  "author", "time_first", "time_last", "version", "model_id", "embedding",
+];
+const DEFAULT_SCAN_FIELDS = SCAN_FIELDS.filter((f) => f !== "embedding");
+
 /**
  * Lazy-load better-sqlite3, resolving from `moduleDir/node_modules`
  * (self-provisioned module) with a fallback to the bare specifier (repo
@@ -256,9 +264,17 @@ export class SqliteStorage {
     return info.changes;
   }
 
-  async stats() {
-    const r = this.db.prepare("SELECT COUNT(*) c FROM memory").get();
+  async stats({ key }) {
+    if (typeof key !== "string" || !key) throw new Error("stats: key required");
+    const r = this.db.prepare("SELECT COUNT(*) c FROM memory WHERE key = ?").get(key);
     return { entries: r.c };
+  }
+
+  async scan({ key, fields }) {
+    if (typeof key !== "string" || !key) throw new Error("scan: key required");
+    const cols = (fields && fields.length ? fields : DEFAULT_SCAN_FIELDS).filter((f) => SCAN_FIELDS.includes(f));
+    const rows = this.db.prepare(`SELECT ${cols.join(", ")} FROM memory WHERE key = ?`).all(key);
+    return rows.map((r) => ({ ...r, decisions: JSON.parse(r.decisions) }));
   }
 
   async get(session_id) {
