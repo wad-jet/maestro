@@ -273,12 +273,14 @@ untrusted, access-policy не enforced, дефолтные sanitizer-прави�
   `experimental.chat.system.transform`, `event` (`session.idle`/`session.deleted`),
   расширенный `dispose`. Инвариант: `experimental.chat.messages.transform` НЕ
   присваивается.
-- **Гибридный поиск (sqlite):** FTS5-таблица `memory_fts` (title+summary+
-  decisions) + векторный KNN, слияние RRF (k=60); backfill при init, sync при
-  всех путях записи/удаления; ошибка MATCH → fallback vector-only + лог.
+- **Гибридный поиск (все бэкенды, v3a):** векторный KNN + лексические совпадения
+  (title+summary+decisions), слияние RRF (k=60); sqlite — FTS5, pgvector —
+  `tsvector`+`ts_rank`, qdrant — payload full-text (filter-leg); backfill при init,
+  sync при всех путях записи/удаления; ошибка лексической ветки → fallback
+  vector-only + лог.
 - **Фильтры `memory_search`:** `date_from`/`date_to` (time_last), `author`,
-  `project` (кросс-проектный opt-in, **только централизованные бэкенды**;
-  на sqlite — явная ошибка).
+  `project` (кросс-проектный opt-in, **все бэкенды**; sqlite — read-only соседняя
+  БД с fail-soft, qdrant/pg — key-filter).
 - **Permission (обязательное правило):** `memory_forget`/`memory_export`/
   `memory_import` — write/boundary-tools; в merge-config пишется
   `permission: { memory_forget: "ask", memory_export: "ask", memory_import: "ask" }`.
