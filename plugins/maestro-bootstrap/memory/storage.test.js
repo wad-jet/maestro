@@ -1,9 +1,14 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { createRequire } from "node:module";
 import { createStorage } from "./storage.js";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
+import { SqliteStorage } from "./storage/sqlite.js";
+import { sanitizeDirName } from "./config.js";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
+
+const require = createRequire(import.meta.url);
 
 function mkEntry(session_id, key, title, extra = {}) {
   return {
@@ -101,18 +106,184 @@ test("search filters by author", async () => {
   }
 });
 
-test("search project on sqlite throws clear error", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "mem-"));
-  const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
+test("sqlite cross-project search reads sibling DB read-only", async () => {
+  const base = mkdtempSync(join(tmpdir(), "mm-sqlite-xp-"));
+  const dir = (key) => join(base, "maestro", "memory", sanitizeDirName(key));
+  const activeKey = "active"; const other = "other";
+  mkdirSync(dir(activeKey), { recursive: true });
+  mkdirSync(dir(other), { recursive: true });
+  const mk = (key) => new SqliteStorage({ dbPath: join(dir(key), "memory.db"), modelId: "m", dim: 3, moduleDir: null });
+  const active = mk(activeKey); const otherDb = mk(other);
   try {
-    await st.init();
-    await assert.rejects(
-      () => st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 5, min_score: 0, key: "k1", project: "other" }),
-      /централизованн/i,
-    );
+    await otherDb.init();
+    await otherDb.upsert([{ session_id: "o1", key: other, origin_project_hash: "ho", title: "Other Project", summary: "sum", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([1, 0, 0]) }]);
+    await otherDb.dispose();
+    await active.init();
+    await active.upsert([{ session_id: "a1", key: activeKey, origin_project_hash: "ha", title: "Active", summary: "sum", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([0, 1, 0]) }]);
+    const res = await active.search(new Float32Array([1, 0, 0]), { key: activeKey, project: other, top_k: 10, min_score: 0 });
+    const ids = res.map((h) => h.entry.session_id);
+    assert.ok(ids.includes("o1"), "sibling hit present");
+    assert.ok(ids.includes("a1"), "active hit present");
+    // Провенанс: sibling-хит помечен _source_key.
+    const o1 = res.find((h) => h.entry.session_id === "o1");
+    assert.equal(o1.entry._source_key, other, "sibling hit carries _source_key");
+    const a1 = res.find((h) => h.entry.session_id === "a1");
+    assert.equal(a1.entry._source_key, undefined, "active hit has no _source_key");
   } finally {
-    await st.dispose();
-    rmSync(dir, { recursive: true, force: true });
+    await active.dispose();
+    await otherDb.dispose();
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("sqlite cross-project: sibling is opened read-only", async () => {
+  const base = mkdtempSync(join(tmpdir(), "mm-sqlite-xp-"));
+  const dir = (key) => join(base, "maestro", "memory", sanitizeDirName(key));
+  const activeKey = "active"; const other = "other";
+  mkdirSync(dir(activeKey), { recursive: true });
+  mkdirSync(dir(other), { recursive: true });
+  // Stub better-sqlite3 в moduleDir: оборачивает реальный, записывает опции
+  // каждого открытия в JSON-файл (проверяем readonly-флаг sibling-открытия).
+  const nm = join(base, "node_modules", "better-sqlite3");
+  mkdirSync(nm, { recursive: true });
+  const realPath = require.resolve("better-sqlite3");
+  const logPath = join(base, "opens.json");
+  writeFileSync(join(nm, "package.json"), JSON.stringify({ name: "better-sqlite3", main: "index.js" }));
+  writeFileSync(join(nm, "index.js"), `
+    const real = require(${JSON.stringify(realPath)});
+    const fs = require("node:fs");
+    const logPath = ${JSON.stringify(logPath)};
+    function Wrapped(path, opts) {
+      const arr = fs.existsSync(logPath) ? JSON.parse(fs.readFileSync(logPath, "utf8")) : [];
+      arr.push({ path: String(path), opts });
+      fs.writeFileSync(logPath, JSON.stringify(arr));
+      return new real(path, opts);
+    }
+    module.exports = Wrapped;
+  `);
+  const mk = (key) => new SqliteStorage({ dbPath: join(dir(key), "memory.db"), modelId: "m", dim: 3, moduleDir: base });
+  const active = mk(activeKey); const otherDb = mk(other);
+  try {
+    await otherDb.init();
+    await otherDb.upsert([{ session_id: "o1", key: other, origin_project_hash: "ho", title: "Other Project", summary: "sum", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([1, 0, 0]) }]);
+    await otherDb.dispose();
+    await active.init();
+    await active.upsert([{ session_id: "a1", key: activeKey, origin_project_hash: "ha", title: "Active", summary: "sum", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([0, 1, 0]) }]);
+    await active.search(new Float32Array([1, 0, 0]), { key: activeKey, project: other, top_k: 10, min_score: 0 });
+    const opens = JSON.parse(readFileSync(logPath, "utf8"));
+    const siblingOpen = opens.find((o) => String(o.path).includes(sanitizeDirName(other)) && o.opts);
+    assert.ok(siblingOpen, "sibling Database constructed");
+    assert.equal(siblingOpen.opts.readonly, true, "sibling opened read-only");
+  } finally {
+    await active.dispose();
+    await otherDb.dispose();
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("sqlite cross-project: model mismatch sibling is skipped", async () => {
+  const base = mkdtempSync(join(tmpdir(), "mm-sqlite-xp-"));
+  const dir = (key) => join(base, "maestro", "memory", sanitizeDirName(key));
+  const activeKey = "active"; const other = "other";
+  mkdirSync(dir(activeKey), { recursive: true });
+  mkdirSync(dir(other), { recursive: true });
+  const mk = (key, modelId) => new SqliteStorage({ dbPath: join(dir(key), "memory.db"), modelId, dim: 3, moduleDir: null });
+  const active = mk(activeKey, "m"); const otherDb = mk(other, "other-model");
+  const logs = [];
+  const origErr = console.error;
+  console.error = (...a) => logs.push(a.join(" "));
+  try {
+    await otherDb.init();
+    await otherDb.upsert([{ session_id: "o1", key: other, origin_project_hash: "ho", title: "Other Project", summary: "sum", decisions: [], model_id: "other-model", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([1, 0, 0]) }]);
+    await otherDb.dispose();
+    await active.init();
+    await active.upsert([{ session_id: "a1", key: activeKey, origin_project_hash: "ha", title: "Active", summary: "sum", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([0, 1, 0]) }]);
+    const res = await active.search(new Float32Array([1, 0, 0]), { key: activeKey, project: other, top_k: 10, min_score: 0 });
+    const ids = res.map((h) => h.entry.session_id);
+    assert.ok(ids.includes("a1"), "active hit present");
+    assert.ok(!ids.includes("o1"), "mismatched sibling skipped");
+    assert.ok(logs.some((l) => l.includes("model mismatch")), "model mismatch logged");
+  } finally {
+    console.error = origErr;
+    await active.dispose();
+    await otherDb.dispose();
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("sqlite cross-project: missing sibling file is skipped silently", async () => {
+  const base = mkdtempSync(join(tmpdir(), "mm-sqlite-xp-"));
+  const dir = (key) => join(base, "maestro", "memory", sanitizeDirName(key));
+  const activeKey = "active";
+  mkdirSync(dir(activeKey), { recursive: true });
+  const active = new SqliteStorage({ dbPath: join(dir(activeKey), "memory.db"), modelId: "m", dim: 3, moduleDir: null });
+  try {
+    await active.init();
+    await active.upsert([{ session_id: "a1", key: activeKey, origin_project_hash: "ha", title: "Active", summary: "sum", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([0, 1, 0]) }]);
+    // project "nonexistent" — файла нет → skip, без throw.
+    const res = await active.search(new Float32Array([1, 0, 0]), { key: activeKey, project: "nonexistent", top_k: 5, min_score: 0 });
+    const ids = res.map((h) => h.entry.session_id);
+    assert.ok(ids.includes("a1"), "active hit present");
+    assert.ok(!ids.includes("o1"), "no phantom sibling hit");
+  } finally {
+    await active.dispose();
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("sqlite cross-project: sibling search error skipped (fail-soft)", async () => {
+  const base = mkdtempSync(join(tmpdir(), "mm-sqlite-xp-"));
+  const dir = (key) => join(base, "maestro", "memory", sanitizeDirName(key));
+  const activeKey = "active"; const other = "other";
+  mkdirSync(dir(activeKey), { recursive: true });
+  mkdirSync(dir(other), { recursive: true });
+  // Повреждённая sibling-БД: обычный текстовый файл вместо sqlite.
+  writeFileSync(join(dir(other), "memory.db"), "this is not a sqlite database");
+  const active = new SqliteStorage({ dbPath: join(dir(activeKey), "memory.db"), modelId: "m", dim: 3, moduleDir: null });
+  const logs = [];
+  const origErr = console.error;
+  console.error = (...a) => logs.push(a.join(" "));
+  try {
+    await active.init();
+    await active.upsert([{ session_id: "a1", key: activeKey, origin_project_hash: "ha", title: "Active", summary: "sum", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([0, 1, 0]) }]);
+    const res = await active.search(new Float32Array([1, 0, 0]), { key: activeKey, project: other, top_k: 5, min_score: 0 });
+    const ids = res.map((h) => h.entry.session_id);
+    assert.ok(ids.includes("a1"), "active hit present despite corrupt sibling");
+    assert.ok(logs.some((l) => l.includes("cross-project skip")), "corrupt sibling logged");
+  } finally {
+    console.error = origErr;
+    await active.dispose();
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("sqlite cross-project: sibling text-only hit gets full entry (embedded)", async () => {
+  const base = mkdtempSync(join(tmpdir(), "mm-sqlite-xp-"));
+  const dir = (key) => join(base, "maestro", "memory", sanitizeDirName(key));
+  const activeKey = "active"; const other = "other";
+  mkdirSync(dir(activeKey), { recursive: true });
+  mkdirSync(dir(other), { recursive: true });
+  const mk = (key) => new SqliteStorage({ dbPath: join(dir(key), "memory.db"), modelId: "m", dim: 3, moduleDir: null });
+  const active = mk(activeKey); const otherDb = mk(other);
+  try {
+    await otherDb.init();
+    // Слабый вектор (ортогонален запросу → отсекается min_score), но сильный
+    // текстовый матч по "OAuth" → хит только через FTS.
+    await otherDb.upsert([{ session_id: "o1", key: other, origin_project_hash: "ho", title: "OAuth token refresh", summary: "OAuth OAuth flow", decisions: ["d"], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([0, 1, 0]) }]);
+    await otherDb.dispose();
+    await active.init();
+    await active.upsert([{ session_id: "a1", key: activeKey, origin_project_hash: "ha", title: "Active", summary: "sum", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([1, 0, 0]) }]);
+    const res = await active.search(new Float32Array([1, 0, 0]), { key: activeKey, project: other, top_k: 10, min_score: 0.5, query: "OAuth" });
+    const o1 = res.find((h) => h.entry.session_id === "o1");
+    assert.ok(o1, "sibling text-only hit surfaced via FTS");
+    assert.equal(o1.entry.title, "OAuth token refresh", "full entry embedded (title)");
+    assert.equal(o1.entry.summary, "OAuth OAuth flow", "full entry embedded (summary)");
+    assert.deepStrictEqual(o1.entry.decisions, ["d"], "decisions parsed");
+    assert.equal(o1.entry._source_key, other, "sibling hit carries _source_key");
+  } finally {
+    await active.dispose();
+    await otherDb.dispose();
+    rmSync(base, { recursive: true, force: true });
   }
 });
 

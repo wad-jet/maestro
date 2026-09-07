@@ -1,7 +1,9 @@
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { fuseRrf } from "./rrf.js";
+import { resolveSearchKeys } from "../project.js";
+import { sanitizeDirName } from "../config.js";
 
 // Whitelist of scan-able columns (mirrors the `memory` table schema). Default
 // scan returns everything EXCEPT embedding (large); embedding is opt-in.
@@ -159,62 +161,145 @@ export class SqliteStorage {
   }
 
   async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query }) {
-    // B2: cross-project search is centralized-only (per-key sqlite files would
-    // require opening sibling DBs — new concurrency surface). Explicit error.
-    if (project !== undefined && project !== null && project !== "") {
-      throw new Error("кросс-проектный поиск доступен только для централизованных бэкендов");
-    }
-    if (typeof key !== "string" || !key) {
-      throw new Error("search: key required");
-    }
     if (embedding.length !== this.dim) {
       throw new Error(`embedding length ${embedding.length} does not match expected dimension ${this.dim}`);
     }
+    // Ключевой набор: активный key + (опционально) соседний project-ключ.
+    // Без `project` — ровно один ключ, поведение идентично прежнему.
+    const keys = resolveSearchKeys({ key, project });
+    const opts = { date_from, date_to, author, query, top_k, min_score };
+    const textLists = [];
+    const allVector = [];
+    await this._collectKey(keys[0], true, embedding, opts, allVector, textLists); // активный ключ
+    for (const k of keys.slice(1)) {
+      await this._collectKey(k, false, embedding, opts, allVector, textLists); // соседние (read-only)
+    }
+    allVector.sort((a, b) => b.score - a.score);
+    // Единый RRF-фьюжн по всем ключам (модель сверена → скоры сравнимы).
+    const fused = await fuseRrf(allVector, textLists, { fetchEntry: (sid) => this.get(sid) });
+    return fused.slice(0, top_k);
+  }
+
+  /**
+   * Собрать хиты одного ключа (активного или соседнего) и накопить их в
+   * общие списки. Активный ключ — через `this.db`; соседний — read-only
+   * открытие sibling-БД с fail-soft (любая ошибка → skip + лог).
+   * @param {string} k  Ключ.
+   * @param {boolean} isActive  Активный ключ (this.db) или соседний.
+   * @param {Float32Array} embedding  Вектор запроса.
+   * @param {object} opts  date_from/date_to/author/query/top_k/min_score.
+   * @param {Array} allVector  Накопитель векторных хитов (мутируется).
+   * @param {Array} textLists  Накопитель текстовых списков (мутируется).
+   */
+  async _collectKey(k, isActive, embedding, opts, allVector, textLists) {
+    if (isActive) {
+      const { vectorHits, ftsHits } = this._searchIn(this.db, k, embedding, { ...opts, allowFts: true });
+      allVector.push(...vectorHits);
+      if (ftsHits.length) textLists.push(ftsHits);
+      return;
+    }
+    // Соседний ключ: read-only sibling-БД по layout <dataDir>/maestro/memory/<hash>/memory.db.
+    // dataDir = join(dirname(dbPath), "..", "..") — поднимаемся от
+    // <dataDir>/maestro/memory/<hash>/memory.db до <dataDir>/maestro.
+    const dataDir = join(dirname(this.dbPath), "..", "..");
+    const path = join(dataDir, "memory", sanitizeDirName(k), "memory.db");
+    const Database = await loadBetterSqlite3(this.moduleDir);
+    let sib;
+    try {
+      sib = new Database(path, { readonly: true, fileMustExist: false });
+    } catch (err) {
+      console.error(`[memory] cross-project skip ${k}: ${err.message}`);
+      return;
+    }
+    try {
+      // Сверка модели: несовпадение → косинусы несравнимы → skip + лог.
+      const model = sib.prepare("SELECT value FROM meta WHERE name = 'model_id'").get();
+      if (model && model.value !== this.modelId) {
+        console.error(`[memory] cross-project skip ${k}: model mismatch`);
+        return;
+      }
+      const dim = sib.prepare("SELECT value FROM meta WHERE name = 'dim'").get();
+      if (dim && parseInt(dim.value, 10) !== this.dim) {
+        console.error(`[memory] cross-project skip ${k}: dim mismatch`);
+        return;
+      }
+      // Старая БД без FTS-таблицы → vector-only.
+      const hasFts = sib.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'memory_fts'").get();
+      const { vectorHits, ftsHits } = this._searchIn(sib, k, embedding, { ...opts, allowFts: !!hasFts });
+      // Провенанс: помечаем хиты соседнего ключа (transient, не в scan/export).
+      const src = (h) => ({ ...h, entry: { ...h.entry, _source_key: k } });
+      allVector.push(...vectorHits.map(src));
+      if (ftsHits.length) textLists.push(ftsHits.map(src));
+    } catch (err) {
+      console.error(`[memory] cross-project skip ${k}: ${err.message}`);
+    } finally {
+      sib.close();
+    }
+  }
+
+  /**
+   * Общий векторный + (опциональный) FTS-поиск по произвольному соединению.
+   * Для активного ключа `db === this.db`; для соседнего — read-only sibling.
+   * FTS-хиты несут полный entry (подтянутый из `memory` до закрытия БД), чтобы
+   * fuseRrf не дёргал fetchEntry по уже закрытому соединению.
+   * @param {object} db  better-sqlite3 соединение.
+   * @param {string} k  Ключ.
+   * @param {Float32Array} embedding  Вектор запроса.
+   * @param {object} opts  date_from/date_to/author/query/top_k/min_score/allowFts.
+   * @returns {{ vectorHits: Array, ftsHits: Array }}
+   */
+  _searchIn(db, k, embedding, { top_k = 3, min_score = 0, date_from, date_to, author, query, allowFts = true }) {
     const conds = ["key = ?"];
-    const params = [key];
+    const params = [k];
     if (date_from !== undefined) { conds.push("time_last >= ?"); params.push(date_from); }
     if (date_to !== undefined) { conds.push("time_last <= ?"); params.push(date_to); }
     if (author !== undefined) { conds.push("author = ?"); params.push(author); }
-    const rows = this.db.prepare(`SELECT * FROM memory WHERE ${conds.join(" AND ")}`).all(...params);
+    const rows = db.prepare(`SELECT * FROM memory WHERE ${conds.join(" AND ")}`).all(...params);
     const vectorHits = rows.map((r) => {
       const vec = new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4);
       const score = cosine(embedding, vec);
       return { entry: { ...r, embedding: undefined, decisions: JSON.parse(r.decisions) }, score };
     }).filter((h) => h.score >= min_score).sort((a, b) => b.score - a.score).slice(0, top_k);
 
-    // No text query → vector-only path (backward compatible).
-    if (typeof query !== "string" || !query.trim()) {
-      return vectorHits;
+    // Нет текстового запроса или FTS недоступен → vector-only.
+    if (!allowFts || typeof query !== "string" || !query.trim()) {
+      return { vectorHits, ftsHits: [] };
     }
 
-    // FTS hits (best-first by bm25 rank — SMALLER bm25 = better match, so ASC).
-    // time_last/author live only in `memory`, so date/author filters join back
-    // to it (FTS schema unchanged).
+    // FTS-хиты (best-first по bm25 rank — МЕНЬШЕ bm25 = лучше, поэтому ASC).
+    // time_last/author живут только в `memory`, поэтому date/author-фильтры
+    // join-ятся обратно к нему (схема FTS не меняется).
     const tokens = query.split(/\s+/).filter(Boolean);
     let ftsHits = [];
     if (tokens.length) {
       const match = tokens.map((t) => `"${t.replace(/"/g, '""')}"*`).join(" ");
       const ftsConds = ["memory_fts MATCH ?", "memory.key = ?"];
-      const ftsParams = [match, key];
+      const ftsParams = [match, k];
       if (date_from !== undefined) { ftsConds.push("memory.time_last >= ?"); ftsParams.push(date_from); }
       if (date_to !== undefined) { ftsConds.push("memory.time_last <= ?"); ftsParams.push(date_to); }
       if (author !== undefined) { ftsConds.push("memory.author = ?"); ftsParams.push(author); }
       try {
-        const ftsRows = this.db.prepare(
+        const ftsRows = db.prepare(
           `SELECT memory_fts.session_id, bm25(memory_fts) AS rank
            FROM memory_fts JOIN memory ON memory.session_id = memory_fts.session_id
            WHERE ${ftsConds.join(" AND ")}
            ORDER BY bm25(memory_fts)`,
         ).all(...ftsParams);
-        ftsHits = ftsRows.slice(0, top_k);
+        // Подтягиваем полный entry сразу (до закрытия соединения), чтобы
+        // fuseRrf не вызывал fetchEntry по закрытой sibling-БД.
+        const fetch = db.prepare("SELECT * FROM memory WHERE session_id = ?");
+        ftsHits = ftsRows.slice(0, top_k).map((r) => {
+          const full = fetch.get(r.session_id);
+          if (!full) return { session_id: r.session_id };
+          let parsed;
+          try { parsed = JSON.parse(full.decisions); } catch { parsed = []; }
+          return { session_id: r.session_id, entry: { ...full, embedding: undefined, decisions: parsed } };
+        });
       } catch (err) {
         console.error(`[memory] FTS MATCH failed, falling back to vector-only: ${err.message}`);
       }
     }
-
-    // RRF fusion (k=60): merge vector + FTS ranks через общий хелпер.
-    const fused = await fuseRrf(vectorHits, ftsHits.length ? [ftsHits] : [], { fetchEntry: (sid) => this.get(sid) });
-    return fused.slice(0, top_k);
+    return { vectorHits, ftsHits };
   }
 
   async delete(session_id) {

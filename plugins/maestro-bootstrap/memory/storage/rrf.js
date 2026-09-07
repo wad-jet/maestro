@@ -30,7 +30,9 @@ export async function fuseRrf(vectorHits, textHitLists, { K = 60, fetchEntry } =
       const cur = merged.get(r.session_id) || { rrf: 0, entry: null, score: 0.5 };
       cur.rrf += 1 / (K + i + 1);
       if (!cur.entry) {
-        cur.entry = fetchEntry ? await fetchEntry(r.session_id) : { session_id: r.session_id };
+        // Хит может нести полный entry (sibling-БД, закрытая до фьюжна) —
+        // тогда fetchEntry не вызывается (нельзя читать закрытое соединение).
+        cur.entry = r.entry ?? (fetchEntry ? await fetchEntry(r.session_id) : { session_id: r.session_id });
         cur.score = 0.5; // text-only хит: низкий display score
       }
       merged.set(r.session_id, cur);
