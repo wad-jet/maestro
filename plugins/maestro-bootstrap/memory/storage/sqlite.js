@@ -108,6 +108,12 @@ export class SqliteStorage {
     const r = this.db.prepare("SELECT COUNT(*) c FROM memory").get();
     return { entries: r.c };
   }
+
+  async get(session_id) {
+    const r = this.db.prepare("SELECT * FROM memory WHERE session_id = ?").get(session_id);
+    if (!r) return null;
+    return { ...r, embedding: undefined, decisions: JSON.parse(r.decisions) };
+  }
 }
 
 function cosine(a, b) {

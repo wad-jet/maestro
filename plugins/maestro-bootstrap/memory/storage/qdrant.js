@@ -74,4 +74,16 @@ export class QdrantStorage {
     const { count } = await this.client.count(this.collection);
     return { entries: count };
   }
+
+  async get(session_id) {
+    const res = await this.client.query(this.collection, {
+      query: null,
+      limit: 1,
+      filter: { must: [{ key: "session_id", match: { value: session_id } }] },
+      with_payload: true,
+    });
+    const point = (res.points ?? [])[0];
+    if (!point) return null;
+    return { ...point.payload, embedding: undefined, decisions: JSON.parse(point.payload.decisions) };
+  }
 }

@@ -59,4 +59,9 @@ export class PgVectorStorage {
   }
   async delete(session_id) { await this.pool.query(`DELETE FROM ${this.table} WHERE session_id = $1`, [session_id]); }
   async stats() { const r = await this.pool.query(`SELECT count(*) FROM ${this.table}`); return { entries: Number(r.rows[0].count) }; }
+  async get(session_id) {
+    const r = await this.pool.query(`SELECT * FROM ${this.table} WHERE session_id = $1`, [session_id]);
+    if (!r.rows[0]) return null;
+    return { ...r.rows[0], decisions: JSON.parse(r.rows[0].decisions) };
+  }
 }

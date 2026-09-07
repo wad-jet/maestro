@@ -87,6 +87,25 @@ test("sqlite dimension mismatch throws", async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("sqlite get returns entry or null", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
+  try {
+    await st.init();
+    await st.upsert([mkEntry("s1", "k1", "t1")]);
+    const found = await st.get("s1");
+    assert.ok(found);
+    assert.equal(found.session_id, "s1");
+    assert.equal(found.title, "t1");
+    assert.deepStrictEqual(found.decisions, []);
+    const notFound = await st.get("nonexistent");
+    assert.equal(notFound, null);
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("qdrant factory returns QdrantStorage with valid options", async () => {
   const c = { collectionExists: async () => ({ exists: false }), createCollection: async () => {} };
   const st = createStorage({ type: "qdrant", options: { client: c, collection: "c" }, modelId: "m", dim: 3 });
