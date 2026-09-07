@@ -1,10 +1,9 @@
-import { execSync } from "node:child_process";
 import os from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
-import { makeBoundedMap, readPluginVersion } from "../core.js";
+import { makeBoundedMap, readPluginVersion, getGitConfig } from "../core.js";
 import { loadMemoryConfig, resolveEffectiveKey, resolveIdentity, sanitizeDirName } from "./config.js";
 import { maskEntry } from "./mask.js";
 import { ensureModule } from "./provision.js";
@@ -37,19 +36,6 @@ export function defaultDataDir() {
   if (process.env.XDG_DATA_HOME) return process.env.XDG_DATA_HOME;
   if (process.platform === "darwin") return join(os.homedir(), "Library", "Application Support");
   return join(os.homedir(), ".local", "share");
-}
-
-function gitConfig(root, key) {
-  try {
-    const out = execSync(`git config --get ${key}`, {
-      cwd: root,
-      encoding: "utf8",
-      stdio: ["ignore", "pipe", "ignore"],
-    });
-    return out.trim() || null;
-  } catch {
-    return null;
-  }
 }
 
 // Schema-v1 fields required for import (mirrors the `memory` table).
@@ -220,7 +206,10 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
   // I-2: identity — identity_env → git user.name → os username (fallback).
   // gitName резолвится ДО loadMemoryConfig, чтобы централизованный gate
   // (classifyMemoryConfig) принимал git user.name как identity.
-  const gitName = gitConfig(root, "user.name");
+  // C5 (dedup): getGitConfig кэширует один `git config --list` на root —
+  // core gate и memory переиспользуют его (без повторных subprocess).
+  const gitCfg = getGitConfig(root);
+  const gitName = gitCfg.name;
   const config = loadMemoryConfig(maestroConfig, { gitName });
   if (!config.enabled) {
     // I-3: логируем причину только когда секция `memory` существует, но
@@ -260,7 +249,8 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     const author = identity ?? config.identity ?? os.userInfo().username;
 
     // Проектный ключ: git remote → deriveProjectKey; fallback — dir hash.
-    const gitRemote = gitConfig(root, "remote.origin.url");
+    // C5 (dedup): remote берётся из того же кэшированного getGitConfig.
+    const gitRemote = gitCfg.remote;
     const projectKey = deriveProjectKey({ gitRemote, absPath: root });
     const effectiveKey = resolveEffectiveKey({ projectHash: projectKey.hash, namespace: config.namespace ?? null });
 

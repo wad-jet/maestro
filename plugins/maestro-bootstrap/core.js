@@ -29,18 +29,46 @@ import { classifyMemoryConfig } from "./memory/config.js";
 const LOG_LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
 
 // Git config lookup (fail-soft). Используется для identity-фоллбека
-// централизованного memory gate (git user.name).
-function gitConfig(root, key) {
+// централизованного memory gate (git user.name) и проектного ключа
+// (remote.origin.url). C5 (dedup): ОДИН `git config --list` на корень,
+// результат парсится и кэшируется в module-level Map — core gate и memory
+// переиспользуют его, не запуская повторные subprocess-вызовы.
+const gitConfigCache = new Map();
+
+/**
+ * Read git identity + remote in a single subprocess call, cached per root.
+ * C5: dedup — один `execSync("git config --list")` на корень; результат
+ * кэшируется в module-level Map (переживает несколько init в процессе).
+ * Fail-soft: git отсутствует / ключи не заданы → null (не бросаем).
+ * @param {string} root  Project directory (cwd for git).
+ * @param {(cmd: string, opts: object) => string} [exec]  Injectable execSync
+ *   (тесты). По умолчанию — node:child_process.execSync.
+ * @returns {{ name: string|null, remote: string|null }}
+ */
+export function getGitConfig(root, exec = execSync) {
+  const cached = gitConfigCache.get(root);
+  if (cached !== undefined) return cached;
+  let result = { name: null, remote: null };
   try {
-    const out = execSync(`git config --get ${key}`, {
+    const out = exec("git config --list", {
       cwd: root,
       encoding: "utf8",
       stdio: ["ignore", "pipe", "ignore"],
     });
-    return out.trim() || null;
+    const lines = String(out ?? "").split("\n");
+    for (const line of lines) {
+      const eq = line.indexOf("=");
+      if (eq === -1) continue;
+      const key = line.slice(0, eq);
+      const value = line.slice(eq + 1).trim();
+      if (key === "user.name" && result.name === null) result.name = value || null;
+      else if (key === "remote.origin.url" && result.remote === null) result.remote = value || null;
+    }
   } catch {
-    return null;
+    /* fail-soft: git отсутствует → null */
   }
+  gitConfigCache.set(root, result);
+  return result;
 }
 
 // --- Context Sanitizer (Уровень 1) -----------------------------------------
@@ -1149,7 +1177,7 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
   // C1 (zero-dep): импорт memory/index.js (тянет better-sqlite3 через
   // storage/sqlite.js) происходит ТОЛЬКО при memory.enabled === true.
   // Классификация — лёгкий classifyMemoryConfig (без storage-импортов).
-  const memClass = classifyMemoryConfig(config, { gitName: gitConfig(root, "user.name") });
+  const memClass = classifyMemoryConfig(config, { gitName: getGitConfig(root).name });
   let memoryHooks = {};
   if (memClass.enabled) {
     try {

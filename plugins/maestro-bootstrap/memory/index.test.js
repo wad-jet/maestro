@@ -4,6 +4,7 @@ import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { registerMemoryHooks } from "./index.js";
+import { getGitConfig } from "../core.js";
 import { sanitizeDirName } from "./config.js";
 import { projectHashFromDir, projectHashFromRemote } from "./project.js";
 import { SESSIONS } from "./summarize.js";
@@ -1320,5 +1321,63 @@ test("import reports physical line numbers", async () => {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = saved;
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── Task 12: git-config dedup (C5) ─────────────────────────────────────
+
+test("git-config dedup: one execSync per root, cached across core+memory init", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-git-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    let execCount = 0;
+    const spyExec = (cmd, opts) => {
+      execCount++;
+      assert.match(cmd, /git config --list/, "must use a single git config --list call");
+      return "user.name=alice\nremote.origin.url=https://github.com/foo/bar.git\n";
+    };
+
+    // First lookup runs exactly one exec and parses both values.
+    const cfg = getGitConfig(dir, spyExec);
+    assert.equal(execCount, 1, "first lookup must run exactly one exec");
+    assert.equal(cfg.name, "alice");
+    assert.equal(cfg.remote, "https://github.com/foo/bar.git");
+
+    // Plugin init with memory enabled must reuse the cached config (no new exec).
+    const hooks = await registerMemoryHooks({ client: mkClient(), config: mkConfig(dir), log: silentLog, root: dir });
+    assert.equal(execCount, 1, "plugin init must reuse cached git config (no extra exec)");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("git-config dedup: distinct roots get separate exec; fail-soft on git absence", async () => {
+  const dirA = mkdtempSync(join(tmpdir(), "mem-git-a-"));
+  const dirB = mkdtempSync(join(tmpdir(), "mem-git-b-"));
+  try {
+    let execCount = 0;
+    const spyExec = (cmd, opts) => {
+      execCount++;
+      if (opts.cwd === dirB) throw new Error("not a git repo");
+      return "user.name=alice\nremote.origin.url=https://github.com/foo/bar.git\n";
+    };
+
+    const a = getGitConfig(dirA, spyExec);
+    const a2 = getGitConfig(dirA, spyExec);
+    assert.equal(execCount, 1, "same root must be cached (no second exec)");
+    assert.equal(a, a2, "cached result must be returned for same root");
+    assert.equal(a.name, "alice");
+
+    const b = getGitConfig(dirB, spyExec);
+    assert.equal(execCount, 2, "distinct root must run its own exec");
+    assert.equal(b.name, null, "fail-soft: git absence → null name");
+    assert.equal(b.remote, null, "fail-soft: git absence → null remote");
+  } finally {
+    rmSync(dirA, { recursive: true, force: true });
+    rmSync(dirB, { recursive: true, force: true });
   }
 });
