@@ -62,9 +62,19 @@ export class QdrantStorage {
       const points = res.points ?? [];
       const pts = points.filter((p) => p.payload?.title || p.payload?.summary || p.payload?.decisions);
       if (pts.length) {
-        await this.client.setPayload(this.collection, {
-          points: pts.map((p) => ({ id: p.id, payload: { text: QdrantStorage.textOf(p) } })),
-        });
+        // Реальный API: setPayload(collection, { payload, points }) — payload —
+        // ОДИН объект, points — список id. Per-point вызовы + guard: сбой
+        // backfill деградирует в лог (как index-creation fallback), не ломая init().
+        try {
+          for (const p of pts) {
+            await this.client.setPayload(this.collection, {
+              payload: { text: QdrantStorage.textOf(p) },
+              points: [p.id],
+            });
+          }
+        } catch (err) {
+          console.error(`[memory] qdrant text backfill failed: ${err.message}`);
+        }
       }
       offset = res.next_page_offset;
     } while (offset != null);
@@ -133,9 +143,11 @@ export class QdrantStorage {
       try {
         const tmust = this.buildMust({ key, project, date_from, date_to, author });
         tmust.push({ key: "text", full_text_match: { text: query } });
-        // Filter-only leg — БЕЗ `nearest` (не должен быть векторно-упорядочен).
+        // Filter-only leg — top-level `filter` БЕЗ `query` (у Query enum нет
+        // FilterQuery-варианта; сервер вернул бы 400). Не должен быть
+        // векторно-упорядочен (нет `nearest`).
         const tr = await this.client.query(this.collection, {
-          query: { filter: { must: tmust } },
+          filter: { must: tmust },
           limit: top_k,
           with_payload: true,
         });
@@ -224,6 +236,9 @@ export class QdrantStorage {
     });
     const p = res.points?.[0];
     if (!p) return null;
-    return { ...p.payload, embedding: undefined, decisions: JSON.parse(p.payload.decisions) };
+    // Производное поле `text` (для full-text индекса) не должно протекать
+    // в entry — выкидываем через деструктуризацию (spec §3.6).
+    const { text, ...rest } = p.payload;
+    return { ...rest, embedding: undefined, decisions: JSON.parse(rest.decisions) };
   }
 }

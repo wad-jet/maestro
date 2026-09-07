@@ -385,10 +385,10 @@ test("qdrant init creates payload text index + backfills empty-text points (page
   const scrollCalls = c.calls.filter(([k]) => k === "scroll");
   assert.ok(scrollCalls.length >= 2, "must paginate");
   assert.deepEqual(scrollCalls[0][2].filter.must, [{ key: "text", is_empty: true }]);
-  // setPayload с вычисленным text.
-  assert.equal(setPayloadCalls.length, 1);
-  assert.deepEqual(setPayloadCalls[0].points[0], { id: "p1", payload: { text: "T1 S1 d1" } });
-  assert.deepEqual(setPayloadCalls[0].points[1], { id: "p2", payload: { text: "T2 S2" } });
+  // setPayload: per-point вызовы { payload: { text }, points: [id] }.
+  assert.equal(setPayloadCalls.length, 2);
+  assert.deepEqual(setPayloadCalls[0], { payload: { text: "T1 S1 d1" }, points: ["p1"] });
+  assert.deepEqual(setPayloadCalls[1], { payload: { text: "T2 S2" }, points: ["p2"] });
 });
 
 test("qdrant init: index creation failure → scan-mode fallback, backfill still runs", async () => {
@@ -416,7 +416,7 @@ test("qdrant init: index creation failure → scan-mode fallback, backfill still
   }
 });
 
-test("qdrant hybrid: text leg is filter-only (no nearest), full_text_match present, fuses via rrf, capped to top_k", async () => {
+test("qdrant hybrid: text leg is filter-only (no query/nearest), full_text_match present, fuses via rrf, capped to top_k", async () => {
   const c = fakeClient();
   const textQueries = [];
   c.query = async (name, q) => {
@@ -424,7 +424,8 @@ test("qdrant hybrid: text leg is filter-only (no nearest), full_text_match prese
     if (q.query && q.query.nearest) {
       return { points: [{ id: "s1", score: 0.9, payload: { session_id: "s1", title: "t", summary: "s", decisions: "[]", key: "k1" } }] };
     }
-    if (q.query && q.query.filter && q.query.filter.must.some((m) => m.key === "text")) {
+    // Текстовая ветка: top-level filter с full_text_match (без query/nearest).
+    if (q.filter && q.filter.must.some((m) => m.key === "text")) {
       textQueries.push(q);
       return { points: [{ id: "s2", payload: { session_id: "s2" } }] };
     }
@@ -434,12 +435,13 @@ test("qdrant hybrid: text leg is filter-only (no nearest), full_text_match prese
   const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
   await st.init();
   const res = await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 2, min_score: 0, key: "k1", query: "OAuth" });
-  // Текстовая ветка: filter-only, БЕЗ nearest.
+  // Текстовая ветка: top-level filter, БЕЗ query и БЕЗ nearest.
   assert.equal(textQueries.length, 1);
   const tq = textQueries[0];
-  assert.ok(tq.query.filter, "text leg must use query.filter");
-  assert.equal(tq.query.nearest, undefined, "text leg must NOT use nearest");
-  assert.ok(tq.query.filter.must.some((m) => m.key === "text" && m.full_text_match && m.full_text_match.text === "OAuth"));
+  assert.ok(tq.filter, "text leg must use top-level filter");
+  assert.equal(tq.query, undefined, "text leg must NOT have query key");
+  assert.equal(tq.query?.nearest, undefined, "text leg must NOT use nearest");
+  assert.ok(tq.filter.must.some((m) => m.key === "text" && m.full_text_match && m.full_text_match.text === "OAuth"));
   // Фузия: векторный s1 + текстовый s2.
   assert.ok(res.length >= 2, `expected fused result, got ${res.length}`);
   const ids = res.map((r) => r.entry.session_id);
@@ -467,10 +469,10 @@ test("qdrant search: text-leg failure falls back to vector-only", async () => {
 
 test("qdrant backfill: malformed decisions JSON falls back to []", async () => {
   const c = fakeClient();
-  let setPayloadPoints = null;
+  let setPayloadCalls = [];
   c.setPayload = async (name, opts) => {
     c.calls.push(["setPayload", name, opts]);
-    setPayloadPoints = opts.points;
+    setPayloadCalls.push(opts);
   };
   c.scroll = async (name, opts) => {
     c.calls.push(["scroll", name, opts]);
@@ -479,5 +481,42 @@ test("qdrant backfill: malformed decisions JSON falls back to []", async () => {
   const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
   await st.init();
   // text из title+summary только (decisions не парсится → []).
-  assert.deepEqual(setPayloadPoints[0], { id: "p1", payload: { text: "T1 S1" } });
+  assert.deepEqual(setPayloadCalls[0], { payload: { text: "T1 S1" }, points: ["p1"] });
+});
+
+test("qdrant init: backfill failure degrades to log, init still completes", async () => {
+  const c = fakeClient();
+  const logs = [];
+  const origError = console.error;
+  console.error = (msg) => { logs.push(msg); };
+  c.setPayload = async () => { throw new Error("setPayload boom"); };
+  c.scroll = async (name, opts) => {
+    c.calls.push(["scroll", name, opts]);
+    return { points: [{ id: "p1", payload: { title: "T1", summary: "S1", decisions: "[]" } }], next_page_offset: null };
+  };
+  try {
+    const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+    await st.init(); // не должен бросить
+    assert.ok(logs.some((l) => l.includes("text backfill failed")), "must log backfill failure");
+  } finally {
+    console.error = origError;
+  }
+});
+
+test("qdrant get excludes derived text field from entry", async () => {
+  const c = fakeClient();
+  c.query = async (name, q) => {
+    c.calls.push(["query", name, q]);
+    // get() — filter-only по session_id.
+    return { points: [{ id: "s1", payload: { session_id: "s1", title: "t1", summary: "s1", decisions: '["d1"]', key: "k1", text: "t1 s1 d1" } }] };
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  const found = await st.get("s1");
+  assert.ok(found);
+  assert.equal(found.session_id, "s1");
+  assert.equal(found.title, "t1");
+  assert.deepEqual(found.decisions, ["d1"]);
+  // Производное поле text не должно протекать в entry (spec §3.6).
+  assert.equal(found.text, undefined, "get() must not leak derived text field");
 });
