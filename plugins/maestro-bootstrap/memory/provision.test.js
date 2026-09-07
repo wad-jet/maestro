@@ -118,14 +118,17 @@ test("ensureModule does not re-sync when version unchanged", () => {
   cleanup({ src, mod });
 });
 
-test("ensureModule returns false on errors", () => {
-  // Pass invalid paths that will cause mkdirSync to fail
-  const ok = ensureModule({
-    moduleDir: "/nonexistent/deeply/nested/nope/__mod__",
-    srcDir: "/tmp",
-    version: "1.0.0",
-  });
+test("ensureModule returns false on failure", () => {
+  // moduleDir points at an existing FILE → mkdirSync throws EEXIST
+  const dir = mkdtempSync(join(tmpdir(), "prov-"));
+  const src = join(dir, "src");
+  mkdirSync(src, { recursive: true });
+  writeFileSync(join(src, "index.js"), "export const x=1;");
+  const fileAsDir = join(dir, "not-a-dir");
+  writeFileSync(fileAsDir, "i am a file");
+  const ok = ensureModule({ moduleDir: fileAsDir, srcDir: src, version: "1.0.0" });
   assert.equal(ok, false);
+  rmSync(dir, { recursive: true, force: true });
 });
 
 test("ensureModule excludes node_modules from src when copying", () => {
