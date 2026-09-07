@@ -38,6 +38,17 @@ function mergedConfig(m) {
 }
 
 /**
+ * retention_days: null (off) or a positive number; anything else → invalid.
+ * Shared by classifyMemoryConfig (zero-dep gate) and loadMemoryConfig.
+ * @param {object} m  The `memory` config section.
+ * @returns {boolean}  True when retention_days is valid (or absent/null).
+ */
+function retentionDaysValid(m) {
+  if (m?.retention_days == null) return true;
+  return typeof m.retention_days === "number" && m.retention_days > 0;
+}
+
+/**
  * Lightweight classification of the memory config — NO storage imports.
  * Used by core.js BEFORE any memory module import (zero-dep gate, C1) and
  * re-used by loadMemoryConfig / registerMemoryHooks.
@@ -49,6 +60,7 @@ export function classifyMemoryConfig(maestroJson, { gitName = null } = {}) {
   const m = maestroJson?.memory;
   if (!m) return { enabled: false, disabled_reason: "no_memory_section" };
   if (m.enabled !== true) return { enabled: false, disabled_reason: "explicitly_disabled" };
+  if (!retentionDaysValid(m)) return { enabled: false, disabled_reason: "retention_days_invalid" };
   const type = m.storage?.type ?? "sqlite";
   if (!STORAGE_TYPES.has(type)) return { enabled: false, disabled_reason: "storage_type_invalid" };
   const centralized = type !== "sqlite";
@@ -67,12 +79,7 @@ export function classifyMemoryConfig(maestroJson, { gitName = null } = {}) {
 export function loadMemoryConfig(maestroJson, { gitName = null } = {}) {
   const { enabled, disabled_reason } = classifyMemoryConfig(maestroJson, { gitName });
   if (!enabled) return { ...DEFAULTS, enabled: false, disabled_reason };
-  const m = maestroJson.memory;
-  // retention_days: null (off) or a positive number; anything else → disabled.
-  if (m.retention_days != null && (typeof m.retention_days !== "number" || m.retention_days <= 0)) {
-    return { ...DEFAULTS, enabled: false, disabled_reason: "retention_days_invalid" };
-  }
-  return mergedConfig(m);
+  return mergedConfig(maestroJson.memory);
 }
 
 export function resolveEffectiveKey({ projectHash, namespace }) {

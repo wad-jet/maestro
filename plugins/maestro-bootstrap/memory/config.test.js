@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { loadMemoryConfig, DEFAULTS, resolveEffectiveKey, resolveIdentity, sanitizeDirName } from "./config.js";
+import { loadMemoryConfig, classifyMemoryConfig, DEFAULTS, resolveEffectiveKey, resolveIdentity, sanitizeDirName } from "./config.js";
 
 test("default off when no memory section", () => {
   const cfg = loadMemoryConfig({});
@@ -71,4 +71,15 @@ test("retention_days from config", () => {
 test("retention_days invalid value disables memory", () => {
   const cfg = loadMemoryConfig({ memory: { enabled: true, retention_days: -5 } });
   assert.equal(cfg.enabled, false);
+});
+test("retention_days zero disables", () => {
+  assert.equal(loadMemoryConfig({ memory: { enabled: true, retention_days: 0 } }).enabled, false);
+});
+test("retention_days string disables", () => {
+  assert.equal(loadMemoryConfig({ memory: { enabled: true, retention_days: "30" } }).enabled, false);
+});
+test("classifyMemoryConfig catches invalid retention_days", () => {
+  const c = classifyMemoryConfig({ memory: { enabled: true, retention_days: -5 } });
+  assert.equal(c.enabled, false);
+  assert.equal(c.disabled_reason, "retention_days_invalid");
 });
