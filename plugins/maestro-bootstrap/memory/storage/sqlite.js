@@ -63,16 +63,24 @@ export class SqliteStorage {
       )`);
       // One-time backfill: index pre-existing memory rows (upgrade path). Guarded by
       // a meta flag so re-init is idempotent (FTS5 has no unique constraint on
-      // session_id, so a plain INSERT would duplicate on every run).
+      // session_id, so a plain INSERT would duplicate on every run). decisions is
+      // stored as JSON in `memory`; the FTS column mirrors the upsert path
+      // (decisions.join(" ")), so backfill parses in JS rather than copying raw JSON.
       const backfilled = db.prepare("SELECT value FROM meta WHERE name = 'fts_backfilled'").get();
       if (!backfilled) {
-        const n = db.prepare(
-          `INSERT INTO memory_fts (session_id, key, title, summary, decisions)
-           SELECT session_id, key, title, summary, decisions FROM memory`,
-        ).run();
-        db.prepare("INSERT OR REPLACE INTO meta (name, value) VALUES ('fts_backfilled', '1')").run();
-        if (n.changes > 0) {
-          console.error(`[memory] FTS backfill indexed ${n.changes} entries`);
+        const rows = db.prepare("SELECT session_id, key, title, summary, decisions FROM memory").all();
+        const ftsIns = db.prepare(
+          "INSERT INTO memory_fts (session_id, key, title, summary, decisions) VALUES (?, ?, ?, ?, ?)",
+        );
+        const tx = db.transaction((rs) => {
+          for (const r of rs) {
+            ftsIns.run(r.session_id, r.key, r.title, r.summary, JSON.parse(r.decisions).join(" "));
+          }
+          db.prepare("INSERT OR REPLACE INTO meta (name, value) VALUES ('fts_backfilled', '1')").run();
+        });
+        tx(rows);
+        if (rows.length > 0) {
+          console.error(`[memory] FTS backfill indexed ${rows.length} entries`);
         }
       }
       const row = db.prepare("SELECT value FROM meta WHERE name = 'model_id'").get();
@@ -163,7 +171,7 @@ export class SqliteStorage {
       const match = tokens.map((t) => `"${t.replace(/"/g, '""')}"*`).join(" ");
       try {
         const ftsRows = this.db.prepare(
-          "SELECT session_id, bm25(memory_fts) AS rank FROM memory_fts WHERE memory_fts MATCH ? AND key = ?",
+          "SELECT session_id, bm25(memory_fts) AS rank FROM memory_fts WHERE memory_fts MATCH ? AND key = ? ORDER BY bm25(memory_fts) DESC",
         ).all(match, key);
         ftsHits = ftsRows.slice(0, top_k);
       } catch (err) {

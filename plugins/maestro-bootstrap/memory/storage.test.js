@@ -184,15 +184,30 @@ test("sqlite prune removes old entries", async () => {
 test("fts backfill indexes existing entries (re-init)", async () => {
   const dbPath = join(mkdtempSync(join(tmpdir(), "fts-")), "m.db");
   const st = createStorage({ type: "sqlite", options: { dbPath }, modelId: "m", dim: 3 });
-  await st.init();
-  await st.upsert([{ ...mkEntry("s1", "k1", "Auth refactor"), summary: "OAuth2 tokens expiry handling" }]);
-  await st.dispose();
+  try {
+    await st.init();
+    await st.upsert([{ ...mkEntry("s1", "k1", "Auth refactor"), summary: "OAuth2 tokens expiry handling" }]);
+  } finally {
+    await st.dispose();
+  }
   const st2 = createStorage({ type: "sqlite", options: { dbPath }, modelId: "m", dim: 3 });
-  await st2.init(); // backfill should index s1
-  const vec = new Float32Array([0.9, 0.9, 0.9]); // far from s1 vector
-  const hits = await st2.search(vec, { top_k: 5, min_score: 0, key: "k1", query: "OAuth" });
-  assert.ok(hits.some((h) => h.entry.session_id === "s1"), "FTS match surfaced");
-  st2.dispose();
+  try {
+    await st2.init(); // backfill should index s1
+    const vec = new Float32Array([0.9, 0.9, 0.9]); // far from s1 vector
+    const hits = await st2.search(vec, { top_k: 5, min_score: 0, key: "k1", query: "OAuth" });
+    assert.ok(hits.some((h) => h.entry.session_id === "s1"), "FTS match surfaced");
+  } finally {
+    await st2.dispose();
+  }
+  // Re-init again → backfill must be idempotent (no duplicate FTS rows).
+  const st3 = createStorage({ type: "sqlite", options: { dbPath }, modelId: "m", dim: 3 });
+  try {
+    await st3.init();
+    const n = st3.db.prepare("SELECT COUNT(*) c FROM memory_fts WHERE session_id = ?").get("s1").c;
+    assert.equal(n, 1, "no duplicate FTS rows after repeated init");
+  } finally {
+    await st3.dispose();
+  }
   rmSync(dirname(dbPath), { recursive: true, force: true });
 });
 
@@ -221,6 +236,30 @@ test("fts stays in sync after delete", async () => {
     await st.delete("s1");
     const hits = await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 5, min_score: 0, key: "k1", query: "OAuth" });
     assert.equal(hits.some((h) => h.entry.session_id === "s1"), false, "FTS row removed on delete");
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("fts stays in sync after deleteByFilter and prune", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
+  try {
+    await st.init();
+    const now = Date.now();
+    await st.upsert([
+      mkEntry("s1", "k1", "Auth refactor", { summary: "OAuth2 tokens", time_last: now }),
+      mkEntry("s2", "k1", "Cache invalidation", { summary: "ETag headers", time_last: now - 40 * 86400_000 }),
+    ]);
+    // deleteByFilter removes s1 (k1) → its FTS row must go too.
+    await st.deleteByFilter({ key: "k1", session_id: "s1" });
+    let hits = await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 5, min_score: 0, key: "k1", query: "OAuth" });
+    assert.equal(hits.some((h) => h.entry.session_id === "s1"), false, "FTS row removed on deleteByFilter");
+    // prune removes s2 (k1, 40d old) → its FTS row must go too.
+    await st.prune({ key: "k1", olderThanDays: 30 });
+    hits = await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 5, min_score: 0, key: "k1", query: "ETag" });
+    assert.equal(hits.some((h) => h.entry.session_id === "s2"), false, "FTS row removed on prune");
   } finally {
     await st.dispose();
     rmSync(dir, { recursive: true, force: true });
