@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { createStorage } from "./storage.js";
 import { mkdtempSync, rmSync, mkdirSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 
 function mkEntry(session_id, key, title, extra = {}) {
   return {
@@ -175,6 +175,52 @@ test("sqlite prune removes old entries", async () => {
     assert.equal(await st.get("s1"), null);
     assert.ok(await st.get("s2"));
     assert.ok(await st.get("s3"));
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("fts backfill indexes existing entries (re-init)", async () => {
+  const dbPath = join(mkdtempSync(join(tmpdir(), "fts-")), "m.db");
+  const st = createStorage({ type: "sqlite", options: { dbPath }, modelId: "m", dim: 3 });
+  await st.init();
+  await st.upsert([{ ...mkEntry("s1", "k1", "Auth refactor"), summary: "OAuth2 tokens expiry handling" }]);
+  await st.dispose();
+  const st2 = createStorage({ type: "sqlite", options: { dbPath }, modelId: "m", dim: 3 });
+  await st2.init(); // backfill should index s1
+  const vec = new Float32Array([0.9, 0.9, 0.9]); // far from s1 vector
+  const hits = await st2.search(vec, { top_k: 5, min_score: 0, key: "k1", query: "OAuth" });
+  assert.ok(hits.some((h) => h.entry.session_id === "s1"), "FTS match surfaced");
+  st2.dispose();
+  rmSync(dirname(dbPath), { recursive: true, force: true });
+});
+
+test("hybrid search returns FTS match even with low vector similarity", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
+  try {
+    await st.init();
+    await st.upsert([mkEntry("s1", "k1", "Auth refactor", { embedding: new Float32Array([1, 0, 0]) })]);
+    // orthogonal query vector → cosine 0, below min_score → vector-only would miss it
+    const vec = new Float32Array([0, 1, 0]);
+    const hits = await st.search(vec, { top_k: 5, min_score: 0.5, key: "k1", query: "refactor" });
+    assert.ok(hits.some((h) => h.entry.session_id === "s1"), "FTS match surfaced despite low vector similarity");
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("fts stays in sync after delete", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
+  try {
+    await st.init();
+    await st.upsert([mkEntry("s1", "k1", "Auth refactor", { summary: "OAuth2 tokens" })]);
+    await st.delete("s1");
+    const hits = await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 5, min_score: 0, key: "k1", query: "OAuth" });
+    assert.equal(hits.some((h) => h.entry.session_id === "s1"), false, "FTS row removed on delete");
   } finally {
     await st.dispose();
     rmSync(dir, { recursive: true, force: true });
