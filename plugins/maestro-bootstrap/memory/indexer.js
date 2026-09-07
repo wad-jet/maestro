@@ -1,8 +1,30 @@
 import { maskTranscript, maskEntry } from "./mask.js";
 import { resolveEffectiveKey } from "./config.js";
+import { SESSIONS } from "./summarize.js";
+
+function splitModel(s) {
+  if (!s) return null;
+  if (typeof s === "object") return s;
+  if (typeof s !== "string") return null;
+  const i = s.indexOf("/");
+  if (i === -1) return null;
+  return { providerID: s.slice(0, i), modelID: s.slice(i + 1) };
+}
+
+function withTimeout(p, ms) {
+  return Promise.race([
+    p,
+    new Promise((_, rej) =>
+      setTimeout(() => rej(new Error("memory: summarize timeout")), ms).unref?.()
+    ),
+  ]);
+}
 
 export class Indexer {
-  constructor({ client, config, embeddings, storage, state, summarize, projectKey, confidentialPatterns = [], log = console }) {
+  constructor({
+    client, config, embeddings, storage, state, summarize,
+    projectKey, confidentialPatterns = [], log = console, author = null,
+  }) {
     this.client = client;
     this.config = config;
     this.embeddings = embeddings;
@@ -12,19 +34,21 @@ export class Indexer {
     this.projectKey = projectKey;
     this.confidentialPatterns = confidentialPatterns;
     this.log = log;
+    this.author = author;
     this.timers = new Map();
     this.running = false;
-    this.queue = [];
+    this.queue = new Set();
   }
 
   _debounce(sessionID) {
     if (this.timers.has(sessionID)) clearTimeout(this.timers.get(sessionID));
-    const t = setTimeout(() => this._run(sessionID), (this.config.idle_debounce_min ?? 10) * 60_000);
+    const t = setTimeout(() => this._run(sessionID).catch(() => {}), (this.config.idle_debounce_min ?? 10) * 60_000);
     t.unref?.();
     this.timers.set(sessionID, t);
   }
 
   async onSessionIdle({ sessionID }) {
+    if (!sessionID) return;
     this._debounce(sessionID);
   }
 
@@ -37,6 +61,10 @@ export class Indexer {
       for (const s of list) {
         if (queued >= (this.config.backfill_max_per_start ?? 5)) break;
         if (s.parentID) continue;
+        if (s.title?.startsWith("[maestro-memory]")) {
+          try { await this.client.session.delete({ path: { id: s.id } }); } catch {}
+          continue;
+        }
         if (await this.state.isSkipped(s.id)) continue;
         const updated = s.time?.updated ?? s.time_updated;
         if (!updated) continue;
@@ -55,17 +83,32 @@ export class Indexer {
     } catch {
       // best-effort
     }
+    // M2: clear pending timer for deleted session
+    const t = this.timers.get(sessionID);
+    if (t) { clearTimeout(t); this.timers.delete(sessionID); }
   }
 
   async _run(sessionID) {
-    // G3: concurrency-1 queue
+    // M3: queue dedup via Set
+    if (this.queue.has(sessionID)) return;
     if (this.running) {
-      this.queue.push(sessionID);
+      this.queue.add(sessionID);
       return;
     }
     this.running = true;
     try {
+      // I3: retry throttle
+      let lastAttempt = undefined;
+      if (this.state.getLastAttempt) {
+        lastAttempt = await this.state.getLastAttempt(sessionID);
+      }
+      const retryInterval = (this.config.retry_interval_min ?? 60) * 60_000;
+      if (lastAttempt != null && Date.now() - lastAttempt < retryInterval) return;
+
       if (await this.state.isSkipped(sessionID)) return;
+
+      // I2: exclude maestro-memory sessions
+      if (SESSIONS.has(sessionID)) return;
 
       const sessResp = await this.client.session.get({ path: { id: sessionID } });
       const sess = sessResp?.data ?? sessResp;
@@ -74,11 +117,24 @@ export class Indexer {
       const msgResp = await this.client.session.messages({ path: { id: sessionID } });
       const messages = (msgResp?.data ?? msgResp) ?? [];
 
+      // C1: extract model from last assistant message
+      let modelRef = null;
+      for (let i = messages.length - 1; i >= 0; i--) {
+        const m = messages[i];
+        if (m.info?.provider || m.info?.model) {
+          modelRef = { providerID: m.info.provider ?? null, modelID: m.info.model ?? null };
+          break;
+        }
+        if (m.info?.role === "assistant" && m.info?.provider) {
+          modelRef = { providerID: m.info.provider, modelID: m.info.model ?? null };
+          break;
+        }
+      }
+
       // G1: min_new_messages check
       const lastSummarized = await this.state.getLastSummarized(sessionID);
       const minNew = this.config.min_new_messages ?? 3;
       if (lastSummarized != null && messages.length > 0) {
-        // Count messages newer than lastSummarized
         const newCount = messages.filter((m) => {
           const tc = m.time_created ?? m.info?.time?.created ?? 0;
           return tc > lastSummarized;
@@ -95,23 +151,18 @@ export class Indexer {
       // Mask confidential content BEFORE summarize
       const masked = maskTranscript(transcript, { confidentialPatterns: this.confidentialPatterns });
 
-      // session has no `model` field in v1 — pass null, summarize handles it
+      // C1: pass modelRef to summarize (it may be object from assistant msg)
       const { title, summary, decisions } = await this.summarize({
         client: this.client,
         sessionID,
         transcript: masked,
-        model: sess?.model ?? null,
+        model: modelRef,
         summarizerModel: this.config.summarizer_model ?? null,
       });
 
-      const vec = await this.embeddings.embed(`${title}\n${summary}\n${decisions.join("\n")}`);
       const key = resolveEffectiveKey({ projectHash: this.projectKey.hash, namespace: this.config.namespace ?? null });
 
-      // G5: version increment via storage.get
-      const existing = await this.storage.get(sessionID);
-      const version = (existing?.version ?? 0) + 1;
-
-      // G2: re-mask entry before write (defense-in-depth)
+      // I1: build entry, mask FIRST, then embed masked content
       const entry = {
         session_id: sessionID,
         key,
@@ -119,27 +170,43 @@ export class Indexer {
         title,
         summary,
         decisions,
-        embedding: vec,
+        embedding: null,
         model_id: this.embeddings.modelId,
-        author: this.config.author ?? "unknown",
+        author: this.author ?? this.config.author ?? "unknown",
         time_first: sess?.time?.created ?? 0,
         time_last: sess?.time?.updated ?? 0,
-        version,
+        version: 0, // placeholder, set below
       };
+
       const maskedEntry = maskEntry(entry, { confidentialPatterns: this.confidentialPatterns });
 
-      await this.storage.upsert([maskedEntry]);
+      // I4: wrap summarize+embed+upsert in timeout
+      const timeoutMs = this.config.summarize_timeout_ms ?? 120_000;
+      const work = (async () => {
+        // G5: version increment via storage.get
+        const existing = await this.storage.get(sessionID);
+        maskedEntry.version = (existing?.version ?? 0) + 1;
+        const vec = await this.embeddings.embed(`${maskedEntry.title}\n${maskedEntry.summary}\n${maskedEntry.decisions.join("\n")}`);
+        maskedEntry.embedding = vec;
+        await this.storage.upsert([maskedEntry]);
+        await this.state.setSummarized(sessionID);
+      })();
 
-      await this.state.setSummarized(sessionID);
+      await withTimeout(work, timeoutMs);
     } catch (err) {
-      // G4: error logging
-      this.log?.error?.("memory: indexer error", { sessionID, error: err.message });
+      // M1: safe error message
+      const errMsg = err instanceof Error ? err.message : String(err);
+      this.log?.error?.("memory: indexer error", { sessionID, error: errMsg });
       try { await this.state.recordFail(sessionID); } catch {}
     } finally {
-      // G3: release lock, process next queued item
       this.running = false;
-      if (this.queue.length > 0) {
-        this._run(this.queue.shift());
+      // M3: dedup when processing queue
+      const next = [...this.queue].find((sid) => sid !== sessionID);
+      if (next) {
+        this.queue.delete(next);
+        this._run(next).catch(() => {});
+      } else {
+        this.queue.clear();
       }
       const t = this.timers.get(sessionID);
       if (t) { clearTimeout(t); this.timers.delete(sessionID); }

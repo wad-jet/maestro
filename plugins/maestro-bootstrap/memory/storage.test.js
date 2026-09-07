@@ -119,6 +119,39 @@ test("qdrant factory rejects missing client", async () => {
   await assert.rejects(() => st.init(), /client|collectionExists/);
 });
 
+test("qdrant get returns entry or null", async () => {
+  let storedPayload = null;
+  const c = {
+    collectionExists: async () => ({ exists: false }),
+    createCollection: async () => {},
+    upsert: async (_, { points }) => { storedPayload = points[0]?.payload ?? null; },
+    query: async (col, { query, limit, with_payload }) => {
+      // For get: query is a filter { match: { key, value } }
+      if (query?.match?.key === "session_id") {
+        const sid = query.match.value;
+        if (sid === "s1" && storedPayload) {
+          // Return raw payload (decisions is still a JSON string — get will parse it)
+          const payload = with_payload ? storedPayload : null;
+          return { points: payload ? [{ id: "s1_0", payload }] : [] };
+        }
+        return { points: [] };
+      }
+      return { points: [] };
+    },
+    count: async () => ({ count: 0 }),
+  };
+  const st = createStorage({ type: "qdrant", options: { client: c, collection: "c" }, modelId: "m", dim: 3 });
+  await st.init();
+  await st.upsert([mkEntry("s1", "k1", "t1")]);
+  const found = await st.get("s1");
+  assert.ok(found);
+  assert.equal(found.session_id, "s1");
+  assert.equal(found.title, "t1");
+  assert.deepStrictEqual(found.decisions, []);
+  const notFound = await st.get("nonexistent");
+  assert.equal(notFound, null);
+});
+
 test("pgvector factory rejects missing pool", async () => {
   const st = createStorage({ type: "pgvector", options: { table: "m" }, modelId: "m1", dim: 3 });
   assert.equal(st.constructor.name, "PgVectorStorage");

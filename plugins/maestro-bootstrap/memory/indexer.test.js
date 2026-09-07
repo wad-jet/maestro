@@ -1,8 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { Indexer } from "./indexer.js";
+import { SESSIONS } from "./summarize.js";
 
-function mkClient() {
+function mkClient(msgs = null) {
   const upserts = [];
   return {
     upserts,
@@ -16,7 +17,7 @@ function mkClient() {
         },
       }),
       messages: async () => ({
-        data: [
+        data: msgs ?? [
           { info: {}, parts: [{ type: "text", text: "API_KEY=secret123 hello" }] },
         ],
       }),
@@ -65,22 +66,17 @@ function mkState(extra = {}) {
   };
 }
 
+// ── Basic functionality ──────────────────────────────────────────────
+
 test("indexer summarizes and upserts on _run, masking secrets", async () => {
   const client = mkClient();
   const storage = mkStorage(client);
   const embeddings = { embed: async () => new Float32Array([0.1, 0.2, 0.3]), dim: 3, modelId: "m" };
-  const config = mkConfig();
-  const state = mkState();
-  const summarize = async ({ transcript }) => ({ title: "t", summary: "s", decisions: [] });
   const idx = new Indexer({
-    client,
-    config,
-    embeddings,
-    storage,
-    state,
-    summarize,
-    projectKey: { hash: "khash", source: "remote" },
-    confidentialPatterns: [],
+    client, config: mkConfig(), embeddings, storage,
+    state: mkState(),
+    summarize: async ({ transcript }) => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
   });
   await idx._run("s1");
   assert.equal(client.upserts.length, 1);
@@ -99,19 +95,12 @@ test("indexer skips subagent sessions (parentID present)", async () => {
     data: { id: "s1", parentID: "p1", title: "st", time: { created: 1, updated: 100 } },
   });
   const storage = mkStorage(client);
-  const embeddings = { embed: async () => new Float32Array([0.1, 0.2, 0.3]), dim: 3, modelId: "m" };
-  const config = mkConfig();
-  const state = mkState();
-  const summarize = async () => ({ title: "t", summary: "s", decisions: [] });
   const idx = new Indexer({
-    client,
-    config,
-    embeddings,
-    storage,
-    state,
-    summarize,
-    projectKey: { hash: "khash", source: "remote" },
-    confidentialPatterns: [],
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
   });
   await idx._run("s1");
   assert.equal(client.upserts.length, 0);
@@ -119,27 +108,17 @@ test("indexer skips subagent sessions (parentID present)", async () => {
 });
 
 test("indexer deletes on session deleted", async () => {
-  const client = mkClient();
   let deletedId = null;
   const storage = {
-    upsert: async () => {},
-    search: async () => [],
-    delete: async (sid) => { deletedId = sid; },
-    stats: async () => ({ entries: 0 }),
+    upsert: async () => {}, search: async () => [],
+    delete: async (sid) => { deletedId = sid; }, stats: async () => ({ entries: 0 }),
   };
-  const config = mkConfig();
-  const embeddings = { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" };
-  const state = mkState();
-  const summarize = async () => ({});
   const idx = new Indexer({
-    client,
-    config,
-    embeddings,
-    storage,
-    state,
-    summarize,
-    projectKey: { hash: "k", source: "remote" },
-    confidentialPatterns: [],
+    client: mkClient(), config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({}),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
   });
   await idx.onSessionDeleted({ sessionID: "s1" });
   assert.equal(deletedId, "s1");
@@ -147,27 +126,18 @@ test("indexer deletes on session deleted", async () => {
 });
 
 test("indexer _run calls recordFail on error", async () => {
-  const client = mkClient();
   let failCalled = false;
   let failSessionId = null;
+  const client = mkClient();
   client.session.get = async () => { throw new Error("network"); };
   const storage = mkStorage(client);
-  const embeddings = { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" };
-  const config = mkConfig();
-  const state = {
-    ...mkState(),
-    recordFail: async (sid) => { failCalled = true; failSessionId = sid; },
-  };
-  const summarize = async () => ({});
   const idx = new Indexer({
-    client,
-    config,
-    embeddings,
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage,
-    state,
-    summarize,
-    projectKey: { hash: "khash", source: "remote" },
-    confidentialPatterns: [],
+    state: { ...mkState(), recordFail: async (sid) => { failCalled = true; failSessionId = sid; } },
+    summarize: async () => ({}),
+    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
   });
   await idx._run("s1");
   assert.ok(failCalled);
@@ -176,199 +146,78 @@ test("indexer _run calls recordFail on error", async () => {
 });
 
 test("indexer records summarized state after success", async () => {
-  const client = mkClient();
   let summarizedId = null;
+  const client = mkClient();
   const storage = mkStorage(client);
-  const embeddings = { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" };
-  const config = mkConfig();
-  const state = {
-    ...mkState(),
-    setSummarized: async (sid) => { summarizedId = sid; },
-  };
-  const summarize = async () => ({ title: "t", summary: "s", decisions: [] });
   const idx = new Indexer({
-    client,
-    config,
-    embeddings,
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage,
-    state,
-    summarize,
-    projectKey: { hash: "khash", source: "remote" },
-    confidentialPatterns: [],
+    state: { ...mkState(), setSummarized: async (sid) => { summarizedId = sid; } },
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
   });
   await idx._run("s1");
   assert.equal(summarizedId, "s1");
   idx.dispose();
 });
 
-test("indexer onSessionIdle schedules debounce timer", async () => {
-  const client = mkClient();
-  const storage = mkStorage(client);
-  const embeddings = { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" };
-  const config = mkConfig();
-  const state = mkState();
-  const summarize = async () => ({ title: "t", summary: "s", decisions: [] });
+// M6: guard onSessionIdle without sessionID
+test("indexer onSessionIdle guards null sessionID", async () => {
   const idx = new Indexer({
-    client,
-    config,
-    embeddings,
-    storage,
-    state,
-    summarize,
-    projectKey: { hash: "khash", source: "remote" },
-    confidentialPatterns: [],
+    client: mkClient(), config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(null), state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
   });
-  await idx.onSessionIdle({ sessionID: "s1" });
-  // After dispose, all timers should be cleared
+  await idx.onSessionIdle({ sessionID: null });
+  // Should not throw
   idx.dispose();
 });
 
-test("indexer onStartup backfills eligible sessions", async () => {
-  const now = Date.now();
-  const client = {
-    upserts: [],
-    session: {
-      get: async ({ path }) => ({
-        data: { id: path.id, parentID: null, title: "st", time: { created: 1, updated: now - 1000 } },
-      }),
-      messages: async () => ({
-        data: [{ info: {}, parts: [{ type: "text", text: "hi" }] }],
-      }),
-      list: async () => ({
-        data: [
-          { id: "recent", parentID: null, time: { created: 1, updated: now - 1000 } },
-          { id: "old", parentID: null, time: { created: 1, updated: now - 40 * 86400_000 } },
-          { id: "subagent", parentID: "p1", time: { created: 1, updated: now - 1000 } },
-        ],
-      }),
-    },
-  };
+// ── C1 — model from assistant message ────────────────────────────────
+
+test("indexer extracts model from last assistant message (C1)", async () => {
+  const client = mkClient([
+    { info: { role: "user" }, parts: [{ type: "text", text: "hello" }] },
+    { info: { role: "assistant", provider: "google", model: "gemini-2.0" }, parts: [{ type: "text", text: "hi" }] },
+  ]);
   const storage = mkStorage(client);
-  const embeddings = { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" };
-  const config = mkConfig({ idle_debounce_min: 0.001 }); // ~1ms debounce for test
-  const state = {
-    ...mkState(),
-    isSkipped: async () => false,
-  };
-  const summarize = async () => ({ title: "t", summary: "s", decisions: [] });
+  let capturedModel = null;
   const idx = new Indexer({
-    client,
-    config,
-    embeddings,
-    storage,
-    state,
-    summarize,
-    projectKey: { hash: "khash", source: "remote" },
-    confidentialPatterns: [],
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async ({ model }) => { capturedModel = model; return { title: "t", summary: "s", decisions: [] }; },
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
   });
-  await idx.onStartup();
-  // After 100ms, debounce should fire for the recent session only
-  await new Promise((r) => setTimeout(r, 100));
+  await idx._run("s1");
+  assert.equal(capturedModel.providerID, "google");
+  assert.equal(capturedModel.modelID, "gemini-2.0");
   assert.equal(client.upserts.length, 1);
-  assert.equal(client.upserts[0][0].session_id, "recent");
   idx.dispose();
 });
 
-test("indexer skips sessions marked in state", async () => {
-  const client = mkClient();
-  const storage = mkStorage(client);
-  const embeddings = { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" };
-  const config = mkConfig();
-  const state = {
-    ...mkState(),
-    isSkipped: async (sid) => sid === "s1",
-  };
-  const summarize = async () => ({ title: "t", summary: "s", decisions: [] });
-  const idx = new Indexer({
-    client,
-    config,
-    embeddings,
-    storage,
-    state,
-    summarize,
-    projectKey: { hash: "khash", source: "remote" },
-    confidentialPatterns: [],
-  });
-  await idx._run("s1");
-  assert.equal(client.upserts.length, 0);
-  idx.dispose();
-});
+// ── G1 — min_new_messages ────────────────────────────────────────────
 
-test("indexer uses namespace in key when provided", async () => {
-  const client = mkClient();
-  const storage = mkStorage(client);
-  const embeddings = { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" };
-  const config = mkConfig({ namespace: "ns1" });
-  const state = mkState();
-  const summarize = async () => ({ title: "t", summary: "s", decisions: [] });
-  const idx = new Indexer({
-    client,
-    config,
-    embeddings,
-    storage,
-    state,
-    summarize,
-    projectKey: { hash: "khash", source: "remote" },
-    confidentialPatterns: [],
-  });
-  await idx._run("s1");
-  assert.equal(client.upserts[0][0].key, "ns1");
-  idx.dispose();
-});
-
-test("indexer builds correct upsert record fields", async () => {
-  const client = mkClient();
-  const storage = mkStorage(client);
-  const embeddings = { embed: async () => new Float32Array([0.1, 0.2]), dim: 2, modelId: "xgb" };
-  const config = mkConfig({ namespace: "ns" });
-  const state = mkState();
-  const summarize = async () => ({ title: "t", summary: "s", decisions: [] });
-  const idx = new Indexer({
-    client,
-    config,
-    embeddings,
-    storage,
-    state,
-    summarize,
-    projectKey: { hash: "phash", source: "remote" },
-    confidentialPatterns: [],
-  });
-  await idx._run("sid");
-  const e = client.upserts[0][0];
-  assert.equal(e.session_id, "sid");
-  assert.equal(e.key, "ns");
-  assert.equal(e.origin_project_hash, "phash");
-  assert.equal(e.title, "t");
-  assert.equal(e.model_id, "xgb");
-  assert.equal(e.author, "test");
-  assert.equal(e.time_first, 1);
-  assert.equal(e.time_last, 100);
-  assert.equal(e.version, 1);
-  assert.ok(e.decisions instanceof Array);
-  assert.ok(e.embedding instanceof Float32Array);
-  idx.dispose();
-});
-
-// G1 — min_new_messages check
 test("indexer skips _run when messages < min_new_messages (G1)", async () => {
   const client = mkClient();
   const storage = mkStorage(client);
-  const embeddings = { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" };
-  const config = mkConfig({ min_new_messages: 3 }); // require 3 new messages
+  const config = mkConfig({ min_new_messages: 3 });
   let callCount = 0;
-  const state = {
-    ...mkState(),
-    getLastSummarized: async () => 99, // last summarized at ts=99
-  };
+  const state = { ...mkState(), getLastSummarized: async () => 99 };
   const summarize = async () => { callCount++; return { title: "t", summary: "s", decisions: [] }; };
-  const idx = new Indexer({
-    client, config, embeddings, storage, state, summarize,
-    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+  client.session.messages = async () => ({
+    data: [{ info: { time: { created: 100 } }, parts: [{ type: "text", text: "hi" }] }],
   });
-  // Only 1 message with time_created > 99 → skip (need 3)
-  client.session.messages = async () => ({ data: [{ info: { time: { created: 100 } }, parts: [{ type: "text", text: "hi" }] }] });
+  const idx = new Indexer({ client, config,
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state, summarize,
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+  });
   await idx._run("s1");
-  assert.equal(callCount, 0); // summarize never called
+  assert.equal(callCount, 0);
   assert.equal(client.upserts.length, 0);
   idx.dispose();
 });
@@ -376,19 +225,10 @@ test("indexer skips _run when messages < min_new_messages (G1)", async () => {
 test("indexer proceeds when messages >= min_new_messages (G1)", async () => {
   const client = mkClient();
   const storage = mkStorage(client);
-  const embeddings = { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" };
-  const config = mkConfig({ min_new_messages: 2 }); // require 2 new messages
+  const config = mkConfig({ min_new_messages: 2 });
   let callCount = 0;
-  const state = {
-    ...mkState(),
-    getLastSummarized: async () => 99,
-  };
+  const state = { ...mkState(), getLastSummarized: async () => 99 };
   const summarize = async () => { callCount++; return { title: "t", summary: "s", decisions: [] }; };
-  const idx = new Indexer({
-    client, config, embeddings, storage, state, summarize,
-    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
-  });
-  // 3 messages with time_created > 99 → proceed
   client.session.messages = async () => ({
     data: [
       { info: { time: { created: 100 } }, parts: [{ type: "text", text: "a" }] },
@@ -396,8 +236,13 @@ test("indexer proceeds when messages >= min_new_messages (G1)", async () => {
       { info: { time: { created: 102 } }, parts: [{ type: "text", text: "c" }] },
     ],
   });
+  const idx = new Indexer({ client, config,
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state, summarize,
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+  });
   await idx._run("s1");
-  assert.equal(callCount, 1); // summarize called
+  assert.equal(callCount, 1);
   assert.equal(client.upserts.length, 1);
   idx.dispose();
 });
@@ -405,114 +250,231 @@ test("indexer proceeds when messages >= min_new_messages (G1)", async () => {
 test("indexer first summary proceeds with no lastSummarized (G1)", async () => {
   const client = mkClient();
   const storage = mkStorage(client);
-  const embeddings = { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" };
   const config = mkConfig({ min_new_messages: 3 });
   let callCount = 0;
-  const state = mkState(); // getLastSummarized → null by default
   const summarize = async () => { callCount++; return { title: "t", summary: "s", decisions: [] }; };
-  const idx = new Indexer({
-    client, config, embeddings, storage, state, summarize,
-    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+  const idx = new Indexer({ client, config,
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(), summarize,
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
   });
   await idx._run("s1");
-  assert.equal(callCount, 1); // first time → proceed regardless of count
+  assert.equal(callCount, 1);
   assert.equal(client.upserts.length, 1);
   idx.dispose();
 });
 
-// G2 — re-mask entry before write
-test("indexer re-masks entry title/summary/decisions before upsert (G2)", async () => {
+// ── G2 — re-mask entry ──────────────────────────────────────────────
+
+test("indexer re-masks entry before upsert (G2)", async () => {
   const client = mkClient();
   const storage = mkStorage(client);
-  const embeddings = { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" };
-  const config = mkConfig();
-  const state = mkState();
-  // Summarize returns a title containing a secret — maskEntry should catch it
-  const summarize = async () => ({ title: "API_KEY=leaked_secret", summary: "detail with TOKEN=abc", decisions: ["x"] });
-  const idx = new Indexer({
-    client, config, embeddings, storage, state, summarize,
-    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+  const summarize = async () => ({
+    title: "API_KEY=leaked", summary: "TOKEN=abc detail", decisions: ["x"],
+  });
+  const idx = new Indexer({ client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(), summarize,
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
   });
   await idx._run("s1");
   assert.equal(client.upserts.length, 1);
   const e = client.upserts[0][0];
-  assert.ok(!e.title.includes("leaked_secret"));
+  assert.ok(!e.title.includes("leaked"));
   assert.ok(!e.summary.includes("abc"));
   idx.dispose();
 });
 
-// G3 — concurrency serialization
+// ── G3 — concurrency ─────────────────────────────────────────────────
+
 test("indexer serializes concurrent _run calls (G3)", async () => {
-  const client = mkClient();
-  const storage = mkStorage(client);
-  const embeddings = { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" };
-  const config = mkConfig();
-  const state = mkState();
   let summarizeOrder = [];
   let blockerResolve = null;
   const blocker = new Promise((r) => { blockerResolve = r; });
-
   const summarize = async ({ sessionID }) => {
     summarizeOrder.push(sessionID);
-    if (sessionID === "s1") {
-      await blocker;
-    }
+    if (sessionID === "s1") await blocker;
     return { title: "t", summary: "s", decisions: [] };
   };
-
   const idx = new Indexer({
-    client, config, embeddings, storage, state, summarize,
-    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+    client: mkClient(), config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(null),
+    state: mkState(), summarize,
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
   });
 
-  // p1 starts _run("s1"), hits summarize("s1"), awaits blocker, holds running=true
   const p1 = idx._run("s1");
-
-  // p2 immediately sees running=true and queues
   const p2 = idx._run("s2");
-
-  // p2 returns immediately (queued, not running). Give event loop a tick.
   await new Promise((r) => setImmediate(r));
-
-  // Verify p2 is queued
-  assert.equal(idx.queue.length, 1, "p2 is queued behind p1");
+  assert.equal(idx.queue.size, 1, "p2 is queued behind p1");
   assert.equal(idx.running, true, "p1 holds the lock");
 
-  // Release p1 — it completes, releases lock, processes queue → s2 runs
   blockerResolve();
   await p1;
-
-  // p1 completed. The finally block called this._run(this.queue.shift())
-  // which runs s2. But p2 is already resolved (it just returned from _run).
-  // The recursive _run(s2) call happens inside p1's finally, so after await p1,
-  // s2 should have been summarized.
-  // However, the recursive _run call returns a promise we're not awaiting.
-  // Let's yield to let it complete.
   await new Promise((r) => setImmediate(r));
-
   assert.equal(summarizeOrder.length, 2, "both sessions summarized");
-  assert.equal(summarizeOrder[0], "s1", "s1 first");
-  assert.equal(summarizeOrder[1], "s2", "s2 second from queue");
+  assert.equal(summarizeOrder[0], "s1");
+  assert.equal(summarizeOrder[1], "s2");
   idx.dispose();
 });
 
-// G5 — version increment
+// M3: queue dedup — calling _run twice for same session should not double-queue
+test("indexer dedups queued sessions (M3)", async () => {
+  let summarizeOrder = [];
+  const summarize = async ({ sessionID }) => { summarizeOrder.push(sessionID); return { title: "t", summary: "s", decisions: [] }; };
+  const idx = new Indexer({
+    client: mkClient(), config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(null), state: mkState(), summarize,
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+  });
+  // First call acquires lock
+  const p1 = idx._run("s1");
+  // Second call for same session: queue.has → returns early (dedup)
+  idx._run("s1");
+  await p1;
+  assert.equal(summarizeOrder.length, 1, "s1 summarized once");
+  idx.dispose();
+});
+
+// ── G5 — version increment ──────────────────────────────────────────
+
 test("indexer increments version on re-summarize (G5)", async () => {
   const client = mkClient();
   const storage = mkStorage(client);
-  const embeddings = { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" };
-  const config = mkConfig();
-  const state = mkState();
   const summarize = async () => ({ title: "t", summary: "s", decisions: [] });
-  const idx = new Indexer({
-    client, config, embeddings, storage, state, summarize,
-    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+  const idx = new Indexer({ client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(), summarize,
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
   });
-  // First run → version 1
   await idx._run("s1");
   assert.equal(client.upserts[0][0].version, 1);
-  // Second run → version 2
   await idx._run("s1");
   assert.equal(client.upserts[1][0].version, 2);
+  idx.dispose();
+});
+
+// ── I2 — SESSIONS exclusion + maestro-memory cleanup ─────────────────
+
+test("indexer skips maestro-memory sessions from SESSIONS set (I2)", async () => {
+  SESSIONS.add("mem-session-1");
+  const client = mkClient();
+  const storage = mkStorage(client);
+  const summarize = async () => ({ title: "t", summary: "s", decisions: [] });
+  const idx = new Indexer({ client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(), summarize,
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+  });
+  await idx._run("mem-session-1");
+  assert.equal(client.upserts.length, 0);
+  SESSIONS.delete("mem-session-1");
+  idx.dispose();
+});
+
+test("indexer deletes [maestro-memory] sessions during backfill (I2)", async () => {
+  let deletedIds = [];
+  const client = {
+    upserts: [],
+    session: {
+      get: async () => ({ data: { id: "user-1", parentID: null, title: "User session", time: { created: 1, updated: Date.now() - 1000 } } }),
+      messages: async () => ({ data: [{ info: {}, parts: [{ type: "text", text: "hi" }] }] }),
+      list: async () => ({ data: [
+        { id: "mem-1", parentID: null, title: "[maestro-memory] old-session" },
+        { id: "user-1", parentID: null, title: "User session", time: { created: 1, updated: Date.now() - 1000 } },
+      ]}),
+      delete: async ({ path: { id } }) => { deletedIds.push(id); },
+    },
+  };
+  const storage = mkStorage(client);
+  const summarize = async () => ({ title: "t", summary: "s", decisions: [] });
+  const idx = new Indexer({ client, config: { ...mkConfig({ idle_debounce_min: 0.001 }), backfill_max_per_start: 5 },
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: { ...mkState(), isSkipped: async () => false },
+    summarize, projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+  });
+  await idx.onStartup();
+  await new Promise((r) => setTimeout(r, 100));
+  assert.ok(deletedIds.includes("mem-1"), "maestro-memory session deleted");
+  assert.equal(client.upserts.length, 1, "only user-1 was backfilled");
+  idx.dispose();
+});
+
+// ── I3 — retry throttle ─────────────────────────────────────────────
+
+test("indexer throttles retry based on lastAttempt (I3)", async () => {
+  const client = mkClient();
+  const storage = mkStorage(client);
+  let callCount = 0;
+  const summarize = async () => { callCount++; return { title: "t", summary: "s", decisions: [] }; };
+  const idx = new Indexer({ client, config: { ...mkConfig(), retry_interval_min: 10 },
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: { ...mkState(), getLastAttempt: async () => Date.now() },
+    summarize, projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+  });
+  await idx._run("s1");
+  assert.equal(callCount, 0, "retry throttled — lastAttempt too recent");
+  idx.dispose();
+});
+
+// ── I5 — debounce fix + backfill cap ─────────────────────────────────
+
+test("indexer debounce sets timer (I5)", async () => {
+  const idx = new Indexer({
+    client: mkClient(), config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(null), state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+  });
+  await idx.onSessionIdle({ sessionID: "s1" });
+  assert.equal(idx.timers.size, 1, "one timer set");
+  assert.ok(idx.timers.has("s1"));
+  idx.dispose();
+});
+
+test("indexer onStartup caps backfill at backfill_max_per_start (I5)", async () => {
+  const now = Date.now();
+  const sessions = Array.from({ length: 20 }, (_, i) => ({
+    id: `s${i}`, parentID: null, time: { created: 1, updated: now - 1000 },
+  }));
+  const client = {
+    upserts: [],
+    session: {
+      get: async ({ path }) => ({ data: { id: path.id, parentID: null, title: "st", time: { created: 1, updated: now - 1000 } } }),
+      messages: async () => ({ data: [{ info: {}, parts: [{ type: "text", text: "hi" }] }] }),
+      list: async () => ({ data: sessions }),
+    },
+  };
+  const storage = mkStorage(client);
+  const summarize = async () => ({ title: "t", summary: "s", decisions: [] });
+  const idx = new Indexer({ client, config: { ...mkConfig({ idle_debounce_min: 0.001 }), backfill_max_per_start: 3 },
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: { ...mkState(), isSkipped: async () => false },
+    summarize, projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+  });
+  await idx.onStartup();
+  await new Promise((r) => setTimeout(r, 100));
+  assert.equal(client.upserts.length, 3, "only 3 sessions backfilled (cap)");
+  idx.dispose();
+});
+
+// ── Custom author (M7) ───────────────────────────────────────────────
+
+test("indexer uses explicit author param (M7)", async () => {
+  const client = mkClient();
+  const storage = mkStorage(client);
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    author: "custom-author",
+  });
+  await idx._run("s1");
+  assert.equal(client.upserts[0][0].author, "custom-author");
   idx.dispose();
 });

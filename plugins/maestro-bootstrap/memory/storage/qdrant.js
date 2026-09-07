@@ -77,9 +77,8 @@ export class QdrantStorage {
 
   async get(session_id) {
     const res = await this.client.query(this.collection, {
-      query: null,
+      query: { match: { key: "session_id", value: session_id } },
       limit: 1,
-      filter: { must: [{ key: "session_id", match: { value: session_id } }] },
       with_payload: true,
     });
     const point = (res.points ?? [])[0];

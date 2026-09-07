@@ -1,8 +1,11 @@
 export const SESSIONS = new Set();
 
 function splitModel(s) {
-  if (!s || !s.includes("/")) return null;
+  if (!s) return null;
+  if (typeof s === "object") return s;
+  if (typeof s !== "string") return null;
   const i = s.indexOf("/");
+  if (i === -1) return null;
   return { providerID: s.slice(0, i), modelID: s.slice(i + 1) };
 }
 
@@ -47,6 +50,7 @@ export async function summarizeSession({ client, sessionID, transcript, model, s
       "--- транскрипт ---",
       transcript,
     ].join("\n");
+    // C1: model may be object {providerID, modelID} from last assistant message
     const modelRef = splitModel(summarizerModel) ?? splitModel(model);
     // M3: throw if neither model resolves
     if (!modelRef) {

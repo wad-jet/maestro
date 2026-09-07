@@ -62,6 +62,6 @@ export class PgVectorStorage {
   async get(session_id) {
     const r = await this.pool.query(`SELECT * FROM ${this.table} WHERE session_id = $1`, [session_id]);
     if (!r.rows[0]) return null;
-    return { ...r.rows[0], decisions: JSON.parse(r.rows[0].decisions) };
+    return { ...r.rows[0], embedding: undefined, decisions: JSON.parse(r.rows[0].decisions) };
   }
 }
