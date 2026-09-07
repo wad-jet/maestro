@@ -496,7 +496,7 @@ test("pgvector get returns entry or null", async () => {
       if (sql.includes("CREATE")) return { rows: [] };
       if (sql.includes("INSERT")) return { rows: [] };
       if (sql.includes("DELETE")) return { rows: [] };
-      if (sql.includes("SELECT * FROM m WHERE session_id")) {
+      if (sql.includes("SELECT session_id, key, origin_project_hash, title, summary, decisions, model_id, author, time_first, time_last, version") && sql.includes("FROM m WHERE session_id")) {
         const sid = params[0];
         const found = rows.find((r) => r.session_id === sid);
         return { rows: found ? [found] : [] };

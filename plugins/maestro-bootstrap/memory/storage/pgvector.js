@@ -1,4 +1,5 @@
 import { resolveSearchKeys } from "../project.js";
+import { fuseRrf } from "./rrf.js";
 
 // Whitelist of scan-able columns (mirrors the table schema). Default scan
 // returns everything EXCEPT embedding (large); embedding is opt-in.
@@ -9,11 +10,14 @@ const SCAN_FIELDS = [
 const DEFAULT_SCAN_FIELDS = SCAN_FIELDS.filter((f) => f !== "embedding");
 
 export class PgVectorStorage {
-  constructor({ pool, table, dim, modelId }) {
+  constructor({ pool, table, dim, modelId, textSearchConfig }) {
     this.pool = pool;
     this.table = table;
     this.dim = dim;
     this.modelId = modelId;
+    // Эффективный конфиг полнотекстового поиска (resolveEffectiveTextConfig);
+    // fallback — "russian".
+    this.textSearchConfig = textSearchConfig ?? "russian";
   }
   async init() {
     try {
@@ -35,6 +39,33 @@ export class PgVectorStorage {
       time_last BIGINT NOT NULL,
       version INT NOT NULL
     )`);
+    // Эффективный конфиг; сверка с фактическим выражением колонки fts.
+    const cfg = this.textSearchConfig;
+    const exprRows = await this.pool.query(
+      `SELECT pg_get_expr(a.adbin, a.adrelid) AS expr
+       FROM pg_attribute a
+       JOIN pg_class c ON c.oid = a.attrelid
+       JOIN pg_namespace n ON n.oid = c.relnamespace
+       WHERE c.relname = $1 AND a.attname = 'fts' AND NOT a.attisdropped`,
+      [this.table]);
+    const expr = exprRows.rows?.[0]?.expr;
+    const addExpr = (c) => `ALTER TABLE ${this.table} ADD COLUMN fts tsvector GENERATED ALWAYS AS (to_tsvector('${c}'::regconfig, coalesce(title,'') || ' ' || coalesce(summary,'') || ' ' || coalesce(decisions,''))) STORED`;
+    if (expr !== undefined && !expr.includes(`'${cfg}'::regconfig`)) {
+      // Смена конфига: атомарный recreate (не оставлять таблицу без fts).
+      await this.pool.query("BEGIN");
+      try {
+        await this.pool.query(`ALTER TABLE ${this.table} DROP COLUMN IF EXISTS fts`);
+        await this.pool.query(addExpr(cfg));
+        await this.pool.query(`CREATE INDEX IF NOT EXISTS ${this.table}_fts_idx ON ${this.table} USING gin(fts)`);
+        await this.pool.query("COMMIT");
+      } catch (err) {
+        await this.pool.query("ROLLBACK").catch(() => {});
+        throw err;
+      }
+    } else if (expr === undefined) {
+      await this.pool.query(`ALTER TABLE ${this.table} ADD COLUMN IF NOT EXISTS fts tsvector GENERATED ALWAYS AS (to_tsvector('${cfg}'::regconfig, coalesce(title,'') || ' ' || coalesce(summary,'') || ' ' || coalesce(decisions,''))) STORED`);
+      await this.pool.query(`CREATE INDEX IF NOT EXISTS ${this.table}_fts_idx ON ${this.table} USING gin(fts)`);
+    }
     await this.pool.query(`CREATE INDEX IF NOT EXISTS ${this.table}_key_idx ON ${this.table} (key)`);
   }
   async dispose() { await this.pool.end?.(); }
@@ -66,7 +97,7 @@ export class PgVectorStorage {
       client.release();
     }
   }
-  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project }) {
+  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query }) {
     // B2: cross-project opt-in — key IN (current + project key).
     const keys = resolveSearchKeys({ key, project });
     const conds = [];
@@ -84,7 +115,7 @@ export class PgVectorStorage {
     if (author !== undefined) { conds.push(`author = $${i++}`); params.push(author); }
     conds.push(`1 - (embedding <=> $1) >= $${i++}`);
     params.push(min_score);
-    const res = await this.pool.query(
+    const vectorRes = await this.pool.query(
       `SELECT session_id, key, origin_project_hash, title, summary, decisions, model_id, author, time_first, time_last, version,
               1 - (embedding <=> $1) AS score
        FROM ${this.table}
@@ -93,7 +124,41 @@ export class PgVectorStorage {
        LIMIT $${i}`,
       [...params, top_k]
     );
-    return res.rows.map((r) => ({ entry: { ...r, embedding: undefined, decisions: JSON.parse(r.decisions) }, score: Number(r.score) }));
+    const vectorHits = vectorRes.rows.map((r) => ({ entry: { ...r, embedding: undefined, decisions: JSON.parse(r.decisions) }, score: Number(r.score) }));
+
+    // Текстовая ветка: только lex (ts_rank), фузия через RRF. Зеркалит
+    // key-set/date/author фильтры векторной ветки (resolveSearchKeys).
+    if (typeof query === "string" && query.trim().length > 0) {
+      try {
+        const tparams = [this.textSearchConfig, query];
+        let j = 2;
+        const tconds = [`fts @@ plainto_tsquery($1, $2)`];
+        if (keys.length === 1) {
+          tconds.push(`key = $${j++}`);
+          tparams.push(keys[0]);
+        } else {
+          tconds.push(`key IN (${keys.map(() => `$${j++}`).join(", ")})`);
+          tparams.push(...keys);
+        }
+        if (date_from !== undefined) { tconds.push(`time_last >= $${j++}`); tparams.push(date_from); }
+        if (date_to !== undefined) { tconds.push(`time_last <= $${j++}`); tparams.push(date_to); }
+        if (author !== undefined) { tconds.push(`author = $${j++}`); tparams.push(author); }
+        const textRes = await this.pool.query(
+          `SELECT session_id FROM ${this.table}
+           WHERE ${tconds.join(" AND ")}
+           ORDER BY ts_rank(fts, plainto_tsquery($1, $2)) DESC
+           LIMIT $${j}`,
+          [...tparams, top_k]
+        );
+        const textHits = textRes.rows.map((r) => ({ session_id: r.session_id }));
+        return fuseRrf(vectorHits, textHits.length ? [textHits] : [], { fetchEntry: (sid) => this.get(sid) });
+      } catch (err) {
+        // Fail-soft: при сбое текстовой ветки возвращаем только векторные хиты.
+        console.error("[memory] pgvector text leg failed, vector-only fallback: " + err.message);
+        return vectorHits;
+      }
+    }
+    return vectorHits;
   }
   async delete(session_id) { await this.pool.query(`DELETE FROM ${this.table} WHERE session_id = $1`, [session_id]); }
   async deleteByFilter({ key, session_id, author, before }) {
@@ -132,7 +197,11 @@ export class PgVectorStorage {
     });
   }
   async get(session_id) {
-    const r = await this.pool.query(`SELECT * FROM ${this.table} WHERE session_id = $1`, [session_id]);
+    // Явный список колонок (без SELECT *, без fts).
+    const r = await this.pool.query(
+      `SELECT session_id, key, origin_project_hash, title, summary, decisions, model_id, author, time_first, time_last, version
+       FROM ${this.table} WHERE session_id = $1`,
+      [session_id]);
     if (!r.rows[0]) return null;
     return { ...r.rows[0], embedding: undefined, decisions: JSON.parse(r.rows[0].decisions) };
   }

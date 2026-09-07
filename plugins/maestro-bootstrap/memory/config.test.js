@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { loadMemoryConfig, classifyMemoryConfig, DEFAULTS, resolveEffectiveKey, resolveIdentity, sanitizeDirName } from "./config.js";
+import { loadMemoryConfig, classifyMemoryConfig, DEFAULTS, resolveEffectiveKey, resolveIdentity, resolveEffectiveTextConfig, sanitizeDirName } from "./config.js";
 
 test("default off when no memory section", () => {
   const cfg = loadMemoryConfig({});
@@ -117,4 +117,10 @@ test("text_search_config length cap 63", () => {
 test("text_search_config valid custom passes", () => {
   const cfg = loadMemoryConfig({ memory: { enabled: true, storage: { type: "pgvector", text_search_config: "english" }, identity: "x" } });
   assert.equal(cfg.storage.pgvector.text_search_config, "english");
+});
+
+test("resolveEffectiveTextConfig: valid passes through, invalid/absent falls back to russian", () => {
+  assert.equal(resolveEffectiveTextConfig({ storage: { pgvector: { text_search_config: "english" } } }), "english");
+  assert.equal(resolveEffectiveTextConfig({ storage: { pgvector: { text_search_config: "BAD" } } }), "russian");
+  assert.equal(resolveEffectiveTextConfig({ storage: { pgvector: {} } }), "russian");
 });

@@ -1,7 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PgVectorStorage } from "./pgvector.js";
-
 function fakePool() {
   const calls = [];
   const handle = async (sql, params) => {
@@ -283,4 +282,127 @@ test("pgvector scan with embedding parses string to Float32Array", async () => {
   assert.equal(rows.length, 1);
   assert.ok(rows[0].embedding instanceof Float32Array, "embedding must be Float32Array");
   assert.ok(rows[0].embedding.every((v, i) => Math.abs(v - [0.1, 0.2, 0.3][i]) < 1e-6));
+});
+
+// --- Task 3: гибридный текстовый поиск (generated tsvector + ts_rank + rrf) ---
+
+// fakePool, который умеет отвечать на init-DDL (expr-запрос, ALTER, CREATE INDEX)
+// и на текстовую ветку поиска (plainto_tsquery).
+function fakePoolHybrid({ expr, textRows = [] } = {}) {
+  const calls = [];
+  const handle = async (sql, params) => {
+    calls.push([sql, params]);
+    if (sql.startsWith("SELECT count")) return { rows: [{ count: "2" }] };
+    if (sql.includes("pg_get_expr")) return { rows: expr === undefined ? [] : [{ expr }] };
+    if (sql.includes("plainto_tsquery")) return { rows: textRows };
+    if (sql.includes("FROM maestro_memory WHERE session_id")) {
+      // get(): возвращаем строку с запрошенным session_id.
+      const sid = params[0];
+      return { rows: [{ session_id: sid, title: "t", summary: "s", decisions: "[]", key: "k" }] };
+    }
+    if (sql.includes("FROM maestro_memory")) return { rows: [{ session_id: "s1", title: "t", summary: "s", decisions: "[]", key: "k", score: 0.9 }] };
+    if (sql.startsWith("CREATE TABLE")) return { rows: [] };
+    if (sql.startsWith("INSERT")) return { rows: [] };
+    if (sql.startsWith("DELETE")) return { rows: [] };
+    if (sql.includes("info_version")) return { rows: [{ extversion: "0.7.0" }] };
+    return { rows: [] };
+  };
+  const client = { query: handle, release: () => {} };
+  return { calls, query: handle, connect: async () => client, end: async () => {} };
+}
+
+test("pgvector hybrid: text leg uses plainto_tsquery + ts_rank and fuses via rrf", async () => {
+  const p = fakePoolHybrid({ textRows: [{ session_id: "s2" }] });
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, textSearchConfig: "russian" });
+  await st.init();
+  const res = await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "k1", query: "foo" });
+  // Текстовая ветка выполнена с конфигом и запросом.
+  const textCall = p.calls.find(([sql]) => sql.includes("plainto_tsquery"));
+  assert.ok(textCall, "text leg must run plainto_tsquery");
+  assert.equal(textCall[1][0], "russian");
+  assert.equal(textCall[1][1], "foo");
+  assert.ok(textCall[0].includes("ts_rank(fts, plainto_tsquery($1, $2)) DESC"), textCall[0]);
+  // Фузия: векторный хит s1 + текстовый хит s2.
+  assert.ok(res.length >= 2, `expected fused result, got ${res.length}`);
+  const ids = res.map((r) => r.entry.session_id);
+  assert.ok(ids.includes("s1"));
+  assert.ok(ids.includes("s2"));
+});
+
+test("pgvector init: creates generated fts column + gin index with effective config", async () => {
+  const p = fakePoolHybrid(); // expr undefined → ADD COLUMN branch
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, textSearchConfig: "russian" });
+  await st.init();
+  const add = p.calls.find(([sql]) => sql.includes("ADD COLUMN IF NOT EXISTS fts"));
+  assert.ok(add, "must ADD COLUMN fts");
+  assert.ok(add[0].includes("to_tsvector('russian'::regconfig"), add[0]);
+  const gin = p.calls.find(([sql]) => sql.includes("_fts_idx") && sql.includes("USING gin"));
+  assert.ok(gin, "must create GIN index on fts");
+});
+
+test("pgvector init: recreate on config change (atomic)", async () => {
+  // Фактическое выражение — english, конфиг — russian → атомарный recreate.
+  const p = fakePoolHybrid({ expr: "to_tsvector('english'::regconfig, ...)" });
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, textSearchConfig: "russian" });
+  await st.init();
+  const sqls = p.calls.map(([sql]) => sql);
+  assert.ok(sqls.includes("BEGIN"), "must BEGIN");
+  assert.ok(sqls.some((s) => s.includes("DROP COLUMN IF EXISTS fts")), "must DROP fts");
+  assert.ok(sqls.some((s) => s.includes("ADD COLUMN fts") && s.includes("to_tsvector('russian'::regconfig")), "must ADD fts with russian");
+  assert.ok(sqls.some((s) => s.includes("_fts_idx") && s.includes("USING gin")), "must recreate GIN index");
+  assert.ok(sqls.includes("COMMIT"), "must COMMIT");
+  assert.ok(!sqls.includes("ROLLBACK"), "must not ROLLBACK on success");
+});
+
+test("pgvector init: recreate rolls back on failure (no column loss)", async () => {
+  // ADD COLUMN бросает → ROLLBACK, колонка не теряется.
+  const p = fakePoolHybrid({ expr: "to_tsvector('english'::regconfig, ...)" });
+  let addCount = 0;
+  const origQuery = p.query;
+  p.query = async (sql, params) => {
+    p.calls.push([sql, params]);
+    if (sql.includes("ADD COLUMN fts") && !sql.includes("IF NOT EXISTS")) {
+      addCount++;
+      if (addCount === 1) throw new Error("boom");
+    }
+    return origQuery(sql, params);
+  };
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, textSearchConfig: "russian" });
+  await assert.rejects(() => st.init(), /boom/);
+  const sqls = p.calls.map(([sql]) => sql);
+  assert.ok(sqls.includes("BEGIN"), "must BEGIN");
+  assert.ok(sqls.includes("ROLLBACK"), "must ROLLBACK on failure");
+  assert.ok(!sqls.includes("COMMIT"), "must NOT COMMIT on failure");
+});
+
+test("pgvector get/scan exclude fts column (explicit list)", async () => {
+  const p = fakePoolHybrid();
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3 });
+  await st.init();
+  await st.get("s1");
+  const getCall = p.calls.find(([sql]) => sql.includes("WHERE session_id = $1"));
+  assert.ok(getCall, "get must run");
+  assert.ok(!getCall[0].includes("SELECT *"), "get must not use SELECT *");
+  assert.ok(!getCall[0].includes("fts"), "get must not select fts");
+  // scan: whitelist не содержит fts.
+  await st.scan({ key: "k1", fields: ["session_id", "title"] });
+  const scanCall = p.calls.find(([sql]) => sql.includes("WHERE key=$1"));
+  assert.ok(scanCall, "scan must run");
+  assert.ok(!scanCall[0].includes("fts"), "scan must not select fts");
+});
+
+test("pgvector search: text-leg failure falls back to vector-only", async () => {
+  const p = fakePoolHybrid();
+  const origQuery = p.query;
+  p.query = async (sql, params) => {
+    p.calls.push([sql, params]);
+    if (sql.includes("plainto_tsquery")) throw new Error("text leg boom");
+    return origQuery(sql, params);
+  };
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, textSearchConfig: "russian" });
+  await st.init();
+  const res = await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "k1", query: "foo" });
+  // Только векторные хиты, без фузии, без throw.
+  assert.equal(res.length, 1);
+  assert.equal(res[0].entry.session_id, "s1");
 });

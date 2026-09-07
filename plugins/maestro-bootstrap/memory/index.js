@@ -4,7 +4,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { makeBoundedMap, readPluginVersion, getGitConfig } from "../core.js";
-import { loadMemoryConfig, resolveEffectiveKey, resolveIdentity, sanitizeDirName } from "./config.js";
+import { loadMemoryConfig, resolveEffectiveKey, resolveIdentity, resolveEffectiveTextConfig, sanitizeDirName } from "./config.js";
 import { maskEntry } from "./mask.js";
 import { ensureModule } from "./provision.js";
 import { createStorage } from "./storage.js";
@@ -310,6 +310,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       options: storageOptions,
       modelId: config.embedding_model,
       dim: 384,
+      textSearchConfig: resolveEffectiveTextConfig(config),
     });
     if (!deps.storage) {
       mkdirSync(dirname(dbPath), { recursive: true });
