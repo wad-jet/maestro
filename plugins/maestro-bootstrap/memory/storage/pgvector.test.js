@@ -288,11 +288,12 @@ test("pgvector scan with embedding parses string to Float32Array", async () => {
 
 // fakePool, который умеет отвечать на init-DDL (expr-запрос, ALTER, CREATE INDEX)
 // и на текстовую ветку поиска (plainto_tsquery).
-function fakePoolHybrid({ expr, textRows = [] } = {}) {
+function fakePoolHybrid({ expr, textRows = [], tsConfigFound = true } = {}) {
   const calls = [];
   const handle = async (sql, params) => {
     calls.push([sql, params]);
     if (sql.startsWith("SELECT count")) return { rows: [{ count: "2" }] };
+    if (sql.includes("pg_ts_config")) return { rows: tsConfigFound ? [{ "?column?": 1 }] : [] };
     if (sql.includes("pg_get_expr")) return { rows: expr === undefined ? [] : [{ expr }] };
     if (sql.includes("plainto_tsquery")) return { rows: textRows };
     if (sql.includes("FROM maestro_memory WHERE session_id")) {
@@ -355,17 +356,19 @@ test("pgvector init: recreate on config change (atomic)", async () => {
 });
 
 test("pgvector init: recreate rolls back on failure (no column loss)", async () => {
-  // ADD COLUMN бросает → ROLLBACK, колонка не теряется.
+  // ADD COLUMN бросает → ROLLBACK, колонка не теряется. Recreate идёт через
+  // выделенный клиент (pool.connect), поэтому переопределяем query клиента.
   const p = fakePoolHybrid({ expr: "to_tsvector('english'::regconfig, ...)" });
   let addCount = 0;
-  const origQuery = p.query;
-  p.query = async (sql, params) => {
+  const client = await p.connect();
+  const origClientQuery = client.query;
+  client.query = async (sql, params) => {
     p.calls.push([sql, params]);
     if (sql.includes("ADD COLUMN fts") && !sql.includes("IF NOT EXISTS")) {
       addCount++;
       if (addCount === 1) throw new Error("boom");
     }
-    return origQuery(sql, params);
+    return origClientQuery(sql, params);
   };
   const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, textSearchConfig: "russian" });
   await assert.rejects(() => st.init(), /boom/);
@@ -405,4 +408,86 @@ test("pgvector search: text-leg failure falls back to vector-only", async () => 
   // Только векторные хиты, без фузии, без throw.
   assert.equal(res.length, 1);
   assert.equal(res[0].entry.session_id, "s1");
+});
+
+// --- Review fixes: C1 (placeholder numbering), C2 (top_k cap), I2 (pg_catalog) ---
+
+test("pgvector text leg: single-key placeholders start at $3, LIMIT is last", async () => {
+  const p = fakePoolHybrid({ textRows: [{ session_id: "s2" }] });
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, textSearchConfig: "russian" });
+  await st.init();
+  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "k1", query: "foo" });
+  const textCall = p.calls.find(([sql]) => sql.includes("plainto_tsquery"));
+  assert.ok(textCall, "text leg must run");
+  // $1=cfg, $2=query, $3=key, $4=top_k (LIMIT).
+  assert.ok(textCall[0].includes("key = $3"), textCall[0]);
+  assert.ok(textCall[0].includes("LIMIT $4"), textCall[0]);
+  assert.equal(textCall[1][0], "russian");
+  assert.equal(textCall[1][1], "foo");
+  assert.equal(textCall[1][2], "k1");
+  assert.equal(textCall[1][3], 3);
+});
+
+test("pgvector text leg: multi-key uses key IN ($3, $4)", async () => {
+  const p = fakePoolHybrid({ textRows: [{ session_id: "s2" }] });
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, textSearchConfig: "russian" });
+  await st.init();
+  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "k1", project: "other", query: "foo" });
+  const textCall = p.calls.find(([sql]) => sql.includes("plainto_tsquery"));
+  assert.ok(textCall, "text leg must run");
+  assert.ok(textCall[0].includes("key IN ($3, $4)"), textCall[0]);
+  assert.ok(textCall[0].includes("LIMIT $5"), textCall[0]);
+  assert.equal(textCall[1][2], "k1");
+  assert.equal(textCall[1][3], "other");
+  assert.equal(textCall[1][4], 3);
+});
+
+test("pgvector text leg: date_from/author placeholders continue after key-set", async () => {
+  const p = fakePoolHybrid({ textRows: [{ session_id: "s2" }] });
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, textSearchConfig: "russian" });
+  await st.init();
+  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "k1", date_from: 100, author: "alice", query: "foo" });
+  const textCall = p.calls.find(([sql]) => sql.includes("plainto_tsquery"));
+  assert.ok(textCall, "text leg must run");
+  // $1=cfg, $2=query, $3=key, $4=date_from, $5=author, $6=top_k.
+  assert.ok(textCall[0].includes("key = $3"), textCall[0]);
+  assert.ok(textCall[0].includes("time_last >= $4"), textCall[0]);
+  assert.ok(textCall[0].includes("author = $5"), textCall[0]);
+  assert.ok(textCall[0].includes("LIMIT $6"), textCall[0]);
+  assert.equal(textCall[1][2], "k1");
+  assert.equal(textCall[1][3], 100);
+  assert.equal(textCall[1][4], "alice");
+  assert.equal(textCall[1][5], 3);
+});
+
+test("pgvector hybrid: fused result capped to top_k", async () => {
+  // Векторная ветка даёт 3 хита, текстовая — 3 хита; фузия даёт больше, но
+  // результат должен быть ограничен top_k.
+  const p = fakePoolHybrid({ textRows: [{ session_id: "s2" }, { session_id: "s3" }, { session_id: "s4" }] });
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, textSearchConfig: "russian" });
+  await st.init();
+  const res = await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 2, min_score: 0, key: "k1", query: "foo" });
+  assert.ok(res.length <= 2, `fused result must be capped to top_k, got ${res.length}`);
+});
+
+test("pgvector init: pg_catalog fallback to russian when config absent", async () => {
+  // cfg="klingon" отсутствует в pg_ts_config → fallback на "russian".
+  const logs = [];
+  const origError = console.error;
+  console.error = (msg) => { logs.push(msg); };
+  try {
+    const p = fakePoolHybrid({ tsConfigFound: false });
+    const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, textSearchConfig: "klingon" });
+    await st.init();
+    // DDL использует 'russian'.
+    const add = p.calls.find(([sql]) => sql.includes("ADD COLUMN IF NOT EXISTS fts"));
+    assert.ok(add, "must ADD COLUMN fts");
+    assert.ok(add[0].includes("to_tsvector('russian'::regconfig"), add[0]);
+    // Эффективный конфиг сохранён на инстансе.
+    assert.equal(st.textSearchConfig, "russian");
+    // Лог эмитирован.
+    assert.ok(logs.some((l) => l.includes("not found in pg_ts_config, falling back to russian")), logs.join("\n"));
+  } finally {
+    console.error = origError;
+  }
 });

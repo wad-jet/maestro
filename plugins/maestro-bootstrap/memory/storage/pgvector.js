@@ -39,6 +39,19 @@ export class PgVectorStorage {
       time_last BIGINT NOT NULL,
       version INT NOT NULL
     )`);
+    // I2: проверяем, что конфиг существует в pg_ts_config ДО того, как запечём
+    // его в DDL. Если отсутствует (и отличается от "russian") — fallback на
+    // "russian" для этого init И последующих поисков.
+    const cfgRows = await this.pool.query(`SELECT 1 FROM pg_ts_config WHERE cfgname = $1`, [this.textSearchConfig]);
+    if (cfgRows.rows.length === 0) {
+      if (this.textSearchConfig !== "russian") {
+        console.error(`[memory] pgvector text_search_config '${this.textSearchConfig}' not found in pg_ts_config, falling back to russian`);
+        this.textSearchConfig = "russian";
+      } else {
+        // "russian" отсутствует — логируем и продолжаем; DDL упадёт громко.
+        console.error("[memory] pgvector text_search_config 'russian' not found in pg_ts_config");
+      }
+    }
     // Эффективный конфиг; сверка с фактическим выражением колонки fts.
     const cfg = this.textSearchConfig;
     const exprRows = await this.pool.query(
@@ -52,15 +65,19 @@ export class PgVectorStorage {
     const addExpr = (c) => `ALTER TABLE ${this.table} ADD COLUMN fts tsvector GENERATED ALWAYS AS (to_tsvector('${c}'::regconfig, coalesce(title,'') || ' ' || coalesce(summary,'') || ' ' || coalesce(decisions,''))) STORED`;
     if (expr !== undefined && !expr.includes(`'${cfg}'::regconfig`)) {
       // Смена конфига: атомарный recreate (не оставлять таблицу без fts).
-      await this.pool.query("BEGIN");
+      // I1: транзакция на выделенном клиенте (как в upsert), release в finally.
+      const client = await this.pool.connect();
       try {
-        await this.pool.query(`ALTER TABLE ${this.table} DROP COLUMN IF EXISTS fts`);
-        await this.pool.query(addExpr(cfg));
-        await this.pool.query(`CREATE INDEX IF NOT EXISTS ${this.table}_fts_idx ON ${this.table} USING gin(fts)`);
-        await this.pool.query("COMMIT");
+        await client.query("BEGIN");
+        await client.query(`ALTER TABLE ${this.table} DROP COLUMN IF EXISTS fts`);
+        await client.query(addExpr(cfg));
+        await client.query(`CREATE INDEX IF NOT EXISTS ${this.table}_fts_idx ON ${this.table} USING gin(fts)`);
+        await client.query("COMMIT");
       } catch (err) {
-        await this.pool.query("ROLLBACK").catch(() => {});
+        try { await client.query("ROLLBACK"); } catch { /* ignore */ }
         throw err;
+      } finally {
+        client.release();
       }
     } else if (expr === undefined) {
       await this.pool.query(`ALTER TABLE ${this.table} ADD COLUMN IF NOT EXISTS fts tsvector GENERATED ALWAYS AS (to_tsvector('${cfg}'::regconfig, coalesce(title,'') || ' ' || coalesce(summary,'') || ' ' || coalesce(decisions,''))) STORED`);
@@ -131,7 +148,8 @@ export class PgVectorStorage {
     if (typeof query === "string" && query.trim().length > 0) {
       try {
         const tparams = [this.textSearchConfig, query];
-        let j = 2;
+        // $1 = cfg, $2 = query → первый key-фильтр начинается с $3.
+        let j = 3;
         const tconds = [`fts @@ plainto_tsquery($1, $2)`];
         if (keys.length === 1) {
           tconds.push(`key = $${j++}`);
@@ -151,7 +169,8 @@ export class PgVectorStorage {
           [...tparams, top_k]
         );
         const textHits = textRes.rows.map((r) => ({ session_id: r.session_id }));
-        return fuseRrf(vectorHits, textHits.length ? [textHits] : [], { fetchEntry: (sid) => this.get(sid) });
+        // C2: кап результата фузии до top_k (паритет с sqlite).
+        return (await fuseRrf(vectorHits, textHits.length ? [textHits] : [], { fetchEntry: (sid) => this.get(sid) })).slice(0, top_k);
       } catch (err) {
         // Fail-soft: при сбое текстовой ветки возвращаем только векторные хиты.
         console.error("[memory] pgvector text leg failed, vector-only fallback: " + err.message);
