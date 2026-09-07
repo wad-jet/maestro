@@ -11,6 +11,7 @@ import { dirname } from "node:path";
  *   setSummarized(id): Promise<void>,
  *   recordFail(id): Promise<void>,
  *   isSkipped(id): Promise<boolean>,
+ *   getLastAttempt(id): Promise<number|null>,
  *   getFirstRun(): Promise<number>,
  *   prune(maxAgeMs): Promise<void>,
  * }}
@@ -45,6 +46,9 @@ export function createState(path) {
     },
     async isSkipped(id) {
       return Boolean(data.sessions[id]?.skip);
+    },
+    async getLastAttempt(id) {
+      return data.sessions[id]?.lastAttempt ?? null;
     },
     async getFirstRun() {
       return data.firstRun;

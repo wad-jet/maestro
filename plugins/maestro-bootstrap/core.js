@@ -23,6 +23,7 @@
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { classifyMemoryConfig } from "./memory/config.js";
 
 const LOG_LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
 
@@ -1129,12 +1130,20 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
   // experimental.chat.system.transform, event-дополнения (session.idle /
   // session.deleted). Fail-soft: любая ошибка инициализации → лог + {}.
   // Инвариант: `experimental.chat.messages.transform` НЕ присваивается.
+  // C1 (zero-dep): импорт memory/index.js (тянет better-sqlite3 через
+  // storage/sqlite.js) происходит ТОЛЬКО при memory.enabled === true.
+  // Классификация — лёгкий classifyMemoryConfig (без storage-импортов).
+  const memClass = classifyMemoryConfig(config);
   let memoryHooks = {};
-  try {
-    const { registerMemoryHooks } = await import("./memory/index.js");
-    memoryHooks = await registerMemoryHooks({ client, config, log, root });
-  } catch (err) {
-    log.error("memory: init failed", { error: err instanceof Error ? err.message : String(err) });
+  if (memClass.enabled) {
+    try {
+      const { registerMemoryHooks } = await import("./memory/index.js");
+      memoryHooks = await registerMemoryHooks({ client, config, log, root });
+    } catch (err) {
+      log.error("memory: init failed", { error: err instanceof Error ? err.message : String(err) });
+    }
+  } else if (config?.memory && memClass.disabled_reason) {
+    log.info("memory: disabled", { reason: memClass.disabled_reason });
   }
   plugin.tool = { ...(memoryHooks.tool ?? {}) };
   plugin["chat.message"] = memoryHooks["chat.message"];

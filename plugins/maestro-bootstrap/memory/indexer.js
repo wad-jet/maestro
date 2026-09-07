@@ -45,6 +45,8 @@ export class Indexer {
 
   async onStartup() {
     try {
+      // M7: prune stale state entries (older than backfill window)
+      try { await this.state.prune?.((this.config.backfill_window_days ?? 30) * 86400_000); } catch {}
       const listResp = await this.client.session.list({});
       const list = (listResp?.data ?? listResp) ?? [];
       const firstRun = (await this.state.getFirstRun()) ?? Date.now();
