@@ -180,6 +180,21 @@ test("base_url trailing slashes normalized", () => {
   assert.equal(cfg.embedding.base_url, "https://x/v1");
 });
 
+test("openai base_url non-string → embedding_invalid (classify, no throw)", () => {
+  // Spec §2.1: base_url — строка. Число (напр. 8080) не должно проходить gate
+  // и падать в mergedConfig .replace(...) на централизованных бэкендах.
+  const cfg = { memory: { enabled: true, storage: { type: "qdrant" }, embedding: { provider: "openai", model: "m", api_key_env: "K", dim: 3, base_url: 8080 } } };
+  assert.doesNotThrow(() => {
+    const cls = classifyMemoryConfig(cfg);
+    assert.equal(cls.disabled_reason, "embedding_invalid");
+  });
+});
+
+test("openai base_url non-string → loadMemoryConfig does not throw", () => {
+  const cfg = { memory: { enabled: true, storage: { type: "qdrant" }, embedding: { provider: "openai", model: "m", api_key_env: "K", dim: 3, base_url: 8080 } } };
+  assert.doesNotThrow(() => loadMemoryConfig(cfg));
+});
+
 test("dim ignored for local; probe_cooldown_min validation", () => {
   const cfg = loadMemoryConfig({ memory: { enabled: true, embedding: { dim: 512 } } });
   assert.equal(cfg.embedding.dim, null);

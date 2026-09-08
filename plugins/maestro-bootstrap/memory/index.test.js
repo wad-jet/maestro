@@ -1505,6 +1505,42 @@ test("@maestro-memory duplicates diagnostics: disabled_reason / mainline_unresol
   }
 });
 
+test("memory_stats_detail duplicates external_embedder_unmasked_queries (openai + confidential.paths)", async () => {
+  // Spec §5.2: init-warn дублируется в выдаче memory_stats_detail / @maestro-memory.
+  process.env.MM_KEY_SET = "k";
+  const dir = mkdtempSync(join(tmpdir(), "mem-openai-diag-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.stats = async () => ({ entries: 1 });
+    storage.scan = async () => [
+      { session_id: "s1", title: "T1", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]), merged: 1, head: "", branch: "" },
+    ];
+    const cfg = { memory: { enabled: true, storage: { type: "sqlite" }, embedding: { provider: "openai", model: "m", api_key_env: "MM_KEY_SET", dim: 3 } } };
+    cfg.confidential = { paths: ["docs/confidential/**"] };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: cfg,
+      log: silentLog,
+      root: dir,
+      deps: {
+        storage,
+        embeddings: { probe: async () => ({ ok: true, hard: false, detail: "ok" }), dim: 3, modelId: "openai:m@https://api.openai.com/v1" },
+        git: { detectMainline: () => ({ name: "main" }), revList: () => new Set(), isAncestor: () => "no" },
+      },
+    });
+    const res = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "s1" });
+    assert.match(res, /external_embedder_unmasked_queries/, "openai + confidential.paths → diagnostic in output");
+    await hooks.dispose?.();
+  } finally {
+    delete process.env.MM_KEY_SET;
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("M-1: stats tiers from full scan — real unattributed row (merged=0 head='') → unknown=1", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mem-m1-scan-"));
   const saved = process.env.XDG_DATA_HOME;

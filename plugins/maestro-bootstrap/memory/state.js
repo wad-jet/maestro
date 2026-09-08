@@ -14,6 +14,8 @@ import { dirname } from "node:path";
  *   getLastAttempt(id): Promise<number|null>,
  *   getFirstRun(): Promise<number>,
  *   prune(maxAgeMs): Promise<void>,
+ *   getEmbedderProbe(): object|null,
+ *   setEmbedderProbe(info): Promise<void>,
  * }}
  */
 export function createState(path) {

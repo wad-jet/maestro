@@ -25,8 +25,8 @@ description: Показать статус memory layer плагина maestro-b
    централизованный бэкенд без identity → `centralized_identity_missing`;
    env-зависимые причины (`qdrant` без `url`/`api_key_env` → `qdrant_config_invalid`;
    `pgvector` без `connection_string_env` → `pgvector_config_invalid`);
-   embedder-причины: невалидная секция `embedding` → `embedding_invalid`;
-   `embedding.provider: openai` без `api_key_env`/ключа → `embedding_api_key_env_missing`;
+   embedder-причины: невалидная секция `embedding` (в т.ч. отсутствие `api_key_env` в конфиге) → `embedding_invalid`;
+   `embedding.provider: openai` с `api_key_env` в конфиге, но без значения в env → `embedding_api_key_env_missing`;
    невалидный `probe_cooldown_min` → `probe_cooldown_min_invalid`;
    стартовый probe завершился hard-fail (ключ/модель/размерность) → `embedder_probe_hard_fail`.
 
@@ -90,7 +90,8 @@ description: Показать статус memory layer плагина maestro-b
 
 Если в отчёте `memory_stats_detail` есть диагностические строки — выведи их как есть:
 - `mainline_unresolved` — mainline не резолвнут (branch-context flat; guidance: `memory.mainline` override);
-- `unmasked_branch_metadata` — централизованный бэкенд + непустые `confidential.paths` (имена веток уходят на сервер).
+- `unmasked_branch_metadata` — централизованный бэкенд + непустые `confidential.paths` (имена веток уходят на сервер);
+- `external_embedder_unmasked_queries` — внешний embedder + непустые `confidential.paths` (запросы/контент уходят внешнему вендору).
 
 Если строка **Проверка embedder:** отсутствует или статус `FAIL` — вызови инструмент
 `memory_probe` (live-проверка, минуя cooldown) и покажи результат + рекомендации:

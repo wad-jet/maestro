@@ -151,6 +151,9 @@ function embeddingValid(m) {
   if (typeof e !== "object" || Array.isArray(e)) return false;
   const provider = e.provider ?? "local";
   if (!EMBEDDING_PROVIDERS.has(provider)) return false;
+  // Spec §2.1: base_url — строка. Не-строка (напр. 8080) прошла бы gate и
+  // упала TypeError в mergedConfig .replace(...) на централизованных бэкендах.
+  if (e.base_url != null && typeof e.base_url !== "string") return false;
   if (provider === "openai") {
     if (typeof e.model !== "string" || e.model.length === 0) return false;
     if (typeof e.api_key_env !== "string" || e.api_key_env.length === 0) return false;
@@ -160,8 +163,8 @@ function embeddingValid(m) {
 }
 
 /**
- * probe_cooldown_min: null (по умолчанию) или положительное число; иначе →
- * невалидно (память отключена). Shared by classifyMemoryConfig and
+ * probe_cooldown_min: null (не задан → default 30) или положительное число;
+ * иначе → невалидно (память отключена). Shared by classifyMemoryConfig and
  * loadMemoryConfig.
  * @param {object} m  The `memory` config section.
  * @returns {boolean}  True when probe_cooldown_min is valid (or absent).

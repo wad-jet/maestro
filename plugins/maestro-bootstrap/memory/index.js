@@ -781,7 +781,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       }),
       memory_stats_detail: tool({
         description:
-          "Агрегатная статистика памяти активного проекта: число записей, по авторам, по датам, кластеры тем (cosine > similarity_threshold), граф похожести, разбивка по тирам (merged/experience/unknown/dead) и веткам, диагностики (mainline_unresolved, unmasked_branch_metadata). Только агрегаты — без summary-текста.",
+          "Агрегатная статистика памяти активного проекта: число записей, по авторам, по датам, кластеры тем (cosine > similarity_threshold), граф похожести, разбивка по тирам (merged/experience/unknown/dead) и веткам, диагностики (mainline_unresolved, unmasked_branch_metadata, external_embedder_unmasked_queries). Только агрегаты — без summary-текста.",
         args: {},
         execute: async (args, ctx) => {
           try {
@@ -888,6 +888,13 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             const centralized = config.storage.type === "qdrant" || config.storage.type === "pgvector";
             if (centralized && confidentialPaths.length > 0) {
               out.push("Диагностика: unmasked_branch_metadata — имена веток (минуя sanitize) уходят на сервер");
+            }
+            // external_embedder_unmasked_queries — внешний (openai) embedder +
+            // непустые confidential.paths (запросы/контент, замаскированные
+            // best-effort, уходят генерическому внешнему вендору). Spec §5.2:
+            // init-warn дублируется в выдаче @maestro-memory.
+            if (isOpenai && confidentialPaths.length > 0) {
+              out.push("Диагностика: external_embedder_unmasked_queries — запросы и контент (замаскированные best-effort) уходят генерическому внешнему вендору");
             }
             return out.join("\n");
           } catch (err) {
