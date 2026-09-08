@@ -416,13 +416,21 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             // Task 6: commit-based membership. scope: "branch"|"project"
             // (default branch; branch_context=false → project). Явный
             // scope-параметр всегда побеждает конфиг. Кандидаты — merged=1 OR
-            // head != ''; векторная/текстовая ветки идут по полному набору,
+            // head != ''; поиск идёт ТОЛЬКО по кандидатам (I1: pre-filter,
+            // чтобы unattributed/out-of-context записи не разбавляли top_k),
             // членство применяется JS-фильтром к хитам.
             const scope = args.scope ?? (config.branch_context === false ? "project" : "branch");
-            const candidates = await storage.candidates(effectiveKey);
+            // M2: невалидный scope — ошибка инструмента, а не тихий flatten.
+            if (scope !== "branch" && scope !== "project") {
+              return `memory_search: невалидный scope "${args.scope}" (ожидается branch|project)`;
+            }
             let inContext = null; // null → project scope (без членства)
             let experienceIds = new Set();
             if (scope === "branch") {
+              // M1: candidates() только в branch-scope (project — flat, без
+              // лишнего запроса и без риска throw).
+              const candidates = await storage.candidates(effectiveKey);
+              searchOpts.filterSessionIds = candidates.map((c) => c.session_id);
               const sets = computeBranchSets({ revList, detectMainline, root, mainlineOverride: config.mainline ?? null });
               if (sets.failSoft) {
                 log?.debug?.("memory: recall fail-soft — revList failed, merged=1 only");

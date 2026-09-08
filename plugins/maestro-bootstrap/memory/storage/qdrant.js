@@ -114,8 +114,9 @@ export class QdrantStorage {
     await this.client.upsert(this.collection, { points });
   }
 
-  // Общий фильтр для векторной и текстовой веток: key-set + date + author.
-  buildMust({ key, project, date_from, date_to, author }) {
+  // Общий фильтр для векторной и текстовой веток: key-set + date + author +
+  // (I1) pre-filter кандидатов (merged=1 OR head != '').
+  buildMust({ key, project, date_from, date_to, author, filterSessionIds }) {
     const keys = resolveSearchKeys({ key, project });
     const must = keys.length === 1
       ? [{ key: "key", match: { value: keys[0] } }]
@@ -123,12 +124,15 @@ export class QdrantStorage {
     if (date_from !== undefined) must.push({ key: "time_last", range: { gte: date_from } });
     if (date_to !== undefined) must.push({ key: "time_last", range: { lte: date_to } });
     if (author !== undefined) must.push({ key: "author", match: { value: author } });
+    if (filterSessionIds && filterSessionIds.length) {
+      must.push({ key: "session_id", match: { any: filterSessionIds } });
+    }
     return must;
   }
 
-  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query }) {
+  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds }) {
     // B2: cross-project opt-in — key-set filter (current + project key).
-    const must = this.buildMust({ key, project, date_from, date_to, author });
+    const must = this.buildMust({ key, project, date_from, date_to, author, filterSessionIds });
     const res = await this.client.query(this.collection, {
       query: { nearest: Array.from(embedding) },
       limit: top_k,
@@ -148,7 +152,7 @@ export class QdrantStorage {
     if (typeof query === "string" && query.trim().length > 0) {
       let textHits = [];
       try {
-        const tmust = this.buildMust({ key, project, date_from, date_to, author });
+        const tmust = this.buildMust({ key, project, date_from, date_to, author, filterSessionIds });
         tmust.push({ key: "text", full_text_match: { text: query } });
         // Filter-only leg — top-level `filter` БЕЗ `query` (у Query enum нет
         // FilterQuery-варианта; сервер вернул бы 400). Не должен быть

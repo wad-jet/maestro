@@ -173,14 +173,14 @@ export class SqliteStorage {
     tx(entries);
   }
 
-  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query }) {
+  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds }) {
     if (embedding.length !== this.dim) {
       throw new Error(`embedding length ${embedding.length} does not match expected dimension ${this.dim}`);
     }
     // Ключевой набор: активный key + (опционально) соседний project-ключ.
     // Без `project` — ровно один ключ, поведение идентично прежнему.
     const keys = resolveSearchKeys({ key, project });
-    const opts = { date_from, date_to, author, query, top_k, min_score };
+    const opts = { date_from, date_to, author, query, top_k, min_score, filterSessionIds };
     const textLists = [];
     const allVector = [];
     await this._collectKey(keys[0], true, embedding, opts, allVector, textLists); // активный ключ
@@ -200,7 +200,7 @@ export class SqliteStorage {
    * @param {string} k  Ключ.
    * @param {boolean} isActive  Активный ключ (this.db) или соседний.
    * @param {Float32Array} embedding  Вектор запроса.
-   * @param {object} opts  date_from/date_to/author/query/top_k/min_score.
+   * @param {object} opts  date_from/date_to/author/query/top_k/min_score/filterSessionIds.
    * @param {Array} allVector  Накопитель векторных хитов (мутируется).
    * @param {Array} textLists  Накопитель текстовых списков (мутируется).
    */
@@ -258,15 +258,21 @@ export class SqliteStorage {
    * @param {object} db  better-sqlite3 соединение.
    * @param {string} k  Ключ.
    * @param {Float32Array} embedding  Вектор запроса.
-   * @param {object} opts  date_from/date_to/author/query/top_k/min_score/allowFts.
+   * @param {object} opts  date_from/date_to/author/query/top_k/min_score/allowFts/filterSessionIds.
    * @returns {{ vectorHits: Array, ftsHits: Array }}
    */
-  _searchIn(db, k, embedding, { top_k = 3, min_score = 0, date_from, date_to, author, query, allowFts = true }) {
+  _searchIn(db, k, embedding, { top_k = 3, min_score = 0, date_from, date_to, author, query, allowFts = true, filterSessionIds }) {
     const conds = ["key = ?"];
     const params = [k];
     if (date_from !== undefined) { conds.push("time_last >= ?"); params.push(date_from); }
     if (date_to !== undefined) { conds.push("time_last <= ?"); params.push(date_to); }
     if (author !== undefined) { conds.push("author = ?"); params.push(author); }
+    // I1: pre-filter по кандидатам (merged=1 OR head != '') — поиск идёт ТОЛЬКО
+    // по ним, чтобы unattributed/out-of-context записи не разбавляли top_k.
+    if (filterSessionIds && filterSessionIds.length) {
+      conds.push(`session_id IN (${filterSessionIds.map(() => "?").join(",")})`);
+      params.push(...filterSessionIds);
+    }
     const rows = db.prepare(`SELECT * FROM memory WHERE ${conds.join(" AND ")}`).all(...params);
     const vectorHits = rows.map((r) => {
       const vec = new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4);
@@ -291,6 +297,11 @@ export class SqliteStorage {
       if (date_from !== undefined) { ftsConds.push("memory.time_last >= ?"); ftsParams.push(date_from); }
       if (date_to !== undefined) { ftsConds.push("memory.time_last <= ?"); ftsParams.push(date_to); }
       if (author !== undefined) { ftsConds.push("memory.author = ?"); ftsParams.push(author); }
+      // I1: тот же pre-filter кандидатов в FTS-ветке (join к memory.session_id).
+      if (filterSessionIds && filterSessionIds.length) {
+        ftsConds.push(`memory.session_id IN (${filterSessionIds.map(() => "?").join(",")})`);
+        ftsParams.push(...filterSessionIds);
+      }
       try {
         const ftsRows = db.prepare(
           `SELECT memory_fts.session_id, bm25(memory_fts) AS rank

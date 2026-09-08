@@ -150,6 +150,30 @@ test("qdrant search filters date/author", async () => {
   assert.deepEqual(must[3], { key: "author", match: { value: "alice" } });
 });
 
+test("qdrant search filterSessionIds adds session_id match any to vector + text legs (I1)", async () => {
+  const c = fakeClient();
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "k1", query: "foo", filterSessionIds: ["s1", "s2"] });
+  const queries = c.calls.filter(([k]) => k === "query");
+  assert.ok(queries.length >= 2, "vector + text legs must run");
+  for (const [, , q] of queries) {
+    const sid = q.filter.must.find((m) => m.key === "session_id");
+    assert.ok(sid, "must filter by session_id");
+    assert.deepEqual(sid.match.any, ["s1", "s2"]);
+  }
+});
+
+test("qdrant search empty filterSessionIds → no session_id filter", async () => {
+  const c = fakeClient();
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "k1", filterSessionIds: [] });
+  const query = c.calls.find(([k]) => k === "query");
+  assert.ok(query);
+  assert.ok(!query[2].filter.must.some((m) => m.key === "session_id"), "empty filter must not add session_id");
+});
+
 test("qdrant delete uses filter-based delete (no query lookup)", async () => {
   const c = fakeClient();
   const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });

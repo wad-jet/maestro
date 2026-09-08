@@ -127,7 +127,7 @@ export class PgVectorStorage {
       client.release();
     }
   }
-  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query }) {
+  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds }) {
     // B2: cross-project opt-in — key IN (current + project key).
     const keys = resolveSearchKeys({ key, project });
     const conds = [];
@@ -143,6 +143,12 @@ export class PgVectorStorage {
     if (date_from !== undefined) { conds.push(`time_last >= $${i++}`); params.push(date_from); }
     if (date_to !== undefined) { conds.push(`time_last <= $${i++}`); params.push(date_to); }
     if (author !== undefined) { conds.push(`author = $${i++}`); params.push(author); }
+    // I1: pre-filter по кандидатам (merged=1 OR head != '') — поиск идёт ТОЛЬКО
+    // по ним, чтобы unattributed/out-of-context записи не разбавляли top_k.
+    if (filterSessionIds && filterSessionIds.length) {
+      conds.push(`session_id IN (${filterSessionIds.map(() => `$${i++}`).join(", ")})`);
+      params.push(...filterSessionIds);
+    }
     conds.push(`1 - (embedding <=> $1) >= $${i++}`);
     params.push(min_score);
     const vectorRes = await this.pool.query(
@@ -174,6 +180,11 @@ export class PgVectorStorage {
         if (date_from !== undefined) { tconds.push(`time_last >= $${j++}`); tparams.push(date_from); }
         if (date_to !== undefined) { tconds.push(`time_last <= $${j++}`); tparams.push(date_to); }
         if (author !== undefined) { tconds.push(`author = $${j++}`); tparams.push(author); }
+        // I1: тот же pre-filter кандидатов в текстовой ветке.
+        if (filterSessionIds && filterSessionIds.length) {
+          tconds.push(`session_id IN (${filterSessionIds.map(() => `$${j++}`).join(", ")})`);
+          tparams.push(...filterSessionIds);
+        }
         const textRes = await this.pool.query(
           `SELECT session_id FROM ${this.table}
            WHERE ${tconds.join(" AND ")}

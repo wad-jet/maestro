@@ -23,12 +23,15 @@ export class Recall {
       if (count !== 1) return;
       const vec = await this.embeddings.embed(text);
       // Task 6: auto-recall использует дефолтный scope. В branch-scope —
-      // членство по коммитам (JS-фильтр хитов по кандидатам); fail-soft
-      // (revList null) → merged=1 only + debug-лог.
+      // членство по коммитам: поиск идёт ТОЛЬКО по кандидатам (I1: pre-filter,
+      // чтобы unattributed/out-of-context записи не разбавляли top_k), затем
+      // JS-фильтр хитов по inContext; fail-soft (revList null) → merged=1 only
+      // + debug-лог.
       const scope = this.branchContext === false ? "project" : "branch";
       let hits;
       if (scope === "branch" && this.git) {
         const candidates = await this.storage.candidates(this.key);
+        const candidateIds = candidates.map((c) => c.session_id);
         const sets = computeBranchSets({
           revList: this.git.revList,
           detectMainline: this.git.detectMainline,
@@ -37,9 +40,13 @@ export class Recall {
         });
         if (sets.failSoft) this.log?.debug?.("memory: recall fail-soft — revList failed, merged=1 only");
         const { inContext } = applyBranchScope(candidates, sets);
-        hits = (await this.storage.search(vec, { top_k: this.topK, min_score: this.minScore, key: this.key }))
+        hits = (await this.storage.search(vec, { top_k: this.topK, min_score: this.minScore, key: this.key, filterSessionIds: candidateIds }))
           .filter((h) => inContext.has(h.entry.session_id));
       } else {
+        // M4: branch-scope запрошен, но git не подключён → debug-лог (не тихо).
+        if (scope === "branch") {
+          this.log?.debug?.("memory: recall branch scope requested but git not wired — flat project search");
+        }
         hits = await this.storage.search(vec, { top_k: this.topK, min_score: this.minScore, key: this.key });
       }
       this.buffer.set(sessionID, hits);

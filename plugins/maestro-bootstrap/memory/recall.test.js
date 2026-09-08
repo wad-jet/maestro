@@ -89,3 +89,52 @@ test("recall auto-recall: branch scope filters hits by membership", async () => 
   assert.ok(block.includes("A"), "in-context hit must be in block");
   assert.ok(!block.includes("D"), "out-of-context hit must be filtered");
 });
+
+test("recall auto-recall: branch scope passes filterSessionIds to search (I1)", async () => {
+  const storage = {
+    candidates: async () => [
+      { session_id: "a", merged: 1, head: "" },
+      { session_id: "d", merged: 0, head: "hd" },
+    ],
+    search: async (emb, o) => {
+      assert.deepEqual(o.filterSessionIds, ["a", "d"], "search must be restricted to candidates");
+      return [
+        { entry: { session_id: "a", title: "A", summary: "SA", decisions: [], author: "a", time_last: 1, origin_project_hash: "k" }, score: 0.9 },
+        { entry: { session_id: "d", title: "D", summary: "SD", decisions: [], author: "a", time_last: 2, origin_project_hash: "k" }, score: 0.8 },
+      ];
+    },
+  };
+  const r = new Recall({
+    embeddings: { embed: async () => new Float32Array([0.1, 0.2, 0.3]) },
+    storage, topK: 3, minScore: 0.35, key: "project-key",
+    getUserMessageCount: async () => 1,
+    branchContext: true,
+    git: {
+      revList: (root, ref) => (ref === "HEAD" ? new Set(["hb"]) : new Set()),
+      detectMainline: () => ({ name: "main" }),
+    },
+    root: "/tmp/x",
+  });
+  await r.onChatMessage({ sessionID: "s1", text: "hello" });
+  const block = await r.systemBlock({ sessionID: "s1" });
+  assert.ok(block.includes("A"), "in-context hit must be in block");
+  assert.ok(!block.includes("D"), "out-of-context hit must be filtered");
+});
+
+test("recall auto-recall: branch scope without git → debug log (not silent) (M4)", async () => {
+  const { embedder, storage } = mkDeps();
+  const debugged = [];
+  const log = { debug: (m) => debugged.push(m) };
+  const r = new Recall({
+    embeddings: embedder, storage, topK: 3, minScore: 0.35, key: "project-key",
+    getUserMessageCount: async () => 1,
+    branchContext: true,
+    git: null,
+    root: "/tmp/x",
+    log,
+  });
+  await r.onChatMessage({ sessionID: "s1", text: "hello" });
+  assert.ok(debugged.some((m) => m.includes("git not wired")), "must debug-log missing git wiring");
+  const block = await r.systemBlock({ sessionID: "s1" });
+  assert.ok(block.includes("t"), "flat search still runs");
+});

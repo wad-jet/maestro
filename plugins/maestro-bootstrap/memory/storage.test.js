@@ -530,6 +530,64 @@ test("hybrid search caps fused results to top_k when vector+text both contribute
   }
 });
 
+// ── I1: search pre-filter по кандидатам (filterSessionIds) ─────────────
+
+test("sqlite search filterSessionIds restricts vector leg to candidates", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
+  try {
+    await st.init();
+    await st.upsert([
+      mkEntry("s1", "k1", "t1", { merged: 1, head: "" }),
+      mkEntry("s2", "k1", "t2", { merged: 0, head: "" }), // unattributed
+    ]);
+    // s2 имеет тот же вектор (максимальная похожесть), но не кандидат —
+    // без pre-filter вытеснил бы s1 из top_k.
+    const hits = await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 5, min_score: 0, key: "k1", filterSessionIds: ["s1"] });
+    assert.equal(hits.length, 1, "only candidate s1 must be searched");
+    assert.equal(hits[0].entry.session_id, "s1");
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("sqlite search filterSessionIds applies to FTS leg", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
+  try {
+    await st.init();
+    await st.upsert([
+      mkEntry("s1", "k1", "OAuth token refresh", { summary: "OAuth OAuth flow", merged: 1, head: "" }),
+      mkEntry("s2", "k1", "OAuth cache", { summary: "OAuth tokens", merged: 0, head: "" }),
+    ]);
+    // s2 — сильный FTS-матч, но не кандидат → исключён из текстовой ветки.
+    const hits = await st.search(new Float32Array([0, 1, 0]), { top_k: 5, min_score: 0.5, key: "k1", query: "OAuth", filterSessionIds: ["s1"] });
+    assert.equal(hits.length, 1, "FTS leg must be restricted to candidates");
+    assert.equal(hits[0].entry.session_id, "s1");
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("sqlite search empty filterSessionIds → current behavior (no filter)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
+  try {
+    await st.init();
+    await st.upsert([
+      mkEntry("s1", "k1", "t1", { merged: 1, head: "" }),
+      mkEntry("s2", "k1", "t2", { merged: 0, head: "" }),
+    ]);
+    const hits = await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 5, min_score: 0, key: "k1", filterSessionIds: [] });
+    assert.equal(hits.length, 2, "empty filterSessionIds must not restrict search");
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("fts stays in sync after delete", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mem-"));
   const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });

@@ -179,6 +179,35 @@ test("pgvector search filters date/author", async () => {
   assert.equal(sel[1][4], "alice");
 });
 
+test("pgvector search filterSessionIds adds session_id IN to vector + text legs (I1)", async () => {
+  const p = fakePoolHybrid({ textRows: [{ session_id: "s2" }] });
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, textSearchConfig: "russian" });
+  await st.init();
+  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "k1", query: "foo", filterSessionIds: ["s1", "s2"] });
+  // Векторная ветка: $1=embedding, $2=key, $3,$4=session_id IN, $5=min_score, $6=LIMIT.
+  const vecCall = p.calls.find(([sql]) => sql.includes("FROM maestro_memory") && !sql.includes("plainto_tsquery"));
+  assert.ok(vecCall, "vector leg must run");
+  assert.ok(vecCall[0].includes("session_id IN ($3, $4)"), vecCall[0]);
+  assert.equal(vecCall[1][2], "s1");
+  assert.equal(vecCall[1][3], "s2");
+  // Текстовая ветка: $1=cfg, $2=query, $3=key, $4,$5=session_id IN, $6=LIMIT.
+  const textCall = p.calls.find(([sql]) => sql.includes("plainto_tsquery"));
+  assert.ok(textCall, "text leg must run");
+  assert.ok(textCall[0].includes("session_id IN ($4, $5)"), textCall[0]);
+  assert.equal(textCall[1][3], "s1");
+  assert.equal(textCall[1][4], "s2");
+});
+
+test("pgvector search empty filterSessionIds → no session_id filter", async () => {
+  const p = fakePool();
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3 });
+  await st.init();
+  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "k1", filterSessionIds: [] });
+  const sel = p.calls.find(([sql]) => sql.includes("FROM maestro_memory"));
+  assert.ok(sel);
+  assert.ok(!sel[0].includes("session_id IN"), sel[0]);
+});
+
 test("pgvector deleteByFilter returns count from RETURNING", async () => {
   const p = fakePool();
   p.query = async (sql, params) => {

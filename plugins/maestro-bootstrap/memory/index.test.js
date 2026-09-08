@@ -1760,3 +1760,104 @@ test("memory_search branch_context=false default → project; явный scope=b
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── Task 6 review: I1 (search pre-filter), M1 (candidates scope), M2 (scope validation) ──
+
+// Storage: кандидат a (merged=1) + unattributed u (merged=0, head=''). Поиск
+// симулирует бэкенд: возвращает хиты ТОЛЬКО из filterSessionIds. u имеет
+// максимальную похожесть — без pre-filter вытеснил бы a из top_k.
+function mkDilutionStorage() {
+  const storage = mkMockStorage();
+  storage.candidates = async () => [
+    { session_id: "a", merged: 1, head: "" },
+    { session_id: "u", merged: 0, head: "" }, // unattributed
+  ];
+  storage.search = async function (vec, opts) {
+    this.searches++;
+    this.lastOpts = opts;
+    const allowed = new Set(opts.filterSessionIds ?? []);
+    const all = [
+      { entry: { session_id: "a", title: "A", summary: "SA", decisions: [], author: "alice", time_last: 1, origin_project_hash: "h" }, score: 0.7 },
+      { entry: { session_id: "u", title: "U", summary: "SU", decisions: [], author: "alice", time_last: 2, origin_project_hash: "h" }, score: 0.95 },
+    ];
+    return all.filter((h) => allowed.has(h.entry.session_id));
+  };
+  return storage;
+}
+
+test("I1: branch scope searches only candidates — unattributed high-similarity entry excluded", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-i1-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkDilutionStorage();
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git: mkScopeGit() },
+    });
+    const res = await hooks.tool.memory_search.execute({ query: "x", scope: "branch" }, { sessionID: "s1" });
+    assert.match(res, /# A/, "in-context candidate must be returned");
+    assert.doesNotMatch(res, /# U/, "unattributed entry must be excluded from search (not just post-filtered)");
+    assert.deepEqual(storage.lastOpts.filterSessionIds, ["a", "u"], "filterSessionIds must be passed to storage.search");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("M1: project scope does NOT call candidates (no wasted query, no throw risk)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-m1-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkScopeStorage();
+    let candidatesCalls = 0;
+    storage.candidates = async () => { candidatesCalls++; return []; };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git: mkScopeGit() },
+    });
+    // init-промоция (Task 5) тоже вызывает candidates — сбрасываем счётчик.
+    candidatesCalls = 0;
+    const res = await hooks.tool.memory_search.execute({ query: "x", scope: "project" }, { sessionID: "s1" });
+    assert.equal(candidatesCalls, 0, "project scope must NOT call candidates");
+    assert.match(res, /# A/, "flat search still returns hits");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("M2: invalid scope → tool error (not silent flatten)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-m2-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkScopeStorage();
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git: mkScopeGit() },
+    });
+    const res = await hooks.tool.memory_search.execute({ query: "x", scope: "bogus" }, { sessionID: "s1" });
+    assert.match(res, /невалидный scope "bogus"/, "must report invalid scope");
+    assert.equal(storage.searches, 0, "search must NOT run for invalid scope");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
