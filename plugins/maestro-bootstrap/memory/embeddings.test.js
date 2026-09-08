@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { Embedder } from "./embeddings.js";
+import { Embedder, bucket } from "./embeddings.js";
 
 function fakePipeline() {
   const calls = [];
@@ -39,4 +39,27 @@ test("probe hard when transformers missing", async () => {
   const p = await e.probe();
   assert.equal(p.ok, false);
   assert.equal(p.hard, true);
+});
+
+// Task 5: аудит-события embedder (spec §4.3) — duration без cache_hit
+// (локальный Embedder текстового кэша не имеет).
+test("local embed logs duration without cache_hit", async () => {
+  const calls = [];
+  const log = { debug: (m, e) => calls.push([m, e]) };
+  const e = new Embedder({ model: "x", cacheDir: "/tmp/x", _pipeline: fakePipeline(), _dim: 3, moduleDir: "/tmp/m", _importImpl: async () => ({}), logDebug: log.debug });
+  await e.embed("hi");
+  const ev = calls.find(([m]) => m === "memory:embed.duration");
+  assert.ok(ev);
+  assert.equal(ev[1].provider, "local");
+  assert.equal("cache_hit" in ev[1], false);
+});
+
+// Task 5: биннинг длины текста (spec §3: <100, 100-500, 500-2000, >2000).
+test("bucket bins lengths per spec §3", () => {
+  assert.equal(bucket(50), "<100");
+  assert.equal(bucket(100), "100-500");
+  assert.equal(bucket(500), "100-500");
+  assert.equal(bucket(501), "500-2000");
+  assert.equal(bucket(2000), "500-2000");
+  assert.equal(bucket(2001), ">2000");
 });

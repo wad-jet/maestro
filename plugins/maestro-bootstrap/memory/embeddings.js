@@ -1,5 +1,14 @@
+// Task 5: биннинг длины текста для аудит-лога (spec §3) — бакеты вместо
+// точного значения (SEC-4b: len не логируется как raw).
+export function bucket(len) {
+  if (len < 100) return "<100";
+  if (len <= 500) return "100-500";
+  if (len <= 2000) return "500-2000";
+  return ">2000";
+}
+
 export class Embedder {
-  constructor({ model, cacheDir, moduleDir, _pipeline, _dim, _importImpl } = {}) {
+  constructor({ model, cacheDir, moduleDir, _pipeline, _dim, _importImpl, logDebug = () => {} } = {}) {
     this.model = model;
     this.cacheDir = cacheDir;
     this.moduleDir = moduleDir;
@@ -7,6 +16,8 @@ export class Embedder {
     this._dim = _dim ?? null;
     this.ready = false;
     this._importImpl = _importImpl ?? null;
+    // Task 5: аудит-лог (spec §4.3) — debug-события embedder; default noop.
+    this.logDebug = logDebug;
   }
   async probe() {
     const imp = this._importImpl ?? (() => import(`${this.moduleDir}/node_modules/@huggingface/transformers`));
@@ -32,8 +43,12 @@ export class Embedder {
     this.ready = true;
   }
   async embed(text) {
+    // Task 5: замер duration для memory:embed.duration (только успех; probe — отдельно).
+    const t0 = Date.now();
     if (!this.ready) await this.init();
     const out = await this.pipeline([text], { pooling: "mean", normalize: true });
+    // Локальный Embedder текстового кэша не имеет → cache_hit не логируется.
+    this.logDebug?.("memory:embed.duration", { provider: "local", duration_ms: Date.now() - t0, len_bucket: bucket(text.length) });
     return new Float32Array(out.data);
   }
   get dim() { return this._dim; }

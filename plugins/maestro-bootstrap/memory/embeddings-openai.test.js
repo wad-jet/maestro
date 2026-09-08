@@ -61,3 +61,62 @@ test("probe classification", async () => {
   const pDim = await mk(async () => ({ ok: true, status: 200, statusText: "OK", json: async () => ({ data: [{ embedding: [1, 2] }] }) })).probe();
   assert.equal(pDim.hard, true);
 });
+
+// Task 5: аудит-события openai-embedder (spec §4.3) — duration с cache_hit
+// и cache_stats (info, раз в 10 embed-вызовов).
+test("openai embed logs duration with cache_hit and cache_stats", async () => {
+  const calls = [];
+  const log = { debug: (m, e) => calls.push([m, e]), info: (m, e) => calls.push([m, e]) };
+  const fetchImpl = fakeFetch(async () => okRes());
+  const e = new OpenAiEmbedder({ model: "m", baseUrl: "https://x/v1", apiKey: "k", dim: 3, fetchImpl, logDebug: log.debug, logInfo: log.info });
+  await e.embed("q");
+  const dur = calls.find(([m]) => m === "memory:embed.duration");
+  assert.ok(dur);
+  assert.equal(dur[1].provider, "external");
+  assert.equal(dur[1].cache_hit, false);
+});
+
+test("openai http.error logs status_class enum, not body", async () => {
+  const calls = [];
+  const log = { warn: (m, e) => calls.push([m, e]) };
+  const fetchImpl = fakeFetch(async () => ({ ok: false, status: 503, statusText: "Busy", text: async () => "top secret body" }));
+  const e = new OpenAiEmbedder({ model: "m", baseUrl: "https://x/v1", apiKey: "k", dim: 3, fetchImpl, logWarn: log.warn });
+  await assert.rejects(() => e.embed("hi"));
+  const ev = calls.find(([m]) => m === "memory:http.error");
+  assert.ok(ev);
+  assert.ok(!JSON.stringify(ev).includes("secret body"), "HTTP body NOT in log");
+});
+
+test("openai cache_stats logged every 10th embed with hit_rate and cache_size", async () => {
+  const calls = [];
+  const log = { debug: () => {}, info: (m, e) => calls.push([m, e]) };
+  const fetchImpl = fakeFetch(async () => okRes());
+  const e = new OpenAiEmbedder({ model: "m", baseUrl: "https://x/v1", apiKey: "k", dim: 3, fetchImpl, logDebug: log.debug, logInfo: log.info });
+  for (let i = 0; i < 10; i++) await e.embed(`q${i}`);
+  const stats = calls.find(([m]) => m === "memory:embed.cache_stats");
+  assert.ok(stats, "cache_stats on 10th embed");
+  assert.equal(typeof stats[1].hit_rate, "number");
+  assert.equal(stats[1].cache_size, 10);
+});
+
+test("openai network error logs http.error with error_class network", async () => {
+  const calls = [];
+  const log = { warn: (m, e) => calls.push([m, e]) };
+  const fetchImpl = fakeFetch(async () => { throw new Error("ECONNREFUSED"); });
+  const e = new OpenAiEmbedder({ model: "m", baseUrl: "https://x/v1", apiKey: "k", dim: 3, fetchImpl, logWarn: log.warn });
+  await assert.rejects(() => e.embed("hi"));
+  const ev = calls.find(([m]) => m === "memory:http.error");
+  assert.ok(ev);
+  assert.equal(ev[1].error_class, "network");
+});
+
+test("openai 401 logs http.error with auth class", async () => {
+  const calls = [];
+  const log = { warn: (m, e) => calls.push([m, e]) };
+  const fetchImpl = fakeFetch(async () => ({ ok: false, status: 401, statusText: "Unauthorized", text: async () => "" }));
+  const e = new OpenAiEmbedder({ model: "m", baseUrl: "https://x/v1", apiKey: "k", dim: 3, fetchImpl, logWarn: log.warn });
+  await assert.rejects(() => e.embed("hi"));
+  const ev = calls.find(([m]) => m === "memory:http.error");
+  assert.ok(ev);
+  assert.equal(ev[1].http_status_class, "auth");
+});
