@@ -44,3 +44,16 @@ test("state prune removes entries without recent activity", async () => {
   assert.equal(await st.getLastSummarized("s4"), null, "entry without lastAttempt must be pruned");
   rmSync(dir, { recursive: true, force: true });
 });
+
+test("embedder probe cache round-trip", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mm-state-"));
+  const s = createState(join(dir, "state.json"));
+  assert.equal(await s.getEmbedderProbe(), null);
+  const info = { modelId: "openai:m@https://x/v1", dim: 3, apiKeyEnv: "K", ok: true, hard: false, detail: "OK (dim 3)" };
+  await s.setEmbedderProbe(info);
+  const got = await s.getEmbedderProbe();
+  assert.equal(got.ok, true);
+  assert.equal(got.modelId, info.modelId);
+  assert.equal(typeof got.at, "number");
+  rmSync(dir, { recursive: true, force: true });
+});

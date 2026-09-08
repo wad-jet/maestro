@@ -60,5 +60,12 @@ export function createState(path) {
       }
       persist();
     },
+    getEmbedderProbe() {
+      return data.embedderProbe ?? null;
+    },
+    async setEmbedderProbe(info) {
+      data.embedderProbe = { at: Date.now(), ...info };
+      persist();
+    },
   };
 }
