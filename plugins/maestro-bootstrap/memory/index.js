@@ -221,14 +221,6 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     return {};
   }
   try {
-    // I5: confidential-проект + centralized forbid → локальный sqlite.
-    const confidentialPaths = maestroConfig?.confidential?.paths ?? [];
-    const isCentralized = config.storage.type === "qdrant" || config.storage.type === "pgvector";
-    if (isCentralized && config.storage.centralized_confidential === "forbid" && confidentialPaths.length > 0) {
-      log?.warn?.("memory: centralized backend forbidden for confidential project — fallback to sqlite");
-      config.storage.type = "sqlite";
-    }
-
     // M-5: валидация централизованных бэкендов ДО createStorage.
     if (config.storage.type === "qdrant") {
       const q = config.storage.qdrant ?? {};
@@ -319,6 +311,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
 
     const embeddings = deps.embeddings ?? new Embedder({ model: config.embedding_model, cacheDir: memoryDataDir, moduleDir });
     const state = createState(statePath);
+    const confidentialPaths = maestroConfig?.confidential?.paths ?? [];
     const indexer = new Indexer({
       client,
       config,

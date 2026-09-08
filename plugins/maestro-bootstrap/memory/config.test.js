@@ -15,9 +15,10 @@ test("storage type validation", () => {
   const cfg = loadMemoryConfig({ memory: { enabled: true, storage: { type: "bogus" } } });
   assert.equal(cfg.enabled, false);
 });
-test("centralized_confidential default forbid", () => {
+test("branch_context default true; mainline default null", () => {
   const cfg = loadMemoryConfig({ memory: { enabled: true } });
-  assert.equal(cfg.storage.centralized_confidential, "forbid");
+  assert.equal(cfg.branch_context, true);
+  assert.equal(cfg.mainline, null);
 });
 test("identity resolution order", () => {
   assert.equal(resolveIdentity({ config: { identity_env: "ME_ID" }, env: { ME_ID: "alice" }, gitName: "git" }), "alice");
@@ -41,13 +42,17 @@ test("effective key", () => {
   assert.equal(resolveEffectiveKey({ projectHash: "ph", namespace: null }), "ph");
   assert.equal(resolveEffectiveKey({ projectHash: "ph", namespace: "team" }), "team");
 });
-test("centralized_confidential invalid value disables", () => {
-  const cfg = loadMemoryConfig({ memory: { enabled: true, storage: { type: "qdrant", centralized_confidential: "bogus" }, identity: "x" } });
-  assert.equal(cfg.enabled, false);
+test("branch_context invalid disables; mainline invalid disables", () => {
+  assert.equal(classifyMemoryConfig({ memory: { enabled: true, branch_context: "yes" } }).disabled_reason, "branch_context_invalid");
+  assert.equal(classifyMemoryConfig({ memory: { enabled: true, mainline: "bad name!" } }).disabled_reason, "mainline_invalid");
 });
-test("centralized_confidential allow enables with identity", () => {
-  const cfg = loadMemoryConfig({ memory: { enabled: true, storage: { type: "qdrant", centralized_confidential: "allow" }, identity: "x" } });
-  assert.equal(cfg.enabled, true);
+test("mainline validation: length 100 cap + valid passes", () => {
+  assert.equal(classifyMemoryConfig({ memory: { enabled: true, mainline: "a".repeat(101) } }).disabled_reason, "mainline_invalid");
+  assert.equal(classifyMemoryConfig({ memory: { enabled: true, mainline: "develop" } }).enabled, true);
+});
+test("centralized_confidential removed from config (key ignored)", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, storage: { type: "sqlite" }, centralized_confidential: "forbid" } });
+  assert.equal(cfg.storage.centralized_confidential, undefined);
 });
 test("explicit enabled false disables", () => {
   const cfg = loadMemoryConfig({ memory: { enabled: false } });

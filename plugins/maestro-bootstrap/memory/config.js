@@ -19,7 +19,9 @@ export const DEFAULTS = {
   similarity_threshold: 0.7,
   retention_days: null,
   summarize_timeout_ms: 120000,
-  storage: { type: "sqlite", centralized_confidential: "forbid" },
+  branch_context: true,
+  mainline: null,
+  storage: { type: "sqlite", qdrant: null, pgvector: null },
 };
 
 const STORAGE_TYPES = new Set(["sqlite", "qdrant", "pgvector"]);
@@ -43,7 +45,6 @@ function mergedConfig(m) {
         // storage.text_search_config убран за строгость.
         text_search_config: m.storage?.pgvector?.text_search_config ?? "russian",
       },
-      centralized_confidential: m.storage?.centralized_confidential ?? "forbid",
     },
   };
 }
@@ -89,6 +90,33 @@ function similarityThresholdValid(m) {
     && m.similarity_threshold <= 1;
 }
 
+// Имя mainline-ветки: допустимы буквы/цифры/`_`/`/`/`.`/`-`, длина ≤ 100.
+const MAINLINE_RE = /^[a-zA-Z0-9_\/.-]+$/;
+
+/**
+ * mainline: null (off) or a valid branch name (string ≤ 100 chars matching
+ * MAINLINE_RE); anything else → invalid (memory disabled). Shared by
+ * classifyMemoryConfig (zero-dep gate) and loadMemoryConfig.
+ * @param {object} m  The `memory` config section.
+ * @returns {boolean}  True when mainline is valid (or absent/null).
+ */
+function mainlineValid(m) {
+  if (m?.mainline == null) return true;
+  return typeof m.mainline === "string" && m.mainline.length <= 100 && MAINLINE_RE.test(m.mainline);
+}
+
+/**
+ * branch_context: null (default true) or a boolean; anything else → invalid
+ * (memory disabled). Shared by classifyMemoryConfig (zero-dep gate) and
+ * loadMemoryConfig.
+ * @param {object} m  The `memory` config section.
+ * @returns {boolean}  True when branch_context is valid (or absent).
+ */
+function branchContextValid(m) {
+  if (m?.branch_context == null) return true;
+  return typeof m.branch_context === "boolean";
+}
+
 /**
  * Lightweight classification of the memory config — NO storage imports.
  * Used by core.js BEFORE any memory module import (zero-dep gate, C1) and
@@ -106,14 +134,13 @@ export function classifyMemoryConfig(maestroJson, { gitName = null } = {}) {
   const type = m.storage?.type ?? "sqlite";
   if (!STORAGE_TYPES.has(type)) return { enabled: false, disabled_reason: "storage_type_invalid" };
   if (!pgvectorTextSearchConfigValid(m)) return { enabled: false, disabled_reason: "pgvector_text_search_config_invalid" };
+  if (!branchContextValid(m)) return { enabled: false, disabled_reason: "branch_context_invalid" };
+  if (!mainlineValid(m)) return { enabled: false, disabled_reason: "mainline_invalid" };
   const centralized = type !== "sqlite";
   if (centralized) {
     const cfg = mergedConfig(m);
     if (!resolveIdentity({ config: cfg, env: process.env, gitName })) {
       return { enabled: false, disabled_reason: "centralized_identity_missing" };
-    }
-    if (cfg.storage.centralized_confidential !== "allow" && cfg.storage.centralized_confidential !== "forbid") {
-      return { enabled: false, disabled_reason: "centralized_confidential_invalid" };
     }
   }
   return { enabled: true, disabled_reason: null };

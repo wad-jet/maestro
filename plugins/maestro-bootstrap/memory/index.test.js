@@ -23,7 +23,7 @@ function mkConfig(dir, extra = {}) {
       backfill_window_days: 30,
       backfill_max_per_start: 1,
       retry_interval_min: 60,
-      storage: { type: "sqlite", centralized_confidential: "forbid" },
+      storage: { type: "sqlite" },
       module_dir: join(dir, "memory", "module"),
       embedding_model: "x",
       ...extra,
@@ -348,9 +348,9 @@ test("M2: auto_recall false → no chat.message/system.transform hooks", async (
   }
 });
 
-// ── I5: centralized forbid + confidential → sqlite fallback ────────────
+// ── I5 removed: centralized forbid + confidential → NO sqlite fallback ──
 
-test("I5: centralized forbid + confidential paths → fallback to sqlite", async () => {
+test("I5 removed: confidential project on qdrant config stays qdrant (no failover)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mem-hooks-"));
   const saved = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = dir;
@@ -361,16 +361,14 @@ test("I5: centralized forbid + confidential paths → fallback to sqlite", async
       storage: {
         type: "qdrant",
         qdrant: { url: "http://localhost:6333", api_key_env: "Q_KEY" },
-        centralized_confidential: "forbid",
       },
       identity: "x",
     });
     config.confidential = { paths: ["docs/confidential/**"] };
     const hooks = await registerMemoryHooks({ client: mkClient(), config, log, root: dir });
-    assert.ok(hooks.tool && hooks.tool.memory_search, "must work via sqlite fallback");
     assert.ok(
-      logged.some(([m]) => m === "memory: centralized backend forbidden for confidential project — fallback to sqlite"),
-      "must log the fallback warning",
+      !logged.some(([m]) => m === "memory: centralized backend forbidden for confidential project — fallback to sqlite"),
+      "must NOT log the removed fallback warning",
     );
     await hooks.dispose?.();
   } finally {
