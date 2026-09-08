@@ -1,5 +1,6 @@
 import { resolveSearchKeys } from "../project.js";
 import { fuseRrf } from "./rrf.js";
+import { timed } from "../storage.js";
 
 // Whitelist of scan-able columns (mirrors the table schema). Default scan
 // returns everything EXCEPT embedding (large); embedding is opt-in.
@@ -11,7 +12,7 @@ const SCAN_FIELDS = [
 const DEFAULT_SCAN_FIELDS = SCAN_FIELDS.filter((f) => f !== "embedding");
 
 export class PgVectorStorage {
-  constructor({ pool, table, dim, modelId, textSearchConfig }) {
+  constructor({ pool, table, dim, modelId, textSearchConfig, log }) {
     this.pool = pool;
     this.table = table;
     this.dim = dim;
@@ -19,8 +20,13 @@ export class PgVectorStorage {
     // Эффективный конфиг полнотекстового поиска (resolveEffectiveTextConfig);
     // fallback — "russian".
     this.textSearchConfig = textSearchConfig ?? "russian";
+    // Task 6: аудит-лог (spec §4.3) — debug/error-события операций; default null (noop).
+    this.log = log ?? null;
   }
   async init() {
+    return timed(this.log, "init", () => this._init());
+  }
+  async _init() {
     try {
       await this.pool.query(`CREATE EXTENSION IF NOT EXISTS vector`);
     } catch {
@@ -100,6 +106,9 @@ export class PgVectorStorage {
   }
   async dispose() { await this.pool.end?.(); }
   async upsert(entries) {
+    return timed(this.log, "upsert", () => this._upsert(entries));
+  }
+  async _upsert(entries) {
     // M-7: atomic per-file import — wrap the whole batch in a transaction so a
     // mid-batch failure rolls back everything (nothing partially imported).
     const client = await this.pool.connect();
@@ -128,6 +137,9 @@ export class PgVectorStorage {
     }
   }
   async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds }) {
+    return timed(this.log, "search", () => this._search(embedding, { top_k, min_score, key, date_from, date_to, author, project, query, filterSessionIds }));
+  }
+  async _search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds }) {
     // B2: cross-project opt-in — key IN (current + project key). Активная нога
     // (own key) и sibling-ноги разделяются: sibling строго general (merged=1,
     // §6.2) и НЕ получает own-key filterSessionIds (иначе sibling пуст).
@@ -144,7 +156,7 @@ export class PgVectorStorage {
 
     vectorHits.sort((a, b) => b.score - a.score);
     if (textLists.length) {
-      return (await fuseRrf(vectorHits, textLists, { fetchEntry: (sid) => this.get(sid) })).slice(0, top_k);
+      return (await fuseRrf(vectorHits, textLists, { fetchEntry: (sid) => this._get(sid) })).slice(0, top_k);
     }
     return vectorHits.slice(0, top_k);
   }
@@ -234,7 +246,10 @@ export class PgVectorStorage {
       }
     }
   }
-  async delete(session_id) { await this.pool.query(`DELETE FROM ${this.table} WHERE session_id = $1`, [session_id]); }
+  async delete(session_id) {
+    return timed(this.log, "delete", () => this._delete(session_id));
+  }
+  async _delete(session_id) { await this.pool.query(`DELETE FROM ${this.table} WHERE session_id = $1`, [session_id]); }
   async deleteByFilter({ key, session_id, author, before }) {
     if (typeof key !== "string" || !key) throw new Error("deleteByFilter: key required");
     const conds = ["key = $1"];
@@ -271,6 +286,9 @@ export class PgVectorStorage {
     });
   }
   async get(session_id) {
+    return timed(this.log, "get", () => this._get(session_id));
+  }
+  async _get(session_id) {
     // Явный список колонок (без SELECT *, без fts).
     const r = await this.pool.query(
       `SELECT session_id, key, origin_project_hash, title, summary, decisions, model_id, author, time_first, time_last, version, branch, head, merged
@@ -284,6 +302,9 @@ export class PgVectorStorage {
   // (merged=1), либо имеют атрибуцию head (head != ''). Malformed decisions →
   // [] (guard как в sqlite/get) — не ронять recall.
   async candidates(key) {
+    return timed(this.log, "candidates", () => this._candidates(key));
+  }
+  async _candidates(key) {
     if (typeof key !== "string" || !key) throw new Error("candidates: key required");
     const res = await this.pool.query(
       `SELECT session_id, key, origin_project_hash, title, summary, decisions, model_id, author, time_first, time_last, version, branch, head, merged

@@ -1010,3 +1010,85 @@ test("pgvector get returns entry or null", async () => {
   const notFound = await st.get("nonexistent");
   assert.equal(notFound, null);
 });
+
+// ── Task 6: storage-события (duration/error/cross_project_miss) ──
+
+test("storage search logs duration and errors with class", async () => {
+  const calls = [];
+  const log = { debug: (m, e) => calls.push([m, e]), error: (m, e) => calls.push([m, e]) };
+  const st = createStorage({ type: "sqlite", options: { dbPath: ":memory:", log }, modelId: "m", dim: 3 });
+  try {
+    await st.init();
+    await st.upsert([mkEntry("s1", "k1", "t1")]);
+    await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0.3, key: "k1" });
+    assert.ok(calls.some(([m]) => m === "memory:storage.search.duration"), "search duration logged");
+    assert.ok(calls.some(([m, e]) => m === "memory:storage.search.duration" && typeof e.duration_ms === "number" && e.op === "search"), "duration carries op + duration_ms");
+  } finally {
+    await st.dispose();
+  }
+});
+
+test("storage error event logs error_class and rethrows", async () => {
+  const calls = [];
+  const log = { debug: (m, e) => calls.push([m, e]), error: (m, e) => calls.push([m, e]) };
+  const st = createStorage({ type: "sqlite", options: { dbPath: ":memory:", log }, modelId: "m", dim: 3 });
+  try {
+    await st.init();
+    // Неверная размерность → ошибка внутри search → error-событие + rethrow.
+    await assert.rejects(
+      () => st.search(new Float32Array([0.1, 0.2]), { top_k: 3, min_score: 0, key: "k1" }),
+      /dimension/,
+    );
+    assert.ok(calls.some(([m, e]) => m === "memory:storage.error" && e.op === "search" && e.error_class === "storage_error"), "storage.error logged with class");
+  } finally {
+    await st.dispose();
+  }
+});
+
+test("storage logs cross_project_miss on sibling model mismatch", async () => {
+  const base = mkdtempSync(join(tmpdir(), "mm-sqlite-xp-"));
+  const dir = (key) => join(base, "maestro", "memory", sanitizeDirName(key));
+  const activeKey = "active"; const other = "other";
+  mkdirSync(dir(activeKey), { recursive: true });
+  mkdirSync(dir(other), { recursive: true });
+  const calls = [];
+  const log = { debug: (m, e) => calls.push([m, e]), error: (m, e) => calls.push([m, e]) };
+  const mk = (key, modelId) => new SqliteStorage({ dbPath: join(dir(key), "memory.db"), modelId, dim: 3, moduleDir: null, log });
+  const active = mk(activeKey, "m"); const otherDb = mk(other, "other-model");
+  try {
+    await otherDb.init();
+    await otherDb.upsert([{ session_id: "o1", key: other, origin_project_hash: "ho", title: "Other Project", summary: "sum", decisions: [], model_id: "other-model", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([1, 0, 0]) }]);
+    await otherDb.dispose();
+    await active.init();
+    await active.upsert([{ session_id: "a1", key: activeKey, origin_project_hash: "ha", title: "Active", summary: "sum", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([0, 1, 0]) }]);
+    const res = await active.search(new Float32Array([1, 0, 0]), { key: activeKey, project: other, top_k: 10, min_score: 0 });
+    assert.ok(res.some((h) => h.entry.session_id === "a1"), "active hit present");
+    assert.ok(!res.some((h) => h.entry.session_id === "o1"), "mismatched sibling skipped");
+    assert.ok(calls.some(([m, e]) => m === "memory:cross_project_miss" && e.reason === "model_mismatch"), "cross_project_miss logged with model_mismatch");
+  } finally {
+    await active.dispose();
+    await otherDb.dispose();
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("storage logs cross_project_miss when sibling DB unavailable", async () => {
+  const base = mkdtempSync(join(tmpdir(), "mm-sqlite-xp-"));
+  const dir = (key) => join(base, "maestro", "memory", sanitizeDirName(key));
+  const activeKey = "active";
+  mkdirSync(dir(activeKey), { recursive: true });
+  const calls = [];
+  const log = { debug: (m, e) => calls.push([m, e]), error: (m, e) => calls.push([m, e]) };
+  const active = new SqliteStorage({ dbPath: join(dir(activeKey), "memory.db"), modelId: "m", dim: 3, moduleDir: null, log });
+  try {
+    await active.init();
+    await active.upsert([{ session_id: "a1", key: activeKey, origin_project_hash: "ha", title: "Active", summary: "sum", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([0, 1, 0]) }]);
+    // project "nonexistent" — sibling-файла нет → skip + cross_project_miss.
+    const res = await active.search(new Float32Array([1, 0, 0]), { key: activeKey, project: "nonexistent", top_k: 5, min_score: 0 });
+    assert.ok(res.some((h) => h.entry.session_id === "a1"), "active hit present");
+    assert.ok(calls.some(([m, e]) => m === "memory:cross_project_miss" && e.reason === "unavailable"), "cross_project_miss logged with unavailable");
+  } finally {
+    await active.dispose();
+    rmSync(base, { recursive: true, force: true });
+  }
+});

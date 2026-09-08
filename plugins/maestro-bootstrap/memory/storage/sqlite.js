@@ -4,6 +4,7 @@ import { createRequire } from "node:module";
 import { fuseRrf } from "./rrf.js";
 import { resolveSearchKeys } from "../project.js";
 import { sanitizeDirName } from "../config.js";
+import { timed } from "../storage.js";
 
 // Whitelist of scan-able columns (mirrors the `memory` table schema). Default
 // scan returns everything EXCEPT embedding (large); embedding is opt-in.
@@ -39,15 +40,21 @@ async function loadBetterSqlite3(moduleDir) {
 }
 
 export class SqliteStorage {
-  constructor({ dbPath, modelId, dim, moduleDir }) {
+  constructor({ dbPath, modelId, dim, moduleDir, log }) {
     this.dbPath = dbPath;
     this.modelId = modelId;
     this.dim = dim;
     this.moduleDir = moduleDir;
+    // Task 6: аудит-лог (spec §4.3) — debug/error-события операций; default null (noop).
+    this.log = log ?? null;
     this.db = null;
   }
 
   async init() {
+    return timed(this.log, "init", () => this._init());
+  }
+
+  async _init() {
     const Database = await loadBetterSqlite3(this.moduleDir);
     let db = new Database(this.dbPath);
     try {
@@ -136,6 +143,10 @@ export class SqliteStorage {
   }
 
   async upsert(entries) {
+    return timed(this.log, "upsert", () => this._upsert(entries));
+  }
+
+  async _upsert(entries) {
     const ins = this.db.prepare(`INSERT OR REPLACE INTO memory
       (session_id, key, origin_project_hash, title, summary, decisions, embedding, model_id, author, time_first, time_last, version, branch, head, merged)
       VALUES (@session_id, @key, @origin_project_hash, @title, @summary, @decisions, @embedding, @model_id, @author, @time_first, @time_last, @version, @branch, @head, @merged)`);
@@ -177,6 +188,10 @@ export class SqliteStorage {
   }
 
   async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds }) {
+    return timed(this.log, "search", () => this._search(embedding, { top_k, min_score, key, date_from, date_to, author, project, query, filterSessionIds }));
+  }
+
+  async _search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds }) {
     if (embedding.length !== this.dim) {
       throw new Error(`embedding length ${embedding.length} does not match expected dimension ${this.dim}`);
     }
@@ -194,7 +209,7 @@ export class SqliteStorage {
     }
     allVector.sort((a, b) => b.score - a.score);
     // Единый RRF-фьюжн по всем ключам (модель сверена → скоры сравнимы).
-    const fused = await fuseRrf(allVector, textLists, { fetchEntry: (sid) => this.get(sid) });
+    const fused = await fuseRrf(allVector, textLists, { fetchEntry: (sid) => this._get(sid) });
     return fused.slice(0, top_k);
   }
 
@@ -227,6 +242,8 @@ export class SqliteStorage {
       sib = new Database(path, { readonly: true, fileMustExist: false });
     } catch (err) {
       console.error(`[memory] cross-project skip ${k}: ${err.message}`);
+      // Task 6: аудит-событие промаха cross-project (sibling-БД недоступна).
+      this.log?.debug?.("memory:cross_project_miss", { reason: "unavailable" });
       return;
     }
     try {
@@ -234,17 +251,24 @@ export class SqliteStorage {
       const model = sib.prepare("SELECT value FROM meta WHERE name = 'model_id'").get();
       if (model && model.value !== this.modelId) {
         console.error(`[memory] cross-project skip ${k}: model mismatch`);
+        // Task 6: аудит-событие промаха (модель sibling не совпала).
+        this.log?.debug?.("memory:cross_project_miss", { reason: "model_mismatch" });
         return;
       }
       const dim = sib.prepare("SELECT value FROM meta WHERE name = 'dim'").get();
       if (dim && parseInt(dim.value, 10) !== this.dim) {
         console.error(`[memory] cross-project skip ${k}: dim mismatch`);
+        // Task 6: аудит-событие промаха (размерность sibling не совпала — то же
+        // пространство эмбеддингов, что и model_mismatch).
+        this.log?.debug?.("memory:cross_project_miss", { reason: "model_mismatch" });
         return;
       }
       // Pre-v3 sibling (без колонки merged) → SQL-ошибка → fail-soft skip (§6.2).
       const cols = sib.prepare("PRAGMA table_info(memory)").all().map((c) => c.name);
       if (opts.mergedOnly && !cols.includes("merged")) {
         console.error(`[memory] cross-project skip ${k}: pre-v3 sibling without merged column`);
+        // Task 6: аудит-событие промаха (sibling-схема непригодна для merged-ноги).
+        this.log?.debug?.("memory:cross_project_miss", { reason: "unavailable" });
         return;
       }
       // Старая БД без FTS-таблицы → vector-only.
@@ -345,6 +369,10 @@ export class SqliteStorage {
   }
 
   async delete(session_id) {
+    return timed(this.log, "delete", () => this._delete(session_id));
+  }
+
+  async _delete(session_id) {
     this.db.prepare("DELETE FROM memory WHERE session_id = ?").run(session_id);
     this.db.prepare("DELETE FROM memory_fts WHERE session_id = ?").run(session_id);
   }
@@ -394,6 +422,10 @@ export class SqliteStorage {
   }
 
   async get(session_id) {
+    return timed(this.log, "get", () => this._get(session_id));
+  }
+
+  async _get(session_id) {
     const r = this.db.prepare("SELECT * FROM memory WHERE session_id = ?").get(session_id);
     if (!r) return null;
     // Upgrade-path robustness: guard malformed decisions JSON (used by the FTS
@@ -406,6 +438,10 @@ export class SqliteStorage {
   // Кандидаты для recall (Task 6): записи ключа, которые либо уже влиты в
   // mainline (merged=1), либо имеют атрибуцию head (head != '').
   async candidates(key) {
+    return timed(this.log, "candidates", () => this._candidates(key));
+  }
+
+  async _candidates(key) {
     if (typeof key !== "string" || !key) throw new Error("candidates: key required");
     const rows = this.db.prepare(
       "SELECT * FROM memory WHERE key = ? AND (merged = 1 OR head != '')",

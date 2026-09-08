@@ -1,6 +1,7 @@
 import { createHash } from "node:crypto";
 import { resolveSearchKeys } from "../project.js";
 import { fuseRrf } from "./rrf.js";
+import { timed } from "../storage.js";
 
 // Whitelist of scan-able payload fields. Default scan returns everything EXCEPT
 // embedding (large); embedding is opt-in.
@@ -17,11 +18,13 @@ function uuidFrom(s) {
 }
 
 export class QdrantStorage {
-  constructor({ client, collection, modelId, dim }) {
+  constructor({ client, collection, modelId, dim, log }) {
     this.client = client;
     this.collection = collection;
     this.modelId = modelId;
     this.dim = dim;
+    // Task 6: аудит-лог (spec §4.3) — debug/error-события операций; default null (noop).
+    this.log = log ?? null;
   }
 
   // Текстовое представление точки для full-text индекса (payload `text`).
@@ -33,6 +36,10 @@ export class QdrantStorage {
   }
 
   async init() {
+    return timed(this.log, "init", () => this._init());
+  }
+
+  async _init() {
     const { exists } = await this.client.collectionExists(this.collection);
     if (!exists) {
       await this.client.createCollection(this.collection, {
@@ -84,6 +91,10 @@ export class QdrantStorage {
   async dispose() {}
 
   async upsert(entries) {
+    return timed(this.log, "upsert", () => this._upsert(entries));
+  }
+
+  async _upsert(entries) {
     // I3: паритет с sqlite/pgvector — несовпадение model_id → ошибка с
     // инструкцией переиндексации (embedding dim проверяется сервер-стороной:
     // collection создаётся с фикс. размерностью).
@@ -123,6 +134,10 @@ export class QdrantStorage {
   }
 
   async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds }) {
+    return timed(this.log, "search", () => this._search(embedding, { top_k, min_score, key, date_from, date_to, author, project, query, filterSessionIds }));
+  }
+
+  async _search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds }) {
     // B2: cross-project opt-in — key-set filter (current + project key). Активная
     // нога (own key) и sibling-ноги разделяются: sibling строго general (merged=1,
     // §6.2) и НЕ получает own-key filterSessionIds (иначе sibling пуст).
@@ -140,7 +155,7 @@ export class QdrantStorage {
     vectorHits.sort((a, b) => b.score - a.score);
     if (textLists.length) {
       // C2: кап результата фузии до top_k (паритет с sqlite/pgvector).
-      const fused = await fuseRrf(vectorHits, textLists, { fetchEntry: (sid) => this.get(sid) });
+      const fused = await fuseRrf(vectorHits, textLists, { fetchEntry: (sid) => this._get(sid) });
       return fused.slice(0, top_k);
     }
     return vectorHits.slice(0, top_k);
@@ -210,6 +225,10 @@ export class QdrantStorage {
 
   // C-2: direct filter delete (no query-based point lookup)
   async delete(session_id, { key } = {}) {
+    return timed(this.log, "delete", () => this._delete(session_id, { key }));
+  }
+
+  async _delete(session_id, { key } = {}) {
     await this.client.delete(this.collection, {
       filter: {
         must: [{ key: "session_id", match: { value: session_id } }, ...(key ? [{ key: "key", match: { value: key } }] : [])],
@@ -281,6 +300,10 @@ export class QdrantStorage {
 
   // C-2: filter-only query for get()
   async get(session_id) {
+    return timed(this.log, "get", () => this._get(session_id));
+  }
+
+  async _get(session_id) {
     const res = await this.client.query(this.collection, {
       filter: { must: [{ key: "session_id", match: { value: session_id } }] },
       limit: 1,
@@ -299,6 +322,10 @@ export class QdrantStorage {
   // `!= ''` дешёво → scroll по key + JS-фильтр. Malformed decisions → []
   // (guard как в sqlite/get) — не ронять recall. M-6: scroll-пагинация.
   async candidates(key) {
+    return timed(this.log, "candidates", () => this._candidates(key));
+  }
+
+  async _candidates(key) {
     if (typeof key !== "string" || !key) throw new Error("candidates: key required");
     const out = [];
     let offset = undefined;
