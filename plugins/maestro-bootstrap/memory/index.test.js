@@ -1323,6 +1323,51 @@ test("memory_stats_detail includes tier + branch breakdown", async () => {
   }
 });
 
+test("memory_stats_detail: merged=0 head∈mainlineSet → merged (general) tier (pull→init window)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-tiers-win-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.stats = async () => ({ entries: 2 });
+    storage.scan = async () => [
+      { session_id: "w1", title: "T1", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]) },
+      { session_id: "e1", title: "T2", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([0, 1, 0]) },
+    ];
+    // w1: merged=0, head ∈ mainlineSet → окно pull→init → general (merged tier),
+    // НЕ experience. e1: merged=0, head ∈ expSet (ancestorSet \ mainlineSet) → experience.
+    storage.candidates = async () => [
+      { session_id: "w1", merged: 0, head: "hm", branch: "main" },
+      { session_id: "e1", merged: 0, head: "he", branch: "feature/x" },
+    ];
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      revList: (root, ref) => {
+        if (ref === "HEAD") return new Set(["hm", "he"]);
+        if (ref === "main") return new Set(["hm"]);
+        return new Set();
+      },
+      isAncestor: () => "no",
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+    const res = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "s1" });
+    assert.match(res, /merged: 1/, "head∈mainlineSet (merged=0) → merged/general tier");
+    assert.match(res, /experience: 1/, "head∈expSet → experience tier");
+    assert.doesNotMatch(res, /experience: 2/, "window entry must NOT be experience");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("memory_stats_detail fail-soft: revList null → только merged-счётчики", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mem-tiers-fs-"));
   const saved = process.env.XDG_DATA_HOME;

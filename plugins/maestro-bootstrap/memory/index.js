@@ -664,9 +664,11 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             const tierCounts = { merged: 0, experience: 0, unknown: 0, dead: 0 };
             const branchCounts = new Map();
             let failSoft = false;
+            // M-b: computeBranchSets уже вызывает detectMainline — берём mainline
+            // из него (без повторного git-вызова) для mainline_unresolved.
+            const sets = computeBranchSets({ revList, detectMainline, root, mainlineOverride: config.mainline ?? null });
+            failSoft = sets.failSoft;
             if (candidates.length) {
-              const sets = computeBranchSets({ revList, detectMainline, root, mainlineOverride: config.mainline ?? null });
-              failSoft = sets.failSoft;
               if (failSoft) {
                 for (const c of candidates) if (c.merged === 1) tierCounts.merged++;
               } else {
@@ -699,9 +701,8 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             }
 
             // Task 7: дублируемые диагностики (в выдаче @maestro-memory).
-            // mainline_unresolved — detectMainline → null (branch-context flat).
-            const mainline = detectMainline(root, { override: config.mainline ?? null });
-            if (!mainline) {
+            // mainline_unresolved — mainline → null (branch-context flat).
+            if (!sets.mainline) {
               out.push("Диагностика: mainline_unresolved — branch-context flat (нет резолвнутого mainline)");
             }
             // unmasked_branch_metadata — централизованный бэкенд + непустые

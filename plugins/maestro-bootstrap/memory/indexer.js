@@ -108,6 +108,9 @@ export class Indexer {
     // M2: clear pending timer for deleted session
     const t = this.timers.get(sessionID);
     if (t) { clearTimeout(t); this.timers.delete(sessionID); }
+    // M-a: clear sticky branch/head context so a re-summarize of the same
+    // session re-resolves branch/head (no stale state after deletion).
+    this._branchContext.delete(sessionID);
   }
 
   async _run(sessionID) {
@@ -254,5 +257,6 @@ export class Indexer {
   dispose() {
     for (const t of this.timers.values()) clearTimeout(t);
     this.timers.clear();
+    this._branchContext.clear();
   }
 }

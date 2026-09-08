@@ -43,7 +43,7 @@ export function applyBranchScope(candidates, { ancestorSet, mainlineSet }) {
  *
  * @param {{ revList: Function, detectMainline: Function, root: string,
  *   mainlineOverride?: string | null }} opts
- * @returns {{ ancestorSet: Set<string>, mainlineSet: Set<string>, failSoft: boolean }}
+ * @returns {{ ancestorSet: Set<string>, mainlineSet: Set<string>, failSoft: boolean, mainline: object|null }}
  */
 export function computeBranchSets({ revList, detectMainline, root, mainlineOverride = null }) {
   const ancestorSet = revList(root, "HEAD");
@@ -54,5 +54,6 @@ export function computeBranchSets({ revList, detectMainline, root, mainlineOverr
     ancestorSet: failSoft ? new Set() : ancestorSet,
     mainlineSet: failSoft ? new Set() : mainlineSet,
     failSoft,
+    mainline,
   };
 }

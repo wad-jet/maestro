@@ -582,6 +582,40 @@ test("summarize attaches branch/head (sticky) and merged fast-path", async () =>
   idx.dispose();
 });
 
+test("onSessionDeleted clears sticky branch/head → re-summarize re-resolves", async () => {
+  const client = mkClient();
+  const storage = mkStorage(client);
+  let branch = "feature/x";
+  let head = "sha1";
+  const git = {
+    resolveBranch: async () => branch,
+    resolveHead: async () => head,
+  };
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git, mainline: "main",
+  });
+  await idx._run("s1");
+  assert.equal(client.upserts[0][0].branch, "feature/x", "first summarize resolves branch");
+
+  // git switches; sticky keeps old value on re-summarize (no delete yet)
+  branch = "main";
+  head = "sha2";
+  await idx._run("s1");
+  assert.equal(client.upserts[1][0].branch, "feature/x", "sticky preserved before delete");
+
+  // delete → sticky cleared → re-summarize re-resolves current git state
+  await idx.onSessionDeleted({ sessionID: "s1" });
+  await idx._run("s1");
+  assert.equal(client.upserts[2][0].branch, "main", "sticky cleared → branch re-resolved");
+  assert.equal(client.upserts[2][0].head, "sha2", "sticky cleared → head re-resolved");
+  idx.dispose();
+});
+
 test("branch==mainline → merged=1 fast-path; mainline unresolved → merged=0", async () => {
   const client = mkClient();
   const storage = mkStorage(client);
