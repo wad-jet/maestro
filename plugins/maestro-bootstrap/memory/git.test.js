@@ -69,3 +69,37 @@ test("revList returns ancestor set; isAncestor yes/no/error", () => {
   assert.equal(isAncestor(dir, sideHead, "main"), "no");
   assert.equal(isAncestor(dir, "deadbeef", "main"), "error"); // invalid object
 });
+
+// ── M-5: detectMainline steps 2–3 ──────────────────────────────────────
+
+test("detectMainline step 2: origin/HEAD prefix-strip + verify", () => {
+  const dir = makeRepo();
+  // main → trunk; origin/HEAD указывает на refs/remotes/origin/trunk.
+  execFileSync("git", ["branch", "-m", "main", "trunk"], { cwd: dir, stdio: "ignore" });
+  execFileSync("git", ["update-ref", "refs/remotes/origin/trunk", "HEAD"], { cwd: dir, stdio: "ignore" });
+  execFileSync("git", ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/trunk"], { cwd: dir, stdio: "ignore" });
+  // Шаг 2: symbolic-ref → срез префикса refs/remotes/origin/ → bare "trunk" →
+  // verifyBranch (локальное существование) → { name: "trunk" }.
+  assert.equal(detectMainline(dir).name, "trunk");
+});
+
+test("detectMainline step 2 fallthrough: origin/HEAD name absent locally → step 3/4", () => {
+  const dir = makeRepo();
+  // main → develop (резерв шага 4); origin/HEAD указывает на "main", которого
+  // локально НЕТ (симуляция `git clone -b <ветка>`: origin/HEAD = дефолт
+  // remote, локально — только выбранная ветка).
+  execFileSync("git", ["branch", "-m", "main", "develop"], { cwd: dir, stdio: "ignore" });
+  execFileSync("git", ["update-ref", "refs/remotes/origin/main", "HEAD"], { cwd: dir, stdio: "ignore" });
+  execFileSync("git", ["symbolic-ref", "refs/remotes/origin/HEAD", "refs/remotes/origin/main"], { cwd: dir, stdio: "ignore" });
+  // Шаг 2: "main" не существует локально → шаг 3 (init.defaultBranch не задан)
+  // → шаг 4: резерв находит develop.
+  assert.equal(detectMainline(dir).name, "develop");
+});
+
+test("detectMainline step 3: init.defaultBranch naming absent branch → skipped", () => {
+  const dir = makeRepo();
+  // Локальный init.defaultBranch именует ветку, которой нет в репо (глобальная
+  // настройка может именовать отсутствующую) → verifyBranch провал → шаг 4.
+  execFileSync("git", ["config", "init.defaultBranch", "trunk"], { cwd: dir, stdio: "ignore" });
+  assert.equal(detectMainline(dir).name, "main");
+});

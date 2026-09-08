@@ -1285,21 +1285,14 @@ test("memory_stats_detail includes tier + branch breakdown", async () => {
   try {
     const storage = mkMockStorage();
     storage.stats = async () => ({ entries: 5 });
+    // M-1: тиры классифицируются по ПОЛНОМУ scan (не candidates) — scan-строки
+    // несут branch/head/merged.
     storage.scan = async () => [
-      { session_id: "m1", title: "T1", author: "alice", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]) },
-      { session_id: "m2", title: "T2", author: "alice", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([0.99, 0.01, 0]) },
-      { session_id: "e1", title: "T3", author: "bob", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([0.98, 0.02, 0]) },
-      { session_id: "d1", title: "T4", author: "bob", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([0, 1, 0]) },
-      { session_id: "u1", title: "T5", author: "carol", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([0, 0, 1]) },
-    ];
-    // Кандидаты: merged=1 ×2, experience ×1 (head ∈ expSet), dead ×1
-    // (head ∉ ancestorSet), unknown ×1 (head='').
-    storage.candidates = async () => [
-      { session_id: "m1", merged: 1, head: "hm1", branch: "main" },
-      { session_id: "m2", merged: 1, head: "hm2", branch: "main" },
-      { session_id: "e1", merged: 0, head: "he", branch: "feature/x" },
-      { session_id: "d1", merged: 0, head: "hd", branch: "feature/y" },
-      { session_id: "u1", merged: 0, head: "", branch: "" },
+      { session_id: "m1", title: "T1", author: "alice", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]), merged: 1, head: "hm1", branch: "main" },
+      { session_id: "m2", title: "T2", author: "alice", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([0.99, 0.01, 0]), merged: 1, head: "hm2", branch: "main" },
+      { session_id: "e1", title: "T3", author: "bob", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([0.98, 0.02, 0]), merged: 0, head: "he", branch: "feature/x" },
+      { session_id: "d1", title: "T4", author: "bob", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([0, 1, 0]), merged: 0, head: "hd", branch: "feature/y" },
+      { session_id: "u1", title: "T5", author: "carol", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([0, 0, 1]), merged: 0, head: "", branch: "" },
     ];
     const git = {
       detectMainline: () => ({ name: "main" }),
@@ -1341,15 +1334,12 @@ test("memory_stats_detail: merged=0 head∈mainlineSet → merged (general) tier
   try {
     const storage = mkMockStorage();
     storage.stats = async () => ({ entries: 2 });
+    // M-1: тиры по полному scan; w1: merged=0, head ∈ mainlineSet → окно
+    // pull→init → general (merged tier), НЕ experience. e1: merged=0,
+    // head ∈ expSet (ancestorSet \ mainlineSet) → experience.
     storage.scan = async () => [
-      { session_id: "w1", title: "T1", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]) },
-      { session_id: "e1", title: "T2", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([0, 1, 0]) },
-    ];
-    // w1: merged=0, head ∈ mainlineSet → окно pull→init → general (merged tier),
-    // НЕ experience. e1: merged=0, head ∈ expSet (ancestorSet \ mainlineSet) → experience.
-    storage.candidates = async () => [
-      { session_id: "w1", merged: 0, head: "hm", branch: "main" },
-      { session_id: "e1", merged: 0, head: "he", branch: "feature/x" },
+      { session_id: "w1", title: "T1", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]), merged: 0, head: "hm", branch: "main" },
+      { session_id: "e1", title: "T2", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([0, 1, 0]), merged: 0, head: "he", branch: "feature/x" },
     ];
     const git = {
       detectMainline: () => ({ name: "main" }),
@@ -1386,15 +1376,11 @@ test("memory_stats_detail fail-soft: revList null → только merged-счё
   try {
     const storage = mkMockStorage();
     storage.stats = async () => ({ entries: 3 });
+    // M-1: тиры по полному scan (не candidates).
     storage.scan = async () => [
-      { session_id: "m1", title: "T1", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]) },
-      { session_id: "e1", title: "T2", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([0, 1, 0]) },
-      { session_id: "d1", title: "T3", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([0, 0, 1]) },
-    ];
-    storage.candidates = async () => [
-      { session_id: "m1", merged: 1, head: "hm1", branch: "main" },
-      { session_id: "e1", merged: 0, head: "he", branch: "feature/x" },
-      { session_id: "d1", merged: 0, head: "hd", branch: "feature/y" },
+      { session_id: "m1", title: "T1", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]), merged: 1, head: "hm1", branch: "main" },
+      { session_id: "e1", title: "T2", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([0, 1, 0]), merged: 0, head: "he", branch: "feature/x" },
+      { session_id: "d1", title: "T3", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([0, 0, 1]), merged: 0, head: "hd", branch: "feature/y" },
     ];
     const git = {
       detectMainline: () => ({ name: "main" }),
@@ -1434,9 +1420,8 @@ test("@maestro-memory duplicates diagnostics: disabled_reason / mainline_unresol
     const storage = mkMockStorage();
     storage.stats = async () => ({ entries: 1 });
     storage.scan = async () => [
-      { session_id: "s1", title: "T1", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]) },
+      { session_id: "s1", title: "T1", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]), merged: 1, head: "", branch: "" },
     ];
-    storage.candidates = async () => [{ session_id: "s1", merged: 1, head: "", branch: "" }];
     const hooks = await registerMemoryHooks({
       client: mkClient(),
       config: mkConfig(dir),
@@ -1456,9 +1441,8 @@ test("@maestro-memory duplicates diagnostics: disabled_reason / mainline_unresol
     const storage2 = mkMockStorage();
     storage2.stats = async () => ({ entries: 1 });
     storage2.scan = async () => [
-      { session_id: "s1", title: "T1", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]) },
+      { session_id: "s1", title: "T1", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]), merged: 1, head: "", branch: "" },
     ];
-    storage2.candidates = async () => [{ session_id: "s1", merged: 1, head: "", branch: "" }];
     const config = mkConfig(dir, {
       storage: { type: "qdrant", qdrant: { url: "http://localhost:6333", api_key_env: "Q_KEY" } },
       identity: "x",
@@ -1478,6 +1462,144 @@ test("@maestro-memory duplicates diagnostics: disabled_reason / mainline_unresol
     const res2 = await hooks2.tool.memory_stats_detail.execute({}, { sessionID: "s1" });
     assert.match(res2, /unmasked_branch_metadata/, "centralized + confidential.paths → diagnostic in output");
     await hooks2.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("M-1: stats tiers from full scan — real unattributed row (merged=0 head='') → unknown=1", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-m1-scan-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    // Реальный sqlite: unattributed-строка (merged=0, head='') НЕ проходит
+    // candidates() (merged=1 OR head != '') — но тиры считаются по полному scan.
+    const storage = await mkSqliteStorage(dir);
+    await storage.upsert([mkFullEntry({ session_id: "u1", merged: 0, head: "", branch: "" })]);
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir, { namespace: "k" }),
+      log: silentLog,
+      root: dir,
+      deps: {
+        storage,
+        embeddings: mkMockEmbeddings(),
+        git: { detectMainline: () => ({ name: "main" }), revList: () => new Set(), isAncestor: () => "no" },
+      },
+    });
+    const res = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "s1" });
+    assert.match(res, /unknown: 1/, "unattributed row must be counted in unknown tier (full scan)");
+    await hooks.dispose?.();
+    await storage.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("M-2: init-warn unmasked_branch_metadata at init (centralized + confidential.paths)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-m2-warn-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const warned = [];
+    const log = { debug() {}, info() {}, warn: (m) => warned.push(m), error() {} };
+    const storage = mkMockStorage();
+    const config = mkConfig(dir, {
+      storage: { type: "qdrant", qdrant: { url: "http://localhost:6333", api_key_env: "Q_KEY" } },
+      identity: "x",
+    });
+    config.confidential = { paths: ["docs/confidential/**"] };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config,
+      log,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git: mkScopeGit() },
+    });
+    assert.ok(warned.some((m) => m.includes("unmasked_branch_metadata")), "init must warn unmasked_branch_metadata");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("M-3: memory_recall_preview respects scope — branch filters, project flat", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-m3-prev-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    // branch_context=true + mainline resolved → membership фильтрует.
+    const storage = mkScopeStorage();
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git: mkScopeGit() },
+    });
+    const res = await hooks.tool.memory_recall_preview.execute({ query: "x" }, { sessionID: "s1" });
+    assert.match(res, /# A/, "merged=1 → general");
+    assert.match(res, /# B/, "head ∈ mainlineSet → general");
+    assert.match(res, /# C/, "head ∈ expSet → experience");
+    assert.doesNotMatch(res, /# D/, "head ∉ ancestorSet → не в контексте");
+    await hooks.dispose?.();
+
+    // branch_context=false → flat (все кандидаты, без членства).
+    const storage2 = mkScopeStorage();
+    const hooks2 = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir, { branch_context: false }),
+      log: silentLog,
+      root: dir,
+      deps: { storage: storage2, embeddings: mkMockEmbeddings(), git: mkScopeGit() },
+    });
+    const res2 = await hooks2.tool.memory_recall_preview.execute({ query: "x" }, { sessionID: "s1" });
+    assert.match(res2, /# D/, "flat preview includes head∉ancestorSet");
+    await hooks2.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("M-4: memory_search output includes branch and merged flag", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-m4-out-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.candidates = async () => [
+      { session_id: "a", merged: 1, head: "" },
+      { session_id: "e", merged: 0, head: "he" },
+    ];
+    storage.search = async () => [
+      { entry: { session_id: "a", title: "A", summary: "SA", decisions: [], author: "alice", time_last: 1, origin_project_hash: "h", merged: 1, branch: "main" }, score: 0.9 },
+      { entry: { session_id: "e", title: "E", summary: "SE", decisions: [], author: "bob", time_last: 2, origin_project_hash: "h", merged: 0, branch: "feature/x" }, score: 0.8 },
+    ];
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      revList: (root, ref) => (ref === "HEAD" ? new Set(["he"]) : new Set()),
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+    const res = await hooks.tool.memory_search.execute({ query: "x", scope: "branch" }, { sessionID: "s1" });
+    assert.match(res, /# A.*\(в main\)/, "merged=1 hit annotated (в main)");
+    assert.match(res, /ветка: main/, "branch shown for merged hit");
+    assert.match(res, /# E.*⚠️ не в main/, "experience hit annotated");
+    assert.match(res, /ветка: feature\/x/, "branch shown for experience hit");
+    await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = saved;

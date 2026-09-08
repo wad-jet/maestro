@@ -236,31 +236,39 @@ export class QdrantStorage {
 
   async scan({ key, fields }) {
     if (typeof key !== "string" || !key) throw new Error("scan: key required");
-    const res = await this.client.scroll(this.collection, {
-      filter: { must: [{ key: "key", match: { value: key } }] },
-      limit: 10000,
-      with_payload: true,
-      with_vector: true,
-    });
     // Field whitelist (mirrors sqlite/pg): only requested SCAN_FIELDS are read
     // from payload; embedding is handled separately from the vector.
     const cols = (fields && fields.length ? fields : DEFAULT_SCAN_FIELDS).filter((f) => SCAN_FIELDS.includes(f));
     if (!cols.length) throw new Error("scan: no valid fields requested");
     const wantEmbedding = cols.includes("embedding");
-    return (res.points ?? []).map((p) => {
-      const out = {};
-      for (const f of cols) {
-        if (f === "embedding") continue;
-        if (f in p.payload) out[f] = p.payload[f];
+    // M-6: scroll-пагинация через next_page_offset (limit 10000 молча обрезал).
+    const out = [];
+    let offset = undefined;
+    do {
+      const res = await this.client.scroll(this.collection, {
+        filter: { must: [{ key: "key", match: { value: key } }] },
+        limit: 1000,
+        offset,
+        with_payload: true,
+        with_vector: true,
+      });
+      for (const p of res.points ?? []) {
+        const o = {};
+        for (const f of cols) {
+          if (f === "embedding") continue;
+          if (f in p.payload) o[f] = p.payload[f];
+        }
+        if ("decisions" in o) o.decisions = JSON.parse(o.decisions);
+        // C-1: embedding lives in the vector (not payload); normalize to Float32Array.
+        if (wantEmbedding) {
+          const vec = p.vector ?? p.payload?.embedding;
+          o.embedding = Array.isArray(vec) ? new Float32Array(vec) : undefined;
+        }
+        out.push(o);
       }
-      if ("decisions" in out) out.decisions = JSON.parse(out.decisions);
-      // C-1: embedding lives in the vector (not payload); normalize to Float32Array.
-      if (wantEmbedding) {
-        const vec = p.vector ?? p.payload?.embedding;
-        out.embedding = Array.isArray(vec) ? new Float32Array(vec) : undefined;
-      }
-      return out;
-    });
+      offset = res.next_page_offset;
+    } while (offset != null);
+    return out;
   }
 
   // C-2: filter-only query for get()
@@ -281,41 +289,55 @@ export class QdrantStorage {
   // Кандидаты для recall (Task 6): записи ключа, которые либо влиты в mainline
   // (merged=1), либо имеют атрибуцию head (head != ''). Qdrant не фильтрует
   // `!= ''` дешёво → scroll по key + JS-фильтр. Malformed decisions → []
-  // (guard как в sqlite/get) — не ронять recall.
+  // (guard как в sqlite/get) — не ронять recall. M-6: scroll-пагинация.
   async candidates(key) {
     if (typeof key !== "string" || !key) throw new Error("candidates: key required");
-    const res = await this.client.scroll(this.collection, {
-      filter: { must: [{ key: "key", match: { value: key } }] },
-      limit: 10000,
-      with_payload: true,
-      with_vector: false,
-    });
-    return (res.points ?? [])
-      .filter((p) => p.payload?.merged === 1 || (p.payload?.head ?? "") !== "")
-      .map((p) => {
-        const { text, ...rest } = p.payload;
-        let parsed;
-        try { parsed = JSON.parse(rest.decisions); } catch { parsed = []; }
-        return { ...rest, embedding: undefined, decisions: parsed };
+    const out = [];
+    let offset = undefined;
+    do {
+      const res = await this.client.scroll(this.collection, {
+        filter: { must: [{ key: "key", match: { value: key } }] },
+        limit: 1000,
+        offset,
+        with_payload: true,
+        with_vector: false,
       });
+      for (const p of res.points ?? []) {
+        if (p.payload?.merged === 1 || (p.payload?.head ?? "") !== "") {
+          const { text, ...rest } = p.payload;
+          let parsed;
+          try { parsed = JSON.parse(rest.decisions); } catch { parsed = []; }
+          out.push({ ...rest, embedding: undefined, decisions: parsed });
+        }
+      }
+      offset = res.next_page_offset;
+    } while (offset != null);
+    return out;
   }
 
   // Промоция (Task 5): пометить записи ключа с данным head как влитые в mainline.
+  // M-6: scroll-пагинация (limit 10000 молча обрезал id-набор).
   async markMerged(key, head) {
     if (typeof key !== "string" || !key) throw new Error("markMerged: key required");
     if (typeof head !== "string" || !head) throw new Error("markMerged: head required");
-    const res = await this.client.scroll(this.collection, {
-      filter: {
-        must: [
-          { key: "key", match: { value: key } },
-          { key: "head", match: { value: head } },
-        ],
-      },
-      limit: 10000,
-      with_payload: false,
-      with_vector: false,
-    });
-    const ids = (res.points ?? []).map((p) => p.id);
+    const ids = [];
+    let offset = undefined;
+    do {
+      const res = await this.client.scroll(this.collection, {
+        filter: {
+          must: [
+            { key: "key", match: { value: key } },
+            { key: "head", match: { value: head } },
+          ],
+        },
+        limit: 1000,
+        offset,
+        with_payload: false,
+        with_vector: false,
+      });
+      ids.push(...(res.points ?? []).map((p) => p.id));
+      offset = res.next_page_offset;
+    } while (offset != null);
     if (ids.length) {
       await this.client.setPayload(this.collection, { payload: { merged: 1 }, points: ids });
     }

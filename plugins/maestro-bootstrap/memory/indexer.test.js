@@ -668,3 +668,37 @@ test("detached → branch='' but head recorded", async () => {
   assert.equal(e.merged, 0, "detached → merged=0");
   idx.dispose();
 });
+
+test("M-7: _branchContext bounded — oldest evicted on overflow (re-resolves)", async () => {
+  const client = mkClient();
+  const storage = mkStorage(client);
+  let branch = "feature/x";
+  const git = {
+    resolveBranch: async () => branch,
+    resolveHead: async () => "sha1",
+  };
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git, mainline: "main",
+    branchContextCap: 3,
+  });
+  // 3 сессии влезают в cap.
+  await idx._resolveBranchContext("s1");
+  await idx._resolveBranchContext("s2");
+  await idx._resolveBranchContext("s3");
+  assert.equal(idx._branchContext.size, 3);
+  // 4-я вставка эвиктит старейшую (s1) — FIFO.
+  await idx._resolveBranchContext("s4");
+  assert.equal(idx._branchContext.size, 3, "map stays bounded");
+  assert.ok(!idx._branchContext.has("s1"), "oldest evicted");
+  assert.ok(idx._branchContext.has("s2") && idx._branchContext.has("s3") && idx._branchContext.has("s4"), "newer kept");
+  // Эвиктированная сессия re-resolves текущее git-состояние.
+  branch = "main";
+  const ctx = await idx._resolveBranchContext("s1");
+  assert.equal(ctx.branch, "main", "evicted session re-resolves current git state");
+  idx.dispose();
+});

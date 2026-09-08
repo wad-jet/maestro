@@ -665,6 +665,59 @@ test("qdrant candidates: malformed decisions JSON → [] (не throw)", async ()
   assert.deepEqual(cands[0].decisions, [], "malformed decisions must fall back to []");
 });
 
+// ── M-6: scroll-пагинация (next_page_offset) на candidates/markMerged/scan ──
+
+test("qdrant M-6: candidates/markMerged/scan paginate via next_page_offset", async () => {
+  const c = fakeClient();
+  // Первая страница возвращает offset, вторая — null (пагинация). Фильтры
+  // (key/head) применяются на стороне «сервера».
+  let scrollCount = 0;
+  const all = [
+    { id: "p1", payload: { session_id: "s1", key: "k1", decisions: "[]", merged: 1, head: "" } },
+    { id: "p2", payload: { session_id: "s2", key: "k1", decisions: "[]", merged: 0, head: "h1" } },
+    { id: "p3", payload: { session_id: "s3", key: "k1", decisions: "[]", merged: 0, head: "" } },
+    { id: "p4", payload: { session_id: "s4", key: "k1", decisions: "[]", merged: 1, head: "" } },
+  ];
+  c.scroll = async (name, opts) => {
+    c.calls.push(["scroll", name, opts]);
+    scrollCount++;
+    const keyCond = opts.filter.must.find((m) => m.key === "key");
+    if (!keyCond) return { points: [], next_page_offset: null };
+    const headCond = opts.filter.must.find((m) => m.key === "head");
+    const filtered = all.filter((p) => p.payload.key === keyCond.match.value && (!headCond || p.payload.head === headCond.match.value));
+    const page = scrollCount === 1 ? filtered.slice(0, 2) : filtered.slice(2);
+    return { points: page, next_page_offset: scrollCount === 1 ? 10 : null };
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  scrollCount = 0; // сброс: считаем только вызовы после init
+
+  // candidates: обе страницы, JS-фильтр merged=1 OR head != ''.
+  const cands = await st.candidates("k1");
+  const candIds = cands.map((x) => x.session_id).sort();
+  assert.deepEqual(candIds, ["s1", "s2", "s4"], "candidates across pages (s3 unattributed excluded)");
+  const candScrolls = c.calls.filter(([k]) => k === "scroll").slice(-2);
+  assert.equal(candScrolls[0][2].offset, undefined, "first page no offset");
+  assert.equal(candScrolls[1][2].offset, 10, "second page carries next_page_offset");
+
+  // markMerged: id-набор из обеих страниц → один setPayload.
+  const setPayloadCalls = [];
+  c.setPayload = async (name, opts) => {
+    c.calls.push(["setPayload", name, opts]);
+    setPayloadCalls.push(opts);
+  };
+  scrollCount = 0;
+  const n = await st.markMerged("k1", "h1");
+  assert.equal(n, 1, "markMerged counts ids across pages (head=h1 → p2 only)");
+  assert.equal(setPayloadCalls.length, 1, "single setPayload with all ids");
+  assert.deepEqual(setPayloadCalls[0].points, ["p2"], "ids from both pages");
+
+  // scan: строки из обеих страниц.
+  scrollCount = 0;
+  const rows = await st.scan({ key: "k1", fields: ["session_id"] });
+  assert.deepEqual(rows.map((r) => r.session_id).sort(), ["s1", "s2", "s3", "s4"], "scan across pages");
+});
+
 test("qdrant search: vector-leg entry excludes derived text field", async () => {
   const c = fakeClient();
   c.query = async (name, q) => {

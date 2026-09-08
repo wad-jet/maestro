@@ -578,6 +578,18 @@ test("pgvector upsert/get/scan carry branch/head/merged", async () => {
   assert.ok(scanCall[0].includes("merged"), "scan must select merged");
 });
 
+test("pgvector M-4: vector-leg SELECT carries branch/head/merged (entry contract)", async () => {
+  const p = fakePool();
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3 });
+  await st.init();
+  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "k1" });
+  const sel = p.calls.find(([sql]) => sql.includes("FROM maestro_memory"));
+  assert.ok(sel, "vector leg must run");
+  assert.ok(sel[0].includes("branch"), "vector-leg SELECT must include branch");
+  assert.ok(sel[0].includes("head"), "vector-leg SELECT must include head");
+  assert.ok(sel[0].includes("merged"), "vector-leg SELECT must include merged");
+});
+
 test("pgvector candidates(key) filters merged=1 OR head != ''", async () => {
   const p = fakePoolHybrid();
   const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, modelId: "m1" });

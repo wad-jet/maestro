@@ -15,7 +15,7 @@ export class Indexer {
   constructor({
     client, config, embeddings, storage, state, summarize,
     projectKey, confidentialPatterns = [], log = console, author = null,
-    git = null, mainline = null, root = null,
+    git = null, mainline = null, root = null, branchContextCap = 1000,
   }) {
     this.client = client;
     this.config = config;
@@ -31,7 +31,9 @@ export class Indexer {
     this.mainline = mainline;
     this.root = root;
     // Task 4: sticky branch/head per session (resolved once, reused on version++).
+    // M-7: bounded Map — FIFO-эвикция старейшего при превышении cap.
     this._branchContext = new Map();
+    this._branchContextCap = branchContextCap;
     this.timers = new Map();
     this.running = false;
     this.queue = new Set();
@@ -57,6 +59,12 @@ export class Indexer {
     }
     const ctx = { branch, head };
     this._branchContext.set(sessionID, ctx);
+    // M-7: bound — FIFO-эвикция старейшего ключа при превышении cap (Map
+    // сохраняет порядок вставки; keys().next() — самый старый).
+    if (this._branchContext.size > this._branchContextCap) {
+      const oldest = this._branchContext.keys().next().value;
+      this._branchContext.delete(oldest);
+    }
     return ctx;
   }
 

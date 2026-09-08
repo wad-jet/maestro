@@ -341,6 +341,13 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     const embeddings = deps.embeddings ?? new Embedder({ model: config.embedding_model, cacheDir: memoryDataDir, moduleDir });
     const state = createState(statePath);
     const confidentialPaths = maestroConfig?.confidential?.paths ?? [];
+    // M-2: init-warn — централизованный бэкенд + непустые confidential.paths
+    // (имена веток, минующие sanitize, уходят на сервер). Дублируется в выдаче
+    // memory_stats_detail / @maestro-memory (диагностика без логов).
+    const centralized = config.storage.type === "qdrant" || config.storage.type === "pgvector";
+    if (centralized && confidentialPaths.length > 0) {
+      log?.warn?.("memory: unmasked_branch_metadata — имена веток (минуя sanitize) уходят на сервер");
+    }
     const indexer = new Indexer({
       client,
       config,
@@ -600,19 +607,40 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             if (SESSIONS.has(ctx?.sessionID)) return "memory_recall_preview недоступен для служебных сессий.";
             if (!args?.query) return "memory_recall_preview: укажите query";
             const vec = await embeddings.embed(args.query);
-            // Тот же путь, что у recall: embed → search (включая FTS-запрос).
-            const hits = await storage.search(vec, {
+            // M-3 (§7): тот же scope-логика, что у memory_search (дефолтный
+            // scope; branch_context=false → project). mainline unresolved →
+            // flat (I-2: «эффективно off»).
+            const searchOpts = {
               top_k: config.top_k,
               min_score: config.min_score,
               key: effectiveKey,
               query: args.query,
-            });
-            if (!hits.length) return "Ничего не найдено.";
+            };
+            let inContext = null;
+            let experienceIds = new Set();
+            if (config.branch_context !== false) {
+              const sets = computeBranchSets({ revList, detectMainline, root, mainlineOverride: config.mainline ?? null });
+              if (sets.failSoft) {
+                log?.debug?.("memory: recall fail-soft — revList failed, merged=1 only");
+              }
+              if (sets.mainline) {
+                const candidates = await storage.candidates(effectiveKey);
+                searchOpts.filterSessionIds = candidates.map((c) => c.session_id);
+                const r = applyBranchScope(candidates, sets);
+                inContext = r.inContext;
+                experienceIds = r.experience;
+              }
+            }
+            // Тот же путь, что у recall: embed → search (включая FTS-запрос).
+            const hits = await storage.search(vec, searchOpts);
+            const filtered = inContext ? hits.filter((h) => inContext.has(h.entry.session_id)) : hits;
+            if (!filtered.length) return "Ничего не найдено.";
             const lines = [];
-            for (const h of hits) {
+            for (const h of filtered) {
               const date = new Date(h.entry.time_last).toISOString().slice(0, 10);
+              const exp = experienceIds.has(h.entry.session_id) ? " ⚠️ не в main" : "";
               lines.push(
-                `# ${h.entry.title} (${h.entry.author}, ${date}, score ${h.score.toFixed(2)})\n` +
+                `# ${h.entry.title} (${h.entry.author}, ${date}, score ${h.score.toFixed(2)})${exp}\n` +
                   `${h.entry.summary}\n` +
                   `Проект: ${h.entry.origin_project_hash} | session_id: ${h.entry.session_id}`,
               );
@@ -634,7 +662,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             const { entries } = await storage.stats({ key: effectiveKey });
             const rows = await storage.scan({
               key: effectiveKey,
-              fields: ["session_id", "title", "embedding", "author", "time_last", "origin_project_hash"],
+              fields: ["session_id", "title", "embedding", "author", "time_last", "origin_project_hash", "branch", "head", "merged"],
             });
             // C-1: нормализуем embedding из любого бэкенда (sqlite Buffer /
             // qdrant Float32Array / pgvector string) в Float32Array.
@@ -677,8 +705,9 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
 
             // Task 7: разбивка по тирам (членство Task 6 для текущего checkout)
             // и по веткам (display, не матчинг). Fail-soft (revList null) →
-            // только merged-счётчики (членство недоступно).
-            const candidates = await storage.candidates(effectiveKey);
+            // только merged-счётчики (членство недоступно). M-1: классификация
+            // по ПОЛНОМУ scan (не candidates — тот исключает merged=0 head=''
+            // и unknown-тир всегда был бы 0 в проде).
             const tierCounts = { merged: 0, experience: 0, unknown: 0, dead: 0 };
             const branchCounts = new Map();
             let failSoft = false;
@@ -686,21 +715,21 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             // из него (без повторного git-вызова) для mainline_unresolved.
             const sets = computeBranchSets({ revList, detectMainline, root, mainlineOverride: config.mainline ?? null });
             failSoft = sets.failSoft;
-            if (candidates.length) {
+            if (rows.length) {
               if (failSoft) {
-                for (const c of candidates) if (c.merged === 1) tierCounts.merged++;
+                for (const r of rows) if (r.merged === 1) tierCounts.merged++;
               } else {
-                const r = applyBranchScope(candidates, sets);
-                for (const c of candidates) {
-                  const sid = c.session_id;
+                const r = applyBranchScope(rows, sets);
+                for (const row of rows) {
+                  const sid = row.session_id;
                   if (r.experience.has(sid)) tierCounts.experience++;
                   else if (r.inContext.has(sid)) tierCounts.merged++;
                   else if (r.unknown.has(sid)) tierCounts.unknown++;
                   else tierCounts.dead++;
                 }
               }
-              for (const c of candidates) {
-                const b = c.branch ?? "";
+              for (const row of rows) {
+                const b = row.branch ?? "";
                 branchCounts.set(b, (branchCounts.get(b) ?? 0) + 1);
               }
             }
