@@ -44,7 +44,11 @@
   `memory_stats_detail`), команды `@maestro-memory`/`@maestro-memory-report`. v3a:
   **паритет бэкендов** — гибридный текстовый поиск (pg: tsvector+ts_rank, qdrant:
   payload full-text) и кросс-проектный поиск (sqlite: read-only соседние БД) на всех
-  трёх бэкендах; ключ `storage.pgvector.text_search_config` (default `russian`).
+  трёх бэкендах; ключ `storage.pgvector.text_search_config` (default `russian`). v3:
+  **branch-aware memory** — идентичность записи по коммиту (`head`), commit-scoped
+  recall (general/experience/не в контексте), промоция по `is-ancestor(head, mainline)`,
+  mainline авто-детект из git, ключи `branch_context`/`mainline`; **`centralized_confidential`
+  удалён** (решение локально/удалённо — только `storage.type`).
 
 ## 4. Архитектура
 
