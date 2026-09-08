@@ -51,7 +51,9 @@
   удалён** (решение локально/удалённо — только `storage.type`). **v4 (external
   embeddings):** опциональный внешний OpenAI-совместимый embedder
   (`memory.embedding.provider: "openai"`), probe доступности модели (старт+cooldown+
-  on-demand `memory_probe`), маскирование recall-запросов.
+  on-demand `memory_probe`), маскирование recall-запросов. **v4 (audit log):**
+  отдельный аудит-лог memory layer (`.maestro/logs/maestro-memory-<дата>.log`,
+  aggregates-only field whitelist, env `MAESTRO_MEMORY_LOG_LEVEL/_MASK/_DIR`).
 
 ## 4. Архитектура
 
