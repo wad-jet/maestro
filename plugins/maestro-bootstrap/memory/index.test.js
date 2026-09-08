@@ -1,11 +1,11 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerMemoryHooks } from "./index.js";
-import { getGitConfig } from "../core.js";
+import { getGitConfig, makeLogger } from "../core.js";
 import { sanitizeDirName } from "./config.js";
 import { projectHashFromDir, projectHashFromRemote } from "./project.js";
 import { SESSIONS } from "./summarize.js";
@@ -2632,4 +2632,56 @@ test("memory_search masks confidential query before embed", async () => {
   await hooks.tool.memory_search.execute({ query: "docs/confidential/roadmap.md сроки\nкакие сроки?" }, { sessionID: "s1" });
   assert.ok(!seen[0].includes("roadmap"));
   await hooks.dispose?.();
+});
+
+// ── Task 2: memoryLog threading + carve-out ────────────────────────────
+
+// Читает JSONL-записи из <dir>/.maestro/logs/<filePrefix>-*.log (аналог
+// readLogs из index.test.js — здесь локальная копия, чтобы не тянуть core-тест).
+function readLogs(dir, filePrefix = "maestro-bootstrap") {
+  const logDir = join(dir, ".maestro/logs");
+  const files = existsSync(logDir) ? readdirSync(logDir) : [];
+  const out = [];
+  for (const f of files) {
+    if (!f.endsWith(".log") || !f.includes(filePrefix)) continue;
+    for (const line of readFileSync(join(logDir, f), "utf8").split("\n")) {
+      if (line.trim()) out.push(JSON.parse(line));
+    }
+  }
+  return out;
+}
+
+test("memory events go to memoryLog when passed; bootstrap log stays clean (anti-dup)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mm-log-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const cfg = { memory: { enabled: true, storage: { type: "sqlite" } } };
+    const memoryLog = makeLogger(dir, { filePrefix: "maestro-memory", filterEnv: "MAESTRO_MEMORY" });
+    const log = makeLogger(dir, { filePrefix: "maestro-bootstrap", filterEnv: "MAESTRO_BOOTSTRAP" });
+    const hooks = await registerMemoryHooks({
+      client: mkClient(), config: cfg, log, memoryLog, root: dir,
+      deps: { storage: mkStorage(), embeddings: mkMockEmbeddings() },
+    });
+    const memFiles = readdirSync(join(dir, ".maestro/logs")).filter((f) => f.includes("maestro-memory"));
+    // события probe пишутся в memory-лог
+    assert.ok(memFiles.length > 0, "probe events must be written to the memory log file");
+    // анти-дубликат: probe-событие НЕ в bootstrap-логе, когда memoryLog передан
+    const bootMsgs = readLogs(dir, "maestro-bootstrap").map((e) => e.msg);
+    assert.ok(!bootMsgs.includes("memory: embedder probe OK"), "probe event must NOT be in bootstrap log when memoryLog passed");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory: disabled stays in bootstrap log (carve-out)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mm-off-"));
+  const log = makeLogger(dir, { filePrefix: "maestro-bootstrap", filterEnv: "MAESTRO_BOOTSTRAP" });
+  const memoryLog = makeLogger(dir, { filePrefix: "maestro-memory", filterEnv: "MAESTRO_MEMORY" });
+  await registerMemoryHooks({ client: mkClient(), config: { memory: { enabled: false } }, log, memoryLog, root: dir });
+  const bootMsgs = readLogs(dir, "maestro-bootstrap").map((e) => e.msg);
+  assert.ok(bootMsgs.includes("memory: disabled"), "carve-out: disabled остаётся в bootstrap-логе");
 });

@@ -256,12 +256,25 @@ async function loadFromModuleDir(moduleDir, pkg) {
  * работают). Инвариант: `experimental.chat.messages.transform` никогда не
  * возвращается (не присваивается).
  *
- * @param {{ client: object, config: object, log: object, root: string,
- *   deps?: { storage?: object, embeddings?: object } }} opts
+ * @param {{ client: object, config: object, log: object, memoryLog?: object|null,
+ *   root: string, deps?: { storage?: object, embeddings?: object } }} opts
  *   `deps` — тестовая инъекция (mock storage/embeddings).
+ *   `memoryLog` — отдельный аудит-лог memory layer (`maestro-memory-*.log`);
+ *   события модуля пишутся через хелперы logInfo/… в `memoryLog ?? log`
+ *   (backward compat: без memoryLog — в bootstrap-лог). Carve-out: события
+ *   «memory: disabled» и «memory: init failed» остаются на bootstrap-`log`
+ *   напрямую (нужны в общей картине плагина, HITL-гейт «плагин работает»).
  * @returns {Promise<object>} Hook-объект для слияния в core.js.
  */
-export async function registerMemoryHooks({ client, config: maestroConfig, log, root, deps = {} }) {
+export async function registerMemoryHooks({ client, config: maestroConfig, log, memoryLog = null, root, deps = {} }) {
+  // Хелперы аудит-лога: всё, кроме carve-out-событий, пишется в memoryLog
+  // (fallback — bootstrap-лог). Optional-chaining сохраняет совместимость с
+  // тестовыми fake-логгерами без полного набора методов.
+  const memLog = memoryLog ?? log;
+  const logInfo = (msg, extra) => memLog?.info?.(msg, extra);
+  const logDebug = (msg, extra) => memLog?.debug?.(msg, extra);
+  const logWarn = (msg, extra) => memLog?.warn?.(msg, extra);
+  const logError = (msg, extra) => memLog?.error?.(msg, extra);
   // I-2: identity — identity_env → git user.name → os username (fallback).
   // gitName резолвится ДО loadMemoryConfig, чтобы централизованный gate
   // (classifyMemoryConfig) принимал git user.name как identity.
@@ -273,6 +286,8 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
   if (!config.enabled) {
     // I-3: логируем причину только когда секция `memory` существует, но
     // конфигурация невалидна (не для дефолтного no-section случая).
+    // Carve-out: «memory: disabled» остаётся на bootstrap-`log` напрямую
+    // (не через logInfo) — видимость в общей картине плагина.
     if (maestroConfig?.memory && config.disabled_reason) {
       log?.info?.("memory: disabled", { reason: config.disabled_reason });
     }
@@ -283,14 +298,14 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     if (config.storage.type === "qdrant") {
       const q = config.storage.qdrant ?? {};
       if (!q.url || !q.api_key_env) {
-        log?.info?.("memory: disabled", { reason: "qdrant_config_invalid" });
+        log?.info?.("memory: disabled", { reason: "qdrant_config_invalid" }); // carve-out: bootstrap-лог
         return {};
       }
     }
     if (config.storage.type === "pgvector") {
       const p = config.storage.pgvector ?? {};
       if (!p.connection_string_env) {
-        log?.info?.("memory: disabled", { reason: "pgvector_config_invalid" });
+        log?.info?.("memory: disabled", { reason: "pgvector_config_invalid" }); // carve-out: bootstrap-лог
         return {};
       }
     }
@@ -299,7 +314,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     // ДО storage: отсутствие ключа → память off без побочных эффектов.
     const isOpenai = config.embedding.provider === "openai";
     if (isOpenai && !process.env[config.embedding.api_key_env]) {
-      log?.info?.("memory: disabled", { reason: "embedding_api_key_env_missing" });
+      log?.info?.("memory: disabled", { reason: "embedding_api_key_env_missing" }); // carve-out: bootstrap-лог
       return {};
     }
 
@@ -328,7 +343,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     const version = readPluginVersion();
     if (version) {
       const provisioned = ensureModule({ moduleDir, srcDir, version });
-      if (!provisioned) log?.warn?.("memory: self-provisioning failed");
+      if (!provisioned) logWarn("memory: self-provisioning failed");
     }
 
     // I4: конструируем клиенты централизованных бэкендов из конфига.
@@ -339,7 +354,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       try {
         ({ QdrantClient } = await loadFromModuleDir(moduleDir, "@qdrant/js-client-rest"));
       } catch {
-        log?.error?.("memory: qdrant client not installed — run npm install in " + moduleDir);
+        logError("memory: qdrant client not installed — run npm install in " + moduleDir);
         return {};
       }
       storageOptions.client = new QdrantClient({
@@ -352,7 +367,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       try {
         ({ default: pg } = await loadFromModuleDir(moduleDir, "pg"));
       } catch {
-        log?.error?.("memory: pg client not installed — run npm install in " + moduleDir);
+        logError("memory: pg client not installed — run npm install in " + moduleDir);
         return {};
       }
       storageOptions.pool = new pg.Pool({
@@ -392,22 +407,22 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     const cached = await state.getEmbedderProbe();
     const cacheValid = cached && cached.modelId === probeIdentity.modelId && cached.dim === probeIdentity.dim && cached.apiKeyEnv === probeIdentity.apiKeyEnv;
     if (cacheValid && Date.now() - cached.at < cooldownMs && cached.ok) {
-      log?.info?.("memory: embedder probe (cached)", { ok: true, detail: cached.detail });
+      logInfo("memory: embedder probe (cached)", { ok: true, detail: cached.detail });
     } else if (cacheValid && Date.now() - cached.at < cooldownMs && !cached.hard) {
-      log?.warn?.("memory: embedder probe (cached soft fail)", { detail: cached.detail });
+      logWarn("memory: embedder probe (cached soft fail)", { detail: cached.detail });
     } else {
       const p = await probeWithGuard(embeddings, 20000); // guard > provider timeout 15s (follow-up 1)
       await state.setEmbedderProbe({ ...probeIdentity, ...p });
       if (p.ok) {
-        log?.info?.("memory: embedder probe OK", { detail: p.detail });
+        logInfo("memory: embedder probe OK", { detail: p.detail });
       } else if (p.hard) {
-        log?.info?.("memory: disabled", { reason: "embedder_probe_hard_fail", detail: p.detail });
+        log?.info?.("memory: disabled", { reason: "embedder_probe_hard_fail", detail: p.detail }); // carve-out: bootstrap-лог
         // Spec follow-up 2: hard-fail оставляет диагностический memory_probe
         // (live-проверка вручную, минуя cooldown), но без штатных tool-хуков.
         // core.js сливает только memoryHooks.tool → оборачиваем в { tool: {...} }.
         return { tool: { memory_probe: makeMemoryProbeTool({ embeddings, state, log, apiKeyEnv }) } };
       } else {
-        log?.warn?.("memory: embedder probe failed", { detail: p.detail });
+        logWarn("memory: embedder probe failed", { detail: p.detail });
       }
     }
 
@@ -433,7 +448,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     try {
       const mainline = detectMainline(root, { override: config.mainline ?? null });
       if (!mainline) {
-        log?.warn?.("memory: mainline_unresolved — branch-context flat (нет резолвнутого mainline)");
+        logWarn("memory: mainline_unresolved — branch-context flat (нет резолвнутого mainline)");
       } else {
         const candidates = await storage.candidates(effectiveKey);
         const uniqueHeads = [...new Set(candidates.filter((c) => c.merged === 0 && c.head).map((c) => c.head))];
@@ -442,12 +457,12 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
           if (r === "yes") {
             await storage.markMerged(effectiveKey, head);
           } else if (r === "error") {
-            log?.debug?.(`memory: promotion skip head=${head} (dangling/invalid)`);
+            logDebug(`memory: promotion skip head=${head} (dangling/invalid)`);
           } // 'no' → пропуск
         }
       }
     } catch (err) {
-      log?.error?.("memory: promotion failed", { error: err instanceof Error ? err.message : String(err) });
+      logError("memory: promotion failed", { error: err instanceof Error ? err.message : String(err) });
     }
 
     const confidentialPaths = maestroConfig?.confidential?.paths ?? [];
@@ -456,12 +471,18 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     // memory_stats_detail / @maestro-memory (диагностика без логов).
     const centralized = config.storage.type === "qdrant" || config.storage.type === "pgvector";
     if (centralized && confidentialPaths.length > 0) {
-      log?.warn?.("memory: unmasked_branch_metadata — имена веток (минуя sanitize) уходят на сервер");
+      logWarn("memory: unmasked_branch_metadata — имена веток (минуя sanitize) уходят на сервер");
     }
     // Task 5: init-warn — внешний (openai) embedder + непустые confidential.paths:
     // запросы и контент (замаскированные best-effort) уходят генерическому вендору.
     if (isOpenai && confidentialPaths.length > 0) {
-      log?.warn?.("memory: external_embedder_unmasked_queries — запросы и контент (замаскированные best-effort) уходят генерическому внешнему вендору");
+      logWarn("memory: external_embedder_unmasked_queries — запросы и контент (замаскированные best-effort) уходят генерическому внешнему вендору");
+    }
+    // Spec §3: doc-note при любом непустом confidential.paths (не только openai) —
+    // локальный аудит-лог может покинуть машину через шеринг/бэкап; author/branch-
+    // корреляция. Если paths пусты — note не пишется.
+    if (maestroConfig?.confidential?.paths?.length > 0) {
+      logWarn("memory:log_confidential_note", {});
     }
     const indexer = new Indexer({
       client,
@@ -565,7 +586,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             if (scope === "branch") {
               const sets = computeBranchSets({ revList, detectMainline, root, mainlineOverride: config.mainline ?? null });
               if (sets.failSoft) {
-                log?.debug?.("memory: recall fail-soft — revList failed, merged=1 only");
+                logDebug("memory: recall fail-soft — revList failed, merged=1 only");
               }
               // I-2 (§5): mainline unresolved + НЕ явный scope → flat (project
               // behavior, «эффективно off»). Механика §6.1 с mainlineSet=∅ —
@@ -749,7 +770,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             if (config.branch_context !== false) {
               const sets = computeBranchSets({ revList, detectMainline, root, mainlineOverride: config.mainline ?? null });
               if (sets.failSoft) {
-                log?.debug?.("memory: recall fail-soft — revList failed, merged=1 only");
+                logDebug("memory: recall fail-soft — revList failed, merged=1 only");
               }
               if (sets.mainline) {
                 const candidates = await storage.candidates(effectiveKey);
@@ -962,14 +983,16 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     if (typeof config.retention_days === "number" && config.retention_days > 0) {
       try {
         const pruned = await storage.prune({ key: effectiveKey, olderThanDays: config.retention_days });
-        if (pruned > 0) log.info("memory: retention pruned", { count: pruned });
+        if (pruned > 0) logInfo("memory: retention pruned", { count: pruned });
       } catch (err) {
-        log.error("memory: retention prune failed", { error: err instanceof Error ? err.message : String(err) });
+        logError("memory: retention prune failed", { error: err instanceof Error ? err.message : String(err) });
       }
     }
 
     return hooks;
   } catch (err) {
+    // Carve-out: «memory: init failed» остаётся на bootstrap-`log` напрямую
+    // (не через logError) — видимость в общей картине плагина.
     log?.error?.("memory: init failed", { error: err instanceof Error ? err.message : String(err) });
     return {};
   }
