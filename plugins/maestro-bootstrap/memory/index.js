@@ -41,7 +41,8 @@ export function defaultDataDir() {
   return join(os.homedir(), ".local", "share");
 }
 
-// Schema-v1 fields required for import (mirrors the `memory` table).
+// Schema-v3 fields required for import (mirrors the `memory` table).
+// git-метаданные branch/head/merged — опциональны при импорте (не входят в IMPORT_REQUIRED).
 const IMPORT_REQUIRED = [
   "session_id", "key", "origin_project_hash", "title", "summary", "decisions",
   "model_id", "author", "time_first", "time_last", "version",
@@ -137,7 +138,7 @@ function buildGraph(entries, threshold, cap = 500) {
 }
 
 /**
- * Validate a parsed JSONL entry against schema v1 + model_id/dim match.
+ * Validate a parsed JSONL entry against schema v3 + model_id/dim match.
  * Returns an error reason string, or null when valid.
  * @param {object} e  Parsed entry.
  * @param {{ modelId: string, dim: number }} storage  Storage model identity
@@ -507,7 +508,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       }),
       memory_export: tool({
         description:
-          "Экспорт всех записей памяти активного проекта в JSONL (полная схема v1, включая embedding и model_id). Путь по умолчанию — локальный; путь наружу машины — осознанный выбор пользователя.",
+          "Экспорт всех записей памяти активного проекта в JSONL (полная схема v3, включая embedding, model_id и git-метаданные branch/head/merged). Путь по умолчанию — локальный; путь наружу машины — осознанный выбор пользователя.",
         args: {
           path: tool.schema.string().optional().describe("путь к файлу JSONL (по умолчанию — <dataDir>/maestro/memory/export-<key>-<ts>.jsonl)"),
         },
@@ -549,7 +550,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       }),
       memory_import: tool({
         description:
-          "Импорт записей памяти из JSONL (полная схема v1). Валидация всех записей атомарно (схема + model_id/dim); каждая запись повторно маскируется перед записью. replace: true — очистить активный проект перед импортом.",
+          "Импорт записей памяти из JSONL (полная схема v3). Валидация всех записей атомарно (схема + model_id/dim); каждая запись повторно маскируется перед записью. replace: true — очистить активный проект перед импортом.",
         args: {
           path: tool.schema.string().describe("путь к файлу JSONL"),
           replace: tool.schema.boolean().optional().describe("true — очистить активный key перед импортом"),
