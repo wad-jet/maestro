@@ -15,6 +15,7 @@ export class Indexer {
   constructor({
     client, config, embeddings, storage, state, summarize,
     projectKey, confidentialPatterns = [], log = console, author = null,
+    git = null, mainline = null, root = null,
   }) {
     this.client = client;
     this.config = config;
@@ -26,9 +27,37 @@ export class Indexer {
     this.confidentialPatterns = confidentialPatterns;
     this.log = log;
     this.author = author;
+    this.git = git;
+    this.mainline = mainline;
+    this.root = root;
+    // Task 4: sticky branch/head per session (resolved once, reused on version++).
+    this._branchContext = new Map();
     this.timers = new Map();
     this.running = false;
     this.queue = new Set();
+  }
+
+  /**
+   * Task 4: resolve branch/head for a session — sticky. On first summarization
+   * of a session the git resolvers run once; subsequent re-summarizes reuse the
+   * stored values (no re-resolve). Detached → branch='' but head recorded.
+   * @param {string} sessionID
+   * @returns {Promise<{ branch: string, head: string }>}
+   */
+  async _resolveBranchContext(sessionID) {
+    const cached = this._branchContext.get(sessionID);
+    if (cached) return cached;
+    let branch = "";
+    let head = "";
+    if (this.git?.resolveBranch) {
+      try { branch = (await this.git.resolveBranch(this.root)) ?? ""; } catch { branch = ""; }
+    }
+    if (this.git?.resolveHead) {
+      try { head = (await this.git.resolveHead(this.root)) ?? ""; } catch { head = ""; }
+    }
+    const ctx = { branch, head };
+    this._branchContext.set(sessionID, ctx);
+    return ctx;
   }
 
   _debounce(sessionID) {
@@ -155,6 +184,9 @@ export class Indexer {
           summarizerModel: this.config.summarizer_model ?? null,
         });
 
+        // Task 4: sticky branch/head (resolved once per session).
+        const { branch, head } = await this._resolveBranchContext(sessionID);
+
         // Build entry, mask FIRST, then embed masked content (I1: embed after maskEntry)
         const entry = {
           session_id: sessionID,
@@ -169,6 +201,9 @@ export class Indexer {
           time_first: sess?.time?.created ?? 0,
           time_last: sess?.time?.updated ?? 0,
           version: 0,
+          branch,
+          head,
+          merged: 0,
         };
 
         // G2: re-mask entry before write (defense-in-depth)
@@ -181,6 +216,15 @@ export class Indexer {
         // G5: version increment via storage.get
         const existing = await this.storage.get(sessionID);
         maskedEntry.version = (existing?.version ?? 0) + 1;
+
+        // Task 4: merged fast-path — branch === mainline → 1; branch='' or
+        // mainline unresolved → 0. Re-summarize does NOT reset merged: an
+        // already-promoted entry (merged=1) keeps 1.
+        if (existing?.merged === 1) {
+          maskedEntry.merged = 1;
+        } else {
+          maskedEntry.merged = branch && this.mainline && branch === this.mainline ? 1 : 0;
+        }
 
         await this.storage.upsert([maskedEntry]);
         await this.state.setSummarized(sessionID);

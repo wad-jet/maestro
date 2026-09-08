@@ -545,3 +545,92 @@ test("indexer uses explicit author param (M7)", async () => {
   assert.equal(client.upserts[0][0].author, "custom-author");
   idx.dispose();
 });
+
+// ── Task 4: branch/head (sticky) + merged fast-path ──────────────────
+
+test("summarize attaches branch/head (sticky) and merged fast-path", async () => {
+  const client = mkClient();
+  const storage = mkStorage(client);
+  let branch = "feature/x";
+  const git = {
+    resolveBranch: async () => branch,
+    resolveHead: async () => "sha1",
+  };
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git, mainline: "main",
+  });
+  await idx._run("s1");
+  let e = client.upserts[0][0];
+  assert.equal(e.branch, "feature/x");
+  assert.equal(e.head, "sha1");
+  assert.equal(e.merged, 0);
+  assert.equal(e.version, 1);
+
+  // re-summarize: git switched to main, but sticky keeps feature/x
+  branch = "main";
+  await idx._run("s1");
+  e = client.upserts[1][0];
+  assert.equal(e.branch, "feature/x", "sticky branch preserved");
+  assert.equal(e.head, "sha1", "sticky head preserved");
+  assert.equal(e.merged, 0, "merged preserved (not reset)");
+  assert.equal(e.version, 2);
+  idx.dispose();
+});
+
+test("branch==mainline → merged=1 fast-path; mainline unresolved → merged=0", async () => {
+  const client = mkClient();
+  const storage = mkStorage(client);
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: { resolveBranch: async () => "main", resolveHead: async () => "sha1" },
+    mainline: "main",
+  });
+  await idx._run("s1");
+  assert.equal(client.upserts[0][0].merged, 1, "branch==mainline → merged=1");
+
+  // mainline unresolved → merged=0
+  const client2 = mkClient();
+  const storage2 = mkStorage(client2);
+  const idx2 = new Indexer({
+    client: client2, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: storage2, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: { resolveBranch: async () => "main", resolveHead: async () => "sha1" },
+    mainline: null,
+  });
+  await idx2._run("s1");
+  assert.equal(client2.upserts[0][0].merged, 0, "mainline unresolved → merged=0");
+  idx.dispose();
+  idx2.dispose();
+});
+
+test("detached → branch='' but head recorded", async () => {
+  const client = mkClient();
+  const storage = mkStorage(client);
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: { resolveBranch: async () => "", resolveHead: async () => "sha1" },
+    mainline: "main",
+  });
+  await idx._run("s1");
+  const e = client.upserts[0][0];
+  assert.equal(e.branch, "", "detached → branch=''");
+  assert.equal(e.head, "sha1", "head recorded");
+  assert.equal(e.merged, 0, "detached → merged=0");
+  idx.dispose();
+});

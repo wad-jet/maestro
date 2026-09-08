@@ -14,6 +14,7 @@ import { Recall } from "./recall.js";
 import { createState } from "./state.js";
 import { summarizeSession, SESSIONS } from "./summarize.js";
 import { deriveProjectKey, resolveProjectKey } from "./project.js";
+import { resolveBranch, resolveHead } from "./git.js";
 
 // `@opencode-ai/plugin` не установлен в node_modules этого репо (zero-dep
 // дефолт). `tool()` — identity-функция (возвращает вход как есть), а
@@ -323,6 +324,10 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       confidentialPatterns: confidentialPaths,
       log,
       author,
+      // Task 4: write-time branch/head resolution (sticky) + merged fast-path.
+      git: { resolveBranch, resolveHead },
+      mainline: config.mainline ?? null,
+      root,
     });
     // I1: счётчик user-сообщений по sessionID (bounded) — первое сообщение
     // триггерит recall; хук chat.message срабатывает ДО персиста сообщения,
