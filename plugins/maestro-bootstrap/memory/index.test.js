@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync } from "node
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { registerMemoryHooks, shouldLogFtsFallback } from "./index.js";
+import { registerMemoryHooks } from "./index.js";
 import { getGitConfig, makeLogger } from "../core.js";
 import { sanitizeDirName } from "./config.js";
 import { projectHashFromDir, projectHashFromRemote } from "./project.js";
@@ -460,39 +460,38 @@ test("pgvector without connection_string_env → memory off", async () => {
   assert.ok(logged.some(([m, e]) => m === "memory: disabled" && e.reason === "pgvector_config_invalid"));
 });
 
-// ── Fix round 1 (I3): fts.fallback (spec §4.2) ─────────────────────────
+// ── Fix round 2 (F1): storage events reach memory log (no deps.storage) ─
 
-test("fts.fallback predicate: invalid/non-russian text_search_config → true, valid → false", async () => {
-  // Defensive-путь: валидация конфига (pgvector_text_search_config_invalid)
-  // отсекает невалидные значения до pgvector-ветки, поэтому предикат
-  // тестируется напрямую (как normalizeBranch в Task 7).
-  assert.equal(shouldLogFtsFallback({ storage: { type: "pgvector", pgvector: { text_search_config: "Klingon" } } }), true, "invalid (uppercase) → fallback");
-  assert.equal(shouldLogFtsFallback({ storage: { type: "pgvector", pgvector: { text_search_config: "bad config" } } }), true, "invalid (space) → fallback");
-  assert.equal(shouldLogFtsFallback({ storage: { type: "pgvector", pgvector: { text_search_config: "english" } } }), false, "valid non-russian → no fallback");
-  assert.equal(shouldLogFtsFallback({ storage: { type: "pgvector", pgvector: { text_search_config: "russian" } } }), false, "russian → no fallback");
-  assert.equal(shouldLogFtsFallback({ storage: { type: "pgvector" } }), false, "absent → no fallback");
-  assert.equal(shouldLogFtsFallback({ storage: { type: "sqlite" } }), false, "sqlite → no fallback");
-});
-
-test("fts.fallback: valid non-russian pgvector config → no event emitted (no false positive)", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "mem-fts-fallback-"));
+test("F1: storage.*.duration events land in memory log when storage created by registerMemoryHooks", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-f1-"));
   const saved = process.env.XDG_DATA_HOME;
+  const savedLevel = process.env.MAESTRO_MEMORY_LOG_LEVEL;
   process.env.XDG_DATA_HOME = dir;
-  process.env.MM_PG_DSN = "postgres://x";
+  process.env.MAESTRO_MEMORY_LOG_LEVEL = "debug"; // storage.*.duration — debug
   try {
-    const debugged = [];
-    const log = { debug: (m) => debugged.push(m), info() {}, warn() {}, error() {} };
-    // pg-модуль не установлен в module_dir → init вернёт {} (fail-soft), но
-    // debug-события до этой точки уже захвачены.
-    await registerMemoryHooks({
+    const memoryLog = makeLogger(dir, { filePrefix: "maestro-memory", filterEnv: "MAESTRO_MEMORY" });
+    const log = makeLogger(dir, { filePrefix: "maestro-bootstrap", filterEnv: "MAESTRO_BOOTSTRAP" });
+    // БЕЗ deps.storage — реальный sqlite создаётся внутри registerMemoryHooks
+    // (createStorage с log: memLog). Раньше log не пробрасывался → события
+    // storage никогда не эмитились в проде.
+    const hooks = await registerMemoryHooks({
       client: mkClient(),
-      config: { memory: { enabled: true, storage: { type: "pgvector", pgvector: { connection_string_env: "MM_PG_DSN", text_search_config: "english" } }, identity: "x" } },
+      config: mkConfig(dir, { namespace: "k" }),
       log,
+      memoryLog,
       root: dir,
+      deps: { embeddings: mkMockEmbeddings() },
     });
-    assert.ok(!debugged.includes("memory:fts.fallback"), "valid non-russian → no fts.fallback");
+    // init → memory:storage.init.duration (debug) в memory-лог.
+    const entries = readLogs(dir, "maestro-memory");
+    assert.ok(
+      entries.some((e) => e.msg === "memory:storage.init.duration" && typeof e.duration_ms === "number" && e.op === "init"),
+      "storage.init.duration must land in memory log (createStorage log threading)",
+    );
+    await hooks.dispose?.();
   } finally {
-    delete process.env.MM_PG_DSN;
+    if (savedLevel === undefined) delete process.env.MAESTRO_MEMORY_LOG_LEVEL;
+    else process.env.MAESTRO_MEMORY_LOG_LEVEL = savedLevel;
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = saved;
     rmSync(dir, { recursive: true, force: true });

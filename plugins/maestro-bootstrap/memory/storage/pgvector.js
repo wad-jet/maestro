@@ -61,6 +61,9 @@ export class PgVectorStorage {
     if (cfgRows.rows.length === 0) {
       if (this.textSearchConfig !== "russian") {
         console.error(`[memory] pgvector text_search_config '${this.textSearchConfig}' not found in pg_ts_config, falling back to russian`);
+        // Fix round 2: live-site fts.fallback (spec §4.2) — валидный конфиг
+        // отсутствует в pg_ts_config → эффективный fallback на "russian".
+        this.log?.debug?.("memory:fts.fallback", { backend: "pgvector", fallback: "russian" });
         this.textSearchConfig = "russian";
       } else {
         // "russian" отсутствует — логируем и продолжаем; DDL упадёт громко.

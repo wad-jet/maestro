@@ -135,20 +135,6 @@ export function normalizeBranch(name) {
 }
 
 /**
- * Fix round 1 (I3): предикат fts.fallback (spec §4.2) — pgvector
- * text_search_config невалиден/не-russian и resolveEffectiveTextConfig упал на
- * "russian". Defensive: валидация конфига (pgvector_text_search_config_invalid)
- * обычно отсекает невалидные значения до pgvector-ветки. qdrant/sqlite не имеют
- * text-config fallback (всегда false).
- * @param {object} config  Merged memory config (loadMemoryConfig output).
- * @returns {boolean}
- */
-export function shouldLogFtsFallback(config) {
-  const configured = config?.storage?.pgvector?.text_search_config;
-  return typeof configured === "string" && configured !== "russian" && resolveEffectiveTextConfig(config) === "russian";
-}
-
-/**
  * Task 7: имя модели без `@base_url` (spec §3: эндпоинт не логируется).
  * openai modelId = `openai:<model>@<base_url>` → срез до последнего "@";
  * локальные modelId без "@" → как есть.
@@ -428,7 +414,10 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       try {
         ({ QdrantClient } = await loadFromModuleDir(moduleDir, "@qdrant/js-client-rest"));
       } catch {
-        logError("memory: qdrant client not installed — run npm install in " + moduleDir);
+        // Fix round 2 (Minor): enum-only в memoryLog (SEC-4b — moduleDir это
+        // путь); actionable текст — в bootstrap-лог (carve-out-стиль).
+        logError("memory:client_not_installed", { error_class: "not_installed" });
+        log?.error?.("memory: qdrant client not installed — run npm install in " + moduleDir);
         return {};
       }
       storageOptions.client = new QdrantClient({
@@ -437,19 +426,14 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       });
     } else if (config.storage.type === "pgvector") {
       storageOptions.table = storageOptions.table ?? "maestro_memory";
-      // Fix round 1 (I3): fts.fallback (spec §4.2) — невалидный/не-russian
-      // text_search_config → эффективный fallback на "russian" (debug).
-      // qdrant/sqlite не имеют text-config fallback (skip). Defensive:
-      // валидация конфига (pgvector_text_search_config_invalid) обычно отсекает
-      // невалидные значения до этой точки.
-      if (shouldLogFtsFallback(config)) {
-        logDebug("memory:fts.fallback", { backend: "pgvector", fallback: "russian" });
-      }
       let pg;
       try {
         ({ default: pg } = await loadFromModuleDir(moduleDir, "pg"));
       } catch {
-        logError("memory: pg client not installed — run npm install in " + moduleDir);
+        // Fix round 2 (Minor): enum-only в memoryLog (SEC-4b — moduleDir это
+        // путь); actionable текст — в bootstrap-лог (carve-out-стиль).
+        logError("memory:client_not_installed", { error_class: "not_installed" });
+        log?.error?.("memory: pg client not installed — run npm install in " + moduleDir);
         return {};
       }
       storageOptions.pool = new pg.Pool({
@@ -526,6 +510,11 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       modelId,
       dim,
       textSearchConfig: resolveEffectiveTextConfig(config),
+      // Fix round 2 (F1): проброс аудит-лог-хелперов (memoryLog ?? log) — без
+      // этого storage-бэкенды получают log ?? null и memory:storage.*/
+      // cross_project_miss никогда не эмитятся в проде (тесты инжектили log
+      // напрямую или через deps.storage).
+      log: memLog,
     });
     if (!deps.storage) {
       mkdirSync(dirname(dbPath), { recursive: true });

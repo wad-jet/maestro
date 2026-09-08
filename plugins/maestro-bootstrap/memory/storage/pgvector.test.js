@@ -675,3 +675,17 @@ test("pgvector init: pg_catalog fallback to russian when config absent", async (
     console.error = origError;
   }
 });
+
+// Fix round 2: live-site fts.fallback (spec §4.2) — валидный конфиг отсутствует
+// в pg_ts_config → аудит-событие memory:fts.fallback (debug) в memoryLog.
+test("pgvector init: fts.fallback audit event on pg_ts_config miss", async () => {
+  const calls = [];
+  const log = { debug: (m, e) => calls.push([m, e]) };
+  const p = fakePoolHybrid({ tsConfigFound: false });
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, textSearchConfig: "klingon", log });
+  await st.init();
+  assert.equal(st.textSearchConfig, "russian", "effective config falls back to russian");
+  const ev = calls.find(([m]) => m === "memory:fts.fallback");
+  assert.ok(ev, "must emit memory:fts.fallback");
+  assert.deepEqual(ev[1], { backend: "pgvector", fallback: "russian" });
+});

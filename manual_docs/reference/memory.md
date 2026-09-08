@@ -721,7 +721,8 @@ opt-in на вставку замаскированных заголовков/s
 | `memory:http.error` (warn) | http_status_class, retryable (bool); сетевой вариант — `error_class: "network"`, retryable (без http_status_class) |
 | `memory:state.corrupt` (warn) | reason (enum: `parse_error`; ENOENT первого запуска не варн) |
 | `memory:cross_project_miss` (debug) | reason (enum), projectKey (hash соседнего проекта) |
-| `memory:fts.fallback` (debug) | backend (`pgvector`), fallback (`russian`) — невалидный/не-russian text_search_config |
+| `memory:fts.fallback` (debug) | backend (`pgvector`), fallback (`russian`) — валидный `text_search_config` отсутствует в `pg_ts_config` при init бэкенда |
+| `memory:client_not_installed` (error) | error_class (`not_installed`) — qdrant/pg-клиент не установлен в `module_dir`; actionable текст (`npm install in <module_dir>`) — в bootstrap-логе |
 
 **Производительность (debug):**
 
