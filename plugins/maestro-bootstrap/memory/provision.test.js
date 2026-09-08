@@ -39,7 +39,7 @@ test("ensureModule creates dir, writes package.json, copies sources", () => {
   writeFileSync(join(subDir, "a.js"), "source");
   writeFileSync(join(subDir, "a.test.js"), "should-be-excluded");
 
-  const ok = ensureModule({ moduleDir: mod, srcDir: src, version: "2.5.0" });
+  const ok = ensureModule({ moduleDir: mod, srcDir: src, version: "3.0.0" });
   assert.ok(ok);
 
   // Copied source files
@@ -57,7 +57,7 @@ test("ensureModule creates dir, writes package.json, copies sources", () => {
   const pkg = JSON.parse(readFileSync(join(mod, "package.json"), "utf8"));
   assert.equal(pkg.name, "maestro-memory");
   assert.equal(pkg.type, "module");
-  assert.equal(pkg.version, "2.5.0");
+  assert.equal(pkg.version, "3.0.0");
   assert.equal(pkg.private, true);
   assert.ok(pkg.dependencies);
   assert.equal(pkg.dependencies["better-sqlite3"], "^11.5.0");
