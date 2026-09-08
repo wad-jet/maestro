@@ -30,12 +30,18 @@ description: Показать статус memory layer плагина maestro-b
    невалидный `probe_cooldown_min` → `probe_cooldown_min_invalid`;
    стартовый probe завершился hard-fail (ключ/модель/размерность) → `embedder_probe_hard_fail`.
 
-   **Диагностика в off-состоянии:** даже при выключенной памяти вызови инструмент
-   `memory_probe` (live-проверка embedder, минуя cooldown) и покажи результат +
-   рекомендации — это помогает отличить конфиг-ошибку от недоступности провайдера:
+   **Диагностика в off-состоянии:** инструмент `memory_probe` доступен в
+   off-состоянии **только** при `disabled_reason: embedder_probe_hard_fail`
+   (стартовый probe hard-fail оставляет диагностический тул). В этом случае
+   вызови `memory_probe` (live-проверка embedder, минуя cooldown) и покажи
+   результат + рекомендации:
    - `FAIL (конфигурация)` — проверь `embedding.api_key_env`/ключ, `embedding.model`, `embedding.dim` в `maestro.json`;
    - `FAIL` (soft) — сеть/таймаут провайдера; проверь `embedding.base_url` и доступность эндпоинта;
-   - `OK` — embedder доступен; причина off — в `disabled_reason` (см. выше).
+   - `OK` — embedder доступен; причина off — в другом `disabled_reason` (см. выше).
+   Для прочих `disabled_reason` (`no_memory_section`, `explicitly_disabled`,
+   `*_invalid`, `centralized_identity_missing`, `qdrant_config_invalid`,
+   `pgvector_config_invalid`, `embedding_api_key_env_missing`) `memory_probe`
+   **не зарегистрирован** — диагностика только по конфигу (см. выше).
 
 3. Если инструмент вернул данные → продолжи к Шагу 2.
 
