@@ -493,7 +493,9 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       summarize: summarizeSession,
       projectKey,
       confidentialPatterns: confidentialPaths,
-      log,
+      // Task 3: аудит-лог-хелперы (memoryLog ?? log) — lifecycle-события
+      // индексатора уходят в maestro-memory-*.log (spec §2.2).
+      logInfo, logDebug, logWarn, logError,
       author,
       // Task 4: write-time branch/head resolution (sticky) + merged fast-path.
       git: { resolveBranch, resolveHead },

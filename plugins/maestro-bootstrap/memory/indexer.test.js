@@ -689,6 +689,161 @@ test("detached → branch='' but head recorded", async () => {
   idx.dispose();
 });
 
+// ── Task 3: lifecycle-аудит (spec §4.1) ─────────────────────────────
+
+function captureLog() {
+  const calls = [];
+  return {
+    calls,
+    log: {
+      info: (m, e) => calls.push(["info", m, e]),
+      warn: (m, e) => calls.push(["warn", m, e]),
+      error: (m, e) => calls.push(["error", m, e]),
+      debug: (m, e) => calls.push(["debug", m, e]),
+    },
+  };
+}
+
+test("indexer logs indexed + summarize.duration on success", async () => {
+  const cap = captureLog();
+  const client = mkClient();
+  const idx = new Indexer({
+    client, config: mkConfig(), embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client), state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+    logInfo: cap.log.info, logDebug: cap.log.debug, logWarn: cap.log.warn, logError: cap.log.error,
+  });
+  await idx._run("s1");
+  assert.ok(cap.calls.some(([lvl, m]) => lvl === "info" && m === "memory:indexed"));
+  assert.ok(cap.calls.some(([lvl, m]) => lvl === "debug" && m === "memory:summarize.duration"));
+  idx.dispose();
+});
+
+test("indexer logs index_error with error_class (not message)", async () => {
+  const cap = captureLog();
+  const client = mkClient(); client.session.get = async () => { throw new Error("network"); };
+  const idx = new Indexer({
+    client, config: mkConfig(), embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client), state: { ...mkState(), recordFail: async () => {} },
+    summarize: async () => ({}), projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    logInfo: cap.log.info, logDebug: cap.log.debug, logWarn: cap.log.warn, logError: cap.log.error,
+  });
+  await idx._run("s1");
+  const err = cap.calls.find(([lvl, m]) => m === "memory:index_error");
+  assert.ok(err, "index_error logged");
+  assert.ok(!JSON.stringify(err).includes("network"), "error message NOT in log (enum only)");
+  idx.dispose();
+});
+
+test("indexer logs reindexed on re-summarize (version > 1)", async () => {
+  const cap = captureLog();
+  const client = mkClient();
+  const idx = new Indexer({
+    client, config: mkConfig(), embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client), state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    logInfo: cap.log.info, logDebug: cap.log.debug, logWarn: cap.log.warn, logError: cap.log.error,
+  });
+  await idx._run("s1");
+  await idx._run("s1");
+  assert.ok(cap.calls.some(([lvl, m]) => lvl === "info" && m === "memory:indexed"), "first write → indexed");
+  assert.ok(cap.calls.some(([lvl, m]) => lvl === "info" && m === "memory:reindexed"), "re-summarize → reindexed");
+  idx.dispose();
+});
+
+test("indexer logs index_skipped after 3 fails (recordFail path)", async () => {
+  const cap = captureLog();
+  const client = mkClient();
+  client.session.get = async () => { throw new Error("network"); };
+  const idx = new Indexer({
+    client, config: mkConfig(), embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client), state: mkState(),
+    summarize: async () => ({}), projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    logInfo: cap.log.info, logDebug: cap.log.debug, logWarn: cap.log.warn, logError: cap.log.error,
+  });
+  await idx._run("s1");
+  await idx._run("s1");
+  await idx._run("s1");
+  const skip = cap.calls.find(([lvl, m]) => m === "memory:index_skipped");
+  assert.ok(skip, "index_skipped logged");
+  assert.equal(skip[2].fails, 3);
+  idx.dispose();
+});
+
+test("indexer logs index_retryable on retryable error (error_class enum)", async () => {
+  const cap = captureLog();
+  const client = mkClient();
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: {
+      embed: async () => { const e = new Error("network"); e.retryable = true; throw e; },
+      dim: 1, modelId: "m",
+    },
+    storage: mkStorage(client), state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    logInfo: cap.log.info, logDebug: cap.log.debug, logWarn: cap.log.warn, logError: cap.log.error,
+  });
+  await idx._run("s1");
+  const err = cap.calls.find(([lvl, m]) => m === "memory:index_error");
+  assert.ok(err, "index_error logged");
+  assert.equal(err[2].error_class, "retryable");
+  assert.ok(cap.calls.some(([lvl, m]) => lvl === "debug" && m === "memory:index_retryable"));
+  idx.dispose();
+});
+
+test("indexer logs session_deleted on onSessionDeleted", async () => {
+  const cap = captureLog();
+  const idx = new Indexer({
+    client: mkClient(), config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(null), state: mkState(),
+    summarize: async () => ({}),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    logInfo: cap.log.info, logDebug: cap.log.debug, logWarn: cap.log.warn, logError: cap.log.error,
+  });
+  await idx.onSessionDeleted({ sessionID: "s1" });
+  assert.ok(cap.calls.some(([lvl, m]) => lvl === "info" && m === "memory:session_deleted"));
+  idx.dispose();
+});
+
+test("indexer logs backfill + backfill.done on onStartup (considered/indexed/skipped)", async () => {
+  const cap = captureLog();
+  const now = Date.now();
+  const client = {
+    upserts: [],
+    session: {
+      get: async ({ path }) => ({ data: { id: path.id, parentID: null, title: "st", time: { created: 1, updated: now - 1000 } } }),
+      messages: async () => ({ data: [{ info: {}, parts: [{ type: "text", text: "hi" }] }] }),
+      list: async () => ({ data: [
+        { id: "s1", parentID: null, time: { created: 1, updated: now - 1000 } },
+        { id: "s2", parentID: "p1", time: { created: 1, updated: now - 1000 } },
+        { id: "s3", parentID: null, time: { created: 1, updated: now - 1000 } },
+      ]}),
+    },
+  };
+  const idx = new Indexer({
+    client, config: { ...mkConfig({ idle_debounce_min: 0.001 }), backfill_max_per_start: 5 },
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client), state: { ...mkState(), isSkipped: async () => false },
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    logInfo: cap.log.info, logDebug: cap.log.debug, logWarn: cap.log.warn, logError: cap.log.error,
+  });
+  await idx.onStartup();
+  const bf = cap.calls.find(([lvl, m]) => m === "memory:backfill");
+  assert.ok(bf, "backfill logged");
+  assert.equal(bf[2].considered, 3);
+  assert.equal(bf[2].indexed, 2);
+  assert.equal(bf[2].skipped, 1);
+  const done = cap.calls.find(([lvl, m]) => m === "memory:backfill.done");
+  assert.ok(done, "backfill.done logged");
+  assert.ok(typeof done[2].duration_ms === "number");
+  idx.dispose();
+});
+
 test("M-7: _branchContext bounded — oldest evicted on overflow (re-resolves)", async () => {
   const client = mkClient();
   const storage = mkStorage(client);

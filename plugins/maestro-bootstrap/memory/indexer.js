@@ -16,6 +16,9 @@ export class Indexer {
     client, config, embeddings, storage, state, summarize,
     projectKey, confidentialPatterns = [], log = console, author = null,
     git = null, mainline = null, root = null, branchContextCap = 1000,
+    // Task 3: аудит-лог-хелперы (spec §2.2) — пишут в memoryLog ?? log;
+    // default — заглушки (backward compat: без хелперов события не пишутся).
+    logInfo = () => {}, logDebug = () => {}, logWarn = () => {}, logError = () => {},
   }) {
     this.client = client;
     this.config = config;
@@ -26,6 +29,10 @@ export class Indexer {
     this.projectKey = projectKey;
     this.confidentialPatterns = confidentialPatterns;
     this.log = log;
+    this.logInfo = logInfo;
+    this.logDebug = logDebug;
+    this.logWarn = logWarn;
+    this.logError = logError;
     this.author = author;
     this.git = git;
     this.mainline = mainline;
@@ -34,6 +41,10 @@ export class Indexer {
     // M-7: bounded Map — FIFO-эвикция старейшего при превышении cap.
     this._branchContext = new Map();
     this._branchContextCap = branchContextCap;
+    // Task 3: локальный счётчик fails по sessionID — зеркалит state.recordFail
+    // (state не отдаёт fails наружу); нужен для memory:index_skipped ровно в
+    // момент перехода в skip (3+ fails). Растёт только на ошибочных сессиях.
+    this._fails = new Map();
     this.timers = new Map();
     this.running = false;
     this.queue = new Set();
@@ -88,20 +99,32 @@ export class Indexer {
       const list = (listResp?.data ?? listResp) ?? [];
       const firstRun = (await this.state.getFirstRun()) ?? Date.now();
       let queued = 0;
+      // Task 3: счётчики backfill-окна (spec §4.1 memory:backfill) —
+      // considered = все просмотренные сессии; indexed = поставленные в
+      // debounce-очередь; skipped = остальные (инвариант: considered = indexed + skipped).
+      let considered = 0;
+      let skipped = 0;
+      const backfillStart = Date.now();
       for (const s of list) {
-        if (queued >= (this.config.backfill_max_per_start ?? 5)) break;
-        if (s.parentID) continue;
+        considered++;
+        if (queued >= (this.config.backfill_max_per_start ?? 5)) { skipped++; continue; }
+        if (s.parentID) { skipped++; continue; }
         if (s.title?.startsWith("[maestro-memory]")) {
           try { await this.client.session.delete({ path: { id: s.id } }); } catch {}
+          skipped++;
           continue;
         }
-        if (await this.state.isSkipped(s.id)) continue;
+        if (await this.state.isSkipped(s.id)) { skipped++; continue; }
         const updated = s.time?.updated ?? s.time_updated;
-        if (!updated) continue;
-        if (firstRun - updated > (this.config.backfill_window_days ?? 30) * 86400_000) continue;
+        if (!updated) { skipped++; continue; }
+        if (firstRun - updated > (this.config.backfill_window_days ?? 30) * 86400_000) { skipped++; continue; }
         this._debounce(s.id);
         queued++;
       }
+      // Task 3: аудит окна — по факту завершения пачки (debounce-механика:
+      // фактическая индексация уходит в таймеры, здесь фиксируется очередь).
+      this.logInfo?.("memory:backfill", { considered, indexed: queued, skipped });
+      this.logInfo?.("memory:backfill.done", { duration_ms: Date.now() - backfillStart });
     } catch {
       // recovery best-effort, ignore errors
     }
@@ -119,6 +142,8 @@ export class Indexer {
     // M-a: clear sticky branch/head context so a re-summarize of the same
     // session re-resolves branch/head (no stale state after deletion).
     this._branchContext.delete(sessionID);
+    // Task 3: lifecycle-аудит удаления (spec §4.1 memory:session_deleted).
+    this.logInfo?.("memory:session_deleted", { sessionID });
   }
 
   async _run(sessionID) {
@@ -187,12 +212,20 @@ export class Indexer {
       const timeoutMs = this.config.summarize_timeout_ms ?? 120_000;
       const work = (async () => {
         // Summarize inside withTimeout (I1) — if client.session.prompt hangs, timeout releases lock
+        const summarizeStart = Date.now();
         const { title, summary, decisions } = await this.summarize({
           client: this.client,
           sessionID,
           transcript: masked,
           model: modelRef,
           summarizerModel: this.config.summarizer_model ?? null,
+        });
+        // Task 3: перф-аудит (spec §4.3) — длительность summarize; model —
+        // только имя модели (spec §3: без @base_url/эндпоинта).
+        this.logDebug?.("memory:summarize.duration", {
+          sessionID,
+          duration_ms: Date.now() - summarizeStart,
+          model: modelRef?.modelID ?? null,
         });
 
         // Task 4: sticky branch/head (resolved once per session).
@@ -239,17 +272,36 @@ export class Indexer {
 
         await this.storage.upsert([maskedEntry]);
         await this.state.setSummarized(sessionID);
+        // Task 3: lifecycle-аудит (spec §4.1) — indexed при первой записи,
+        // reindexed при пере-саммаризации повторно посещённой сессии
+        // (version > 1, spec §4.4). author — из записи (maskedEntry.author).
+        const author = maskedEntry.author;
+        if (maskedEntry.version > 1) {
+          this.logInfo?.("memory:reindexed", { sessionID, projectKey: this.projectKey.hash, author, version: maskedEntry.version });
+        } else {
+          this.logInfo?.("memory:indexed", { sessionID, projectKey: this.projectKey.hash, author, version: maskedEntry.version });
+        }
       })();
 
       await withTimeout(work, timeoutMs);
     } catch (err) {
-      // M1: safe error message
-      const errMsg = err instanceof Error ? err.message : String(err);
-      this.log?.error?.("memory: indexer error", { sessionID, error: errMsg });
+      // Task 3: root-cause-аудит (spec §4.1/§3) — enum-only: тела ошибок
+      // (message/stack) в лог НЕ попадают, только error_class. Заменяет
+      // прежнее «memory: indexer error» с errMsg (нарушало whitelist).
+      const errorClass = err?.retryable ? "retryable" : "storage";
+      this.logError?.("memory:index_error", { sessionID, error_class: errorClass });
       if (err?.retryable) {
-        this.log?.warn?.("memory: retryable embed error — skip не засчитывается", { sessionID });
+        // retryable (сеть/timeout/5xx embed) — skip не засчитывается (I3).
+        this.logDebug?.("memory:index_retryable", { sessionID });
       } else {
         try { await this.state.recordFail(sessionID); } catch {}
+        // Task 3: локальный счётчик fails (state не отдаёт fails наружу) —
+        // memory:index_skipped ровно в момент перехода в skip (3+ fails).
+        const fails = (this._fails.get(sessionID) ?? 0) + 1;
+        this._fails.set(sessionID, fails);
+        if (fails >= 3) {
+          this.logWarn?.("memory:index_skipped", { sessionID, fails });
+        }
       }
     } finally {
       this.running = false;
@@ -270,5 +322,6 @@ export class Indexer {
     for (const t of this.timers.values()) clearTimeout(t);
     this.timers.clear();
     this._branchContext.clear();
+    this._fails.clear();
   }
 }
