@@ -520,6 +520,9 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       root,
       mainline: config.mainline ?? null,
       log,
+      // Task 4: аудит-лог-хелперы (memoryLog ?? log) — effectiveness-события
+      // recall уходят в maestro-memory-*.log (spec §4.2/§4.4).
+      logInfo, logDebug, logWarn,
       // Task 6: паттерны confidential-путей — запрос маскируется перед embed.
       confidentialPatterns: confidentialPaths,
     });

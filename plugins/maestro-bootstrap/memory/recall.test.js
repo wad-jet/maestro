@@ -205,3 +205,27 @@ test("recall auto-recall: mainline unresolved → flat (no membership filter) (I
   assert.ok(block.includes("A"), "merged=1 hit in block (flat)");
   assert.ok(block.includes("D"), "head∉ancestorSet hit in block (flat — mainline unresolved)");
 });
+
+// ── Task 4: effectiveness-события (injected/hits/duration/no_hits) ──────
+
+test("recall logs injected/hits/duration and no_hits reasons", async () => {
+  const calls = [];
+  const log = { info: (m, e) => calls.push(["info", m, e]), debug: (m, e) => calls.push(["debug", m, e]), warn: (m, e) => calls.push(["warn", m, e]) };
+  const embedder = { embed: async () => new Float32Array([0.1, 0.2, 0.3]), dim: 3, modelId: "m" };
+  const storage = { search: async () => [{ entry: { session_id: "old1", title: "t", time_last: 1, author: "a", summary: "s", decisions: [] }, score: 0.8 }] };
+  const r = new Recall({ embeddings: embedder, storage, topK: 3, minScore: 0.35, key: "p", getUserMessageCount: async () => 1, logInfo: log.info, logDebug: log.debug, logWarn: log.warn });
+  await r.onChatMessage({ sessionID: "s1", text: "hi" });
+  assert.ok(calls.some(([lvl, m]) => lvl === "debug" && m === "memory:recall.duration"));
+  assert.ok(calls.some(([lvl, m]) => lvl === "debug" && m === "memory:recall.hits"));
+  const sys = await r.systemBlock({ sessionID: "s1" });
+  assert.ok(calls.some(([lvl, m]) => lvl === "info" && m === "memory:recall.injected"));
+});
+test("recall no_hits logs reason enum", async () => {
+  const calls = [];
+  const log = { info: () => {}, debug: () => {}, warn: (m, e) => calls.push([m, e]) };
+  const embedder = { embed: async () => new Float32Array([0.1]), dim: 3, modelId: "m" };
+  const storage = { search: async () => [] };
+  const r = new Recall({ embeddings: embedder, storage, topK: 3, minScore: 0.35, key: "p", getUserMessageCount: async () => 1, logInfo: log.info, logDebug: log.debug, logWarn: log.warn });
+  await r.onChatMessage({ sessionID: "s1", text: "hi" });
+  assert.ok(calls.some(([m, e]) => m === "memory:search.no_hits" && (e.reason === "min_score" || e.reason === "no_candidates")));
+});
