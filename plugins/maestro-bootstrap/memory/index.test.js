@@ -2366,6 +2366,7 @@ test("openai provider with key + injected deps registers hooks", async () => {
       deps: { storage: mkStorage(), embeddings: { probe: async () => ({ ok: true, hard: false, detail: "ok" }), dim: 3, modelId: "openai:m@https://x/v1" } },
     });
     assert.ok(hooks.tool.memory_search);
+    await hooks.dispose?.();
   } finally {
     delete process.env.MM_KEY_SET;
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
@@ -2374,7 +2375,7 @@ test("openai provider with key + injected deps registers hooks", async () => {
   }
 });
 
-test("startup probe hard fail → memory off (hooks {})", async () => {
+test("startup probe hard fail → memory off (memory_probe only, no tool hooks)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mem-probe-hard-"));
   const saved = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = dir;
@@ -2384,7 +2385,10 @@ test("startup probe hard fail → memory off (hooks {})", async () => {
       client: mkClient(), config: cfg, log: mkLog(), root: dir,
       deps: { storage: mkStorage(), embeddings: { probe: async () => ({ ok: false, hard: true, detail: "dimension mismatch" }), dim: 3, modelId: "m" } },
     });
-    assert.deepEqual(hooks, {});
+    assert.ok(hooks.memory_probe, "memory_probe tool must be exposed on hard fail");
+    assert.equal(hooks.tool, undefined, "no regular tool hooks on hard fail");
+    assert.equal(hooks["chat.message"], undefined, "no chat.message on hard fail");
+    await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = saved;
@@ -2403,6 +2407,7 @@ test("startup probe soft fail → hooks registered (fail-soft)", async () => {
       deps: { storage: mkStorage(), embeddings: { probe: async () => ({ ok: false, hard: false, detail: "network" }), dim: 3, modelId: "m" } },
     });
     assert.ok(hooks.tool.memory_search);
+    await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = saved;
@@ -2418,9 +2423,11 @@ test("cooldown cache keyed by identity: same config → single live probe", asyn
     let probes = 0;
     const fake = { probe: async () => { probes++; return { ok: true, hard: false, detail: "ok" }; }, dim: 3, modelId: "m" };
     const cfg = { memory: { enabled: true, storage: { type: "sqlite" } } };
-    await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: fake } });
-    await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: fake } });
+    const h1 = await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: fake } });
+    const h2 = await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: fake } });
     assert.equal(probes, 1);
+    await h1.dispose?.();
+    await h2.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = saved;
@@ -2436,9 +2443,11 @@ test("cache identity mismatch (different modelId) → live probe again", async (
     let probes = 0;
     const mkFake = (modelId) => ({ probe: async () => { probes++; return { ok: true, hard: false, detail: "ok" }; }, dim: 3, modelId });
     const cfg = { memory: { enabled: true, storage: { type: "sqlite" } } };
-    await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: mkFake("m") } });
-    await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: mkFake("m2") } });
+    const h1 = await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: mkFake("m") } });
+    const h2 = await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: mkFake("m2") } });
     assert.equal(probes, 2);
+    await h1.dispose?.();
+    await h2.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = saved;
@@ -2455,11 +2464,50 @@ test("cached hard → live re-probe (no shortcut)", async () => {
     const fake = { probe: async () => { probes++; return { ok: false, hard: true, detail: "dim mismatch" }; }, dim: 3, modelId: "m" };
     const cfg = { memory: { enabled: true, storage: { type: "sqlite" } } };
     const h1 = await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: fake } });
-    assert.deepEqual(h1, {});
+    assert.ok(h1.memory_probe, "hard fail → memory_probe tool");
+    assert.equal(h1.tool, undefined, "no regular tool hooks on hard fail");
     const h2 = await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: fake } });
-    assert.deepEqual(h2, {});
+    assert.ok(h2.memory_probe, "cached hard → live re-probe → hard fail again → memory_probe");
+    assert.equal(h2.tool, undefined, "no regular tool hooks on second hard fail");
     assert.equal(probes, 2);
+    await h1.dispose?.();
+    await h2.dispose?.();
   } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_probe persists effective apiKeyEnv → identity cache stays valid (no re-probe)", async () => {
+  process.env.MM_KEY_SET = "k";
+  const dir = mkdtempSync(join(tmpdir(), "mem-probe-env-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    let probes = 0;
+    let hard = true;
+    const fake = {
+      probe: async () => { probes++; return hard ? { ok: false, hard: true, detail: "dim mismatch" } : { ok: true, hard: false, detail: "ok" }; },
+      dim: 3,
+      modelId: "openai:m@https://x/v1",
+    };
+    const cfg = { memory: { enabled: true, storage: { type: "sqlite" }, embedding: { provider: "openai", model: "m", api_key_env: "MM_KEY_SET", base_url: "https://x/v1", dim: 3 } } };
+    // Первый init: hard-fail → только memory_probe.
+    const h1 = await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: fake } });
+    assert.ok(h1.memory_probe, "hard fail → memory_probe tool");
+    // Ручной probe через инструмент → персистит apiKeyEnv из конфига.
+    hard = false;
+    const res = await h1.memory_probe.execute({}, { sessionID: "s1" });
+    assert.match(res, /OK/, "manual probe must report OK");
+    // Второй init: identity (включая apiKeyEnv) совпадает → cache hit, без live probe.
+    const h2 = await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: fake } });
+    assert.ok(h2.tool.memory_search, "second init must register hooks (cached ok)");
+    assert.equal(probes, 2, "cached identity with apiKeyEnv must be reused — no live re-probe");
+    await h1.dispose?.();
+    await h2.dispose?.();
+  } finally {
+    delete process.env.MM_KEY_SET;
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = saved;
     rmSync(dir, { recursive: true, force: true });
@@ -2475,11 +2523,12 @@ test("init-warn external_embedder_unmasked_queries when openai + confidential pa
     const logs = [];
     const cfg = { memory: { enabled: true, storage: { type: "sqlite" }, embedding: { provider: "openai", model: "m", api_key_env: "MM_KEY_SET", dim: 3 } } };
     cfg.confidential = { paths: ["docs/confidential/**"] };
-    await registerMemoryHooks({
+    const hooks = await registerMemoryHooks({
       client: mkClient(), config: cfg, log: { warn: (m) => logs.push(m) }, root: dir,
       deps: { storage: mkStorage(), embeddings: { probe: async () => ({ ok: true, hard: false, detail: "ok" }), dim: 3, modelId: "openai:m@https://api.openai.com/v1" } },
     });
     assert.ok(logs.some((l) => String(l).includes("external_embedder_unmasked_queries")));
+    await hooks.dispose?.();
   } finally {
     delete process.env.MM_KEY_SET;
     if (saved === undefined) delete process.env.XDG_DATA_HOME;

@@ -52,7 +52,9 @@ async function probeWithGuard(embeddings, guardMs) {
   });
   try {
     return await Promise.race([
-      embeddings.probe().catch((err) => ({ ok: false, hard: false, detail: `probe exception: ${err instanceof Error ? err.message : String(err)}` })),
+      // Promise.resolve().then() — синхронный throw из probe() превращается
+      // в async-отклонение и ловится .catch ниже (не роняет init).
+      Promise.resolve().then(() => embeddings.probe()).catch((err) => ({ ok: false, hard: false, detail: `probe exception: ${err instanceof Error ? err.message : String(err)}` })),
       guard,
     ]);
   } finally {
@@ -64,10 +66,13 @@ async function probeWithGuard(embeddings, guardMs) {
  * Инструмент live-проверки embedder (probe): ключ, модель, размерность, сеть.
  * Принудительно, минуя cooldown. Переиспользуется в Task 8 для штатного
  * toolHooks (здесь — резерв на случай hard-fail стартового probe).
- * @param {{ embeddings: object, state: object, log: object }} ctx
+ * @param {{ embeddings: object, state: object, log: object, apiKeyEnv: string|null }} ctx
+ *   apiKeyEnv — эффективное имя env-переменной ключа (config.embedding.api_key_env
+ *   ?? null); персистится в setEmbedderProbe, чтобы identity кэша после ручного
+ *   memory_probe совпадал со стартовым (иначе live re-probe на каждом рестарте).
  * @returns {object} tool-объект
  */
-function makeMemoryProbeTool({ embeddings, state, log }) {
+function makeMemoryProbeTool({ embeddings, state, log, apiKeyEnv }) {
   return tool({
     description: "Live-проверка доступности модели эмбеддингов (probe): ключ, модель, размерность, сеть. Принудительно, минуя cooldown.",
     args: {},
@@ -75,7 +80,7 @@ function makeMemoryProbeTool({ embeddings, state, log }) {
       try {
         if (SESSIONS.has(ctx?.sessionID)) return "Инструмент недоступен для служебных сессий.";
         const p = await embeddings.probe();
-        await state.setEmbedderProbe({ modelId: embeddings.modelId, dim: embeddings.dim, apiKeyEnv: null, ...p });
+        await state.setEmbedderProbe({ modelId: embeddings.modelId, dim: embeddings.dim, apiKeyEnv, ...p });
         return `Проверка embedder (${embeddings.modelId}): ${p.ok ? "OK" : "FAIL"}${p.hard ? " (конфигурация)" : ""} — ${p.detail}`;
       } catch (err) {
         return `memory_probe failed: ${err instanceof Error ? err.message : String(err)}`;
@@ -393,7 +398,9 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
         log?.info?.("memory: embedder probe OK", { detail: p.detail });
       } else if (p.hard) {
         log?.info?.("memory: disabled", { reason: "embedder_probe_hard_fail", detail: p.detail });
-        return {};
+        // Spec follow-up 2: hard-fail оставляет диагностический memory_probe
+        // (live-проверка вручную, минуя cooldown), но без штатных tool-хуков.
+        return { memory_probe: makeMemoryProbeTool({ embeddings, state, log, apiKeyEnv: config.embedding.api_key_env ?? null }) };
       } else {
         log?.warn?.("memory: embedder probe failed", { detail: p.detail });
       }
