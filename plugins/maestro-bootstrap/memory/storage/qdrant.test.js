@@ -521,6 +521,89 @@ test("qdrant get excludes derived text field from entry", async () => {
   assert.equal(found.text, undefined, "get() must not leak derived text field");
 });
 
+// --- Task 3: branch/head/merged payload + candidates/markMerged ---
+
+test("qdrant upsert payload always carries branch/head/merged (detached → '')", async () => {
+  const c = fakeClient();
+  let capturedPoints = null;
+  c.upsert = async (name, { points }) => {
+    c.calls.push(["upsert", name, points.length]);
+    capturedPoints = points;
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  await st.upsert([{
+    session_id: "s1", key: "k1", origin_project_hash: "h1", title: "T",
+    summary: "S", decisions: [], embedding: new Float32Array([0.1, 0.2, 0.3]),
+    model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1,
+    branch: "feature/x", head: "abc123", merged: 0,
+  }]);
+  assert.equal(capturedPoints[0].payload.branch, "feature/x");
+  assert.equal(capturedPoints[0].payload.head, "abc123");
+  assert.equal(capturedPoints[0].payload.merged, 0);
+  // detached/unknown → '' defaults.
+  await st.upsert([{
+    session_id: "s2", key: "k1", origin_project_hash: "h1", title: "T2",
+    summary: "S2", decisions: [], embedding: new Float32Array([0.1, 0.2, 0.3]),
+    model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1,
+  }]);
+  assert.equal(capturedPoints[0].payload.branch, "");
+  assert.equal(capturedPoints[0].payload.head, "");
+  assert.equal(capturedPoints[0].payload.merged, 0);
+});
+
+test("qdrant candidates(key) scrolls key points + JS-filters merged=1 OR head != ''", async () => {
+  const c = fakeClient();
+  c.scroll = async (name, opts) => {
+    c.calls.push(["scroll", name, opts]);
+    // init()-backfill scroll (is_empty text) → пусто; candidates scroll (key) →
+    // точки запрошенного ключа (реальный сервер фильтрует на стороне qdrant).
+    const keyCond = opts.filter.must.find((m) => m.key === "key");
+    if (!keyCond) return { points: [], next_page_offset: null };
+    const key = keyCond.match.value;
+    const all = [
+      { id: "p1", payload: { session_id: "s1", key: "k1", decisions: "[]", merged: 1, head: "" } },
+      { id: "p2", payload: { session_id: "s2", key: "k1", decisions: "[]", merged: 0, head: "h1" } },
+      { id: "p3", payload: { session_id: "s3", key: "k1", decisions: "[]", merged: 0, head: "" } },
+      { id: "p4", payload: { session_id: "s4", key: "k2", decisions: "[]", merged: 1, head: "" } },
+    ];
+    return { points: all.filter((p) => p.payload.key === key), next_page_offset: null };
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  const cands = await st.candidates("k1");
+  const ids = cands.map((x) => x.session_id).sort();
+  assert.deepEqual(ids, ["s1", "s2"], "candidates = merged=1 OR head != '' within key");
+  // Последний scroll — это candidates (backfill в init() идёт раньше).
+  const scrollCalls = c.calls.filter(([k]) => k === "scroll");
+  const candCall = scrollCalls[scrollCalls.length - 1];
+  assert.deepEqual(candCall[2].filter.must, [{ key: "key", match: { value: "k1" } }]);
+});
+
+test("qdrant markMerged(key, head) scrolls key+head then setPayload merged=1 per id", async () => {
+  const c = fakeClient();
+  const setPayloadCalls = [];
+  c.scroll = async (name, opts) => {
+    c.calls.push(["scroll", name, opts]);
+    return { points: [{ id: "pA", payload: { session_id: "sA", key: "kA", head: "h" } }], next_page_offset: null };
+  };
+  c.setPayload = async (name, opts) => {
+    c.calls.push(["setPayload", name, opts]);
+    setPayloadCalls.push(opts);
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  await st.markMerged("kA", "h");
+  const scrollCalls = c.calls.filter(([k]) => k === "scroll");
+  const markScroll = scrollCalls[scrollCalls.length - 1];
+  assert.deepEqual(markScroll[2].filter.must, [
+    { key: "key", match: { value: "kA" } },
+    { key: "head", match: { value: "h" } },
+  ]);
+  assert.equal(setPayloadCalls.length, 1);
+  assert.deepEqual(setPayloadCalls[0], { payload: { merged: 1 }, points: ["pA"] });
+});
+
 test("qdrant search: vector-leg entry excludes derived text field", async () => {
   const c = fakeClient();
   c.query = async (name, q) => {

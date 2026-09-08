@@ -7,6 +7,7 @@ import { fuseRrf } from "./rrf.js";
 const SCAN_FIELDS = [
   "session_id", "key", "origin_project_hash", "title", "summary", "decisions",
   "author", "time_first", "time_last", "version", "model_id", "embedding",
+  "branch", "head", "merged",
 ];
 const DEFAULT_SCAN_FIELDS = SCAN_FIELDS.filter((f) => f !== "embedding");
 
@@ -104,6 +105,10 @@ export class QdrantStorage {
         time_first: e.time_first,
         time_last: e.time_last,
         version: e.version,
+        // branch/head/merged — легитимные метаданные (detached/unknown → '').
+        branch: e.branch ?? "",
+        head: e.head ?? "",
+        merged: e.merged ?? 0,
       },
     }));
     await this.client.upsert(this.collection, { points });
@@ -242,5 +247,46 @@ export class QdrantStorage {
     // в entry — выкидываем через деструктуризацию (spec §3.6).
     const { text, ...rest } = p.payload;
     return { ...rest, embedding: undefined, decisions: JSON.parse(rest.decisions) };
+  }
+
+  // Кандидаты для recall (Task 6): записи ключа, которые либо влиты в mainline
+  // (merged=1), либо имеют атрибуцию head (head != ''). Qdrant не фильтрует
+  // `!= ''` дешёво → scroll по key + JS-фильтр.
+  async candidates(key) {
+    if (typeof key !== "string" || !key) throw new Error("candidates: key required");
+    const res = await this.client.scroll(this.collection, {
+      filter: { must: [{ key: "key", match: { value: key } }] },
+      limit: 10000,
+      with_payload: true,
+      with_vector: false,
+    });
+    return (res.points ?? [])
+      .filter((p) => p.payload?.merged === 1 || (p.payload?.head ?? "") !== "")
+      .map((p) => {
+        const { text, ...rest } = p.payload;
+        return { ...rest, embedding: undefined, decisions: JSON.parse(rest.decisions) };
+      });
+  }
+
+  // Промоция (Task 5): пометить записи ключа с данным head как влитые в mainline.
+  async markMerged(key, head) {
+    if (typeof key !== "string" || !key) throw new Error("markMerged: key required");
+    if (typeof head !== "string" || !head) throw new Error("markMerged: head required");
+    const res = await this.client.scroll(this.collection, {
+      filter: {
+        must: [
+          { key: "key", match: { value: key } },
+          { key: "head", match: { value: head } },
+        ],
+      },
+      limit: 10000,
+      with_payload: false,
+      with_vector: false,
+    });
+    const ids = (res.points ?? []).map((p) => p.id);
+    if (ids.length) {
+      await this.client.setPayload(this.collection, { payload: { merged: 1 }, points: ids });
+    }
+    return ids.length;
   }
 }

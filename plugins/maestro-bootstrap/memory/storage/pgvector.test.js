@@ -485,6 +485,73 @@ test("pgvector hybrid: fused result capped to top_k", async () => {
   assert.ok(res.length <= 2, `fused result must be capped to top_k, got ${res.length}`);
 });
 
+// --- Task 3: branch/head/merged schema + candidates/markMerged ---
+
+test("pgvector init: ADD COLUMN IF NOT EXISTS branch/head/merged", async () => {
+  const p = fakePoolHybrid();
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, modelId: "m1" });
+  await st.init();
+  const adds = p.calls.filter(([sql]) => sql.includes("ADD COLUMN IF NOT EXISTS"));
+  const addSql = adds.map(([sql]) => sql).join("\n");
+  assert.ok(addSql.includes("branch TEXT NOT NULL DEFAULT ''"), addSql);
+  assert.ok(addSql.includes("head TEXT NOT NULL DEFAULT ''"), addSql);
+  assert.ok(addSql.includes("merged INT NOT NULL DEFAULT 0"), addSql);
+});
+
+test("pgvector upsert/get/scan carry branch/head/merged", async () => {
+  const p = fakePoolHybrid();
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, modelId: "m1" });
+  await st.init();
+  await st.upsert([{
+    session_id: "s1", key: "k1", origin_project_hash: "h1", title: "t1", summary: "s1",
+    decisions: [], embedding: new Float32Array([0.1, 0.2, 0.3]),
+    model_id: "m1", author: "a1", time_first: 1, time_last: 2, version: 1,
+    branch: "feature/x", head: "abc123", merged: 0,
+  }]);
+  const ins = p.calls.find(([sql]) => sql.includes("INSERT INTO"));
+  assert.ok(ins[0].includes("branch"), "INSERT must include branch");
+  assert.ok(ins[0].includes("head"), "INSERT must include head");
+  assert.ok(ins[0].includes("merged"), "INSERT must include merged");
+  // get: явный список колонок включает branch/head/merged.
+  await st.get("s1");
+  const getCall = p.calls.find(([sql]) => sql.includes("WHERE session_id = $1"));
+  assert.ok(getCall[0].includes("branch"), "get must select branch");
+  assert.ok(getCall[0].includes("head"), "get must select head");
+  assert.ok(getCall[0].includes("merged"), "get must select merged");
+  // scan: whitelist включает branch/head/merged.
+  await st.scan({ key: "k1", fields: ["session_id", "branch", "head", "merged"] });
+  const scanCall = p.calls.find(([sql]) => sql.includes("WHERE key=$1"));
+  assert.ok(scanCall[0].includes("branch"), "scan must select branch");
+  assert.ok(scanCall[0].includes("head"), "scan must select head");
+  assert.ok(scanCall[0].includes("merged"), "scan must select merged");
+});
+
+test("pgvector candidates(key) filters merged=1 OR head != ''", async () => {
+  const p = fakePoolHybrid();
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, modelId: "m1" });
+  await st.init();
+  await st.candidates("k1");
+  const sel = p.calls.find(([sql]) => sql.includes("FROM maestro_memory") && sql.includes("merged"));
+  assert.ok(sel, "candidates must run a merged-filtered select");
+  assert.ok(sel[0].includes("key = $1"), sel[0]);
+  assert.ok(sel[0].includes("(merged = 1 OR head != '')"), sel[0]);
+  assert.equal(sel[1][0], "k1");
+});
+
+test("pgvector markMerged(key, head) sets merged=1 key-scoped", async () => {
+  const p = fakePoolHybrid();
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, modelId: "m1" });
+  await st.init();
+  await st.markMerged("kA", "h");
+  const upd = p.calls.find(([sql]) => sql.includes("UPDATE"));
+  assert.ok(upd, "markMerged must run UPDATE");
+  assert.ok(upd[0].includes("SET merged = 1"), upd[0]);
+  assert.ok(upd[0].includes("key = $1"), upd[0]);
+  assert.ok(upd[0].includes("head = $2"), upd[0]);
+  assert.equal(upd[1][0], "kA");
+  assert.equal(upd[1][1], "h");
+});
+
 test("pgvector init: pg_catalog fallback to russian when config absent", async () => {
   // cfg="klingon" отсутствует в pg_ts_config → fallback на "russian".
   const logs = [];

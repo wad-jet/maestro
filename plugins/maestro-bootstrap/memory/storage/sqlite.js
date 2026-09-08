@@ -10,6 +10,7 @@ import { sanitizeDirName } from "../config.js";
 const SCAN_FIELDS = [
   "session_id", "key", "origin_project_hash", "title", "summary", "decisions",
   "author", "time_first", "time_last", "version", "model_id", "embedding",
+  "branch", "head", "merged",
 ];
 const DEFAULT_SCAN_FIELDS = SCAN_FIELDS.filter((f) => f !== "embedding");
 
@@ -61,8 +62,17 @@ export class SqliteStorage {
         author TEXT NOT NULL,
         time_first INTEGER NOT NULL,
         time_last INTEGER NOT NULL,
-        version INTEGER NOT NULL
+        version INTEGER NOT NULL,
+        branch TEXT NOT NULL DEFAULT '',
+        head TEXT NOT NULL DEFAULT '',
+        merged INTEGER NOT NULL DEFAULT 0
       )`);
+      // Dev-гигиена: существующие in-repo dev-БД (v2-схема без branch/head/merged)
+      // получают колонки идемпотентно (ALTER ADD COLUMN, НЕ миграция данных).
+      const cols = db.prepare("PRAGMA table_info(memory)").all().map((c) => c.name);
+      if (!cols.includes("branch")) db.exec("ALTER TABLE memory ADD COLUMN branch TEXT NOT NULL DEFAULT ''");
+      if (!cols.includes("head")) db.exec("ALTER TABLE memory ADD COLUMN head TEXT NOT NULL DEFAULT ''");
+      if (!cols.includes("merged")) db.exec("ALTER TABLE memory ADD COLUMN merged INTEGER NOT NULL DEFAULT 0");
       db.exec(`CREATE TABLE IF NOT EXISTS meta (name TEXT PRIMARY KEY, value TEXT NOT NULL)`);
       db.exec(`CREATE INDEX IF NOT EXISTS memory_key ON memory (key)`);
       db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
@@ -124,8 +134,8 @@ export class SqliteStorage {
 
   async upsert(entries) {
     const ins = this.db.prepare(`INSERT OR REPLACE INTO memory
-      (session_id, key, origin_project_hash, title, summary, decisions, embedding, model_id, author, time_first, time_last, version)
-      VALUES (@session_id, @key, @origin_project_hash, @title, @summary, @decisions, @embedding, @model_id, @author, @time_first, @time_last, @version)`);
+      (session_id, key, origin_project_hash, title, summary, decisions, embedding, model_id, author, time_first, time_last, version, branch, head, merged)
+      VALUES (@session_id, @key, @origin_project_hash, @title, @summary, @decisions, @embedding, @model_id, @author, @time_first, @time_last, @version, @branch, @head, @merged)`);
     const ftsDel = this.db.prepare("DELETE FROM memory_fts WHERE session_id = ?");
     const ftsIns = this.db.prepare(
       "INSERT INTO memory_fts (session_id, key, title, summary, decisions) VALUES (?, ?, ?, ?, ?)",
@@ -151,6 +161,9 @@ export class SqliteStorage {
           time_first: e.time_first,
           time_last: e.time_last,
           version: e.version,
+          branch: e.branch ?? "",
+          head: e.head ?? "",
+          merged: e.merged ?? 0,
         });
         // Sync FTS: delete-then-insert keeps exactly one row per session_id.
         ftsDel.run(e.session_id);
@@ -362,6 +375,28 @@ export class SqliteStorage {
     let parsed;
     try { parsed = JSON.parse(r.decisions); } catch { parsed = []; }
     return { ...r, embedding: undefined, decisions: parsed };
+  }
+
+  // Кандидаты для recall (Task 6): записи ключа, которые либо уже влиты в
+  // mainline (merged=1), либо имеют атрибуцию head (head != '').
+  async candidates(key) {
+    if (typeof key !== "string" || !key) throw new Error("candidates: key required");
+    const rows = this.db.prepare(
+      "SELECT * FROM memory WHERE key = ? AND (merged = 1 OR head != '')",
+    ).all(key);
+    return rows.map((r) => {
+      let parsed;
+      try { parsed = JSON.parse(r.decisions); } catch { parsed = []; }
+      return { ...r, embedding: undefined, decisions: parsed };
+    });
+  }
+
+  // Промоция (Task 5): пометить записи ключа с данным head как влитые в mainline.
+  async markMerged(key, head) {
+    if (typeof key !== "string" || !key) throw new Error("markMerged: key required");
+    if (typeof head !== "string" || !head) throw new Error("markMerged: head required");
+    const info = this.db.prepare("UPDATE memory SET merged = 1 WHERE key = ? AND head = ?").run(key, head);
+    return info.changes;
   }
 }
 

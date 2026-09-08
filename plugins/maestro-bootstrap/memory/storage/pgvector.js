@@ -6,6 +6,7 @@ import { fuseRrf } from "./rrf.js";
 const SCAN_FIELDS = [
   "session_id", "key", "origin_project_hash", "title", "summary", "decisions",
   "author", "time_first", "time_last", "version", "model_id", "embedding",
+  "branch", "head", "merged",
 ];
 const DEFAULT_SCAN_FIELDS = SCAN_FIELDS.filter((f) => f !== "embedding");
 
@@ -37,8 +38,16 @@ export class PgVectorStorage {
       author TEXT NOT NULL,
       time_first BIGINT NOT NULL,
       time_last BIGINT NOT NULL,
-      version INT NOT NULL
+      version INT NOT NULL,
+      branch TEXT NOT NULL DEFAULT '',
+      head TEXT NOT NULL DEFAULT '',
+      merged INT NOT NULL DEFAULT 0
     )`);
+    // Dev-гигиена: существующие dev-БД без branch/head/merged получают колонки
+    // идемпотентно (ADD COLUMN IF NOT EXISTS, НЕ миграция данных).
+    await this.pool.query(`ALTER TABLE ${this.table} ADD COLUMN IF NOT EXISTS branch TEXT NOT NULL DEFAULT ''`);
+    await this.pool.query(`ALTER TABLE ${this.table} ADD COLUMN IF NOT EXISTS head TEXT NOT NULL DEFAULT ''`);
+    await this.pool.query(`ALTER TABLE ${this.table} ADD COLUMN IF NOT EXISTS merged INT NOT NULL DEFAULT 0`);
     // I2: проверяем, что конфиг существует в pg_ts_config ДО того, как запечём
     // его в DDL. Если отсутствует (и отличается от "russian") — fallback на
     // "russian" для этого init И последующих поисков.
@@ -104,10 +113,10 @@ export class PgVectorStorage {
           throw new Error(`model_id mismatch: expected=${this.modelId} got=${e.model_id} — переиндексируйте (см. how-to)`);
         }
         await client.query(
-          `INSERT INTO ${this.table} (session_id, key, origin_project_hash, title, summary, decisions, embedding, model_id, author, time_first, time_last, version)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12)
-           ON CONFLICT (session_id) DO UPDATE SET title=$4, summary=$5, decisions=$6, embedding=$7, time_last=$11, version=$12`,
-          [e.session_id, e.key, e.origin_project_hash, e.title, e.summary, JSON.stringify(e.decisions), `[${Array.from(e.embedding)}]`, e.model_id, e.author, e.time_first, e.time_last, e.version]
+          `INSERT INTO ${this.table} (session_id, key, origin_project_hash, title, summary, decisions, embedding, model_id, author, time_first, time_last, version, branch, head, merged)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
+           ON CONFLICT (session_id) DO UPDATE SET title=$4, summary=$5, decisions=$6, embedding=$7, time_last=$11, version=$12, branch=$13, head=$14, merged=$15`,
+          [e.session_id, e.key, e.origin_project_hash, e.title, e.summary, JSON.stringify(e.decisions), `[${Array.from(e.embedding)}]`, e.model_id, e.author, e.time_first, e.time_last, e.version, e.branch ?? "", e.head ?? "", e.merged ?? 0]
         );
       }
       await client.query("COMMIT");
@@ -222,10 +231,31 @@ export class PgVectorStorage {
   async get(session_id) {
     // Явный список колонок (без SELECT *, без fts).
     const r = await this.pool.query(
-      `SELECT session_id, key, origin_project_hash, title, summary, decisions, model_id, author, time_first, time_last, version
+      `SELECT session_id, key, origin_project_hash, title, summary, decisions, model_id, author, time_first, time_last, version, branch, head, merged
        FROM ${this.table} WHERE session_id = $1`,
       [session_id]);
     if (!r.rows[0]) return null;
     return { ...r.rows[0], embedding: undefined, decisions: JSON.parse(r.rows[0].decisions) };
+  }
+
+  // Кандидаты для recall (Task 6): записи ключа, которые либо влиты в mainline
+  // (merged=1), либо имеют атрибуцию head (head != '').
+  async candidates(key) {
+    if (typeof key !== "string" || !key) throw new Error("candidates: key required");
+    const res = await this.pool.query(
+      `SELECT session_id, key, origin_project_hash, title, summary, decisions, model_id, author, time_first, time_last, version, branch, head, merged
+       FROM ${this.table} WHERE key = $1 AND (merged = 1 OR head != '')`,
+      [key]);
+    return res.rows.map((r) => ({ ...r, embedding: undefined, decisions: JSON.parse(r.decisions) }));
+  }
+
+  // Промоция (Task 5): пометить записи ключа с данным head как влитые в mainline.
+  async markMerged(key, head) {
+    if (typeof key !== "string" || !key) throw new Error("markMerged: key required");
+    if (typeof head !== "string" || !head) throw new Error("markMerged: head required");
+    const res = await this.pool.query(
+      `UPDATE ${this.table} SET merged = 1 WHERE key = $1 AND head = $2`,
+      [key, head]);
+    return res.rowCount ?? 0;
   }
 }
