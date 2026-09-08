@@ -435,7 +435,6 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             // I-1 (§6.2): sibling-нога — строго general (merged=1) при любом
             // scope; own-key кандидаты в sibling не протекают (storage сам
             // разделяет ноги и не применяет filterSessionIds к sibling).
-            if (args.project !== undefined) searchOpts.mergedOnly = true;
             let inContext = null; // null → project scope (без членства)
             let experienceIds = new Set();
             if (scope === "branch") {

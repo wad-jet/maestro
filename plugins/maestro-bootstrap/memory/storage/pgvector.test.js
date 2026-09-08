@@ -156,7 +156,7 @@ test("pgvector search with project splits legs: active key = + merged-only sibli
   const p = fakePool();
   const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3 });
   await st.init();
-  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0.5, key: "k1", project: "other", mergedOnly: true });
+  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0.5, key: "k1", project: "other" });
   const sels = p.calls.filter(([sql]) => sql.includes("FROM maestro_memory"));
   assert.ok(sels.length >= 2, "active + sibling legs must run");
   // Активная нога: key = $2 (own key), без merged-фильтра.
@@ -173,7 +173,7 @@ test("pgvector cross-project: sibling leg gets merged=1 and NOT own-key filterSe
   const p = fakePool();
   const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3 });
   await st.init();
-  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "k1", project: "other", mergedOnly: true, filterSessionIds: ["a1"] });
+  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "k1", project: "other", filterSessionIds: ["a1"] });
   const sels = p.calls.filter(([sql]) => sql.includes("FROM maestro_memory"));
   const sibling = sels.find(([sql, params]) => sql.includes("key = $2") && params[1] === "other");
   assert.ok(sibling, "sibling leg present");
@@ -182,6 +182,28 @@ test("pgvector cross-project: sibling leg gets merged=1 and NOT own-key filterSe
   const active = sels.find(([sql, params]) => sql.includes("key = $2") && params[1] === "k1");
   assert.ok(active, "active leg present");
   assert.ok(active[0].includes("session_id IN"), "active leg keeps filterSessionIds");
+});
+
+test("pgvector pre-v3 table without merged column → SQL error propagates (documented, §6.2)", async () => {
+  // pgvector хранит active и sibling в ОДНОЙ таблице (разные key), поэтому
+  // «pre-v3 sibling» = вся таблица без колонки merged. Векторная нога не
+  // fail-soft: отсутствие колонки → SQL-ошибка, которая пробрасывается
+  // (документированное поведение — в отличие от sqlite, где sibling — отдельная БД).
+  const p = fakePool();
+  p.query = async (sql, params) => {
+    p.calls.push([sql, params]);
+    if (sql.includes("FROM maestro_memory") && sql.includes("merged = 1")) {
+      throw new Error('column "merged" does not exist');
+    }
+    return { rows: [] };
+  };
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3 });
+  await st.init();
+  await assert.rejects(
+    () => st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "k1", project: "other" }),
+    /column "merged" does not exist/,
+    "missing merged column on shared table → SQL error propagates (documented)",
+  );
 });
 
 test("pgvector search filters date/author", async () => {

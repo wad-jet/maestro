@@ -2232,7 +2232,7 @@ test("I-1: scope=branch + project → sibling general records returned (mergedOn
       deps: { storage, embeddings: mkMockEmbeddings(), git: mkScopeGit() },
     });
     const res = await hooks.tool.memory_search.execute({ query: "x", scope: "branch", project: "other" }, { sessionID: "s1" });
-    assert.equal(storage.lastOpts.mergedOnly, true, "cross-project path must set mergedOnly");
+    assert.equal(storage.lastOpts.mergedOnly, undefined, "mergedOnly is not passed to storage (sibling leg is merged internally)");
     assert.match(res, /# A/, "active candidate returned");
     assert.match(res, /# O/, "sibling general record returned (not filtered by own-key candidates)");
     await hooks.dispose?.();

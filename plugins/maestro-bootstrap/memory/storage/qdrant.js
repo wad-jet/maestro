@@ -114,7 +114,7 @@ export class QdrantStorage {
     await this.client.upsert(this.collection, { points });
   }
 
-  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds, mergedOnly }) {
+  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds }) {
     // B2: cross-project opt-in — key-set filter (current + project key). Активная
     // нога (own key) и sibling-ноги разделяются: sibling строго general (merged=1,
     // §6.2) и НЕ получает own-key filterSessionIds (иначе sibling пуст).

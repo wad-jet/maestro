@@ -173,7 +173,7 @@ export class SqliteStorage {
     tx(entries);
   }
 
-  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds, mergedOnly }) {
+  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds }) {
     if (embedding.length !== this.dim) {
       throw new Error(`embedding length ${embedding.length} does not match expected dimension ${this.dim}`);
     }

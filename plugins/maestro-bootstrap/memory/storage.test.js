@@ -373,6 +373,45 @@ test("sqlite cross-project: sibling leg ignores own-key filterSessionIds (merged
   }
 });
 
+test("sqlite cross-project: pre-v3 sibling without merged column → fail-soft skip, active unaffected (§6.2)", async () => {
+  const base = mkdtempSync(join(tmpdir(), "mm-sqlite-v2-"));
+  const dir = (key) => join(base, "maestro", "memory", sanitizeDirName(key));
+  const activeKey = "active"; const other = "other";
+  mkdirSync(dir(activeKey), { recursive: true });
+  mkdirSync(dir(other), { recursive: true });
+  const mk = (key) => new SqliteStorage({ dbPath: join(dir(key), "memory.db"), modelId: "m", dim: 3, moduleDir: null });
+  const active = mk(activeKey);
+  try {
+    // v2-schema sibling: memory table БЕЗ колонки merged (pre-v3).
+    const Database = require("better-sqlite3");
+    const sib = new Database(join(dir(other), "memory.db"));
+    sib.exec(`CREATE TABLE memory (
+      session_id TEXT PRIMARY KEY, key TEXT NOT NULL, origin_project_hash TEXT NOT NULL,
+      title TEXT NOT NULL, summary TEXT NOT NULL, decisions TEXT NOT NULL,
+      embedding BLOB NOT NULL, model_id TEXT NOT NULL, author TEXT NOT NULL,
+      time_first INTEGER NOT NULL, time_last INTEGER NOT NULL, version INTEGER NOT NULL
+    )`);
+    sib.exec(`CREATE TABLE meta (name TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+    sib.prepare("INSERT INTO meta (name, value) VALUES ('model_id', 'm')").run();
+    sib.prepare("INSERT INTO meta (name, value) VALUES ('dim', '3')").run();
+    sib.prepare(`INSERT INTO memory (session_id, key, origin_project_hash, title, summary, decisions, embedding, model_id, author, time_first, time_last, version)
+      VALUES ('o1', ?, 'ho', 'Other', 'sum', '[]', ?, 'm', 'a', 1, 2, 1)`)
+      .run(other, Buffer.from(new Float32Array([1, 0, 0]).buffer));
+    sib.close();
+
+    await active.init();
+    await active.upsert([{ session_id: "a1", key: activeKey, origin_project_hash: "ha", title: "Active", summary: "sum", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([0, 1, 0]) }]);
+    // Pre-v3 sibling (нет merged) → fail-soft skip + лог; активные результаты не затронуты.
+    const res = await active.search(new Float32Array([1, 0, 0]), { key: activeKey, project: other, top_k: 10, min_score: 0 });
+    const ids = res.map((h) => h.entry.session_id);
+    assert.ok(!ids.includes("o1"), "pre-v3 sibling skipped (no merged column)");
+    assert.ok(ids.includes("a1"), "active hit unaffected");
+  } finally {
+    await active.dispose();
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
 test("sqlite model mismatch throws", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mem-"));
   const dbPath = join(dir, "memory.db");

@@ -130,7 +130,7 @@ test("qdrant search with project splits legs: active key + merged-only sibling",
   const c = fakeClient();
   const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
   await st.init();
-  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0.35, key: "k1", project: "other", mergedOnly: true });
+  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0.35, key: "k1", project: "other" });
   const queries = c.calls.filter(([k]) => k === "query");
   assert.ok(queries.length >= 2, "active + sibling legs must run");
   // Активная нога: key match value (own key), без merged-фильтра.
@@ -147,7 +147,7 @@ test("qdrant cross-project: sibling leg merged=1 and NOT own-key filterSessionId
   const c = fakeClient();
   const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
   await st.init();
-  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "k1", project: "other", mergedOnly: true, filterSessionIds: ["a1"] });
+  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "k1", project: "other", filterSessionIds: ["a1"] });
   const queries = c.calls.filter(([k]) => k === "query");
   const sibling = queries.find(([, , q]) => q.filter.must[0]?.key === "key" && q.filter.must[0]?.match?.value === "other");
   assert.ok(sibling, "sibling leg present");
@@ -156,6 +156,33 @@ test("qdrant cross-project: sibling leg merged=1 and NOT own-key filterSessionId
   const active = queries.find(([, , q]) => q.filter.must[0]?.key === "key" && q.filter.must[0]?.match?.value === "k1");
   assert.ok(active, "active leg present");
   assert.ok(active[2].filter.must.some((m) => m.key === "session_id"), "active leg keeps filterSessionIds");
+});
+
+test("qdrant pre-v3 sibling points (no merged payload) → merged=1 filter silently excludes, no throw (§6.2)", async () => {
+  const c = fakeClient();
+  // Pre-v3 sibling point: payload БЕЗ поля merged. qdrant фильтр merged=1
+  // молча исключает такие точки (missing payload ≠ match) → under-inclusion
+  // (документировано). Активная нога возвращает свой хит; sibling пуст, без throw.
+  c.query = async (name, q) => {
+    c.calls.push(["query", name, q]);
+    const isSibling = q.filter?.must?.[0]?.key === "key" && q.filter?.must?.[0]?.match?.value === "other";
+    if (isSibling) {
+      // Sibling-нога: сервер вернул бы только точки с merged=1; у pre-v3 точки
+      // merged отсутствует → не матчится → пустой результат.
+      return { points: [] };
+    }
+    return { points: [{ id: "a1", score: 0.9, payload: { session_id: "a1", title: "Active", summary: "s", decisions: "[]", key: "k1", merged: 1 } }] };
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  const res = await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "k1", project: "other" });
+  const queries = c.calls.filter(([k]) => k === "query");
+  const sibling = queries.find(([, , q]) => q.filter.must[0]?.key === "key" && q.filter.must[0]?.match?.value === "other");
+  assert.ok(sibling, "sibling leg present");
+  assert.deepEqual(sibling[2].filter.must[1], { key: "merged", match: { value: 1 } }, "sibling leg merged-only filter");
+  const ids = res.map((h) => h.entry.session_id);
+  assert.ok(!ids.includes("o1"), "pre-v3 sibling point (no merged payload) silently excluded (under-inclusion)");
+  assert.ok(ids.includes("a1"), "active hit present");
 });
 
 test("qdrant search filters date/author", async () => {
