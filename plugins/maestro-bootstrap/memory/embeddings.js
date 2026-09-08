@@ -1,11 +1,21 @@
 export class Embedder {
-  constructor({ model, cacheDir, moduleDir, _pipeline, _dim }) {
+  constructor({ model, cacheDir, moduleDir, _pipeline, _dim, _importImpl } = {}) {
     this.model = model;
     this.cacheDir = cacheDir;
     this.moduleDir = moduleDir;
     this.pipeline = _pipeline ?? null;
     this._dim = _dim ?? null;
     this.ready = false;
+    this._importImpl = _importImpl ?? null;
+  }
+  async probe() {
+    const imp = this._importImpl ?? (() => import(`${this.moduleDir}/node_modules/@huggingface/transformers`));
+    try {
+      await imp();
+    } catch {
+      return { ok: false, hard: true, detail: `transformers не установлен — выполните npm install в ${this.moduleDir} (см. manual_docs/how-to/enable-memory.md)` };
+    }
+    return { ok: true, hard: false, detail: "зависимость на месте; загрузка модели — лениво (первый embed)" };
   }
   async init() {
     if (!this.pipeline) {

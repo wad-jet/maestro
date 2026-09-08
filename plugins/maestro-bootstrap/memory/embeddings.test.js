@@ -26,3 +26,17 @@ test("init failure throws actionable", async () => {
   const e = new Embedder({ model: "x", cacheDir: "/tmp/x", _pipeline: null, _dim: 3, moduleDir: "/tmp/nonexistent" });
   await assert.rejects(() => e.init(), /install|module_dir/i);
 });
+
+test("probe ok when transformers importable", async () => {
+  const e = new Embedder({ model: "x", cacheDir: "/tmp/x", _pipeline: null, _dim: 3, moduleDir: "/tmp/m", _importImpl: async () => ({}) });
+  const p = await e.probe();
+  assert.equal(p.ok, true);
+  assert.equal(p.hard, false);
+});
+
+test("probe hard when transformers missing", async () => {
+  const e = new Embedder({ model: "x", cacheDir: "/tmp/x", _pipeline: null, _dim: 3, moduleDir: "/tmp/m", _importImpl: async () => { throw new Error("not found"); } });
+  const p = await e.probe();
+  assert.equal(p.ok, false);
+  assert.equal(p.hard, true);
+});
