@@ -114,25 +114,55 @@ export class QdrantStorage {
     await this.client.upsert(this.collection, { points });
   }
 
-  // Общий фильтр для векторной и текстовой веток: key-set + date + author +
-  // (I1) pre-filter кандидатов (merged=1 OR head != '').
-  buildMust({ key, project, date_from, date_to, author, filterSessionIds }) {
+  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds, mergedOnly }) {
+    // B2: cross-project opt-in — key-set filter (current + project key). Активная
+    // нога (own key) и sibling-ноги разделяются: sibling строго general (merged=1,
+    // §6.2) и НЕ получает own-key filterSessionIds (иначе sibling пуст).
     const keys = resolveSearchKeys({ key, project });
-    const must = keys.length === 1
-      ? [{ key: "key", match: { value: keys[0] } }]
-      : [{ key: "key", match: { any: keys } }];
+    const activeKey = keys[0];
+    const siblingKeys = keys.slice(1);
+    const vectorHits = [];
+    const textLists = [];
+
+    await this._collectLeg(activeKey, { filterSessionIds, merged: false }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists);
+    if (siblingKeys.length) {
+      await this._collectLeg(siblingKeys, { merged: true }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists);
+    }
+
+    vectorHits.sort((a, b) => b.score - a.score);
+    if (textLists.length) {
+      // C2: кап результата фузии до top_k (паритет с sqlite/pgvector).
+      const fused = await fuseRrf(vectorHits, textLists, { fetchEntry: (sid) => this.get(sid) });
+      return fused.slice(0, top_k);
+    }
+    return vectorHits.slice(0, top_k);
+  }
+
+  /**
+   * Одна нога поиска (активная или sibling-набор ключей): векторная + текстовая
+   * ветки с общими фильтрами. Хиты накапливаются в переданные массивы.
+   * @param {string|string[]} keys  Ключ(и) ноги.
+   * @param {{ filterSessionIds?: string[], merged?: boolean }} legOpts
+   * @param {Float32Array} embedding
+   * @param {{ top_k: number, min_score: number, date_from?: number, date_to?: number, author?: string, query?: string }} opts
+   * @param {Array} vectorHits  Накопитель векторных хитов (мутируется).
+   * @param {Array} textLists  Накопитель текстовых списков (мутируется).
+   */
+  async _collectLeg(keys, { filterSessionIds, merged }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists) {
+    const ks = Array.isArray(keys) ? keys : [keys];
+    const must = ks.length === 1
+      ? [{ key: "key", match: { value: ks[0] } }]
+      : [{ key: "key", match: { any: ks } }];
     if (date_from !== undefined) must.push({ key: "time_last", range: { gte: date_from } });
     if (date_to !== undefined) must.push({ key: "time_last", range: { lte: date_to } });
     if (author !== undefined) must.push({ key: "author", match: { value: author } });
+    // I1: pre-filter кандидатов (merged=1 OR head != '') — только активная нога.
     if (filterSessionIds && filterSessionIds.length) {
       must.push({ key: "session_id", match: { any: filterSessionIds } });
     }
-    return must;
-  }
+    // I-1 (§6.2): sibling-нога — строго general (merged=1).
+    if (merged) must.push({ key: "merged", match: { value: 1 } });
 
-  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds }) {
-    // B2: cross-project opt-in — key-set filter (current + project key).
-    const must = this.buildMust({ key, project, date_from, date_to, author, filterSessionIds });
     const res = await this.client.query(this.collection, {
       query: { nearest: Array.from(embedding) },
       limit: top_k,
@@ -140,19 +170,18 @@ export class QdrantStorage {
       filter: { must },
       with_payload: true,
     });
-    const vectorHits = (res.points ?? []).map((r) => {
+    vectorHits.push(...(res.points ?? []).map((r) => {
       // M3: производное поле `text` (для full-text индекса) не должно протекать
       // в entry векторной ветки (как в get()) — выкидываем через деструктуризацию.
       const { text, ...rest } = r.payload;
       return { entry: { ...rest, embedding: undefined, decisions: JSON.parse(rest.decisions) }, score: r.score };
-    });
+    }));
 
     // Текстовая ветка: только full-text (full_text_match), фузия через RRF.
-    // Зеркалит key-set/date/author фильтры векторной ветки (buildMust).
+    // Зеркалит key-set/date/author фильтры векторной ветки.
     if (typeof query === "string" && query.trim().length > 0) {
-      let textHits = [];
       try {
-        const tmust = this.buildMust({ key, project, date_from, date_to, author, filterSessionIds });
+        const tmust = [...must];
         tmust.push({ key: "text", full_text_match: { text: query } });
         // Filter-only leg — top-level `filter` БЕЗ `query` (у Query enum нет
         // FilterQuery-варианта; сервер вернул бы 400). Не должен быть
@@ -162,17 +191,13 @@ export class QdrantStorage {
           limit: top_k,
           with_payload: true,
         });
-        textHits = (tr.points ?? []).map((p) => ({ session_id: p.payload.session_id }));
+        const textHits = (tr.points ?? []).map((p) => ({ session_id: p.payload.session_id }));
+        if (textHits.length) textLists.push(textHits);
       } catch (err) {
         // Fail-soft: при сбое текстовой ветки возвращаем только векторные хиты.
         console.error(`[memory] qdrant text leg failed, vector-only fallback: ${err.message}`);
       }
-      if (!textHits.length) return vectorHits;
-      // C2: кап результата фузии до top_k (паритет с sqlite/pgvector).
-      const fused = await fuseRrf(vectorHits, [textHits], { fetchEntry: (sid) => this.get(sid) });
-      return fused.slice(0, top_k);
     }
-    return vectorHits;
   }
 
   // C-2: direct filter delete (no query-based point lookup)

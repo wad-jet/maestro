@@ -30,8 +30,6 @@ export class Recall {
       const scope = this.branchContext === false ? "project" : "branch";
       let hits;
       if (scope === "branch" && this.git) {
-        const candidates = await this.storage.candidates(this.key);
-        const candidateIds = candidates.map((c) => c.session_id);
         const sets = computeBranchSets({
           revList: this.git.revList,
           detectMainline: this.git.detectMainline,
@@ -39,9 +37,19 @@ export class Recall {
           mainlineOverride: this.mainline,
         });
         if (sets.failSoft) this.log?.debug?.("memory: recall fail-soft — revList failed, merged=1 only");
-        const { inContext } = applyBranchScope(candidates, sets);
-        hits = (await this.storage.search(vec, { top_k: this.topK, min_score: this.minScore, key: this.key, filterSessionIds: candidateIds }))
-          .filter((h) => inContext.has(h.entry.session_id));
+        // I-2 (§5): auto-recall всегда дефолтный scope → mainline unresolved →
+        // flat (project behavior, «эффективно off»). Механика §6.1 с
+        // mainlineSet=∅ — только для явного scope=branch (memory_search).
+        if (!sets.mainline) {
+          this.log?.debug?.("memory: recall mainline unresolved — flat project search");
+          hits = await this.storage.search(vec, { top_k: this.topK, min_score: this.minScore, key: this.key });
+        } else {
+          const candidates = await this.storage.candidates(this.key);
+          const candidateIds = candidates.map((c) => c.session_id);
+          const { inContext } = applyBranchScope(candidates, sets);
+          hits = (await this.storage.search(vec, { top_k: this.topK, min_score: this.minScore, key: this.key, filterSessionIds: candidateIds }))
+            .filter((h) => inContext.has(h.entry.session_id));
+        }
       } else {
         // M4: branch-scope запрошен, но git не подключён → debug-лог (не тихо).
         if (scope === "branch") {

@@ -152,16 +152,36 @@ test("pgvector upsert rejects wrong embedding dimension", async () => {
   }]), /embedding length.*does not match/);
 });
 
-test("pgvector search with project uses key IN", async () => {
+test("pgvector search with project splits legs: active key = + merged-only sibling", async () => {
   const p = fakePool();
   const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3 });
   await st.init();
-  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0.5, key: "k1", project: "other" });
-  const sel = p.calls.find(([sql]) => sql.includes("FROM maestro_memory"));
-  assert.ok(sel);
-  assert.ok(sel[0].includes("key IN ($2, $3)"), `expected key IN ($2, $3), got: ${sel[0]}`);
-  assert.equal(sel[1][1], "k1");
-  assert.equal(sel[1][2], "other");
+  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0.5, key: "k1", project: "other", mergedOnly: true });
+  const sels = p.calls.filter(([sql]) => sql.includes("FROM maestro_memory"));
+  assert.ok(sels.length >= 2, "active + sibling legs must run");
+  // Активная нога: key = $2 (own key), без merged-фильтра.
+  const active = sels.find(([sql, params]) => sql.includes("key = $2") && params[1] === "k1");
+  assert.ok(active, "active leg with key = $2 (k1)");
+  assert.ok(!active[0].includes("merged = 1"), "active leg must NOT be merged-only");
+  // Sibling-нога: key = $2 (other) + merged = 1 (§6.2 general-only).
+  const sibling = sels.find(([sql, params]) => sql.includes("key = $2") && params[1] === "other");
+  assert.ok(sibling, "sibling leg with key = $2 (other)");
+  assert.ok(sibling[0].includes("merged = 1"), "sibling leg must be merged-only");
+});
+
+test("pgvector cross-project: sibling leg gets merged=1 and NOT own-key filterSessionIds (§6.2)", async () => {
+  const p = fakePool();
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3 });
+  await st.init();
+  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "k1", project: "other", mergedOnly: true, filterSessionIds: ["a1"] });
+  const sels = p.calls.filter(([sql]) => sql.includes("FROM maestro_memory"));
+  const sibling = sels.find(([sql, params]) => sql.includes("key = $2") && params[1] === "other");
+  assert.ok(sibling, "sibling leg present");
+  assert.ok(sibling[0].includes("merged = 1"), "sibling leg merged-only");
+  assert.ok(!sibling[0].includes("session_id IN"), "own-key filterSessionIds must NOT leak into sibling leg");
+  const active = sels.find(([sql, params]) => sql.includes("key = $2") && params[1] === "k1");
+  assert.ok(active, "active leg present");
+  assert.ok(active[0].includes("session_id IN"), "active leg keeps filterSessionIds");
 });
 
 test("pgvector search filters date/author", async () => {
@@ -472,18 +492,21 @@ test("pgvector text leg: single-key placeholders start at $3, LIMIT is last", as
   assert.equal(textCall[1][3], 3);
 });
 
-test("pgvector text leg: multi-key uses key IN ($3, $4)", async () => {
+test("pgvector text leg: multi-key splits — active key = $3, sibling key = $3 + merged", async () => {
   const p = fakePoolHybrid({ textRows: [{ session_id: "s2" }] });
   const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, textSearchConfig: "russian" });
   await st.init();
   await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "k1", project: "other", query: "foo" });
-  const textCall = p.calls.find(([sql]) => sql.includes("plainto_tsquery"));
-  assert.ok(textCall, "text leg must run");
-  assert.ok(textCall[0].includes("key IN ($3, $4)"), textCall[0]);
-  assert.ok(textCall[0].includes("LIMIT $5"), textCall[0]);
-  assert.equal(textCall[1][2], "k1");
-  assert.equal(textCall[1][3], "other");
-  assert.equal(textCall[1][4], 3);
+  const textCalls = p.calls.filter(([sql]) => sql.includes("plainto_tsquery"));
+  assert.ok(textCalls.length >= 2, "active + sibling text legs must run");
+  // Активная текстовая нога: $1=cfg, $2=query, $3=key (k1).
+  const active = textCalls.find(([sql, params]) => sql.includes("key = $3") && params[2] === "k1");
+  assert.ok(active, "active text leg with key = $3 (k1)");
+  assert.ok(!active[0].includes("merged = 1"), "active text leg must NOT be merged-only");
+  // Sibling текстовая нога: key = $3 (other) + merged = 1 (§6.2).
+  const sibling = textCalls.find(([sql, params]) => sql.includes("key = $3") && params[2] === "other");
+  assert.ok(sibling, "sibling text leg with key = $3 (other)");
+  assert.ok(sibling[0].includes("merged = 1"), "sibling text leg must be merged-only");
 });
 
 test("pgvector text leg: date_from/author placeholders continue after key-set", async () => {

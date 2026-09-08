@@ -173,7 +173,7 @@ export class SqliteStorage {
     tx(entries);
   }
 
-  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds }) {
+  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds, mergedOnly }) {
     if (embedding.length !== this.dim) {
       throw new Error(`embedding length ${embedding.length} does not match expected dimension ${this.dim}`);
     }
@@ -185,7 +185,9 @@ export class SqliteStorage {
     const allVector = [];
     await this._collectKey(keys[0], true, embedding, opts, allVector, textLists); // активный ключ
     for (const k of keys.slice(1)) {
-      await this._collectKey(k, false, embedding, opts, allVector, textLists); // соседние (read-only)
+      // I-1 (§6.2): sibling-нога — строго general (merged=1) при любом scope;
+      // own-key filterSessionIds в sibling не протекает (иначе sibling пуст).
+      await this._collectKey(k, false, embedding, { ...opts, mergedOnly: true, filterSessionIds: undefined }, allVector, textLists);
     }
     allVector.sort((a, b) => b.score - a.score);
     // Единый RRF-фьюжн по всем ключам (модель сверена → скоры сравнимы).
@@ -200,7 +202,7 @@ export class SqliteStorage {
    * @param {string} k  Ключ.
    * @param {boolean} isActive  Активный ключ (this.db) или соседний.
    * @param {Float32Array} embedding  Вектор запроса.
-   * @param {object} opts  date_from/date_to/author/query/top_k/min_score/filterSessionIds.
+   * @param {object} opts  date_from/date_to/author/query/top_k/min_score/filterSessionIds/mergedOnly.
    * @param {Array} allVector  Накопитель векторных хитов (мутируется).
    * @param {Array} textLists  Накопитель текстовых списков (мутируется).
    */
@@ -236,6 +238,12 @@ export class SqliteStorage {
         console.error(`[memory] cross-project skip ${k}: dim mismatch`);
         return;
       }
+      // Pre-v3 sibling (без колонки merged) → SQL-ошибка → fail-soft skip (§6.2).
+      const cols = sib.prepare("PRAGMA table_info(memory)").all().map((c) => c.name);
+      if (opts.mergedOnly && !cols.includes("merged")) {
+        console.error(`[memory] cross-project skip ${k}: pre-v3 sibling without merged column`);
+        return;
+      }
       // Старая БД без FTS-таблицы → vector-only.
       const hasFts = sib.prepare("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'memory_fts'").get();
       const { vectorHits, ftsHits } = this._searchIn(sib, k, embedding, { ...opts, allowFts: !!hasFts });
@@ -258,15 +266,17 @@ export class SqliteStorage {
    * @param {object} db  better-sqlite3 соединение.
    * @param {string} k  Ключ.
    * @param {Float32Array} embedding  Вектор запроса.
-   * @param {object} opts  date_from/date_to/author/query/top_k/min_score/allowFts/filterSessionIds.
+   * @param {object} opts  date_from/date_to/author/query/top_k/min_score/allowFts/filterSessionIds/mergedOnly.
    * @returns {{ vectorHits: Array, ftsHits: Array }}
    */
-  _searchIn(db, k, embedding, { top_k = 3, min_score = 0, date_from, date_to, author, query, allowFts = true, filterSessionIds }) {
+  _searchIn(db, k, embedding, { top_k = 3, min_score = 0, date_from, date_to, author, query, allowFts = true, filterSessionIds, mergedOnly }) {
     const conds = ["key = ?"];
     const params = [k];
     if (date_from !== undefined) { conds.push("time_last >= ?"); params.push(date_from); }
     if (date_to !== undefined) { conds.push("time_last <= ?"); params.push(date_to); }
     if (author !== undefined) { conds.push("author = ?"); params.push(author); }
+    // I-1 (§6.2): sibling-нога — строго general (merged=1).
+    if (mergedOnly) conds.push("merged = 1");
     // I1: pre-filter по кандидатам (merged=1 OR head != '') — поиск идёт ТОЛЬКО
     // по ним, чтобы unattributed/out-of-context записи не разбавляли top_k.
     if (filterSessionIds && filterSessionIds.length) {
@@ -297,6 +307,8 @@ export class SqliteStorage {
       if (date_from !== undefined) { ftsConds.push("memory.time_last >= ?"); ftsParams.push(date_from); }
       if (date_to !== undefined) { ftsConds.push("memory.time_last <= ?"); ftsParams.push(date_to); }
       if (author !== undefined) { ftsConds.push("memory.author = ?"); ftsParams.push(author); }
+      // I-1 (§6.2): тот же merged-only фильтр в FTS-ветке sibling-ноги.
+      if (mergedOnly) { ftsConds.push("memory.merged = 1"); }
       // I1: тот же pre-filter кандидатов в FTS-ветке (join к memory.session_id).
       if (filterSessionIds && filterSessionIds.length) {
         ftsConds.push(`memory.session_id IN (${filterSessionIds.map(() => "?").join(",")})`);

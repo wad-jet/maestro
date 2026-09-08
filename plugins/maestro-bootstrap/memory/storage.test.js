@@ -116,7 +116,7 @@ test("sqlite cross-project search reads sibling DB read-only", async () => {
   const active = mk(activeKey); const otherDb = mk(other);
   try {
     await otherDb.init();
-    await otherDb.upsert([{ session_id: "o1", key: other, origin_project_hash: "ho", title: "Other Project", summary: "sum", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([1, 0, 0]) }]);
+    await otherDb.upsert([{ session_id: "o1", key: other, origin_project_hash: "ho", title: "Other Project", summary: "sum", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([1, 0, 0]), merged: 1 }]);
     await otherDb.dispose();
     await active.init();
     await active.upsert([{ session_id: "a1", key: activeKey, origin_project_hash: "ha", title: "Active", summary: "sum", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([0, 1, 0]) }]);
@@ -269,7 +269,7 @@ test("sqlite cross-project: sibling text-only hit gets full entry (embedded)", a
     await otherDb.init();
     // Слабый вектор (ортогонален запросу → отсекается min_score), но сильный
     // текстовый матч по "OAuth" → хит только через FTS.
-    await otherDb.upsert([{ session_id: "o1", key: other, origin_project_hash: "ho", title: "OAuth token refresh", summary: "OAuth OAuth flow", decisions: ["d"], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([0, 1, 0]) }]);
+    await otherDb.upsert([{ session_id: "o1", key: other, origin_project_hash: "ho", title: "OAuth token refresh", summary: "OAuth OAuth flow", decisions: ["d"], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([0, 1, 0]), merged: 1 }]);
     await otherDb.dispose();
     await active.init();
     await active.upsert([{ session_id: "a1", key: activeKey, origin_project_hash: "ha", title: "Active", summary: "sum", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([1, 0, 0]) }]);
@@ -313,6 +313,59 @@ test("sqlite cross-project: sibling FTS row without memory row is skipped (no ph
     for (const h of res) {
       assert.ok(h.entry && h.entry.session_id, "every hit must carry a real entry");
     }
+  } finally {
+    await active.dispose();
+    await otherDb.dispose();
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("sqlite cross-project: sibling merged=0 record excluded (general-only, §6.2)", async () => {
+  const base = mkdtempSync(join(tmpdir(), "mm-sqlite-xp-"));
+  const dir = (key) => join(base, "maestro", "memory", sanitizeDirName(key));
+  const activeKey = "active"; const other = "other";
+  mkdirSync(dir(activeKey), { recursive: true });
+  mkdirSync(dir(other), { recursive: true });
+  const mk = (key) => new SqliteStorage({ dbPath: join(dir(key), "memory.db"), modelId: "m", dim: 3, moduleDir: null });
+  const active = mk(activeKey); const otherDb = mk(other);
+  try {
+    await otherDb.init();
+    // merged=0 sibling record (даже с head) — НЕ должен попасть в кросс-проект.
+    await otherDb.upsert([{ session_id: "o1", key: other, origin_project_hash: "ho", title: "Other Project", summary: "sum", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([1, 0, 0]), merged: 0, head: "h1" }]);
+    await otherDb.dispose();
+    await active.init();
+    await active.upsert([{ session_id: "a1", key: activeKey, origin_project_hash: "ha", title: "Active", summary: "sum", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([0, 1, 0]) }]);
+    const res = await active.search(new Float32Array([1, 0, 0]), { key: activeKey, project: other, top_k: 10, min_score: 0 });
+    const ids = res.map((h) => h.entry.session_id);
+    assert.ok(!ids.includes("o1"), "merged=0 sibling must be excluded");
+    assert.ok(ids.includes("a1"), "active hit present");
+  } finally {
+    await active.dispose();
+    await otherDb.dispose();
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("sqlite cross-project: sibling leg ignores own-key filterSessionIds (mergedOnly)", async () => {
+  const base = mkdtempSync(join(tmpdir(), "mm-sqlite-xp-"));
+  const dir = (key) => join(base, "maestro", "memory", sanitizeDirName(key));
+  const activeKey = "active"; const other = "other";
+  mkdirSync(dir(activeKey), { recursive: true });
+  mkdirSync(dir(other), { recursive: true });
+  const mk = (key) => new SqliteStorage({ dbPath: join(dir(key), "memory.db"), modelId: "m", dim: 3, moduleDir: null });
+  const active = mk(activeKey); const otherDb = mk(other);
+  try {
+    await otherDb.init();
+    // merged=1 sibling record, session_id НЕ в own-key кандидатах.
+    await otherDb.upsert([{ session_id: "o1", key: other, origin_project_hash: "ho", title: "Other Project", summary: "sum", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([1, 0, 0]), merged: 1 }]);
+    await otherDb.dispose();
+    await active.init();
+    await active.upsert([{ session_id: "a1", key: activeKey, origin_project_hash: "ha", title: "Active", summary: "sum", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([0, 1, 0]) }]);
+    // filterSessionIds = own-key кандидаты (a1) — НЕ должен применяться к sibling.
+    const res = await active.search(new Float32Array([1, 0, 0]), { key: activeKey, project: other, top_k: 10, min_score: 0, filterSessionIds: ["a1"] });
+    const ids = res.map((h) => h.entry.session_id);
+    assert.ok(ids.includes("o1"), "sibling general record returned despite own-key filterSessionIds");
+    assert.ok(ids.includes("a1"), "active candidate present");
   } finally {
     await active.dispose();
     await otherDb.dispose();

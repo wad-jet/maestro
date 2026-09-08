@@ -127,64 +127,98 @@ export class PgVectorStorage {
       client.release();
     }
   }
-  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds }) {
-    // B2: cross-project opt-in — key IN (current + project key).
+  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds, mergedOnly }) {
+    // B2: cross-project opt-in — key IN (current + project key). Активная нога
+    // (own key) и sibling-ноги разделяются: sibling строго general (merged=1,
+    // §6.2) и НЕ получает own-key filterSessionIds (иначе sibling пуст).
     const keys = resolveSearchKeys({ key, project });
+    const activeKey = keys[0];
+    const siblingKeys = keys.slice(1);
+    const vectorHits = [];
+    const textLists = [];
+
+    await this._collectLeg(activeKey, { filterSessionIds, merged: false }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists);
+    if (siblingKeys.length) {
+      await this._collectLeg(siblingKeys, { merged: true }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists);
+    }
+
+    vectorHits.sort((a, b) => b.score - a.score);
+    if (textLists.length) {
+      return (await fuseRrf(vectorHits, textLists, { fetchEntry: (sid) => this.get(sid) })).slice(0, top_k);
+    }
+    return vectorHits.slice(0, top_k);
+  }
+
+  /**
+   * Одна нога поиска (активная или sibling-набор ключей): векторная + текстовая
+   * ветки с общими фильтрами. Хиты накапливаются в переданные массивы.
+   * @param {string|string[]} keys  Ключ(и) ноги.
+   * @param {{ filterSessionIds?: string[], merged?: boolean }} legOpts
+   * @param {Float32Array} embedding
+   * @param {{ top_k: number, min_score: number, date_from?: number, date_to?: number, author?: string, query?: string }} opts
+   * @param {Array} vectorHits  Накопитель векторных хитов (мутируется).
+   * @param {Array} textLists  Накопитель текстовых списков (мутируется).
+   */
+  async _collectLeg(keys, { filterSessionIds, merged }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists) {
+    const ks = Array.isArray(keys) ? keys : [keys];
     const conds = [];
     const params = [`[${Array.from(embedding)}]`];
     let i = 2;
-    if (keys.length === 1) {
+    if (ks.length === 1) {
       conds.push(`key = $${i++}`);
-      params.push(keys[0]);
+      params.push(ks[0]);
     } else {
-      conds.push(`key IN (${keys.map(() => `$${i++}`).join(", ")})`);
-      params.push(...keys);
+      conds.push(`key IN (${ks.map(() => `$${i++}`).join(", ")})`);
+      params.push(...ks);
     }
     if (date_from !== undefined) { conds.push(`time_last >= $${i++}`); params.push(date_from); }
     if (date_to !== undefined) { conds.push(`time_last <= $${i++}`); params.push(date_to); }
     if (author !== undefined) { conds.push(`author = $${i++}`); params.push(author); }
-    // I1: pre-filter по кандидатам (merged=1 OR head != '') — поиск идёт ТОЛЬКО
-    // по ним, чтобы unattributed/out-of-context записи не разбавляли top_k.
+    // I1: pre-filter по кандидатам (merged=1 OR head != '') — только активная нога.
     if (filterSessionIds && filterSessionIds.length) {
       conds.push(`session_id IN (${filterSessionIds.map(() => `$${i++}`).join(", ")})`);
       params.push(...filterSessionIds);
     }
+    // I-1 (§6.2): sibling-нога — строго general (merged=1).
+    if (merged) conds.push(`merged = 1`);
     conds.push(`1 - (embedding <=> $1) >= $${i++}`);
     params.push(min_score);
     const vectorRes = await this.pool.query(
-      `SELECT session_id, key, origin_project_hash, title, summary, decisions, model_id, author, time_first, time_last, version,
-              1 - (embedding <=> $1) AS score
+      `SELECT session_id, key, origin_project_hash, title, summary, decisions, model_id, author, time_first, time_last, version, branch, head, merged,
+               1 - (embedding <=> $1) AS score
        FROM ${this.table}
        WHERE ${conds.join(" AND ")}
        ORDER BY embedding <=> $1
        LIMIT $${i}`,
       [...params, top_k]
     );
-    const vectorHits = vectorRes.rows.map((r) => ({ entry: { ...r, embedding: undefined, decisions: JSON.parse(r.decisions) }, score: Number(r.score) }));
+    vectorHits.push(...vectorRes.rows.map((r) => ({ entry: { ...r, embedding: undefined, decisions: JSON.parse(r.decisions) }, score: Number(r.score) })));
 
     // Текстовая ветка: только lex (ts_rank), фузия через RRF. Зеркалит
-    // key-set/date/author фильтры векторной ветки (resolveSearchKeys).
+    // key-set/date/author фильтры векторной ветки.
     if (typeof query === "string" && query.trim().length > 0) {
       try {
         const tparams = [this.textSearchConfig, query];
         // $1 = cfg, $2 = query → первый key-фильтр начинается с $3.
         let j = 3;
         const tconds = [`fts @@ plainto_tsquery($1, $2)`];
-        if (keys.length === 1) {
+        if (ks.length === 1) {
           tconds.push(`key = $${j++}`);
-          tparams.push(keys[0]);
+          tparams.push(ks[0]);
         } else {
-          tconds.push(`key IN (${keys.map(() => `$${j++}`).join(", ")})`);
-          tparams.push(...keys);
+          tconds.push(`key IN (${ks.map(() => `$${j++}`).join(", ")})`);
+          tparams.push(...ks);
         }
         if (date_from !== undefined) { tconds.push(`time_last >= $${j++}`); tparams.push(date_from); }
         if (date_to !== undefined) { tconds.push(`time_last <= $${j++}`); tparams.push(date_to); }
         if (author !== undefined) { tconds.push(`author = $${j++}`); tparams.push(author); }
-        // I1: тот же pre-filter кандидатов в текстовой ветке.
+        // I1: тот же pre-filter кандидатов в текстовой ветке (активная нога).
         if (filterSessionIds && filterSessionIds.length) {
           tconds.push(`session_id IN (${filterSessionIds.map(() => `$${j++}`).join(", ")})`);
           tparams.push(...filterSessionIds);
         }
+        // I-1 (§6.2): merged-only в текстовой ветке sibling-ноги.
+        if (merged) tconds.push(`merged = 1`);
         const textRes = await this.pool.query(
           `SELECT session_id FROM ${this.table}
            WHERE ${tconds.join(" AND ")}
@@ -193,15 +227,12 @@ export class PgVectorStorage {
           [...tparams, top_k]
         );
         const textHits = textRes.rows.map((r) => ({ session_id: r.session_id }));
-        // C2: кап результата фузии до top_k (паритет с sqlite).
-        return (await fuseRrf(vectorHits, textHits.length ? [textHits] : [], { fetchEntry: (sid) => this.get(sid) })).slice(0, top_k);
+        if (textHits.length) textLists.push(textHits);
       } catch (err) {
         // Fail-soft: при сбое текстовой ветки возвращаем только векторные хиты.
         console.error("[memory] pgvector text leg failed, vector-only fallback: " + err.message);
-        return vectorHits;
       }
     }
-    return vectorHits;
   }
   async delete(session_id) { await this.pool.query(`DELETE FROM ${this.table} WHERE session_id = $1`, [session_id]); }
   async deleteByFilter({ key, session_id, author, before }) {

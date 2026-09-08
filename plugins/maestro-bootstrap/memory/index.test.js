@@ -701,7 +701,9 @@ test("export writes JSONL; import round-trips with embedding", async () => {
   process.env.XDG_DATA_HOME = dir;
   try {
     const storage = await mkSqliteStorage(dir);
-    await storage.upsert([mkFullEntry()]);
+    // I-3: branch/head/merged — легитимные метаданные v3, должны пережить
+    // export → import.
+    await storage.upsert([mkFullEntry({ branch: "feature/x", head: "abc123", merged: 0 })]);
     const hooks = await registerMemoryHooks({
       client: mkClient(),
       config: mkConfig(dir, { namespace: "k" }),
@@ -714,6 +716,11 @@ test("export writes JSONL; import round-trips with embedding", async () => {
     const expRes = await hooks.tool.memory_export.execute({ path: exportPath }, { sessionID: "s1" });
     assert.match(expRes, /Экспортировано 1 запис/);
     assert.ok(existsSync(exportPath), "export file must exist");
+    // I-3: экспортированные строки несут branch/head/merged.
+    const exported = JSON.parse(readFileSync(exportPath, "utf8").trim().split("\n")[0]);
+    assert.equal(exported.branch, "feature/x", "export must include branch");
+    assert.equal(exported.head, "abc123", "export must include head");
+    assert.equal(exported.merged, 0, "export must include merged");
 
     // Fresh storage (new db file) → import → search finds it.
     const storage2 = await mkSqliteStorage(join(dir, "fresh"));
@@ -731,6 +738,10 @@ test("export writes JSONL; import round-trips with embedding", async () => {
     assert.equal(hits.length, 1, "imported entry must be searchable");
     assert.equal(hits[0].entry.title, "Title");
     assert.deepEqual(hits[0].entry.decisions, ["d1", "d2"]);
+    // I-3: round-trip сохраняет branch/head/merged.
+    assert.equal(hits[0].entry.branch, "feature/x", "branch survives round-trip");
+    assert.equal(hits[0].entry.head, "abc123", "head survives round-trip");
+    assert.equal(hits[0].entry.merged, 0, "merged survives round-trip");
 
     await hooks.dispose?.();
     await hooks2.dispose?.();
@@ -2064,6 +2075,109 @@ test("M2: invalid scope → tool error (not silent flatten)", async () => {
     const res = await hooks.tool.memory_search.execute({ query: "x", scope: "bogus" }, { sessionID: "s1" });
     assert.match(res, /невалидный scope "bogus"/, "must report invalid scope");
     assert.equal(storage.searches, 0, "search must NOT run for invalid scope");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── Final review: I-1 (sibling general-only), I-2 (default-scope flatten) ──
+
+test("I-1: scope=branch + project → sibling general records returned (mergedOnly), own-key candidates not applied to sibling", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-i1-xp-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.candidates = async () => [{ session_id: "a", merged: 1, head: "" }];
+    storage.search = async function (vec, opts) {
+      this.searches++;
+      this.lastOpts = opts;
+      // Симулируем бэкенд: sibling-нога (mergedOnly) возвращает general-запись
+      // соседа (o1), НЕ входящую в own-key кандидаты.
+      return [
+        { entry: { session_id: "a", title: "A", summary: "SA", decisions: [], author: "alice", time_last: 1, origin_project_hash: "h", merged: 1, branch: "main" }, score: 0.9 },
+        { entry: { session_id: "o1", title: "O", summary: "SO", decisions: [], author: "bob", time_last: 2, origin_project_hash: "ho", merged: 1, branch: "main" }, score: 0.8 },
+      ];
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git: mkScopeGit() },
+    });
+    const res = await hooks.tool.memory_search.execute({ query: "x", scope: "branch", project: "other" }, { sessionID: "s1" });
+    assert.equal(storage.lastOpts.mergedOnly, true, "cross-project path must set mergedOnly");
+    assert.match(res, /# A/, "active candidate returned");
+    assert.match(res, /# O/, "sibling general record returned (not filtered by own-key candidates)");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("I-2: default scope + mainline unresolved → flat (all candidates incl. head∉ancestorSet returned)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-i2-flat-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkScopeStorage();
+    const git = {
+      detectMainline: () => null,
+      revList: (root, ref) => (ref === "HEAD" ? new Set(["hb", "hc"]) : new Set()),
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+    // БЕЗ явного scope → default branch → mainline unresolved → flat.
+    const res = await hooks.tool.memory_search.execute({ query: "x" }, { sessionID: "s1" });
+    assert.match(res, /# A/, "merged=1 returned (flat)");
+    assert.match(res, /# B/, "head∈ancestorSet returned (flat)");
+    assert.match(res, /# C/, "head∈ancestorSet returned (flat)");
+    assert.match(res, /# D/, "head∉ancestorSet returned (flat — mainline unresolved)");
+    assert.doesNotMatch(res, /⚠️ не в main/, "flat must NOT annotate experience");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("I-2: explicit scope=branch + mainline unresolved → degraded mechanics (mainlineSet ∅)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-i2-deg-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkScopeStorage();
+    const git = {
+      detectMainline: () => null,
+      revList: (root, ref) => (ref === "HEAD" ? new Set(["hb", "hc"]) : new Set()),
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+    // Явный scope=branch → degraded: fork-point записи → experience,
+    // head∉ancestorSet → исключён.
+    const res = await hooks.tool.memory_search.execute({ query: "x", scope: "branch" }, { sessionID: "s1" });
+    assert.match(res, /# A/, "merged=1 → general");
+    assert.match(res, /# B/, "head ∈ ancestorSet (mainline ∅) → experience");
+    assert.match(res, /# B.*⚠️ не в main/, "b annotated as experience (unresolved window)");
+    assert.match(res, /# C/, "head ∈ ancestorSet → experience");
+    assert.doesNotMatch(res, /# D/, "head ∉ ancestorSet → не в контексте");
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;

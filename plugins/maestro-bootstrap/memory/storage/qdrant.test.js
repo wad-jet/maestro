@@ -126,14 +126,36 @@ test("qdrant search parses decisions and returns scored results", async () => {
   assert.equal(res[0].entry.embedding, undefined);
 });
 
-test("qdrant search with project uses key-set filter", async () => {
+test("qdrant search with project splits legs: active key + merged-only sibling", async () => {
   const c = fakeClient();
   const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
   await st.init();
-  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0.35, key: "k1", project: "other" });
-  const query = c.calls.find(([k]) => k === "query");
-  assert.ok(query);
-  assert.deepEqual(query[2].filter.must[0], { key: "key", match: { any: ["k1", "other"] } });
+  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0.35, key: "k1", project: "other", mergedOnly: true });
+  const queries = c.calls.filter(([k]) => k === "query");
+  assert.ok(queries.length >= 2, "active + sibling legs must run");
+  // Активная нога: key match value (own key), без merged-фильтра.
+  const active = queries.find(([, , q]) => q.filter.must[0]?.key === "key" && q.filter.must[0]?.match?.value === "k1");
+  assert.ok(active, "active leg with key match value k1");
+  assert.ok(!active[2].filter.must.some((m) => m.key === "merged"), "active leg must NOT be merged-only");
+  // Sibling-нога: key match value (other) + merged=1 (§6.2 general-only).
+  const sibling = queries.find(([, , q]) => q.filter.must[0]?.key === "key" && q.filter.must[0]?.match?.value === "other");
+  assert.ok(sibling, "sibling leg with key match value other");
+  assert.deepEqual(sibling[2].filter.must[1], { key: "merged", match: { value: 1 } });
+});
+
+test("qdrant cross-project: sibling leg merged=1 and NOT own-key filterSessionIds (§6.2)", async () => {
+  const c = fakeClient();
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "k1", project: "other", mergedOnly: true, filterSessionIds: ["a1"] });
+  const queries = c.calls.filter(([k]) => k === "query");
+  const sibling = queries.find(([, , q]) => q.filter.must[0]?.key === "key" && q.filter.must[0]?.match?.value === "other");
+  assert.ok(sibling, "sibling leg present");
+  assert.deepEqual(sibling[2].filter.must[1], { key: "merged", match: { value: 1 } }, "sibling leg merged-only");
+  assert.ok(!sibling[2].filter.must.some((m) => m.key === "session_id"), "own-key filterSessionIds must NOT leak into sibling leg");
+  const active = queries.find(([, , q]) => q.filter.must[0]?.key === "key" && q.filter.must[0]?.match?.value === "k1");
+  assert.ok(active, "active leg present");
+  assert.ok(active[2].filter.must.some((m) => m.key === "session_id"), "active leg keeps filterSessionIds");
 });
 
 test("qdrant search filters date/author", async () => {
