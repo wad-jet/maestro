@@ -6,6 +6,9 @@ import { dirname } from "node:path";
  * Persisted as JSON at `path`. All methods are async to match the interface
  * consumed by Indexer (Task 10).
  * @param {string} path  Path to the state JSON file.
+ * @param {{ log?: { warn?: Function } }} [opts]  Аудит-лог (spec §4.2):
+ *   parse-ошибка state.json → warn `memory:state.corrupt` (reason: parse_error);
+ *   ENOENT (первый запуск) → не варн (spec: ENOENT не варн для нового проекта).
  * @returns {{
  *   getLastSummarized(id): Promise<number|null>,
  *   setSummarized(id): Promise<void>,
@@ -18,12 +21,16 @@ import { dirname } from "node:path";
  *   setEmbedderProbe(info): Promise<void>,
  * }}
  */
-export function createState(path) {
+export function createState(path, { log } = {}) {
   let data = { sessions: {}, firstRun: null };
   try {
     data = JSON.parse(readFileSync(path, "utf8"));
-  } catch {
-    /* fresh state */
+  } catch (err) {
+    // Task 7: state.corrupt — parse-ошибка (файл существует, но не JSON) → warn;
+    // ENOENT (первый запуск) → не варн (spec §4.2: ENOENT не варн для нового проекта).
+    if (err?.code !== "ENOENT") {
+      log?.warn?.("memory:state.corrupt", { reason: "parse_error" });
+    }
   }
   if (!data.firstRun) data.firstRun = Date.now();
   const persist = () => {

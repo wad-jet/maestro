@@ -635,8 +635,8 @@ test("retention_days set → storage.prune called with effective key + logged", 
     assert.equal(typeof storage.prunes[0].key, "string");
     assert.ok(storage.prunes[0].key.length > 0, "prune must be called with the effective key");
     assert.ok(
-      logged.some(([m, e]) => m === "memory: retention pruned" && e.count === 5),
-      "must log retention pruned with count",
+      logged.some(([m, e]) => m === "memory:retention_pruned" && e.count === 5 && e.older_than_days === 30),
+      "must log retention_pruned with count + older_than_days",
     );
     await hooks.dispose?.();
   } finally {
@@ -2684,4 +2684,323 @@ test("memory: disabled stays in bootstrap log (carve-out)", async () => {
   await registerMemoryHooks({ client: mkClient(), config: { memory: { enabled: false } }, log, memoryLog, root: dir });
   const bootMsgs = readLogs(dir, "maestro-bootstrap").map((e) => e.msg);
   assert.ok(bootMsgs.includes("memory: disabled"), "carve-out: disabled остаётся в bootstrap-логе");
+});
+
+// ── Task 7: forgotten/stats/init/mismatch/state.corrupt/promoted/mainline ──
+
+// Поллинг-ожидание события в массиве лог-вызовов (backfill-триггер асинхронный).
+async function waitForEvent(calls, msg, timeoutMs = 1500) {
+  const t0 = Date.now();
+  while (Date.now() - t0 < timeoutMs) {
+    const ev = calls.find(([m]) => m === msg);
+    if (ev) return ev;
+    await new Promise((r) => setTimeout(r, 5));
+  }
+  return null;
+}
+
+test("normalizeBranch strips ticket codes (SEC-4b)", async () => {
+  const { normalizeBranch } = await import("./index.js");
+  assert.equal(normalizeBranch("feature/PROJ-123-fix"), "feature/*-fix");
+  assert.equal(normalizeBranch("main"), "main");
+  assert.equal(normalizeBranch(""), "");
+  assert.equal(normalizeBranch(null), "");
+});
+
+test("storage.stats logs entries + tier counts after backfill", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-stats-ev-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const calls = [];
+    const log = { debug() {}, info: (m, e) => calls.push([m, e]), warn() {}, error() {} };
+    const storage = mkStorage();
+    storage.stats = async () => ({ entries: 5 });
+    storage.candidates = async () => [
+      { merged: 1, head: "" },
+      { merged: 1, head: "h1" },
+      { merged: 0, head: "h2" },
+      { merged: 0, head: "" },
+    ];
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: { memory: { enabled: true, storage: { type: "sqlite" } } },
+      log,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    const ev = await waitForEvent(calls, "memory:storage.stats");
+    assert.ok(ev, "must emit memory:storage.stats after backfill window");
+    assert.equal(ev[1].entries, 5);
+    assert.equal(ev[1].merged, 2, "merged = count(merged==1)");
+    assert.equal(ev[1].experience, 1, "experience = count(head != '' && merged == 0)");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("storage_init logs type after storage.init", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-init-ev-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const calls = [];
+    const log = { debug() {}, info: (m, e) => calls.push([m, e]), warn() {}, error() {} };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log,
+      root: dir,
+      deps: { embeddings: mkMockEmbeddings() },
+    });
+    const ev = calls.find(([m]) => m === "memory:storage_init");
+    assert.ok(ev, "must emit memory:storage_init");
+    assert.equal(ev[1].type, "sqlite");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("storage_mismatch logs model/dim on init mismatch", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-mismatch-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    // Pre-create DB с несовпадающей размерностью в meta → init бросает
+    // "dimension mismatch: stored=999 expected=384".
+    const dbPath = dbPathFor(dir, dir);
+    const { mkdirSync } = await import("node:fs");
+    mkdirSync(dirname(dbPath), { recursive: true });
+    const { default: Database } = await import("better-sqlite3");
+    const db = new Database(dbPath);
+    db.exec("CREATE TABLE meta (name TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    db.prepare("INSERT INTO meta (name, value) VALUES ('model_id', 'x')").run();
+    db.prepare("INSERT INTO meta (name, value) VALUES ('dim', '999')").run();
+    db.close();
+
+    const errors = [];
+    const log = { debug() {}, info() {}, warn() {}, error: (m, e) => errors.push([m, e]) };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log,
+      root: dir,
+      deps: { embeddings: mkMockEmbeddings() },
+    });
+    assert.deepEqual(hooks, {}, "init failed → memory off");
+    const ev = errors.find(([m]) => m === "memory:storage_mismatch");
+    assert.ok(ev, "must emit memory:storage_mismatch");
+    assert.equal(ev[1].type, "sqlite");
+    assert.equal(ev[1].model, "x", "model — имя без @base_url");
+    assert.equal(ev[1].dim_expected, 384, "local embedder dim = 384");
+    assert.equal(ev[1].dim_actual, 999, "dim_actual из ошибки storage");
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("state.corrupt warns on parse error (not ENOENT)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-state-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const statePath = join(dir, "maestro", "memory", "state.json");
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    mkdirSync(dirname(statePath), { recursive: true });
+    writeFileSync(statePath, "{ not json", "utf8");
+
+    const warns = [];
+    const log = { debug() {}, info() {}, warn: (m, e) => warns.push([m, e]), error() {} };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log,
+      root: dir,
+      deps: { embeddings: mkMockEmbeddings() },
+    });
+    const ev = warns.find(([m]) => m === "memory:state.corrupt");
+    assert.ok(ev, "must warn memory:state.corrupt on parse error");
+    assert.equal(ev[1].reason, "parse_error");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("state.corrupt NOT warned on ENOENT (first run)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-state-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const warns = [];
+    const log = { debug() {}, info() {}, warn: (m, e) => warns.push([m, e]), error() {} };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log,
+      root: dir,
+      deps: { embeddings: mkMockEmbeddings() },
+    });
+    assert.ok(!warns.some(([m]) => m === "memory:state.corrupt"), "ENOENT first run must NOT warn");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_forget logs forgotten with count + filter enums", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-forg-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.deleteByFilter = async () => 3;
+    const calls = [];
+    const log = { debug() {}, info: (m, e) => calls.push([m, e]), warn() {}, error() {} };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    await hooks.tool.memory_forget.execute({ session_id: "s9", author: "alice", before: 123 }, { sessionID: "s1" });
+    const ev = calls.find(([m]) => m === "memory:forgotten");
+    assert.ok(ev, "must log memory:forgotten");
+    assert.equal(ev[1].count, 3);
+    assert.deepEqual(ev[1].filters, ["session_id", "author", "before"], "enum-имена переданных фильтров");
+
+    // Частичная комбинация фильтров.
+    calls.length = 0;
+    await hooks.tool.memory_forget.execute({ author: "alice" }, { sessionID: "s1" });
+    const ev2 = calls.find(([m]) => m === "memory:forgotten");
+    assert.deepEqual(ev2[1].filters, ["author"], "только переданные фильтры");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("init logs mainline_resolved + promoted with normalized branches", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-promo-ev-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = await mkSqliteStorage(dir);
+    await insertRow(storage, { session_id: "a1", head: "h1", branch: "feature/PROJ-123-fix" });
+    const calls = [];
+    const log = { debug() {}, info: (m, e) => calls.push([m, e]), warn() {}, error() {} };
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      isAncestor: () => "yes",
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir, { namespace: "k" }),
+      log,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+    const resolved = calls.find(([m]) => m === "memory:mainline_resolved");
+    assert.ok(resolved, "must log mainline_resolved");
+    assert.equal(resolved[1].branch, "main");
+    const promoted = calls.find(([m]) => m === "memory:promoted");
+    assert.ok(promoted, "must log promoted");
+    assert.equal(promoted[1].count, 1);
+    assert.deepEqual(promoted[1].branches, ["feature/*-fix"], "branch ticket-code нормализован");
+    assert.equal(promoted[1].mainline, "main");
+    await hooks.dispose?.();
+    await storage.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("SEC-4b: memory log contains no record text, paths, base_url, raw branch", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-sec4b-"));
+  const saved = process.env.XDG_DATA_HOME;
+  const savedLevel = process.env.MAESTRO_MEMORY_LOG_LEVEL;
+  process.env.XDG_DATA_HOME = dir;
+  process.env.MAESTRO_MEMORY_LOG_LEVEL = "debug"; // включить debug-события — сильнее проверка
+  try {
+    const storage = await mkSqliteStorage(dir);
+    // Pre-seed кандидата с ticket-code веткой → init-промоция эмитит
+    // memory:promoted с нормализованными branch-полями.
+    await storage.upsert([mkFullEntry({
+      session_id: "seed", key: "k", head: "h1", branch: "feature/PROJ-123-fix", merged: 0,
+      title: "Fix PROJ-123 auth flow", summary: "Refactored docs/confidential/roadmap.md handling",
+    })]);
+
+    // Реалистичные замаскированные фикстуры: транскрипт с confidential-путём
+    // и ticket-кодом; summarize возвращает title/summary с теми же фрагментами.
+    const client = {
+      session: {
+        list: async () => ({ data: [{ id: "s1", parentID: null, title: "Fix PROJ-123 auth flow", time: { created: 1, updated: Date.now() - 1000 } }] }),
+        get: async () => ({ data: { id: "s1", parentID: null, title: "Fix PROJ-123 auth flow", time: { created: 1, updated: Date.now() - 1000 } } }),
+        messages: async () => ({ data: [
+          { info: { role: "user" }, parts: [{ type: "text", text: "docs/confidential/roadmap.md сроки\nкакие сроки по PROJ-123?" }] },
+          { info: { role: "assistant", providerID: "openai", modelID: "gpt-4o" }, parts: [{ type: "text", text: "обновил docs/confidential/roadmap.md" }] },
+        ] }),
+        create: async () => ({ data: { id: "summ-1" } }),
+        prompt: async () => ({ data: { parts: [{ type: "text", text: '{"title":"Fix PROJ-123 auth flow","summary":"Refactored docs/confidential/roadmap.md handling","decisions":["PROJ-123 done"]}' }] } }),
+        delete: async () => ({ data: {} }),
+      },
+    };
+
+    const memoryLog = makeLogger(dir, { filePrefix: "maestro-memory", filterEnv: "MAESTRO_MEMORY" });
+    const log = makeLogger(dir, { filePrefix: "maestro-bootstrap", filterEnv: "MAESTRO_BOOTSTRAP" });
+    const cfg = mkConfig(dir, { namespace: "k", idle_debounce_min: 0, backfill_max_per_start: 5 });
+    cfg.confidential = { paths: ["docs/confidential/**"] };
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      isAncestor: () => "yes",
+      revList: () => new Set(["h1"]),
+    };
+    const hooks = await registerMemoryHooks({
+      client, config: cfg, log, memoryLog, root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+
+    // Ждём backfill (debounce 0) + storage.stats после окна.
+    await new Promise((r) => setTimeout(r, 300));
+
+    // Recall с реалистичным запросом (фрагменты title/summary/query).
+    await hooks["chat.message"]({ sessionID: "s1" }, { message: { parts: [{ type: "text", text: "how to fix PROJ-123 auth" }] } });
+    await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, { system: [] });
+
+    const lines = readLogs(dir, "maestro-memory");
+    assert.ok(lines.length > 0, "memory log must have entries");
+    const raw = lines.map((e) => JSON.stringify(e)).join("\n");
+    assert.ok(!raw.includes("Fix PROJ-123 auth flow"), "title must not leak");
+    assert.ok(!raw.includes("Refactored docs/confidential"), "summary must not leak");
+    assert.ok(!raw.includes("docs/confidential"), "confidential path must not leak");
+    assert.ok(!raw.includes("how to fix PROJ-123 auth"), "query must not leak");
+    assert.ok(!raw.includes("https://"), "base_url must not leak");
+    assert.ok(!raw.includes("PROJ-123"), "raw branch ticket code must not leak");
+
+    await hooks.dispose?.();
+    await storage.dispose?.();
+  } finally {
+    if (savedLevel === undefined) delete process.env.MAESTRO_MEMORY_LOG_LEVEL;
+    else process.env.MAESTRO_MEMORY_LOG_LEVEL = savedLevel;
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

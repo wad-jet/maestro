@@ -121,6 +121,64 @@ function toF32(v) {
 }
 
 /**
+ * Task 7: нормализация branch для аудит-лога (spec §3, SEC-4b): ticket-коды
+ * (`[A-Z]{1,4}-\d+`) → "*". Применяется ко ВСЕМ branch-полям событий
+ * (promoted branches, mainline, mainline_resolved). Не-string → как есть.
+ * @param {string} name
+ * @returns {string}
+ */
+export function normalizeBranch(name) {
+  if (typeof name !== "string") return name ?? "";
+  return name.replace(/[A-Z]{1,4}-\d+/g, "*");
+}
+
+/**
+ * Task 7: имя модели без `@base_url` (spec §3: эндпоинт не логируется).
+ * openai modelId = `openai:<model>@<base_url>` → срез до последнего "@";
+ * локальные modelId без "@" → как есть.
+ * @param {string} modelId
+ * @returns {string}
+ */
+function modelNameOnly(modelId) {
+  if (typeof modelId !== "string") return modelId;
+  const at = modelId.lastIndexOf("@");
+  return at > 0 ? modelId.slice(0, at) : modelId;
+}
+
+/**
+ * Task 7: dim_actual из сообщения ошибки storage (sqlite init:
+ * "dimension mismatch: stored=<n> expected=<m>"). Fail-soft: null, если в
+ * ошибке размерности нет (model mismatch). Тело ошибки в лог НЕ попадает —
+ * только число.
+ * @param {Error} err
+ * @returns {number|null}
+ */
+function dimActualFromError(err) {
+  const m = /stored=(\d+)/.exec(err?.message ?? "");
+  return m ? parseInt(m[1], 10) : null;
+}
+
+/**
+ * Task 7: memory:storage.stats — cumulative-агрегаты после backfill-окна
+ * (spec §4.4). Эмитится по завершении onStartup (backfill-цикл), не по
+ * запросам. Tier-счётчики из candidates(): merged = merged==1,
+ * experience = head != '' && merged == 0 (аппроксимация тира, spec §4.4).
+ * Fail-soft: статистика не роняет init.
+ * @param {{ storage: object, effectiveKey: string, logInfo: Function }} ctx
+ */
+async function emitStorageStats({ storage, effectiveKey, logInfo }) {
+  try {
+    const s = await storage.stats({ key: effectiveKey });
+    const cands = await storage.candidates(effectiveKey);
+    const merged = cands.filter((c) => c.merged === 1).length;
+    const experience = cands.filter((c) => c.head && c.merged === 0).length;
+    logInfo("memory:storage.stats", { entries: s.entries, merged, experience });
+  } catch {
+    /* fail-soft */
+  }
+}
+
+/**
  * Cosine similarity between two Float32Array embeddings (normalized vectors
  * score 1.0; zero-norm guard → 0). Local helper for stats clustering/graph —
  * O(n²) over scan results (thousands of entries, brute-force is fine).
@@ -402,7 +460,9 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     // hard-fail возвращается до любых побочных эффектов storage. Identity —
     // по фактическому embedder (modelId/dim), а не по конфигу: смена модели
     // (даже при том же конфиге) инвалидирует кэш.
-    const state = createState(statePath);
+    // Task 7: state.corrupt — createState логирует parse-ошибку через переданный
+    // log (warn, reason: parse_error); ENOENT (первый запуск) → не варн.
+    const state = createState(statePath, { log: { warn: logWarn } });
     const cooldownMs = config.probe_cooldown_min * 60_000;
     // Эффективное имя env-переменной ключа — хойстим в scope, чтобы штатный
     // toolHooks (memory_probe) и off-ветка использовали одно значение.
@@ -439,7 +499,24 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     });
     if (!deps.storage) {
       mkdirSync(dirname(dbPath), { recursive: true });
-      await storage.init();
+      try {
+        await storage.init();
+        // Task 7: storage_init (spec §4.1) — тип бэкенда после успешного init.
+        logInfo("memory:storage_init", { type: config.storage.type });
+      } catch (err) {
+        // Task 7: storage_mismatch (spec §4.1) — model/dim mismatch при init.
+        // Только enum/числа (SEC-4b): model — имя без @base_url, dim_actual —
+        // из сообщения ошибки storage (тело ошибки в лог не попадает).
+        if (/mismatch/i.test(err?.message ?? "")) {
+          logError("memory:storage_mismatch", {
+            type: config.storage.type,
+            model: modelNameOnly(modelId),
+            dim_expected: dim,
+            dim_actual: dimActualFromError(err),
+          });
+        }
+        throw err;
+      }
     }
 
     // Task 5: mainline detect + head-based promotion (init). Кандидаты ключа
@@ -452,21 +529,42 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     try {
       const mainline = detectMainline(root, { override: config.mainline ?? null });
       if (!mainline) {
-        logWarn("memory: mainline_unresolved — branch-context flat (нет резолвнутого mainline)");
+        // Task 7: mainline_unresolved (spec §4.1) — warn без полей (branch-context flat).
+        logWarn("memory:mainline_unresolved", {});
       } else {
+        // Task 7: mainline_resolved (spec §4.1) — branch нормализован (SEC-4b).
+        logInfo("memory:mainline_resolved", { branch: normalizeBranch(mainline.name) });
         const candidates = await storage.candidates(effectiveKey);
         const uniqueHeads = [...new Set(candidates.filter((c) => c.merged === 0 && c.head).map((c) => c.head))];
+        // Task 7: memory:promoted (spec §4.4) — темы перешли в mainline (merged 0→1).
+        // count = число записей; branches/mainline — нормализованные (SEC-4b).
+        let promotedCount = 0;
+        const promotedBranches = new Set();
         for (const head of uniqueHeads) {
           const r = isAncestor(root, head, mainline.name);
           if (r === "yes") {
-            await storage.markMerged(effectiveKey, head);
+            const changes = await storage.markMerged(effectiveKey, head);
+            if (changes > 0) {
+              promotedCount += changes;
+              for (const c of candidates) {
+                if (c.head === head && c.branch) promotedBranches.add(c.branch);
+              }
+            }
           } else if (r === "error") {
             logDebug(`memory: promotion skip head=${head} (dangling/invalid)`);
           } // 'no' → пропуск
         }
+        if (promotedCount > 0) {
+          logInfo("memory:promoted", {
+            count: promotedCount,
+            branches: [...promotedBranches].map(normalizeBranch),
+            mainline: normalizeBranch(mainline.name),
+          });
+        }
       }
     } catch (err) {
-      logError("memory: promotion failed", { error: err instanceof Error ? err.message : String(err) });
+      // Task 7: enum-only (SEC-4b) — тело ошибки в лог не попадает.
+      logError("memory:promotion_failed", { error_class: "storage_error" });
     }
 
     const confidentialPaths = maestroConfig?.confidential?.paths ?? [];
@@ -654,6 +752,13 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
               return "memory_forget: укажите session_id, author или before";
             }
             const n = await storage.deleteByFilter({ key: effectiveKey, session_id, author, before });
+            // Task 7: memory:forgotten (spec §4.1) — count + enum-имена переданных
+            // фильтров (без значений; комбинация возможна).
+            const filters = [];
+            if (session_id !== undefined) filters.push("session_id");
+            if (author !== undefined) filters.push("author");
+            if (before !== undefined) filters.push("before");
+            logInfo("memory:forgotten", { count: n, filters });
             return `Удалено ${n} записей.`;
           } catch (err) {
             return `memory_forget failed: ${err instanceof Error ? err.message : String(err)}`;
@@ -985,16 +1090,21 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       };
     }
 
-    // I6: backfill при старте (fire-and-forget).
-    indexer.onStartup().catch(() => {});
+    // I6: backfill при старте (fire-and-forget). Task 7: по завершении окна
+    // эмитим memory:storage.stats (cumulative-агрегаты, spec §4.4).
+    indexer.onStartup()
+      .then(() => emitStorageStats({ storage, effectiveKey, logInfo }))
+      .catch(() => {});
 
     // C2: retention — prune entries older than retention_days at startup.
     if (typeof config.retention_days === "number" && config.retention_days > 0) {
       try {
         const pruned = await storage.prune({ key: effectiveKey, olderThanDays: config.retention_days });
-        if (pruned > 0) logInfo("memory: retention pruned", { count: pruned });
+        // Task 7: memory:retention_pruned (spec §4.1) — count + older_than_days.
+        if (pruned > 0) logInfo("memory:retention_pruned", { count: pruned, older_than_days: config.retention_days });
       } catch (err) {
-        logError("memory: retention prune failed", { error: err instanceof Error ? err.message : String(err) });
+        // Task 7: enum-only (SEC-4b) — тело ошибки в лог не попадает.
+        logError("memory:retention_prune_failed", { error_class: "storage_error" });
       }
     }
 
