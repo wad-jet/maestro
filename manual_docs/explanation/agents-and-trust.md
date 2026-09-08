@@ -313,6 +313,16 @@ untrusted работают по очищенным артефактам, а до
   в файл не попадают ни title, ни summary, ни decisions — только числа, имена
   авторов, даты, размеры кластеров, aggregate-label тем, session_id в графе.
   `include_text: true` — осознанный opt-in (документированное понижение).
+- **Аудит-лог memory layer — aggregates-only (SEC-4b+, v4).** Операции
+  memory-модуля пишутся в отдельный файл `.maestro/logs/maestro-memory-<дата>.log`
+  (JSONL; каталог — `MAESTRO_MEMORY_LOG_DIR`, по умолчанию каталог bootstrap-лога).
+  В лог попадают только enum'ы, числа и ограниченный набор идентификаторов
+  (`sessionID`, `projectKey`-hash, `author`, нормализованный `branch`, имя модели
+  без `@base_url`, `len`-бакеты, `error_class`/`http_status_class`). **Никогда** —
+  текст записей/запросов, пути и тела ошибок, `base_url`/эндпоинты, raw branch,
+  секреты. `.maestro/` в `.gitignore` (по умолчанию не покидает машину); при
+  непустых `confidential.paths` — doc-note `memory:log_confidential_note` (warn).
+  Hard-disable не вводится (аудит нужен в confidential-проектах сильнее всего).
 - **Кросс-проектный поиск — opt-in (паритет v3a).** `memory_search` с `project`
   ищет по записям других проектов **только когда задан явно** (не default); данные
   маскированы. Доступен на **всех бэкендах**: централизованные (qdrant/pgvector) —

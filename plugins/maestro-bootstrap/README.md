@@ -327,6 +327,7 @@ logs/, feedback-reports/, plugin-version); конфиг проекта — `maes
 .maestro/logs/maestro-bootstrap-2026-08-02.log
 .maestro/logs/maestro-audit-2026-08-01.log       # security-фактура
 .maestro/logs/maestro-audit-2026-08-02.log
+.maestro/logs/maestro-memory-2026-09-08.log      # аудит-лог memory layer (при memory.enabled)
 ```
 
 Формат строки (bootstrap-лог):
@@ -353,11 +354,17 @@ Memory layer (при `memory.enabled: true`):
   `retention_days_invalid`, `similarity_threshold_invalid`, `embedding_invalid`,
   `probe_cooldown_min_invalid`, `embedding_api_key_env_missing`,
   `embedder_probe_hard_fail`)
-- `memory: mainline_unresolved — branch-context flat (нет резолвнутого mainline)` (warn)
+- `memory:mainline_unresolved` — branch-context flat (нет резолвнутого mainline) (warn)
 - `memory: init failed` — ошибка инициализации (error; сессии работают)
-- `memory: indexer error` — ошибка индексации сессии (error, с `sessionID`)
-- `memory: retention pruned` — retention удалил записи при старте (info, с `count`)
+- `memory:index_error` — ошибка индексации сессии (error, с `sessionID` + `error_class` enum)
+- `memory:retention_pruned` — retention удалил записи при старте (info, с `count` + `older_than_days`)
 - `memory: transformers not installed — run npm install in <module_dir>` (error, actionable)
+
+Операции memory-модуля (lifecycle/root-cause/производительность) пишутся в
+**отдельный аудит-лог** `.maestro/logs/maestro-memory-<дата>.log` (JSONL;
+aggregates-only field whitelist, SEC-4b+). Уровень/маска/каталог —
+`MAESTRO_MEMORY_LOG_LEVEL` (default `info`)/`MAESTRO_MEMORY_LOG_MASK`/
+`MAESTRO_MEMORY_LOG_DIR`. Полный список событий — `manual_docs/reference/memory.md`.
 
 Security-события доступа (`confidential.access`, `access_policy.blocked`) в
 bootstrap-лог **не пишутся** — они только в аудит-логе (см. раздел «Аудит-лог»).
@@ -372,6 +379,9 @@ bootstrap-лог **не пишутся** — они только в аудит-�
 | `MAESTRO_BOOTSTRAP_LOG_MASK` | список включённых уровней через запятую | выводится из `LOG_LEVEL` |
 | `MAESTRO_BOOTSTRAP_LOG_DIR` | каталог для лог-файлов (по умолчанию `<project>/.maestro/logs`) | `<project>/.maestro/logs` |
 | `MAESTRO_AUDIT_LOG_DIR` | каталог для аудит-лога `maestro-audit-*.log` | `<project>/.maestro/logs` |
+| `MAESTRO_MEMORY_LOG_LEVEL` | порог детализации аудит-лога memory layer (`maestro-memory-*.log`) | `info` |
+| `MAESTRO_MEMORY_LOG_MASK` | список включённых уровней через запятую (memory-лог) | выводится из `LOG_LEVEL` |
+| `MAESTRO_MEMORY_LOG_DIR` | каталог для аудит-лога memory layer | каталог bootstrap-лога |
 | `MAESTRO_CONFIG` | путь к maestro.json (консолидированный конфиг) | `<project>/maestro.json` |
 | `MAESTRO_MEMORY_IDENTITY` | identity для подписи записей памяти (через `memory.identity_env`) | — |
 | `MAESTRO_MEMORY_QDRANT_KEY` | API-ключ Qdrant (через `memory.storage.qdrant.api_key_env`) | — |

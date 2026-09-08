@@ -338,6 +338,57 @@ warmup-строкой. Результат кэшируется в `state.json` �
 | `memory_import` возвращает ошибку с номером строки | Невалидный JSONL / несовпадение `model_id`/размерности / чужой `key` — ничего не импортировано (атомарно) |
 | `memory_forget`/`memory_export`/`memory_import` не выполняются | Не задано permission-правило `"ask"` в merge-config (см. [Конфигурация](../reference/config.md)) |
 
+### Логирование и диагностика (аудит-лог memory layer)
+
+Операции памяти пишутся в **отдельный аудит-лог** `.maestro/logs/maestro-memory-<дата>.log`
+(JSONL, один файл на день; каталог — `MAESTRO_MEMORY_LOG_DIR`, по умолчанию
+каталог bootstrap-лога). Полный список событий и field whitelist — в
+[Память maestro (reference)](../reference/memory.md).
+
+**Где смотреть:**
+
+```bash
+# Все события по конкретной сессии (lifecycle + перф):
+grep '"sessionID":"<session-id>"' .maestro/logs/maestro-memory-$(date +%F).log
+
+# Медленные операции (латентность):
+grep 'duration_ms' .maestro/logs/maestro-memory-$(date +%F).log | jq -r 'select(.duration_ms > 5000) | [.msg, .duration_ms] | @tsv'
+
+# Пустые поиски (root-cause):
+grep 'memory:search.no_hits' .maestro/logs/maestro-memory-$(date +%F).log
+```
+
+**Поднятие уровня для root-cause:** по умолчанию пишутся `info`+ (lifecycle и
+эффективность). Для перф-событий и debug-диагностики (`memory:index_retryable`,
+`memory:cross_project_miss`, `memory:recall.duration`, `memory:embed.duration`,
+`memory:storage.<op>.duration`) задайте:
+
+```bash
+export MAESTRO_MEMORY_LOG_LEVEL=debug
+```
+
+**Интерпретация `memory:search.no_hits`** (warn, поле `reason`):
+
+| reason | Причина / действие |
+|---|---|
+| `no_candidates` | В branch-scope нет кандидатов (память пуста или все записи вне контекста) — проверьте `backfill`/`storage.stats` |
+| `mainline_unresolved` | Mainline не резолвнут → flat recall; задайте `memory.mainline` явно |
+| `min_score` | Записи есть, но ниже порога `min_score` — снизьте порог или проверьте релевантность записей |
+| `fts_empty` | Лексическая ветка пуста (FTS-таблица не построена / backfill не прошёл) — гибрид деградирует до векторного поиска |
+
+**Определение проблем:**
+
+- **Память молчит** — `recall.injected` = 0 при `recall.hits > 0`: блок не
+  попадает в system prompt (не top-level primary сессия / модель эмбеддингов
+  ещё прогревается). `search.no_hits` с `no_candidates` — backfill ещё не прошёл.
+- **Покрытие** — `memory:backfill` (considered/indexed/skipped) и
+  `memory:storage.stats` (entries + merged/experience): мало `indexed` при
+  большом `considered` — сессии вне окна `backfill_window_days` или уже
+  заиндексированы.
+- **Латентность** — большие `duration_ms` в `embed.duration`/`summarize.duration`/
+  `recall.duration`; `http.error` у внешнего embedder. Митигация: `top_k`/
+  `min_score`, `retention_days`, локальный embedder.
+
 ## 🔗 Связанные разделы
 
 - [Память maestro (reference)](../reference/memory.md) — полная схема конфигурации

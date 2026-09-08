@@ -67,6 +67,32 @@
     `AGENTS.md`, `docs/project-context.md`,
     `docs/testing/maestro-sandbox-checklist.md` (F12–F16).
 
+- **Аудит-лог memory layer (v4).** Операции memory-модуля пишутся в отдельный
+  файл `.maestro/logs/maestro-memory-<дата>.log` (JSONL, один файл на день;
+  каталог — `MAESTRO_MEMORY_LOG_DIR`, по умолчанию каталог bootstrap-лога):
+  - **События:** lifecycle/аудит (`memory:indexed`/`reindexed`/`index_skipped`/
+    `index_retryable`/`index_error`/`session_deleted`/`forgotten`/`backfill`/
+    `backfill.done`/`retention_pruned`/`retention_prune_failed`/`promoted`/
+    `promotion_failed`/`mainline_resolved`/`mainline_unresolved`/`storage_init`/
+    `storage_mismatch`/`storage.stats`), root-cause (`search.no_hits`/
+    `storage.error`/`http.error`/`state.corrupt`/`cross_project_miss`),
+    производительность (`embed.duration`/`embed.cache_stats`/
+    `summarize.duration`/`storage.<op>.duration`/`recall.duration`/`recall.hits`/
+    `recall.injected`).
+  - **Безопасность (SEC-4b+):** aggregates-only field whitelist — без текста
+    записей/запросов, путей, тел ошибок (enum-only `error_class`), `base_url`;
+    `len` — биннинг; `branch` нормализуется (ticket-коды → `*`); doc-note
+    `memory:log_confidential_note` при непустых `confidential.paths`; hard-disable
+    не вводится (аудит confidential-проектов).
+  - **Env:** `MAESTRO_MEMORY_LOG_LEVEL` (default `info`), `MAESTRO_MEMORY_LOG_MASK`,
+    `MAESTRO_MEMORY_LOG_DIR`.
+  - Спека: `docs/superpowers/specs/2026-09-08-memory-logging-design.md`.
+    Документация: `SECURITY.md` (§5a), `manual_docs/reference/memory.md`
+    (Логирование + Оценка эффективности), `manual_docs/how-to/enable-memory.md`
+    (Логирование и диагностика), `manual_docs/reference/config.md` (env),
+    `commands/maestro-memory.md`, `plugins/maestro-bootstrap/README.md`,
+    `docs/project-context.md`.
+
 ### Исправлено / Изменено
 
 - **qdrant upsert проверяет `model_id` (I3).** Раньше qdrant молча писал точки

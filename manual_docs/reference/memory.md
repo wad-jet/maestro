@@ -650,6 +650,114 @@ opt-in на вставку замаскированных заголовков/s
 
 Все memory-хуки — глобальные, try/catch-guarded (инвариант плагина).
 
+## 📜 Логирование (аудит-лог memory layer)
+
+Операции memory-модуля пишутся в **отдельный аудит-лог** — не в bootstrap-лог:
+
+- **Файл:** `.maestro/logs/maestro-memory-<дата>.log` (JSONL, один файл на день).
+  Каталог — `MAESTRO_MEMORY_LOG_DIR` (по умолчанию — каталог bootstrap-лога
+  `<project>/.maestro/logs`). Весь `.maestro/` в `.gitignore` — лог по умолчанию
+  не покидает машину.
+- **Env:**
+  - `MAESTRO_MEMORY_LOG_LEVEL` — порог детализации (default `info`);
+  - `MAESTRO_MEMORY_LOG_MASK` — явный список включённых уровней через запятую
+    (как у bootstrap-лога; запись пишется при пересечении маски и порога);
+  - `MAESTRO_MEMORY_LOG_DIR` — каталог лога (default — каталог bootstrap-лога).
+- **Уровни:** `info` — lifecycle/эффективность; `debug` — производительность и
+  root-cause; `warn`/`error` — root-cause (проблемы). Для полной картины
+  (перф-события) поднимите уровень до `debug`.
+- **Дисциплина — aggregates-only field whitelist (SEC-4b+):** в лог попадают
+  только enum'ы, числа и ограниченный набор идентификаторов. **Никогда** не
+  логируются: текст записей/запросов (`query`/`summary`/`title`/`decisions`),
+  пути и тела ошибок (только `error_class` enum), `base_url`/эндпоинты, raw
+  branch. `len` — **биннинг** (бакеты `<100`, `100-500`, `500-2000`, `>2000`,
+  не точное значение). `branch` — **нормализуется** (`normalizeBranch`:
+  ticket-коды `[A-Z]{1,4}-\d+` → `*`) во всех событиях. При непустых
+  `confidential.paths` — warn `memory:log_confidential_note` (лог может покинуть
+  машину через шеринг/бэкап).
+
+### События (фактические имена)
+
+**Lifecycle / аудит (info):**
+
+| Событие | Поля |
+|---|---|
+| `memory:indexed` / `memory:reindexed` | sessionID, projectKey, author, version |
+| `memory:index_skipped` (warn) | sessionID, fails |
+| `memory:index_retryable` (debug) | sessionID |
+| `memory:index_error` (error) | sessionID, error_class |
+| `memory:session_deleted` | sessionID |
+| `memory:forgotten` | count, filters (массив enum: `session_id`/`author`/`before`, без значений) |
+| `memory:backfill` | considered, indexed, skipped |
+| `memory:backfill.done` | duration_ms |
+| `memory:retention_pruned` | count, older_than_days |
+| `memory:retention_prune_failed` (error) | error_class |
+| `memory:promoted` | count, branches (нормализованные), mainline (нормализованный) |
+| `memory:promotion_failed` (error) | error_class |
+| `memory:mainline_resolved` / `memory:mainline_unresolved` (warn) | branch (нормализованный) |
+| `memory:storage_init` | type |
+| `memory:storage_mismatch` (error) | type, model (имя без `@base_url`), dim_expected, dim_actual |
+| `memory:log_confidential_note` (warn) | — |
+| `memory:storage.stats` | entries, merged, experience |
+
+**Root-cause (warn/error + debug):**
+
+| Событие | Поля |
+|---|---|
+| `memory:search.no_hits` (warn) | reason (enum: `no_candidates`/`mainline_unresolved`/`min_score`/`fts_empty`) |
+| `memory:storage.error` (error) | op, error_class |
+| `memory:http.error` (warn) | http_status_class, retryable (bool) |
+| `memory:state.corrupt` (warn) | reason (enum: `parse_error`; ENOENT первого запуска не варн) |
+| `memory:cross_project_miss` (debug) | reason (enum), projectKey (hash соседнего проекта) |
+
+**Производительность (debug):**
+
+| Событие | Поля |
+|---|---|
+| `memory:embed.duration` | provider, duration_ms, len_bucket; `cache_hit` — только для openai |
+| `memory:embed.cache_stats` (info, openai) | hit_rate, cache_size |
+| `memory:summarize.duration` | sessionID, duration_ms, model |
+| `memory:storage.<op>.duration` | op, duration_ms |
+| `memory:recall.duration` | duration_ms, hits, topK, minScore, scope |
+| `memory:recall.hits` | hits |
+| `memory:recall.injected` (info) | records |
+
+> **Тайминг `memory:storage.stats`:** эмитится **один раз** после завершения
+> стартового backfill-окна, **до** фактической индексации debounce-очереди
+> (`session.idle`-сессий) — агрегаты отражают состояние на момент окна +
+> pre-seeded записи (лаг ~`idle_debounce_min`). При долгоживущих сессиях
+> агрегаты не обновляются до рестарта.
+
+## 📈 Оценка эффективности (память vs файлы)
+
+Память — авто-поддерживаемый **исторический** контекст сессий; файлы проекта
+(`project-context.md`, `docs/`) — курируемый **статический** контекст. Память
+даёт релевантный прошлый контекст (решения/откаты/причины), которого нет в
+файлах, подмешивая его без ручной работы. Что смотреть в `maestro-memory-*.log`:
+
+| Событие | Что показывает |
+|---|---|
+| `memory:recall.injected` | авто-recall добавил N записей в system-block сессии; **>0 и растёт → память реально подмешивает контекст** |
+| `memory:recall.hits` | найдено N релевантных записей (до порога) — полнота прошлого контекста |
+| `memory:backfill` | considered/indexed/skipped per окно — полнота захвата истории |
+| `memory:storage.stats` | cumulative: `entries` + tier-счётчики `merged`/`experience` (аппроксимация тира: `experience` = `head != '' && merged == 0`) |
+| `memory:reindexed` | пере-саммаризация повторно посещённой сессии — знания «живые», уточняются |
+| `memory:promoted` | темы перешли в mainline (merged 0→1) — дурабельные, повторяющиеся знания |
+
+**Чек-лист:**
+
+- **Память работает:** `recall.injected > 0` и растёт; `backfill.indexed > 0`;
+  `storage.stats.entries` растёт; `promoted`/`reindexed` появляются.
+- **Память молчит:** `recall.injected` = 0 при `recall.hits > 0` (блок не
+  попадает в system prompt — проверьте top-level primary сессию и прогрев
+  модели); `search.no_hits` с причиной `no_candidates` (память пуста — backfill
+  ещё не прошёл) или `mainline_unresolved` (branch-context flat); `backfill`
+  skipped ≈ considered (сессии уже заиндексированы или вне окна).
+- **Память дорогая:** `embed.duration`/`summarize.duration`/`recall.duration`
+  с большими `duration_ms`; `http.error` (внешний embedder); `storage.stats`
+  с большим `entries` при медленном recall. Митигация: `top_k`/`min_score`,
+  `retention_days`, локальный embedder.
+
 ## 🔗 Связанные разделы
 
 - [Как включить память](../how-to/enable-memory.md) — пошаговые инструкции

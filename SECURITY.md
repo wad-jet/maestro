@@ -181,6 +181,25 @@
   решением локально/удалённо для записей. `memory.db` вне git (глобальный
   каталог). Секреты не логируются. API-ключи централизованных бэкендов — только
   через ссылку на env (`api_key_env`), никогда plaintext в `maestro.json`.
+- **Логирование memory layer — отдельный аудит-лог (v4).** Операции memory-модуля
+  пишутся в отдельный файл `.maestro/logs/maestro-memory-<дата>.log` (JSONL, один
+  файл на день; каталог — `MAESTRO_MEMORY_LOG_DIR`, по умолчанию каталог
+  bootstrap-лога). **Aggregates-only field whitelist (SEC-4b+):** в лог попадают
+  только enum'ы, числа и ограниченный набор идентификаторов — `sessionID`,
+  `projectKey` (one-way sha256), `author`, **нормализованный** `branch`
+  (ticket-коды `[A-Z]+-\d+` → `*`), `provider`-flag (`local`/`external`), имя
+  модели **без** `@base_url`, `dim`, счётчики/тайминги, `len`-бакеты,
+  `error_class`/`http_status_class` (enum-only). **Запрещено всегда:** текст
+  записей/запросов (`query`/`summary`/`title`/`decisions`), пути (в т.ч.
+  confidential) и тела ошибок (`Error.message`/`.stack`/HTTP-body — только
+  `error_class`), `base_url`/эндпоинты, raw free-text branch, значения секретов.
+  `.maestro/` в `.gitignore` — лог по умолчанию не покидает машину; при непустых
+  `confidential.paths` — doc-note `memory:log_confidential_note` (warn): локальный
+  лог может покинуть машину через шеринг/бэкап (author/branch-корреляция).
+  **Hard-disable не вводится** — аудит нужен в confidential-проектах сильнее
+  всего; жёсткое отключение ломает bootstrap-лог и HITL-гейт «плагин работает».
+  Уровень/маска/каталог: `MAESTRO_MEMORY_LOG_LEVEL` (default `info`),
+  `MAESTRO_MEMORY_LOG_MASK`, `MAESTRO_MEMORY_LOG_DIR`.
 - **Default off.** Нет секции `memory` / `enabled: false` → память полностью
   выключена: хуки не регистрируются, зависимости не загружаются, LLM-вызовов
   нет. Никакого silent opt-in при обновлении maestro.

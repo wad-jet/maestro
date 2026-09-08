@@ -93,6 +93,13 @@ description: Показать статус memory layer плагина maestro-b
 - `unmasked_branch_metadata` — централизованный бэкенд + непустые `confidential.paths` (имена веток уходят на сервер);
 - `external_embedder_unmasked_queries` — внешний embedder + непустые `confidential.paths` (запросы/контент уходят внешнему вендору).
 
+**Аудит-лог memory layer:** для root-cause/эффективности/латентности укажи файл
+`.maestro/logs/maestro-memory-<дата>.log` (JSONL; lifecycle/эффективность — `info`,
+перф/root-cause — `debug`, поднимается `MAESTRO_MEMORY_LOG_LEVEL=debug`). Грепы:
+`memory:search.no_hits` (причины пустого поиска), `memory:recall.injected`
+(работает ли авто-вспоминание), `memory:backfill`/`memory:storage.stats`
+(покрытие), `duration_ms` (латентность).
+
 Если строка **Проверка embedder:** отсутствует или статус `FAIL` — вызови инструмент
 `memory_probe` (live-проверка, минуя cooldown) и покажи результат + рекомендации:
 - `FAIL (конфигурация)` — проверь `embedding.api_key_env`/ключ, `embedding.model`, `embedding.dim` в `maestro.json`;

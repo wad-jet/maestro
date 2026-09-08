@@ -741,6 +741,35 @@ MAESTRO_BOOTSTRAP_LOG_DIR="/var/log/maestro"
 По умолчанию: `<project>/.maestro/logs`. Логи разбиваются по дням:
 `.maestro/logs/maestro-bootstrap-2026-08-01.log`.
 
+### `MAESTRO_MEMORY_LOG_LEVEL`
+
+Порог детализации **аудит-лога memory layer** (`.maestro/logs/maestro-memory-<дата>.log`).
+Пишутся уровни `>=` заданного; default `info`:
+
+| Значение | Что логируется |
+|---|---|
+| `debug` | Всё: debug, info, warn, error (включая перф-события) |
+| `info` | info, warn, error (по умолчанию) |
+| `warn` | warn, error |
+| `error` | Только error |
+
+### `MAESTRO_MEMORY_LOG_MASK`
+
+Явный список включённых уровней через запятую (как у bootstrap-лога): запись
+пишется при **пересечении** двух условий — уровень входит в маску И не ниже
+порога `MAESTRO_MEMORY_LOG_LEVEL`. Если не задана — выводится из порога.
+
+### `MAESTRO_MEMORY_LOG_DIR`
+
+Каталог для аудит-лога memory layer:
+
+```bash
+MAESTRO_MEMORY_LOG_DIR="/var/log/maestro"
+```
+
+По умолчанию — каталог bootstrap-лога (`<project>/.maestro/logs`). Логи
+разбиваются по дням: `.maestro/logs/maestro-memory-2026-09-08.log`.
+
 ## 📁 Файлы, создаваемые / используемые pipeline
 
 | Путь | Назначение | В git? |
