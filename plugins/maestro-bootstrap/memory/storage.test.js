@@ -701,6 +701,108 @@ test("pgvector factory rejects missing pool", async () => {
   await assert.rejects(() => st.init(), /pgvector/);
 });
 
+// --- Task 3: branch/head/merged schema + candidates/markMerged ---
+
+test("sqlite schema: branch/head/merged stored + returned by get/scan", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
+  try {
+    await st.init();
+    await st.upsert([mkEntry("s1", "k1", "t1", { branch: "feature/x", head: "abc123", merged: 0 })]);
+    const found = await st.get("s1");
+    assert.equal(found.branch, "feature/x");
+    assert.equal(found.head, "abc123");
+    assert.equal(found.merged, 0);
+    // scan возвращает поля (легитимные метаданные).
+    const rows = await st.scan({ key: "k1", fields: ["session_id", "branch", "head", "merged"] });
+    assert.equal(rows.length, 1);
+    assert.equal(rows[0].branch, "feature/x");
+    assert.equal(rows[0].head, "abc123");
+    assert.equal(rows[0].merged, 0);
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("sqlite ALTER dev-hygiene: old v2-schema table gains columns idempotently", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const dbPath = join(dir, "memory.db");
+  // Вручную создаём таблицу v2 (без branch/head/merged) + meta.
+  const Database = require("better-sqlite3");
+  const db = new Database(dbPath);
+  db.exec(`CREATE TABLE memory (
+    session_id TEXT PRIMARY KEY,
+    key TEXT NOT NULL,
+    origin_project_hash TEXT NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    decisions TEXT NOT NULL,
+    embedding BLOB NOT NULL,
+    model_id TEXT NOT NULL,
+    author TEXT NOT NULL,
+    time_first INTEGER NOT NULL,
+    time_last INTEGER NOT NULL,
+    version INTEGER NOT NULL
+  )`);
+  db.exec(`CREATE TABLE meta (name TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+  db.close();
+  const st = createStorage({ type: "sqlite", options: { dbPath }, modelId: "m", dim: 3 });
+  try {
+    await st.init(); // должен ALTER ADD COLUMN × 3
+    const cols = st.db.prepare("PRAGMA table_info(memory)").all().map((c) => c.name);
+    assert.ok(cols.includes("branch"), "branch column added");
+    assert.ok(cols.includes("head"), "head column added");
+    assert.ok(cols.includes("merged"), "merged column added");
+    // Повторный init не падает (guard).
+    await st.dispose();
+    const st2 = createStorage({ type: "sqlite", options: { dbPath }, modelId: "m", dim: 3 });
+    await st2.init();
+    await st2.dispose();
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("sqlite candidates(key) returns merged=1 OR head != ''", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
+  try {
+    await st.init();
+    await st.upsert([
+      mkEntry("s1", "k1", "t1", { merged: 1, head: "" }),
+      mkEntry("s2", "k1", "t2", { merged: 0, head: "h1" }),
+      mkEntry("s3", "k1", "t3", { merged: 0, head: "" }),
+      mkEntry("s4", "k2", "t4", { merged: 1, head: "" }), // другой key — не кандидат
+    ]);
+    const cands = await st.candidates("k1");
+    const ids = cands.map((c) => c.session_id).sort();
+    assert.deepEqual(ids, ["s1", "s2"], "candidates = merged=1 OR head != '' within key");
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("sqlite markMerged(key, head) sets merged=1 (key-scoped)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
+  try {
+    await st.init();
+    await st.upsert([
+      mkEntry("sA", "kA", "tA", { head: "h", merged: 0 }),
+      mkEntry("sB", "kB", "tB", { head: "h", merged: 0 }),
+    ]);
+    await st.markMerged("kA", "h");
+    assert.equal((await st.get("sA")).merged, 1, "A promoted");
+    assert.equal((await st.get("sB")).merged, 0, "B untouched (different key)");
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("pgvector get returns entry or null", async () => {
   const rows = [];
   const pool = {
