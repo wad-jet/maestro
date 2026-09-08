@@ -1640,6 +1640,20 @@ describe("maestro-bootstrap audit logger", () => {
     }
   });
 
+  it("makeLogger logDir option overrides env/directory", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mlog-"));
+    const custom = path.join(dir, "custom");
+    fs.mkdirSync(custom, { recursive: true });
+    try {
+      const log = makeLogger(dir, { filePrefix: "maestro-memory", logDir: custom, filterEnv: "MAESTRO_MEMORY" });
+      log.info("memory: test", {});
+      const files = fs.readdirSync(custom).filter((f) => f.includes("maestro-memory"));
+      assert.ok(files.length === 1, "log file written to explicit logDir");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("audit logger is NOT suppressed by MAESTRO_BOOTSTRAP_LOG_MASK/LOG_LEVEL (security invariant)", () => {
     const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-audit-filter-"));
     const savedMask = process.env.MAESTRO_BOOTSTRAP_LOG_MASK;

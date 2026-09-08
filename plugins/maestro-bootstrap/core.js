@@ -798,8 +798,10 @@ export function makeLogger(directory, {
   filePrefix = "maestro-bootstrap",
   logDirEnv = "MAESTRO_BOOTSTRAP_LOG_DIR",
   filterEnv = "MAESTRO_BOOTSTRAP",
+  logDir = null, // новая опция: явный каталог, приоритет над logDirEnv/directory
 } = {}) {
-  const logDir =
+  const dir =
+    logDir ||
     process.env[logDirEnv] ||
     path.join(directory, ".maestro/logs");
 
@@ -825,13 +827,13 @@ export function makeLogger(directory, {
   }
 
   try {
-    fs.mkdirSync(logDir, { recursive: true });
+    fs.mkdirSync(dir, { recursive: true });
   } catch {
     /* logging must never break the session */
   }
 
   const logFileFor = (date) =>
-    path.join(logDir, `${filePrefix}-${date}.log`);
+    path.join(dir, `${filePrefix}-${date}.log`);
 
   const write = (level, msg, extra) => {
     if (!enabled.has(level)) return;
@@ -856,7 +858,7 @@ export function makeLogger(directory, {
   };
 
   return {
-    logDir,
+    logDir: dir,
     filePrefix,
     level: levelEnv,
     mask: filterEnv === null ? "all" : [...enabled].join(","),
@@ -932,6 +934,15 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
     filePrefix: "maestro-audit",
     logDirEnv: "MAESTRO_AUDIT_LOG_DIR",
     filterEnv: null,
+  });
+  // Memory-лог — отдельный файл `maestro-memory-<date>.log` (аудит-фактура
+  // операций memory-модуля: recall/promote/forget и т.п.). Каталог:
+  // MAESTRO_MEMORY_LOG_DIR или каталог bootstrap-лога; фильтр —
+  // MAESTRO_MEMORY_LOG_LEVEL/_LOG_MASK (по умолчанию info).
+  const memoryLog = makeLogger(root, {
+    logDir: process.env.MAESTRO_MEMORY_LOG_DIR || log.logDir,
+    filePrefix: "maestro-memory",
+    filterEnv: "MAESTRO_MEMORY",
   });
   const config = loadMaestroConfig(undefined, root);
   const whitelist = loadWhitelist(config);
@@ -1186,7 +1197,7 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
   if (memClass.enabled) {
     try {
       const { registerMemoryHooks } = await import("./memory/index.js");
-      memoryHooks = await registerMemoryHooks({ client, config, log, root });
+      memoryHooks = await registerMemoryHooks({ client, config, log, memoryLog, root });
     } catch (err) {
       log.error("memory: init failed", { error: err instanceof Error ? err.message : String(err) });
     }
