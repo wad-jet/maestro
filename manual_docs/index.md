@@ -33,6 +33,7 @@ primary-сессии.
 - [Поддержание документации в актуальном состоянии](how-to/keep-docs-up-to-date.md)
 - [Подбор моделей для агентов](how-to/choose-models.md) — критерии (скорость/качество/стоимость), локальные vs внешние
 - [Как включить память maestro](how-to/enable-memory.md) — опциональный memory layer (sqlite/qdrant/pgvector)
+- [Выбор и замена модели эмбеддингов](how-to/choose-embedding-model.md) — критерии, настройка, переиндексация, проверка
 
 ## Reference (справочник)
 
