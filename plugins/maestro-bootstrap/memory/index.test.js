@@ -1404,6 +1404,154 @@ test("git-config precedence: last occurrence wins (system → global → local)"
 
 // ── Task 13: ask-gate verification — write-tools registered for permission enforcement ──
 
+// ── Task 5: mainline detect + promotion (init) ─────────────────────────
+
+// Insert a memory row with branch/head/merged attributes (real sqlite storage).
+async function insertRow(storage, { session_id, key = "k", head = "", branch = "", merged = 0 }) {
+  await storage.upsert([mkFullEntry({ session_id, key, head, branch, merged })]);
+}
+
+async function mergedOf(storage, key, session_id) {
+  const rows = await storage.scan({ key, fields: ["session_id", "merged"] });
+  const r = rows.find((x) => x.session_id === session_id);
+  return r ? r.merged : undefined;
+}
+
+test("init: mainline detected → promotion marks merged=1 for ancestor heads (key-scoped)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-promo-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = await mkSqliteStorage(dir);
+    await insertRow(storage, { session_id: "a1", head: "h1", branch: "main" });
+    await insertRow(storage, { session_id: "a2", head: "h2", branch: "feature" });
+    await insertRow(storage, { session_id: "b1", key: "other", head: "h1", branch: "main" });
+
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      isAncestor: (root, head) => (head === "h1" ? "yes" : "no"),
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir, { namespace: "k" }),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+
+    assert.equal(await mergedOf(storage, "k", "a1"), 1, "A.h1 ancestor → merged=1");
+    assert.equal(await mergedOf(storage, "k", "a2"), 0, "A.h2 not ancestor → merged=0");
+    assert.equal(await mergedOf(storage, "other", "b1"), 0, "B.h1 different key → NOT promoted (key-scoped)");
+    await hooks.dispose?.();
+    await storage.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("init: mainline unresolved → warn mainline_unresolved + promotion skipped", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-promo-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = await mkSqliteStorage(dir);
+    await insertRow(storage, { session_id: "a1", head: "h1", branch: "main" });
+
+    let isAncestorCalls = 0;
+    const logged = [];
+    const log = { debug() {}, info() {}, warn: (m) => logged.push(m), error() {} };
+    const git = {
+      detectMainline: () => null,
+      isAncestor: () => { isAncestorCalls++; return "yes"; },
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir, { namespace: "k" }),
+      log,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+
+    assert.ok(logged.some((m) => m.includes("mainline_unresolved")), "must warn mainline_unresolved");
+    assert.equal(isAncestorCalls, 0, "promotion must be skipped when mainline unresolved");
+    assert.equal(await mergedOf(storage, "k", "a1"), 0, "no record promoted");
+    await hooks.dispose?.();
+    await storage.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("init: heal — trunk records from unresolved window promote on first resolved init", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-promo-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = await mkSqliteStorage(dir);
+    // Written while mainline was unresolved: merged=0, head=H, branch=main.
+    await insertRow(storage, { session_id: "a1", head: "H", branch: "main" });
+
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      isAncestor: () => "yes",
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir, { namespace: "k" }),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+
+    assert.equal(await mergedOf(storage, "k", "a1"), 1, "trunk record from unresolved window must heal to merged=1");
+    await hooks.dispose?.();
+    await storage.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("init: dangling head → isAncestor error → skip + debug log, pass continues", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-promo-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = await mkSqliteStorage(dir);
+    await insertRow(storage, { session_id: "good", head: "h1", branch: "main" });
+    await insertRow(storage, { session_id: "bad", head: "deadbeef", branch: "feature" });
+
+    const debugged = [];
+    const log = { debug: (m) => debugged.push(m), info() {}, warn() {}, error() {} };
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      isAncestor: (root, head) => (head === "h1" ? "yes" : "error"),
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir, { namespace: "k" }),
+      log,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+
+    assert.equal(await mergedOf(storage, "k", "good"), 1, "valid head promoted");
+    assert.equal(await mergedOf(storage, "k", "bad"), 0, "dangling head skipped");
+    assert.ok(debugged.some((m) => m.includes("promotion skip")), "must debug-log promotion skip");
+    await hooks.dispose?.();
+    await storage.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("write-tools registered for permission enforcement (ask-gate contract)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mem-gate-ask-"));
   const saved = process.env.XDG_DATA_HOME;

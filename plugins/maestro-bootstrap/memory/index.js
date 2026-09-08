@@ -14,7 +14,7 @@ import { Recall } from "./recall.js";
 import { createState } from "./state.js";
 import { summarizeSession, SESSIONS } from "./summarize.js";
 import { deriveProjectKey, resolveProjectKey } from "./project.js";
-import { resolveBranch, resolveHead } from "./git.js";
+import { resolveBranch, resolveHead, detectMainline as detectMainlineReal, isAncestor as isAncestorReal } from "./git.js";
 
 // `@opencode-ai/plugin` не установлен в node_modules этого репо (zero-dep
 // дефолт). `tool()` — identity-функция (возвращает вход как есть), а
@@ -308,6 +308,33 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     if (!deps.storage) {
       mkdirSync(dirname(dbPath), { recursive: true });
       await storage.init();
+    }
+
+    // Task 5: mainline detect + head-based promotion (init). Кандидаты ключа
+    // (merged=0, head != '') дедупятся по уникальным head; каждый head, чей
+    // коммит достижим из mainline (isAncestor 'yes'), помечается merged=1
+    // (key-scoped markMerged). Heal-путь: транковые записи окна unresolved
+    // (merged=0, head=предок mainline) промоутятся на первом резолвнутом init.
+    // Fail-soft: ошибка промоции не роняет init (лог + continue).
+    const { detectMainline = detectMainlineReal, isAncestor = isAncestorReal } = deps.git ?? {};
+    try {
+      const mainline = detectMainline(root, { override: config.mainline ?? null });
+      if (!mainline) {
+        log?.warn?.("memory: mainline_unresolved — branch-context flat (нет резолвнутого mainline)");
+      } else {
+        const candidates = await storage.candidates(effectiveKey);
+        const uniqueHeads = [...new Set(candidates.filter((c) => c.merged === 0 && c.head).map((c) => c.head))];
+        for (const head of uniqueHeads) {
+          const r = isAncestor(root, head, mainline.name);
+          if (r === "yes") {
+            await storage.markMerged(effectiveKey, head);
+          } else if (r === "error") {
+            log?.debug?.(`memory: promotion skip head=${head} (dangling/invalid)`);
+          } // 'no' → пропуск
+        }
+      }
+    } catch (err) {
+      log?.error?.("memory: promotion failed", { error: err instanceof Error ? err.message : String(err) });
     }
 
     const embeddings = deps.embeddings ?? new Embedder({ model: config.embedding_model, cacheDir: memoryDataDir, moduleDir });
