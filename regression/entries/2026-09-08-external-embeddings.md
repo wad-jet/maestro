@@ -1,0 +1,22 @@
+# Regression — external-embedder
+
+- **version:** 1
+- **feature:** external OpenAI-compatible embedder + probe + query masking (memory layer)
+- **added:** 2026-09-08
+- **status:** active
+- **risk:** MEDIUM
+- **category:** memory plugin
+- **scenarios:**
+  - **config schema** (`plugins/maestro-bootstrap/memory/config.js` — legacy `embedding_model` не должен сломаться; новый блок `memory.embedding` + `probe_cooldown_min`):
+    - run: `node --test plugins/maestro-bootstrap/memory/config.test.js`
+    - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent`
+  - **storage model_id/dim** (`plugins/maestro-bootstrap/memory/index.js` — local dim 384/model_id не меняются; переиндексация существующих локальных БД не требуется):
+    - run: `node --test plugins/maestro-bootstrap/memory/index.test.js plugins/maestro-bootstrap/memory/storage.test.js`
+    - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent`
+  - **recall/search masking** (`plugins/maestro-bootstrap/memory/recall.js` — маскирование запросов теперь всегда; пустой замаскированный запрос не ломает поиск):
+    - run: `node --test plugins/maestro-bootstrap/memory/recall.test.js plugins/maestro-bootstrap/memory/index.test.js`
+    - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent`
+  - **полный прогон памяти:**
+    - run: `npm run test:memory`
+    - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent`
+  - **[Manual] Sandbox E2E (Bun/opencode):** внешний embedder через совместимый шлюз; probe на старте; `@maestro-memory` строка «Проверка embedder» (`docs/testing/maestro-sandbox-checklist.md`)

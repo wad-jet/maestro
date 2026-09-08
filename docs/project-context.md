@@ -48,7 +48,10 @@
   **branch-aware memory** — идентичность записи по коммиту (`head`), commit-scoped
   recall (general/experience/не в контексте), промоция по `is-ancestor(head, mainline)`,
   mainline авто-детект из git, ключи `branch_context`/`mainline`; **`centralized_confidential`
-  удалён** (решение локально/удалённо — только `storage.type`).
+  удалён** (решение локально/удалённо — только `storage.type`). **v4 (external
+  embeddings):** опциональный внешний OpenAI-совместимый embedder
+  (`memory.embedding.provider: "openai"`), probe доступности модели (старт+cooldown+
+  on-demand `memory_probe`), маскирование recall-запросов.
 
 ## 4. Архитектура
 
@@ -74,7 +77,8 @@
 - `plugins/maestro-bootstrap/memory/` — **опциональный** модуль памяти сессий
   (векторное хранилище sqlite/qdrant/pgvector, эмбеддинги, саммаризатор, recall,
   гибридный FTS5-поиск, инструменты `memory_search`/`memory_forget`/
-  `memory_export`/`memory_import`/`memory_recall_preview`/`memory_stats_detail`);
+  `memory_export`/`memory_import`/`memory_recall_preview`/`memory_stats_detail`/
+  `memory_probe`);
   **branch-aware (v3):** идентичность записи по коммиту (`head`), commit-scoped
   recall (тиры general/experience/не в контексте/unattributed), промоция по
   `is-ancestor(head, mainline)`, mainline авто-детект, ключи
