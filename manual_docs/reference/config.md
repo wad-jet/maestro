@@ -397,8 +397,7 @@ deny. Trust не наследуется вложенными субагента�
     "storage": {
       "type": "sqlite",
       "qdrant": { "url": "https://qdrant.internal:6333", "api_key_env": "MAESTRO_MEMORY_QDRANT_KEY", "collection": "maestro_memory" },
-      "pgvector": { "connection_string_env": "MAESTRO_MEMORY_PG_DSN", "table": "maestro_memory" },
-      "centralized_confidential": "forbid"
+      "pgvector": { "connection_string_env": "MAESTRO_MEMORY_PG_DSN", "table": "maestro_memory" }
     }
   }
 }
@@ -425,6 +424,8 @@ deny. Trust не наследуется вложенными субагента�
 | `retention_days` | `number` \| `null` | `null` | TTL записей: prune при старте (записи старше N дней по `time_last`). `null` — выключено |
 | `summarize_timeout_ms` | `number` | `120000` | Таймаут цепочки «саммаризация → эмбеддинг → запись» |
 | `report.include_text` | `boolean` | `false` | Разрешает вставку замаскированных заголовков/summary в HTML-отчёт `@maestro-memory-report`; `false` — только агрегаты (SEC-4b) |
+| `branch_context` | `boolean` | `true` | Branch-scoped recall (default-on): членство записей по git-истории (тиры general/experience); `false` → flat project recall (дефолтный scope = `project`) |
+| `mainline` | `string` \| `null` | `null` | Основная ветка для промоции; `null` → авто-детект из git (remote HEAD → `init.defaultBranch` → резерв `main`/`master`/`develop`); явный override авторитетен (несуществующее имя → `mainline_unresolved`) |
 | `storage.type` | `string` | `sqlite` | Бэкенд: `sqlite` \| `qdrant` \| `pgvector` |
 | `storage.qdrant.url` | `string` | — | URL Qdrant (обязателен для `type: qdrant`) |
 | `storage.qdrant.api_key_env` | `string` | — | Имя env-переменной с API-ключом (никогда plaintext) |
@@ -432,13 +433,18 @@ deny. Trust не наследуется вложенными субагента�
 | `storage.pgvector.connection_string_env` | `string` | — | Имя env-переменной с DSN Postgres (обязателен для `type: pgvector`) |
 | `storage.pgvector.table` | `string` | `maestro_memory` | Таблица pgvector |
 | `storage.pgvector.text_search_config` | `string` | `russian` | Postgres text-search конфигурация для гибридного поиска (только при `type: pgvector`). Валидация: `/^[a-z][a-z0-9_]*$/`, ≤63 символа; default `russian` — стеммер; на кастомных PG без `russian`-конфига — fail-loud |
-| `storage.centralized_confidential` | `string` | `forbid` | `forbid` — проект с `confidential.paths` не пишет в централизованный бэкенд (failover на sqlite + warning); `allow` — разрешить |
 
 **Валидация:** некорректный `storage.type` / отсутствие URL / нерезолвнутая
 identity для централизованного бэкенда / некорректный `retention_days` /
-`similarity_threshold` вне `[0, 1]` → память off + лог (`disabled_reason`),
-сессии работают (fail-soft). Централизованные бэкенды требуют identity
-(`identity` → `identity_env` → git `user.name`).
+`similarity_threshold` вне `[0, 1]` / некорректный `branch_context` (не boolean) /
+некорректный `mainline` (не `null` и не строка `/^[a-zA-Z0-9_\/.-]+$/`, длина
+≤ 100) → память off + лог (`disabled_reason`: `storage_type_invalid`,
+`centralized_identity_missing`, `qdrant_config_invalid`,
+`pgvector_config_invalid`, `pgvector_text_search_config_invalid`,
+`retention_days_invalid`, `similarity_threshold_invalid`,
+`branch_context_invalid`, `mainline_invalid`), сессии работают (fail-soft).
+Централизованные бэкенды требуют identity (`identity` → `identity_env` → git
+`user.name`).
 
 #### Permission-правило для write/boundary-tools (обязательное)
 

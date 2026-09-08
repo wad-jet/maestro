@@ -51,8 +51,7 @@
     "storage": {
       "type": "sqlite",
       "qdrant": { "url": "https://qdrant.internal:6333", "api_key_env": "MAESTRO_MEMORY_QDRANT_KEY", "collection": "maestro_memory" },
-      "pgvector": { "connection_string_env": "MAESTRO_MEMORY_PG_DSN", "table": "maestro_memory" },
-      "centralized_confidential": "forbid"
+      "pgvector": { "connection_string_env": "MAESTRO_MEMORY_PG_DSN", "table": "maestro_memory" }
     }
   }
 }
@@ -81,6 +80,8 @@
 | `retention_days` | `number` \| `null` | `null` | TTL записей: при старте плагина удаляются записи с `time_last` старше N дней (`storage.prune`). `null` (default) — выключено, данные не удаляются молча |
 | `summarize_timeout_ms` | `number` | `120000` | Таймаут цепочки «саммаризация → эмбеддинг → запись» (защита от зависшего LLM-вызова) |
 | `report.include_text` | `boolean` | `false` | Разрешает вставку замаскированных заголовков/summary в HTML-отчёт `@maestro-memory-report`. `false` (default) — только агрегаты (SEC-4b); `true` — осознанное понижение уровня безопасности |
+| `branch_context` | `boolean` | `true` | Branch-scoped recall (default-on): членство записей по git-истории (тиры general/experience, см. [Branch-aware memory](#branch-aware-memory-v3)); `false` → flat project recall (дефолтный scope = `project`) |
+| `mainline` | `string` \| `null` | `null` | Основная ветка для промоции; `null` → авто-детект из git (remote HEAD → `init.defaultBranch` → резерв `main`/`master`/`develop`); явный override авторитетен (несуществующее имя → `mainline_unresolved`, §5) |
 | `storage.type` | `string` | `sqlite` | Бэкенд: `sqlite` \| `qdrant` \| `pgvector` |
 | `storage.qdrant.url` | `string` | — | URL Qdrant (обязателен для `type: qdrant`) |
 | `storage.qdrant.api_key_env` | `string` | — | Имя env-переменной с API-ключом (никогда plaintext в `maestro.json`) |
@@ -88,7 +89,6 @@
 | `storage.pgvector.connection_string_env` | `string` | — | Имя env-переменной с DSN Postgres (обязателен для `type: pgvector`) |
 | `storage.pgvector.table` | `string` | `maestro_memory` | Таблица pgvector |
 | `storage.pgvector.text_search_config` | `string` | `russian` | Postgres text-search конфигурация для гибридного поиска (только при `type: pgvector`). Валидация: `/^[a-z][a-z0-9_]*$/`, ≤63 символа. Default `russian` — стеммер; на кастомных PG без `russian`-конфига — fail-loud |
-| `storage.centralized_confidential` | `string` | `forbid` | `forbid` (default) — проект с `confidential.paths` не пишет в централизованный бэкенд → failover на локальный sqlite + warning; `allow` — разрешить (осознанный риск) |
 
 ### Валидация и деградация конфигурации
 
@@ -97,12 +97,17 @@
   (`retention_days_invalid`).
 - Некорректный `similarity_threshold` (вне `[0, 1]`) → память off + лог
   (`similarity_threshold_invalid`).
+- Некорректный `branch_context` (не boolean) → память off + лог
+  (`branch_context_invalid`).
+- Некорректный `mainline` (не `null` и не строка `/^[a-zA-Z0-9_\/.-]+$/`, длина
+  ≤ 100) → память off + лог (`mainline_invalid`). Regex ограничивает ТОЛЬКО
+  явный конфиг-override; авто-детектированные имена веток (любой юникод) — не
+  проходят валидацию конфига (источник — git).
 - Централизованный бэкенд (`qdrant`/`pgvector`) требует **резолвнутую identity**
   (`identity` → `identity_env` → git `user.name`); иначе — память off + лог
   (`centralized_identity_missing`).
 - `qdrant` без `url`/`api_key_env`, `pgvector` без `connection_string_env` →
   память off + лог (`qdrant_config_invalid` / `pgvector_config_invalid`).
-- `centralized_confidential` со значением вне `forbid`/`allow` → память off + лог.
 - Любая ошибка инициализации → память off + лог, сессии работают (fail-soft).
 
 ## 🗄️ Бэкенды
@@ -120,13 +125,12 @@
 - Переключение бэкенда **не мигрирует** данные автоматически; миграция — через
   `memory_export` → `memory_import` (JSONL с embedding, см.
   [Как включить память](../how-to/enable-memory.md)).
-- `centralized_confidential: forbid` (default): проект, где сконфигурирован
-  `confidential.paths`, пишет память **только в локальный sqlite** (failover +
-  warning в лог). Маскирование защищает **raw-confidential** от передачи открыто
-  untrusted LLM и от выхода за машину в полном виде; **санизированные** данные
-  могут храниться/читаться где угодно. `forbid` — консервативный local-first
-  дефолт (failover на sqlite + warning); `allow` — осознанный opt-in владельца
-  проекта.
+- **Решение «локально vs удалённо» — только `storage.type`** (`sqlite` =
+  локально; `qdrant`/`pgvector` = удалённо). Ключ `centralized_confidential`
+  **удалён** (v3): его назначение (страховка от утечки) обеспечено
+  маскированием — raw-confidential не попадает в контент записей в принципе
+  (см. [Агенты и модель доверия](../explanation/agents-and-trust.md));
+  **санизированные** данные могут храниться/читаться где угодно.
 
 ### Паритет-матрица бэкендов (v3a)
 
@@ -174,16 +178,124 @@
 - Запись хранит и `key` (фильтр), и `origin_project_hash` (провенанс —
   отображается в поиске).
 
+## 🌿 Branch-aware memory (v3)
+
+Память привязана к git-истории: каждая запись несёт git-метаданные
+(`branch`/`head`/`merged`), **идентичность записи — по коммиту (`head`)**, имя
+ветки — только display/stats. Recall по умолчанию **commit-scoped**: общий
+(mainline) контекст + собственный «опыт» (неслитые коммиты, достижимые из
+checkout); чужие unmerged-коммиты не попадают в контекст. Слияние работы в
+mainline промоутирует её записи в общий контекст.
+
+### Тиры (членство по `head`)
+
+| Условие | Тир |
+|---|---|
+| `merged = 1` | **general** — знание вошло в mainline |
+| `merged = 0` И `head` достижим из mainline | **general** (окно pull → init-промоция) |
+| `merged = 0` И `head` в истории текущего checkout, но не в mainline | **experience** (аннотация «⚠️ не в main») |
+| `merged = 0`, `head != ''`, недостижим из HEAD и mainline | **не в контексте** (чужая/удалённая/устаревшая работа; только `scope: project`) |
+| `head = ''` | **unattributed** (только `scope: project`) |
+
+Таблица оценивается сверху вниз (первое совпадение). Тиры — механизм **области
+видимости**, не clearance/доверия.
+
+### Промоция (reconciliation)
+
+- На каждом init (старт сессии плагина) — head-based промоция: записи ключа с
+  `merged = 0` и `head`, достижимым из mainline (`git merge-base --is-ancestor
+  <head> <mainline>`), помечаются `merged = 1`. **Имя ветки в промоции не
+  участвует** — переиспользование имён веток не контаминирует контекст.
+- Предикат — строго **key-scoped** (shared-бэкенды qdrant/pg хранят записи
+  многих проектов в одной коллекции/таблице): git-факты текущего репо не
+  промоутируют записи чужих проектов.
+- **Heal-путь:** записи транка, сделанные при нерезолвнутом mainline
+  (`merged=0`), промоутятся на первом init с резолвнутым mainline (их `head` —
+  предок mainline).
+- Промоция — по **локальному** состоянию git: после удалённого PR нужен
+  локальный `git fetch`/`git pull` (обновление локальных refs/объектов), иначе
+  промоция отложена до следующего fetch. `merged` монотонен (0→1, никогда не
+  сбрасывается).
+- Per-record fail-soft: git-ошибка по одной записи (dangling sha после rebase,
+  невалидный объект) → skip + debug-лог, проход продолжается; `exit 1` —
+  легитимный негатив («не предок»).
+
+### Scope (recall)
+
+- `memory_search` принимает `scope: "branch" | "project"` (default `branch`).
+  `branch` — general + опыт (по таблице членства); `project` — все записи ключа
+  (плоско).
+- `memory.branch_context: false` — задаёт **дефолтный scope = project**; явный
+  `scope`-параметр всегда побеждает (конфиг задаёт дефолт, не запрет).
+- Git-ошибка резолва (в т.ч. non-git каталог) → fail-soft коллапс: recall =
+  только `merged = 1` + debug-лог.
+
+### Ограничения (документируются)
+
+- **Squash/rebase-loss (dangling head):** rebase/squash переписывают sha →
+  старые `head` становятся dangling → записи **«не в контексте»** (dead; видимы
+  только `scope: project`). Git сам теряет pre-rebase идентичность — memory
+  честно отражает это. **Config-guidance:** rebase/squash-heavy флоу →
+  `branch_context: false`.
+- **Shallow-clone** обрезает историю → старые записи выпадают в «не в
+  контексте» (under-inclusion, безопасно).
+- **Merge-then-revert:** head слитой ветки достижим из mainline → general, хотя
+  контент откачён revert'ом.
+- **Монорепо 100k+ коммитов:** два `git rev-list` на recall — документируемое
+  ограничение стоимости (escape: `branch_context: false`).
+
+### Mainline авто-детект
+
+`memory.mainline` (default `null`) — основная ветка для промоции. `null` →
+авто-детект из git на init (каждый шаг — только после проверки локального
+существования ветки `git rev-parse --verify refs/heads/<имя>^{commit}`):
+
+1. **override** (`memory.mainline`) — авторитетен; несуществующее имя →
+   `mainline_unresolved` (без fallthrough в авто-детект);
+2. **remote HEAD** — `git symbolic-ref refs/remotes/origin/HEAD` (нормализация:
+   срез префикса `refs/remotes/origin/` → bare имя; проверка локального
+   существования — после `git clone -b <ветка>` имя из `origin/HEAD` может
+   отсутствовать локально);
+3. **`git config --get init.defaultBranch`** (локальный дефолт; глобальная
+   настройка может именовать ветку, отсутствующую в этом репо);
+4. **резерв** `main` → `master` → `develop`.
+
+Ни один шаг не прошёл → **`mainline_unresolved`**: branch-context эффективно off
+(flat recall, идентично `branch_context: false`) + warn в лог; промоушен-проход
+пропускается (предикат зависит от mainline). Детект-значение используется только
+в локальных git-командах, машину не покидает.
+
+**Gitflow-guidance:** в workflows `feature → develop → main` семантика mainline
+выбирается владельцем: `memory.mainline: "develop"` — общий контекст отражает
+интегрированную разработку (промоция на мерже фичи в develop); `"main"` —
+только выпущенную истину (промоция на релизном мерже develop→main). Без override
+детект сам находит фактическую дефолтную ветку — имя ветки не имеет значения.
+
+**Fork-caveat:** origin — конвенция; дефолтная ветка форка может отличаться от
+upstream — при работе с форками задайте `memory.mainline` явно.
+
+### Удаление `centralized_confidential`
+
+Ключ `storage.centralized_confidential` **удалён** (v3). Решение «локально vs
+удалённо» — только `storage.type` (`sqlite` = локально; `qdrant`/`pgvector` =
+удалённо). Отдельный ключ дублировал это решение; его назначение (страховка от
+утечки) обеспечено маскированием (см. [Агенты и модель доверия](../explanation/agents-and-trust.md)).
+
 ## 🔎 Инструмент `memory_search`
 
 Кастомный инструмент (хук `tool`), доступен агентам в сессиях:
 
 ```
-memory_search(query: string, {limit?, date_from?, date_to?, author?, project?}) → строковый результат
+memory_search(query: string, {limit?, date_from?, date_to?, author?, project?, scope?}) → строковый результат
 ```
 
 - Семантический поиск по активному бэкенду хранилища (KNN по эмбеддингу запроса,
   фильтр по `key`, порог `min_score`, `top_k`/`limit`).
+- **`scope` (v3):** `"branch"` (default) — general + опыт (commit-based членство,
+  см. [Branch-aware memory](#branch-aware-memory-v3)); `"project"` — все записи
+  ключа (плоско). Дефолт задаётся `memory.branch_context` (`false` → `project`);
+  явный параметр всегда побеждает. Entry-объекты несут `branch`/`head`/`merged`;
+  experience-записи помечаются «⚠️ не в main».
 - **Гибридный поиск (все бэкенды, v3a):** векторный KNN + лексические совпадения
   по тексту (`title`/`summary`/`decisions`), слияние через RRF (`k = 60`). sqlite —
   FTS5 (unicode61, без русской морфологии); pgvector — `tsvector` + `ts_rank`
@@ -318,11 +430,14 @@ memory_stats_detail() → агрегаты (без summary-текста)
 ### `@maestro-memory`
 
 Статус memory layer: бэкенд, модель, активный `key`, число записей (по авторам
-и датам), кластеры/граф, подсказки по тюнингу (`top_k`, `min_score`,
+и датам), **разбивка по тирам (merged/experience/unknown/dead) и веткам**,
+кластеры/граф, подсказки по тюнингу (`top_k`, `min_score`,
 `retention_days`). Данные — из `memory_stats_detail` + чтение `maestro.json`.
 **Только агрегаты (SEC-4b)** — без раскрытия содержимого записей. При
 выключенной памяти — дружественное сообщение со ссылкой на
-[Как включить память](../how-to/enable-memory.md).
+[Как включить память](../how-to/enable-memory.md). Диагностические строки
+(`mainline_unresolved`, `unmasked_branch_metadata`) дублируются в выдаче —
+диагностика без логов.
 
 ### `@maestro-memory-report`
 
@@ -458,7 +573,9 @@ opt-in на вставку замаскированных заголовков/s
 |---|---|
 | Модель не загружена / нет сети | Память off, лог с инструкцией; сессии работают |
 | deps не установлены (нет `node_modules`) | Память off, лог с actionable инструкцией (`npm install` в `module_dir` / ссылка на how-to); сессии работают |
-| Бэкенд недоступен (qdrant/pg) | Память off, лог; **не** молчаливый fallback на sqlite (кроме `centralized_confidential`) |
+| Бэкенд недоступен (qdrant/pg) | Память off, лог; **не** молчаливый fallback на sqlite |
+| `mainline_unresolved` (нет резолвнутого mainline) | Branch-context flat (идентично `branch_context: false`) + warn в лог; промоушен-проход пропускается; диагностика дублируется в выдаче `@maestro-memory` |
+| Git-ошибка резолва на recall (в т.ч. non-git каталог) | Fail-soft коллапс: recall = только `merged = 1` + debug-лог |
 | Мультипроцессный доступ к memory.db | WAL + busy_timeout (edge) |
 | Ошибка саммаризатора / невалидный JSON | Сессия не-заиндексирована; retry по `retry_interval_min`, после 3 неудач — skip (state-файл) |
 | Первое включение (backfill) | Ограничено окном `backfill_window_days` и cap `backfill_max_per_start` |

@@ -75,8 +75,13 @@
   (векторное хранилище sqlite/qdrant/pgvector, эмбеддинги, саммаризатор, recall,
   гибридный FTS5-поиск, инструменты `memory_search`/`memory_forget`/
   `memory_export`/`memory_import`/`memory_recall_preview`/`memory_stats_detail`);
-  не часть стандартной установки, включается по запросу
-  (секция `memory` в `maestro.json`; см. `manual_docs/reference/memory.md`).
+  **branch-aware (v3):** идентичность записи по коммиту (`head`), commit-scoped
+  recall (тиры general/experience/не в контексте/unattributed), промоция по
+  `is-ancestor(head, mainline)`, mainline авто-детект, ключи
+  `branch_context`/`mainline`; **`centralized_confidential` удалён** (решение
+  локально/удалённо — только `storage.type`); не часть стандартной установки,
+  включается по запросу (секция `memory` в `maestro.json`; см.
+  `manual_docs/reference/memory.md`).
 - `skills/` — скилл-спеки и поддерживающие промпты/схемы.
 - `agents/` + `commands/` — определения субагентов и точек входа.
 - `docs/` — project-context, тестовая документация (testing/), каталоги пайплайна
@@ -149,10 +154,12 @@
 - **Секреты:** `.env`, `*.env.*`, `*.{pem,key,cert,secret}` — deny (built-in + config).
 - **Санитайзинг:** маскировка чувствительных данных перед untrusted-диспатчем
   (`sanitizer_whitelist`).
-- **Память (memory layer):** `centralized_confidential: forbid` по умолчанию —
-  проект с `confidential.paths` пишет память только в локальный sqlite; маскирование
-  `sanitize()` до и после саммаризации (правила — `SECURITY.md` §5a и
-  `manual_docs/explanation/agents-and-trust.md`).
+- **Память (memory layer):** маскирование `sanitize()` до и после саммаризации —
+  жёсткий инвариант: raw-confidential и секреты не уходят на сервер
+  (санизированное не блокируется); решение локально/удалённо — только
+  `storage.type` (`centralized_confidential` удалён); риск unmasked git-метаданных
+  (`branch`/`head`/`merged`) на централизованном бэкенде (правила — `SECURITY.md`
+  §5a и `manual_docs/explanation/agents-and-trust.md`).
 - Источник истины — `SECURITY.md` (требования P1–P5).
 
 ## 13. Мониторинг и observability

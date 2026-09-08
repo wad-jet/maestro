@@ -7,6 +7,39 @@
 > Хронология составлена по истории authoring-репо `maestro-agent`. Даты
 > приблизительные (по коммитам).
 
+## [2026-09-08]
+
+### Добавлено
+
+- **Memory layer v3: branch-aware memory.** Контекст памяти привязан к
+  git-истории:
+  - **Commit-based членство:** идентичность записи — по коммиту (`head`), имя
+    ветки — только display/stats; тиры general/experience/не в контексте/
+    unattributed (членство по достижимости `head` в git-истории); recall по
+    умолчанию commit-scoped (`scope: "branch"`), `scope: "project"` — плоский
+    обзор всех записей ключа.
+  - **Промоция:** на init — head-based (`git merge-base --is-ancestor`), строго
+    key-scoped (shared-бэкенды не контаминируются), heal-путь для записей транка
+    при нерезолвнутом mainline; `merged` монотонен (0→1).
+  - **Mainline авто-детект:** `memory.mainline` override → remote HEAD →
+    `init.defaultBranch` → резерв `main`/`master`/`develop`; нерезолв →
+    `mainline_unresolved` (flat recall + warn, диагностика в `@maestro-memory`).
+    Gitflow-guidance: `memory.mainline: "develop"` / `"main"`.
+  - **Новые ключи:** `branch_context` (default `true`), `mainline` (default
+    `null`). **Config-guidance:** rebase/squash-heavy флоу → `branch_context:
+    false` (squash/rebase-loss — dangling head, документированное ограничение).
+  - **Удалён `centralized_confidential`:** решение локально/удалённо — только
+    `storage.type`; назначение ключа (страховка от утечки) обеспечено
+    маскированием (жёсткий инвариант §5a `SECURITY.md`).
+  - Спека: `docs/superpowers/specs/2026-09-07-maestro-memory-v3-design.md`.
+    Документация: `manual_docs/reference/memory.md` (branch-aware секция),
+    `manual_docs/reference/config.md`, `manual_docs/how-to/enable-memory.md`
+    (`disabled_reason`, диагностики), `manual_docs/explanation/agents-and-trust.md`,
+    `manual_docs/reference/model-selection.md`, `SECURITY.md` (§5a), канон
+    `maestro-assistant`, `maestro-new`, `plugins/maestro-bootstrap/README.md`,
+    `AGENTS.md`, `docs/project-context.md`,
+    `docs/testing/maestro-sandbox-checklist.md` (F12–F16).
+
 ## [2026-09-07]
 
 ### Добавлено

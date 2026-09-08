@@ -160,11 +160,10 @@ silent opt-in).
 При добавлении — HITL-опрос (по канону `maestro-assistant`, секция `memory`):
 
 - **Бэкенд:** `sqlite` (default, локальный) / `qdrant` / `pgvector`
-  (централизованные — требуют identity и env-ссылки на ключ/DSN).
+  (централизованные — требуют identity и env-ссылки на ключ/DSN). Решение
+  «локально vs удалённо» — только `storage.type`.
 - **Командная память:** `identity_env` (имя env-переменной) и `namespace`
   (monorepo / связанные репозитории) — по запросу.
-- **`centralized_confidential`:** всегда `forbid`, если проект имеет
-  `confidential.paths`; `allow` — только по явному HITL-подтверждению.
 
 Минимальный канон при добавлении: `{ "enabled": true }` (остальные ключи —
 дефолты). После записи — напомнить про `npm install` в `module_dir`

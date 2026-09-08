@@ -88,6 +88,11 @@
 | F9 | pgvector hybrid | ✅ | pgvector-проект в sandbox; `memory_search` с текстовым `query` возвращает лексические совпадения (ts_rank); без crash | |
 | F10 | qdrant hybrid | ✅ | qdrant-проект в sandbox; `memory_search` с `query` возвращает full-text совпадения через RRF; без crash | |
 | F11 | sqlite cross-project | ✅ | sqlite-проект; `memory_search { project: <сосед> }` возвращает записи соседа read-only; `origin_project_hash` в выдаче (провенанс); без crash | |
+| F12 | commit-scoped recall | ✅ | стек веток видит базу; переиспользование имени ветки НЕ контаминирует контекст; без crash | |
+| F13 | промоция после мержа | ✅ | ветка влита в mainline + `git pull` → записи становятся general (merged=1) на следующем init | |
+| F14 | scope=project override | ✅ | `memory_search { scope: "project" }` возвращает все записи ключа (плоско) | |
+| F15 | мульти-проект на centralized | ✅ | промоция одного проекта НЕ затрагивает записи другого (key-scoped) | |
+| F16 | heal (mainline_unresolved окно) | ✅ | записи транка, написанные при нерезолвнутом mainline, промоутятся после резолва | |
 
 ---
 

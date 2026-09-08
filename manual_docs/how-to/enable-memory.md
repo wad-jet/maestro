@@ -71,8 +71,7 @@
         "url": "https://qdrant.internal:6333",
         "api_key_env": "MAESTRO_MEMORY_QDRANT_KEY",
         "collection": "maestro_memory"
-      },
-      "centralized_confidential": "forbid"
+      }
     }
   }
 }
@@ -87,8 +86,7 @@
       "pgvector": {
         "connection_string_env": "MAESTRO_MEMORY_PG_DSN",
         "table": "maestro_memory"
-      },
-      "centralized_confidential": "forbid"
+      }
     }
   }
 }
@@ -100,10 +98,11 @@
   → git `user.name`. Identity — подпись записей (`author`), **не access-control**:
   любой член команды с ключом читает всю память проекта. Per-account RBAC —
   server-side задача, вне scope плагина.
-- **`centralized_confidential`:** `forbid` (default) — проект с
-  `confidential.paths` пишет память **только в локальный sqlite** (failover +
-  warning в лог); `allow` — разрешить централизованный бэкенд (осознанный риск,
-  только с identity и маскированием).
+- **Решение «локально vs удалённо» — только `storage.type`** (`sqlite` =
+  локально; `qdrant`/`pgvector` = удалённо). Ключ `centralized_confidential`
+  **удалён** (v3): его назначение (страховка от утечки) обеспечено
+  маскированием — raw-confidential и секреты не попадают в контент записей в
+  принципе; санизированные данные могут храниться/читаться где угодно.
 
 > **Переключение бэкенда не мигрирует данные автоматически.** Миграция — через
 > `memory_export` → `memory_import` (JSONL полной схемы v1, включая embedding;
@@ -191,6 +190,43 @@ timeline-гистограмма по датам, кластеры тем, авт
     нет remote — hash абсолютного пути).
   - ⚠️ **Смена namespace = потеря доступа к старым записям** (миграции нет).
 
+### Branch-aware память (тиры и диагностика)
+
+С v3 память привязана к git-истории: идентичность записи — по коммиту (`head`),
+имя ветки — только display. Recall по умолчанию **commit-scoped** (`scope:
+"branch"`): общий (mainline) контекст + собственный «опыт» (неслитые коммиты,
+достижимые из checkout). Тиры:
+
+- **general** — запись вошла в mainline (`merged = 1` или `head` достижим из
+  mainline);
+- **experience** — неслитая работа текущего checkout (аннотация «⚠️ не в main»);
+- **не в контексте** — чужая/удалённая/устаревшая работа (только `scope:
+  project`);
+- **unattributed** — `head = ''` (только `scope: project`).
+
+`scope: "project"` — все записи ключа (плоско). `memory.branch_context: false`
+задаёт дефолтный scope = `project` (явный `scope`-параметр всегда побеждает).
+Промоция в general — на init по `is-ancestor(head, mainline)`, строго key-scoped;
+после удалённого PR нужен локальный `git fetch`/`git pull`. Подробности —
+[Память maestro (reference)](../reference/memory.md).
+
+**Диагностика:**
+
+- **`mainline_unresolved`** — mainline не резолвнут (override именует
+  несуществующую ветку, либо ни remote HEAD, ни `init.defaultBranch`, ни резерв
+  `main`/`master`/`develop` не подтвердились локально). Поведение: branch-context
+  эффективно off — **flat recall** (идентично `branch_context: false`) + warn в
+  лог; промоушен-проход пропускается. Как диагностировать: warn
+  `memory: mainline_unresolved` в `.maestro/logs/maestro-bootstrap-<дата>.log`
+  и/или строка «Диагностика: mainline_unresolved» в выдаче `@maestro-memory`.
+  Исправление: задать `memory.mainline` явно (см. gitflow-guidance в
+  [Память maestro (reference)](../reference/memory.md)).
+- **`unmasked_branch_metadata`** — централизованный бэкенд + непустые
+  `confidential.paths`: имена веток (`branch`/`head`/`merged` — git-структурные
+  поля, исключение из маскирования) уходят на сервер. Это документированный
+  риск, не ошибка; warn дублируется в выдаче `@maestro-memory` (диагностика без
+  логов).
+
 ### Offline: предзагрузка модели эмбеддингов
 
 Default-модель `Xenova/paraphrase-multilingual-MiniLM-L12-v2` (dim 384, RU+EN,
@@ -230,7 +266,7 @@ q8 ~120 МБ, ONNX) загружается однократно с HuggingFace �
 
 | Симптом | Причина / действие |
 |---|---|
-| Память не работает, в логе `memory: disabled` с `reason` | Конфигурация невалидна (см. `disabled_reason`: `storage_type_invalid`, `centralized_identity_missing`, `qdrant_config_invalid`, `pgvector_config_invalid`, `pgvector_text_search_config_invalid`, `centralized_confidential_invalid`, `retention_days_invalid`, `similarity_threshold_invalid`) |
+| Память не работает, в логе `memory: disabled` с `reason` | Конфигурация невалидна (см. `disabled_reason`: `storage_type_invalid`, `centralized_identity_missing`, `qdrant_config_invalid`, `pgvector_config_invalid`, `pgvector_text_search_config_invalid`, `branch_context_invalid`, `mainline_invalid`, `retention_days_invalid`, `similarity_threshold_invalid`) |
 | В логе `memory: transformers not installed — run npm install in <module_dir>` | Не выполнена установка deps (шаг 3 краткой инструкции) |
 | В логе `memory: init failed` | Ошибка инициализации (бэкенд недоступен, модель не загрузилась и т.п.) — сессии работают |
 | Блок `## Контекст из памяти maestro` не появляется | Модель эмбеддингов ещё прогревается (первый запуск), либо нет записей выше `min_score`, либо сессия не top-level primary |

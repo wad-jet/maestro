@@ -89,8 +89,7 @@ description: Use when the user asks for help configuring maestro, organizing pro
     "storage": {
       "type": "sqlite",
       "qdrant": { "url": "https://qdrant.internal:6333", "api_key_env": "MAESTRO_MEMORY_QDRANT_KEY", "collection": "maestro_memory" },
-      "pgvector": { "connection_string_env": "MAESTRO_MEMORY_PG_DSN", "table": "maestro_memory" },
-      "centralized_confidential": "forbid"
+      "pgvector": { "connection_string_env": "MAESTRO_MEMORY_PG_DSN", "table": "maestro_memory" }
     }
   }
 }
@@ -156,9 +155,19 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
   (централизованные). Централизованные требуют **резолвнутую identity** (иначе
   память off + лог) и `url`+`api_key_env` (qdrant) / `connection_string_env`
   (pgvector). API-ключ — только через ссылку на env, никогда plaintext.
-- **`storage.centralized_confidential`** — `forbid` (default): проект с
-  `confidential.paths` пишет память только в локальный sqlite (failover +
-  warning); `allow` — осознанный HITL-выбор.
+  Решение «локально vs удалённо» — только `storage.type`.
+- **`branch_context`** — branch-scoped recall (default `true`): членство записей
+  по git-истории (тиры general/experience); `false` → flat project recall
+  (дефолтный scope = `project`). Валидация: boolean; иначе — память off + лог
+  (`branch_context_invalid`).
+- **`mainline`** — основная ветка для промоции (default `null` → авто-детект из
+  git: remote HEAD → `init.defaultBranch` → резерв `main`/`master`/`develop`).
+  Явный override авторитетен; несуществующее имя → `mainline_unresolved`
+  (branch-context flat + warn). Валидация: `null` или строка
+  `/^[a-zA-Z0-9_\/.-]+$/`, длина ≤ 100; иначе — память off + лог
+  (`mainline_invalid`). Gitflow-guidance: `memory.mainline: "develop"` (общий
+  контекст = интегрированная разработка) или `"main"` (только выпущенная
+  истина).
 - **`storage.pgvector.text_search_config`** — Postgres text-search конфигурация
   для гибридного поиска, default `"russian"` (стеммер). Только при
   `type: pgvector`. Валидация: `/^[a-z][a-z0-9_]*$/`, ≤63 символа; на кастомных
@@ -182,9 +191,9 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
 - При добавлении — минимальный канон `{ "enabled": true }` (все остальные ключи
   — дефолты); расширять только по запросу HITL (бэкенд, namespace, identity_env,
   модели, retention_days, report).
-- `centralized_confidential` — всегда `forbid`, если проект имеет
-  `confidential.paths`; `allow` — только по явному HITL-подтверждению (осознанный
-  риск).
+- `branch_context`/`mainline` — только по запросу HITL (branch-aware дефолты
+  включены и без них); squash/rebase-heavy флоу → рекомендация
+  `branch_context: false`.
 - `identity_env` — имя env-переменной (напр. `MAESTRO_MEMORY_IDENTITY`), не
   значение; `identity` — только для сервисных аккаунтов.
 - **Write/boundary-tools → permission `ask` (обязательное правило).** При

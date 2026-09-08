@@ -244,8 +244,7 @@ untrusted, access-policy не enforced, дефолтные sanitizer-прави�
     "storage": {
       "type": "sqlite",
       "qdrant": { "url": "https://qdrant.internal:6333", "api_key_env": "MAESTRO_MEMORY_QDRANT_KEY", "collection": "maestro_memory" },
-      "pgvector": { "connection_string_env": "MAESTRO_MEMORY_PG_DSN", "table": "maestro_memory" },
-      "centralized_confidential": "forbid"
+      "pgvector": { "connection_string_env": "MAESTRO_MEMORY_PG_DSN", "table": "maestro_memory" }
     }
   }
 }
@@ -255,13 +254,13 @@ untrusted, access-policy не enforced, дефолтные sanitizer-прави�
   `<data-dir>/maestro/memory/<hash>/memory.db`) | `qdrant` (централизованный,
   `url` + `api_key_env`) | `pgvector` (`connection_string_env`). Централизованные
   требуют резолвнутую identity (`identity` → `identity_env` → git `user.name`).
-- **`centralized_confidential`:** `forbid` (default) — проект с
-  `confidential.paths` пишет память только в локальный sqlite (failover +
-  warning). Маскирование защищает **raw-confidential** от передачи открыто
-  untrusted LLM и от выхода за машину в полном виде; **санизированные** данные
-  могут храниться/читаться где угодно. `forbid` — консервативный local-first
-  дефолт (failover на sqlite + warning); `allow` — осознанный opt-in владельца
-  проекта.
+  Решение «локально vs удалённо» — только `storage.type`.
+- **Branch-aware (v3):** идентичность записи — по коммиту (`head`), имя ветки —
+  только display; recall по умолчанию commit-scoped (`scope: "branch"`), тиры
+  general/experience/не в контексте/unattributed; промоция на init по
+  `is-ancestor(head, mainline)` (key-scoped); mainline авто-детект
+  (`memory.mainline` override → remote HEAD → `init.defaultBranch` → резерв
+  `main`/`master`/`develop`); `branch_context: false` → flat project recall.
 - **`retention_days`:** `null` (default) — выключено; число — TTL записей
   (prune при старте, лог количества удалённых).
 - **`similarity_threshold`:** порог cosine для кластеров/графа в
@@ -333,9 +332,9 @@ Memory layer (при `memory.enabled: true`):
 
 - `memory: disabled` — память выключена (info, с `reason`: `storage_type_invalid`,
   `centralized_identity_missing`, `qdrant_config_invalid`, `pgvector_config_invalid`,
-  `centralized_confidential_invalid`, `retention_days_invalid`,
+  `branch_context_invalid`, `mainline_invalid`, `retention_days_invalid`,
   `similarity_threshold_invalid`)
-- `memory: centralized backend forbidden for confidential project — fallback to sqlite` (warn)
+- `memory: mainline_unresolved — branch-context flat (нет резолвнутого mainline)` (warn)
 - `memory: init failed` — ошибка инициализации (error; сессии работают)
 - `memory: indexer error` — ошибка индексации сессии (error, с `sessionID`)
 - `memory: retention pruned` — retention удалил записи при старте (info, с `count`)
