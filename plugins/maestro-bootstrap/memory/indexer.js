@@ -246,7 +246,11 @@ export class Indexer {
       // M1: safe error message
       const errMsg = err instanceof Error ? err.message : String(err);
       this.log?.error?.("memory: indexer error", { sessionID, error: errMsg });
-      try { await this.state.recordFail(sessionID); } catch {}
+      if (err?.retryable) {
+        this.log?.warn?.("memory: retryable embed error — skip не засчитывается", { sessionID });
+      } else {
+        try { await this.state.recordFail(sessionID); } catch {}
+      }
     } finally {
       this.running = false;
       // M3: dedup when processing queue

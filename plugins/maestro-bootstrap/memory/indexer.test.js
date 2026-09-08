@@ -145,6 +145,26 @@ test("indexer _run calls recordFail on error", async () => {
   idx.dispose();
 });
 
+test("indexer retryable embed error does not recordFail", async () => {
+  let failCalled = false;
+  const client = mkClient();
+  const storage = mkStorage(client);
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: {
+      embed: async () => { const e = new Error("network"); e.retryable = true; throw e; },
+      dim: 1, modelId: "m",
+    },
+    storage,
+    state: { ...mkState(), recordFail: async () => { failCalled = true; } },
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+  });
+  await idx._run("s1");
+  assert.equal(failCalled, false);
+  idx.dispose();
+});
+
 test("indexer records summarized state after success", async () => {
   let summarizedId = null;
   const client = mkClient();
