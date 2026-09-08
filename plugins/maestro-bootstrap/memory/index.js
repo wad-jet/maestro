@@ -391,8 +391,12 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
           apiKey: process.env[config.embedding.api_key_env],
           apiKeyEnv: config.embedding.api_key_env,
           dim: config.embedding.dim,
+          // Task 5 (fix round 1): проброс аудит-лог-хелперов (memoryLog ?? log) —
+          // embedder-события (embed.duration/cache_stats/http.error) пишутся в
+          // maestro-memory-*.log (spec §4.3).
+          logDebug, logWarn, logInfo,
         })
-      : new Embedder({ model: config.embedding.model ?? config.embedding_model, cacheDir: memoryDataDir, moduleDir }));
+      : new Embedder({ model: config.embedding.model ?? config.embedding_model, cacheDir: memoryDataDir, moduleDir, logDebug }));
 
     // Стартовый probe (кэш по identity + гибрид hard/soft) ДО createStorage —
     // hard-fail возвращается до любых побочных эффектов storage. Identity —
