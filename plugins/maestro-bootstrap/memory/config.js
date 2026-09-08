@@ -22,6 +22,14 @@ export const DEFAULTS = {
   branch_context: true,
   mainline: null,
   storage: { type: "sqlite", qdrant: null, pgvector: null },
+  embedding: {
+    provider: "local",
+    model: null,
+    base_url: "https://api.openai.com/v1",
+    api_key_env: null,
+    dim: null,
+  },
+  probe_cooldown_min: 30,
 };
 
 const STORAGE_TYPES = new Set(["sqlite", "qdrant", "pgvector"]);
@@ -33,9 +41,19 @@ const TEXT_SEARCH_CONFIG_RE = /^[a-z][a-z0-9_]*$/;
 
 function mergedConfig(m) {
   const type = m.storage?.type ?? "sqlite";
+  const provider = m.embedding?.provider ?? "local";
+  const embedding = {
+    provider,
+    model: m.embedding?.model ?? (provider === "local" ? (m.embedding_model ?? DEFAULTS.embedding_model) : null),
+    base_url: (m.embedding?.base_url ?? "https://api.openai.com/v1").replace(/\/+$/, ""),
+    api_key_env: m.embedding?.api_key_env ?? null,
+    dim: provider === "local" ? null : (m.embedding?.dim ?? null),
+  };
   return {
     ...DEFAULTS,
     ...m,
+    embedding,
+    probe_cooldown_min: m.probe_cooldown_min ?? DEFAULTS.probe_cooldown_min,
     storage: {
       type,
       qdrant: m.storage?.qdrant ?? null,
@@ -117,6 +135,42 @@ function branchContextValid(m) {
   return typeof m.branch_context === "boolean";
 }
 
+// Идентификаторы провайдеров эмбеддингов, поддерживаемых в конфиге.
+const EMBEDDING_PROVIDERS = new Set(["local", "openai"]);
+
+/**
+ * Валидация блока memory.embedding: provider ∈ {local, openai}, для openai
+ * обязательны model / api_key_env / dim. При отсутствии блока — true (local
+ * default применяется в mergedConfig).
+ * @param {object} m  The `memory` config section.
+ * @returns {boolean}  True when embedding is valid (or absent).
+ */
+function embeddingValid(m) {
+  const e = m.embedding;
+  if (e == null) return true; // отсутствует → local default
+  if (typeof e !== "object" || Array.isArray(e)) return false;
+  const provider = e.provider ?? "local";
+  if (!EMBEDDING_PROVIDERS.has(provider)) return false;
+  if (provider === "openai") {
+    if (typeof e.model !== "string" || e.model.length === 0) return false;
+    if (typeof e.api_key_env !== "string" || e.api_key_env.length === 0) return false;
+    if (e.dim == null || !Number.isInteger(e.dim) || e.dim <= 0) return false;
+  }
+  return true;
+}
+
+/**
+ * probe_cooldown_min: null (по умолчанию) или положительное число; иначе →
+ * невалидно (память отключена). Shared by classifyMemoryConfig and
+ * loadMemoryConfig.
+ * @param {object} m  The `memory` config section.
+ * @returns {boolean}  True when probe_cooldown_min is valid (or absent).
+ */
+function probeCooldownValid(m) {
+  if (m?.probe_cooldown_min == null) return true;
+  return typeof m.probe_cooldown_min === "number" && m.probe_cooldown_min > 0;
+}
+
 /**
  * Lightweight classification of the memory config — NO storage imports.
  * Used by core.js BEFORE any memory module import (zero-dep gate, C1) and
@@ -135,6 +189,8 @@ export function classifyMemoryConfig(maestroJson, { gitName = null } = {}) {
   if (!STORAGE_TYPES.has(type)) return { enabled: false, disabled_reason: "storage_type_invalid" };
   if (!pgvectorTextSearchConfigValid(m)) return { enabled: false, disabled_reason: "pgvector_text_search_config_invalid" };
   if (!branchContextValid(m)) return { enabled: false, disabled_reason: "branch_context_invalid" };
+  if (!embeddingValid(m)) return { enabled: false, disabled_reason: "embedding_invalid" };
+  if (!probeCooldownValid(m)) return { enabled: false, disabled_reason: "probe_cooldown_min_invalid" };
   if (!mainlineValid(m)) return { enabled: false, disabled_reason: "mainline_invalid" };
   const centralized = type !== "sqlite";
   if (centralized) {

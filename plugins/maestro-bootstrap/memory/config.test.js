@@ -137,3 +137,52 @@ test("resolveEffectiveTextConfig: valid passes through, invalid/absent falls bac
   assert.equal(resolveEffectiveTextConfig({ storage: { pgvector: { text_search_config: "BAD" } } }), "russian");
   assert.equal(resolveEffectiveTextConfig({ storage: { pgvector: {} } }), "russian");
 });
+
+// ── Task 1: memory.embedding block + probe_cooldown_min ──
+
+test("embedding block defaults (local)", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true } });
+  assert.deepEqual(cfg.embedding, {
+    provider: "local",
+    model: "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
+    base_url: "https://api.openai.com/v1",
+    api_key_env: null,
+    dim: null,
+  });
+  assert.equal(cfg.probe_cooldown_min, 30);
+});
+
+test("legacy embedding_model feeds embedding.model (local); embedding.model wins", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, embedding_model: "legacy" } });
+  assert.equal(cfg.embedding.model, "legacy");
+  const cfg2 = loadMemoryConfig({ memory: { enabled: true, embedding_model: "legacy", embedding: { model: "new" } } });
+  assert.equal(cfg2.embedding.model, "new");
+});
+
+test("openai provider requires model/api_key_env/dim else embedding_invalid", () => {
+  assert.equal(classifyMemoryConfig({ memory: { enabled: true, embedding: { provider: "openai" } } }).disabled_reason, "embedding_invalid");
+  const ok = { memory: { enabled: true, embedding: { provider: "openai", model: "text-embedding-3-small", api_key_env: "EMB_KEY", dim: 1536 } } };
+  assert.equal(classifyMemoryConfig(ok).disabled_reason, null);
+});
+
+test("unknown provider / non-object embedding → embedding_invalid", () => {
+  assert.equal(classifyMemoryConfig({ memory: { enabled: true, embedding: { provider: "foo" } } }).disabled_reason, "embedding_invalid");
+  assert.equal(classifyMemoryConfig({ memory: { enabled: true, embedding: "x" } }).disabled_reason, "embedding_invalid");
+});
+
+test("openai model does not fall back to legacy embedding_model", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, embedding_model: "legacy", embedding: { provider: "openai", model: "m", api_key_env: "K", dim: 3 } } });
+  assert.equal(cfg.embedding.model, "m");
+});
+
+test("base_url trailing slashes normalized", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, embedding: { provider: "openai", model: "m", api_key_env: "K", dim: 3, base_url: "https://x/v1/" } } });
+  assert.equal(cfg.embedding.base_url, "https://x/v1");
+});
+
+test("dim ignored for local; probe_cooldown_min validation", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, embedding: { dim: 512 } } });
+  assert.equal(cfg.embedding.dim, null);
+  assert.equal(classifyMemoryConfig({ memory: { enabled: true, probe_cooldown_min: 0 } }).disabled_reason, "probe_cooldown_min_invalid");
+  assert.equal(classifyMemoryConfig({ memory: { enabled: true, probe_cooldown_min: 5 } }).disabled_reason, null);
+});
