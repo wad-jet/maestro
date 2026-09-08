@@ -106,8 +106,9 @@ export function detectMainline(root, { override = null } = {}) {
  */
 export function revList(root, ref) {
   try {
-    const out = runGit(root, ["rev-list", ref], { quiet: true }).stdout.trim();
-    return new Set(out ? out.split("\n") : []);
+    const r = runGit(root, ["rev-list", ref], { quiet: true });
+    if (r.status !== 0) return null;
+    return new Set(r.stdout.trim() ? r.stdout.trim().split("\n") : []);
   } catch { return null; }
 }
 

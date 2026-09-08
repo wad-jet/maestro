@@ -49,6 +49,11 @@ test("detectMainline: no override → reserve chain (main exists)", () => {
   assert.equal(detectMainline(dir).name, "main");
 });
 
+test("revList: invalid ref → null (fail-soft, not empty Set)", () => {
+  const dir = makeRepo();
+  assert.equal(revList(dir, "deadbeef"), null);
+});
+
 test("revList returns ancestor set; isAncestor yes/no/error", () => {
   const dir = makeRepo();
   const head = resolveHead(dir);
