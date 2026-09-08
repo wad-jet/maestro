@@ -14,9 +14,15 @@ description: Показать статус memory layer плагина maestro-b
 2. Если вызов не удался / инструмент недоступен / память выключена → выведи:
 
    ```
-   Память maestro выключена — включите в maestro.json:
-   memory.enabled: true (см. manual_docs/how-to/enable-memory.md)
+   Память maestro выключена (disabled_reason: <причина>).
+   Включите в maestro.json: memory.enabled: true (см. manual_docs/how-to/enable-memory.md)
    ```
+
+   Причину (`disabled_reason`) определи по `maestro.json`: отсутствие секции `memory` →
+   `no_memory_section`; `memory.enabled: false` → `explicitly_disabled`; невалидные ключи
+   (`retention_days`, `similarity_threshold`, `storage.type`, `branch_context`, `mainline`,
+   `storage.pgvector.text_search_config`) → соответствующий код (`*_invalid`);
+   централизованный бэкенд без identity → `centralized_identity_missing`.
 
 3. Если инструмент вернул данные → продолжи к Шагу 2.
 
@@ -51,6 +57,9 @@ description: Показать статус memory layer плагина maestro-b
   По авторам: <author1>: <count>, <author2>: <count>, …
   По датам: <date1>: <count>, <date2>: <count>, …
 
+**Тиры:** merged: <N>, experience: <N>, unknown: <N>, dead: <N>
+  По веткам: <branch1>: <count>, <branch2>: <count>, …
+
 **Кластеры / граф:** <количество кластеров>, <количество связей>
 
 **Тюнинг:**
@@ -58,6 +67,10 @@ description: Показать статус memory layer плагина maestro-b
   min_score = <min_score> (для изменения: `min_score: <value>` в `memory` секции maestro.json)
   retention_days = <retention_days или «выключено»>
 ```
+
+Если в отчёте `memory_stats_detail` есть диагностические строки — выведи их как есть:
+- `mainline_unresolved` — mainline не резолвнут (branch-context flat; guidance: `memory.mainline` override);
+- `unmasked_branch_metadata` — централизованный бэкенд + непустые `confidential.paths` (имена веток уходят на сервер).
 
 Если в отчёте `memory_stats_detail` нет данных по кластерам/графу — напиши:
 `«Данные по кластерам/графу отсутствуют»`.

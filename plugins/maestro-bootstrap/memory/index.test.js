@@ -2,7 +2,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import { registerMemoryHooks } from "./index.js";
 import { getGitConfig } from "../core.js";
 import { sanitizeDirName } from "./config.js";
@@ -1262,6 +1263,170 @@ test("memory_stats_detail graph edges above threshold", async () => {
 test("similarity_threshold default 0.7", async () => {
   const { DEFAULTS } = await import("./config.js");
   assert.equal(DEFAULTS.similarity_threshold, 0.7);
+});
+
+// ── Task 7: tier/branch breakdown + duplicated diagnostics ─────────────
+
+test("memory_stats_detail includes tier + branch breakdown", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-tiers-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.stats = async () => ({ entries: 5 });
+    storage.scan = async () => [
+      { session_id: "m1", title: "T1", author: "alice", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]) },
+      { session_id: "m2", title: "T2", author: "alice", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([0.99, 0.01, 0]) },
+      { session_id: "e1", title: "T3", author: "bob", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([0.98, 0.02, 0]) },
+      { session_id: "d1", title: "T4", author: "bob", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([0, 1, 0]) },
+      { session_id: "u1", title: "T5", author: "carol", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([0, 0, 1]) },
+    ];
+    // Кандидаты: merged=1 ×2, experience ×1 (head ∈ expSet), dead ×1
+    // (head ∉ ancestorSet), unknown ×1 (head='').
+    storage.candidates = async () => [
+      { session_id: "m1", merged: 1, head: "hm1", branch: "main" },
+      { session_id: "m2", merged: 1, head: "hm2", branch: "main" },
+      { session_id: "e1", merged: 0, head: "he", branch: "feature/x" },
+      { session_id: "d1", merged: 0, head: "hd", branch: "feature/y" },
+      { session_id: "u1", merged: 0, head: "", branch: "" },
+    ];
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      revList: (root, ref) => {
+        if (ref === "HEAD") return new Set(["he"]);
+        if (ref === "main") return new Set(["hm1", "hm2"]);
+        return new Set();
+      },
+      isAncestor: () => "no",
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+    const res = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "s1" });
+    assert.match(res, /Тиры/, "must include tiers section");
+    assert.match(res, /merged: 2/, "merged=1 ×2 → merged tier");
+    assert.match(res, /experience: 1/, "head ∈ expSet → experience tier");
+    assert.match(res, /dead: 1/, "head ∉ ancestorSet → dead tier");
+    assert.match(res, /unknown: 1/, "head='' → unknown tier");
+    assert.match(res, /По веткам/, "must include branch breakdown");
+    assert.match(res, /main: 2/, "branch display count (main)");
+    assert.match(res, /feature\/x: 1/, "branch display count (feature/x)");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_stats_detail fail-soft: revList null → только merged-счётчики", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-tiers-fs-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.stats = async () => ({ entries: 3 });
+    storage.scan = async () => [
+      { session_id: "m1", title: "T1", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]) },
+      { session_id: "e1", title: "T2", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([0, 1, 0]) },
+      { session_id: "d1", title: "T3", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([0, 0, 1]) },
+    ];
+    storage.candidates = async () => [
+      { session_id: "m1", merged: 1, head: "hm1", branch: "main" },
+      { session_id: "e1", merged: 0, head: "he", branch: "feature/x" },
+      { session_id: "d1", merged: 0, head: "hd", branch: "feature/y" },
+    ];
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      revList: () => null,
+      isAncestor: () => "no",
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+    const res = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "s1" });
+    assert.match(res, /merged: 1/, "merged=1 survives fail-soft");
+    assert.doesNotMatch(res, /experience: [1-9]/, "experience must NOT be counted when revList failed");
+    assert.doesNotMatch(res, /dead: [1-9]/, "dead must NOT be counted when revList failed");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("@maestro-memory duplicates diagnostics: disabled_reason / mainline_unresolved / unmasked_branch_metadata", async () => {
+  // (a) память off → шаблон команды инструктирует выводить disabled_reason.
+  const cmdPath = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "commands", "maestro-memory.md");
+  const cmd = readFileSync(cmdPath, "utf8");
+  assert.match(cmd, /disabled_reason/, "command template must surface disabled_reason when memory is off");
+
+  const dir = mkdtempSync(join(tmpdir(), "mem-diag-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    // (b) mainline unresolved → memory_stats_detail выводит mainline_unresolved.
+    const storage = mkMockStorage();
+    storage.stats = async () => ({ entries: 1 });
+    storage.scan = async () => [
+      { session_id: "s1", title: "T1", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]) },
+    ];
+    storage.candidates = async () => [{ session_id: "s1", merged: 1, head: "", branch: "" }];
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: {
+        storage,
+        embeddings: mkMockEmbeddings(),
+        git: { detectMainline: () => null, revList: () => new Set(), isAncestor: () => "no" },
+      },
+    });
+    const res = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "s1" });
+    assert.match(res, /mainline_unresolved/, "mainline unresolved → diagnostic in output");
+    await hooks.dispose?.();
+
+    // (c) centralized + confidential.paths → unmasked_branch_metadata.
+    const storage2 = mkMockStorage();
+    storage2.stats = async () => ({ entries: 1 });
+    storage2.scan = async () => [
+      { session_id: "s1", title: "T1", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]) },
+    ];
+    storage2.candidates = async () => [{ session_id: "s1", merged: 1, head: "", branch: "" }];
+    const config = mkConfig(dir, {
+      storage: { type: "qdrant", qdrant: { url: "http://localhost:6333", api_key_env: "Q_KEY" } },
+      identity: "x",
+    });
+    config.confidential = { paths: ["docs/confidential/**"] };
+    const hooks2 = await registerMemoryHooks({
+      client: mkClient(),
+      config,
+      log: silentLog,
+      root: dir,
+      deps: {
+        storage: storage2,
+        embeddings: mkMockEmbeddings(),
+        git: { detectMainline: () => ({ name: "main" }), revList: () => new Set(), isAncestor: () => "no" },
+      },
+    });
+    const res2 = await hooks2.tool.memory_stats_detail.execute({}, { sessionID: "s1" });
+    assert.match(res2, /unmasked_branch_metadata/, "centralized + confidential.paths → diagnostic in output");
+    await hooks2.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 test("tools blocked for [maestro-memory]", async () => {

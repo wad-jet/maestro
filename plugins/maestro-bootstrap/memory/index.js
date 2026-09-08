@@ -607,7 +607,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       }),
       memory_stats_detail: tool({
         description:
-          "Агрегатная статистика памяти активного проекта: число записей, по авторам, по датам, кластеры тем (cosine > similarity_threshold), граф похожести. Только агрегаты — без summary-текста.",
+          "Агрегатная статистика памяти активного проекта: число записей, по авторам, по датам, кластеры тем (cosine > similarity_threshold), граф похожести, разбивка по тирам (merged/experience/unknown/dead) и веткам, диагностики (mainline_unresolved, unmasked_branch_metadata). Только агрегаты — без summary-текста.",
         args: {},
         execute: async (args, ctx) => {
           try {
@@ -656,6 +656,60 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             }
             out.push(`Граф (рёбер: ${graph.length}):`);
             for (const [a, b, s] of graph) out.push(`  ${a} <-> ${b}: ${s.toFixed(2)}`);
+
+            // Task 7: разбивка по тирам (членство Task 6 для текущего checkout)
+            // и по веткам (display, не матчинг). Fail-soft (revList null) →
+            // только merged-счётчики (членство недоступно).
+            const candidates = await storage.candidates(effectiveKey);
+            const tierCounts = { merged: 0, experience: 0, unknown: 0, dead: 0 };
+            const branchCounts = new Map();
+            let failSoft = false;
+            if (candidates.length) {
+              const sets = computeBranchSets({ revList, detectMainline, root, mainlineOverride: config.mainline ?? null });
+              failSoft = sets.failSoft;
+              if (failSoft) {
+                for (const c of candidates) if (c.merged === 1) tierCounts.merged++;
+              } else {
+                const r = applyBranchScope(candidates, sets);
+                for (const c of candidates) {
+                  const sid = c.session_id;
+                  if (r.experience.has(sid)) tierCounts.experience++;
+                  else if (r.inContext.has(sid)) tierCounts.merged++;
+                  else if (r.unknown.has(sid)) tierCounts.unknown++;
+                  else tierCounts.dead++;
+                }
+              }
+              for (const c of candidates) {
+                const b = c.branch ?? "";
+                branchCounts.set(b, (branchCounts.get(b) ?? 0) + 1);
+              }
+            }
+            out.push("Тиры:");
+            if (failSoft) {
+              out.push(`  merged: ${tierCounts.merged} (branch-context недоступен — revList failed)`);
+            } else {
+              out.push(`  merged: ${tierCounts.merged}`);
+              out.push(`  experience: ${tierCounts.experience}`);
+              out.push(`  unknown: ${tierCounts.unknown}`);
+              out.push(`  dead: ${tierCounts.dead}`);
+            }
+            out.push("По веткам:");
+            for (const [b, n] of [...branchCounts.entries()].sort((x, y) => y[1] - x[1])) {
+              out.push(`  ${b || "(без ветки)"}: ${n}`);
+            }
+
+            // Task 7: дублируемые диагностики (в выдаче @maestro-memory).
+            // mainline_unresolved — detectMainline → null (branch-context flat).
+            const mainline = detectMainline(root, { override: config.mainline ?? null });
+            if (!mainline) {
+              out.push("Диагностика: mainline_unresolved — branch-context flat (нет резолвнутого mainline)");
+            }
+            // unmasked_branch_metadata — централизованный бэкенд + непустые
+            // confidential.paths (имена веток, минующие sanitize, уходят на сервер).
+            const centralized = config.storage.type === "qdrant" || config.storage.type === "pgvector";
+            if (centralized && confidentialPaths.length > 0) {
+              out.push("Диагностика: unmasked_branch_metadata — имена веток (минуя sanitize) уходят на сервер");
+            }
             return out.join("\n");
           } catch (err) {
             return `memory_stats_detail failed: ${err instanceof Error ? err.message : String(err)}`;

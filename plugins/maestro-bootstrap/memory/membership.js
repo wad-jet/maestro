@@ -13,21 +13,27 @@
  *
  * @param {Array<{session_id: string, merged: number, head: string}>} candidates
  * @param {{ ancestorSet: Set<string>, mainlineSet: Set<string> }} sets
- * @returns {{ inContext: Set<string>, experience: Set<string> }}
+ * @returns {{ inContext: Set<string>, experience: Set<string>, dead: Set<string>, unknown: Set<string> }}
  *   inContext — session_id записей general+experience (допустимы в branch-scope);
- *   experience — session_id записей experience (для аннотации «⚠️ не в main»).
+ *   experience — session_id записей experience (для аннотации «⚠️ не в main»);
+ *   dead — session_id записей merged=0, head != '' и head ∉ ancestorSet/mainlineSet
+ *     («не в контексте»; тир dead в stats);
+ *   unknown — session_id записей merged=0, head='' (unattributed; тир unknown в stats).
  */
 export function applyBranchScope(candidates, { ancestorSet, mainlineSet }) {
   const inContext = new Set();
   const experience = new Set();
+  const dead = new Set();
+  const unknown = new Set();
   for (const c of candidates) {
     const head = c.head ?? "";
     if (c.merged === 1) { inContext.add(c.session_id); continue; }
     if (head !== "" && mainlineSet.has(head)) { inContext.add(c.session_id); continue; }
     if (head !== "" && ancestorSet.has(head)) { inContext.add(c.session_id); experience.add(c.session_id); continue; }
-    // merged=0, head='' (unattributed) или head ∉ ancestorSet → не в контексте.
+    if (head === "") { unknown.add(c.session_id); continue; }
+    dead.add(c.session_id);
   }
-  return { inContext, experience };
+  return { inContext, experience, dead, unknown };
 }
 
 /**
