@@ -9,6 +9,7 @@ import { maskEntry } from "./mask.js";
 import { ensureModule } from "./provision.js";
 import { createStorage } from "./storage.js";
 import { Embedder } from "./embeddings.js";
+import { OpenAiEmbedder } from "./embeddings-openai.js";
 import { Indexer } from "./indexer.js";
 import { Recall } from "./recall.js";
 import { createState } from "./state.js";
@@ -33,6 +34,54 @@ try {
   const toolFn = (input) => input;
   toolFn.schema = schema;
   tool = toolFn;
+}
+
+/**
+ * Probe с guard-таймером: провайдер может зависнуть (сеть/таймаут). Guard
+ * (20000ms) > таймаут провайдера (15s) — возвращает soft-fail, не роняя init.
+ * Если probe недоступен (deps-mock) — считаем ok (fail-open для тестов).
+ * @param {{ probe?: Function }} embeddings
+ * @param {number} guardMs
+ * @returns {Promise<{ ok: boolean, hard: boolean, detail: string }>}
+ */
+async function probeWithGuard(embeddings, guardMs) {
+  if (!embeddings.probe) return { ok: true, hard: false, detail: "probe недоступен (deps mock)" };
+  let timer;
+  const guard = new Promise((resolve) => {
+    timer = setTimeout(() => resolve({ ok: false, hard: false, detail: "probe timeout (guard)" }), guardMs);
+  });
+  try {
+    return await Promise.race([
+      embeddings.probe().catch((err) => ({ ok: false, hard: false, detail: `probe exception: ${err instanceof Error ? err.message : String(err)}` })),
+      guard,
+    ]);
+  } finally {
+    if (timer) clearTimeout(timer);
+  }
+}
+
+/**
+ * Инструмент live-проверки embedder (probe): ключ, модель, размерность, сеть.
+ * Принудительно, минуя cooldown. Переиспользуется в Task 8 для штатного
+ * toolHooks (здесь — резерв на случай hard-fail стартового probe).
+ * @param {{ embeddings: object, state: object, log: object }} ctx
+ * @returns {object} tool-объект
+ */
+function makeMemoryProbeTool({ embeddings, state, log }) {
+  return tool({
+    description: "Live-проверка доступности модели эмбеддингов (probe): ключ, модель, размерность, сеть. Принудительно, минуя cooldown.",
+    args: {},
+    execute: async (args, ctx) => {
+      try {
+        if (SESSIONS.has(ctx?.sessionID)) return "Инструмент недоступен для служебных сессий.";
+        const p = await embeddings.probe();
+        await state.setEmbedderProbe({ modelId: embeddings.modelId, dim: embeddings.dim, apiKeyEnv: null, ...p });
+        return `Проверка embedder (${embeddings.modelId}): ${p.ok ? "OK" : "FAIL"}${p.hard ? " (конфигурация)" : ""} — ${p.detail}`;
+      } catch (err) {
+        return `memory_probe failed: ${err instanceof Error ? err.message : String(err)}`;
+      }
+    },
+  });
 }
 
 export function defaultDataDir() {
@@ -240,6 +289,14 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       }
     }
 
+    // Task 5: провайдер эмбеддингов — openai требует api_key_env. Проверка
+    // ДО storage: отсутствие ключа → память off без побочных эффектов.
+    const isOpenai = config.embedding.provider === "openai";
+    if (isOpenai && !process.env[config.embedding.api_key_env]) {
+      log?.info?.("memory: disabled", { reason: "embedding_api_key_env_missing" });
+      return {};
+    }
+
     // I-2: identity — identity_env → git user.name → os username (fallback).
     const identity = resolveIdentity({ config, env: process.env, gitName });
     const author = identity ?? config.identity ?? os.userInfo().username;
@@ -300,11 +357,53 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       storageOptions.moduleDir = moduleDir;
     }
 
+    // Task 5: modelId/dim для createStorage из конфига (spec §3.3) + диспатч
+    // провайдера эмбеддингов (openai → OpenAiEmbedder, иначе локальный Embedder).
+    const modelId = isOpenai
+      ? `openai:${config.embedding.model}@${config.embedding.base_url}`
+      : (config.embedding.model ?? config.embedding_model);
+    const dim = isOpenai ? config.embedding.dim : 384;
+    const embeddings = deps.embeddings ?? (isOpenai
+      ? new OpenAiEmbedder({
+          model: config.embedding.model,
+          baseUrl: config.embedding.base_url,
+          apiKey: process.env[config.embedding.api_key_env],
+          apiKeyEnv: config.embedding.api_key_env,
+          dim: config.embedding.dim,
+        })
+      : new Embedder({ model: config.embedding.model ?? config.embedding_model, cacheDir: memoryDataDir, moduleDir }));
+
+    // Стартовый probe (кэш по identity + гибрид hard/soft) ДО createStorage —
+    // hard-fail возвращается до любых побочных эффектов storage. Identity —
+    // по фактическому embedder (modelId/dim), а не по конфигу: смена модели
+    // (даже при том же конфиге) инвалидирует кэш.
+    const state = createState(statePath);
+    const cooldownMs = config.probe_cooldown_min * 60_000;
+    const probeIdentity = { modelId: embeddings.modelId, dim: embeddings.dim, apiKeyEnv: config.embedding.api_key_env ?? null };
+    const cached = await state.getEmbedderProbe();
+    const cacheValid = cached && cached.modelId === probeIdentity.modelId && cached.dim === probeIdentity.dim && cached.apiKeyEnv === probeIdentity.apiKeyEnv;
+    if (cacheValid && Date.now() - cached.at < cooldownMs && cached.ok) {
+      log?.info?.("memory: embedder probe (cached)", { ok: true, detail: cached.detail });
+    } else if (cacheValid && Date.now() - cached.at < cooldownMs && !cached.hard) {
+      log?.warn?.("memory: embedder probe (cached soft fail)", { detail: cached.detail });
+    } else {
+      const p = await probeWithGuard(embeddings, 20000); // guard > provider timeout 15s (follow-up 1)
+      await state.setEmbedderProbe({ ...probeIdentity, ...p });
+      if (p.ok) {
+        log?.info?.("memory: embedder probe OK", { detail: p.detail });
+      } else if (p.hard) {
+        log?.info?.("memory: disabled", { reason: "embedder_probe_hard_fail", detail: p.detail });
+        return {};
+      } else {
+        log?.warn?.("memory: embedder probe failed", { detail: p.detail });
+      }
+    }
+
     const storage = deps.storage ?? createStorage({
       type: config.storage.type,
       options: storageOptions,
-      modelId: config.embedding_model,
-      dim: 384,
+      modelId,
+      dim,
       textSearchConfig: resolveEffectiveTextConfig(config),
     });
     if (!deps.storage) {
@@ -339,8 +438,6 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       log?.error?.("memory: promotion failed", { error: err instanceof Error ? err.message : String(err) });
     }
 
-    const embeddings = deps.embeddings ?? new Embedder({ model: config.embedding_model, cacheDir: memoryDataDir, moduleDir });
-    const state = createState(statePath);
     const confidentialPaths = maestroConfig?.confidential?.paths ?? [];
     // M-2: init-warn — централизованный бэкенд + непустые confidential.paths
     // (имена веток, минующие sanitize, уходят на сервер). Дублируется в выдаче
@@ -348,6 +445,11 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     const centralized = config.storage.type === "qdrant" || config.storage.type === "pgvector";
     if (centralized && confidentialPaths.length > 0) {
       log?.warn?.("memory: unmasked_branch_metadata — имена веток (минуя sanitize) уходят на сервер");
+    }
+    // Task 5: init-warn — внешний (openai) embedder + непустые confidential.paths:
+    // запросы и контент (замаскированные best-effort) уходят генерическому вендору.
+    if (isOpenai && confidentialPaths.length > 0) {
+      log?.warn?.("memory: external_embedder_unmasked_queries — запросы и контент (замаскированные best-effort) уходят генерическому внешнему вендору");
     }
     const indexer = new Indexer({
       client,

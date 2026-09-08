@@ -64,6 +64,14 @@ function mkMockEmbeddings() {
   return { embed: async () => new Float32Array([0.1, 0.2, 0.3]), dim: 3, modelId: "m" };
 }
 
+// Task 5: краткие алиасы для тестов probe-флоу (mkLog/mkStorage).
+function mkLog() {
+  return { debug() {}, info() {}, warn() {}, error() {} };
+}
+function mkStorage() {
+  return mkMockStorage();
+}
+
 // Per-key sqlite path (I8): <XDG_DATA_HOME>/maestro/memory/<key-hash>/memory.db
 function dbPathFor(dataHome, root) {
   return join(dataHome, "maestro", "memory", sanitizeDirName(projectHashFromDir(root)), "memory.db");
@@ -93,7 +101,7 @@ test("memory enabled → tool.memory_search + hooks present", async () => {
   const saved = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = dir;
   try {
-    const hooks = await registerMemoryHooks({ client: mkClient(), config: mkConfig(dir), log: silentLog, root: dir });
+    const hooks = await registerMemoryHooks({ client: mkClient(), config: mkConfig(dir), log: silentLog, root: dir, deps: { embeddings: mkMockEmbeddings() } });
     assert.ok(hooks.tool && hooks.tool.memory_search, "tool.memory_search must exist");
     assert.equal(typeof hooks.tool.memory_search.execute, "function");
     assert.equal(typeof hooks["chat.message"], "function");
@@ -113,7 +121,7 @@ test("messages.transform stays undefined", async () => {
   const saved = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = dir;
   try {
-    const hooks = await registerMemoryHooks({ client: mkClient(), config: mkConfig(dir), log: silentLog, root: dir });
+    const hooks = await registerMemoryHooks({ client: mkClient(), config: mkConfig(dir), log: silentLog, root: dir, deps: { embeddings: mkMockEmbeddings() } });
     assert.equal(hooks["experimental.chat.messages.transform"], undefined);
     await hooks.dispose?.();
   } finally {
@@ -130,7 +138,7 @@ test("self-provisioning creates module_dir with package.json", async () => {
   const saved = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = dir;
   try {
-    const hooks = await registerMemoryHooks({ client: mkClient(), config: mkConfig(dir), log: silentLog, root: dir });
+    const hooks = await registerMemoryHooks({ client: mkClient(), config: mkConfig(dir), log: silentLog, root: dir, deps: { embeddings: mkMockEmbeddings() } });
     const moduleDir = join(dir, "memory", "module");
     assert.ok(existsSync(join(moduleDir, "package.json")), "module_dir package.json must be created");
     const pkg = JSON.parse(readFileSync(join(moduleDir, "package.json"), "utf8"));
@@ -152,7 +160,7 @@ test("I8: sqlite db stored per-key under dataDir", async () => {
   const saved = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = dir;
   try {
-    const hooks = await registerMemoryHooks({ client: mkClient(), config: mkConfig(dir), log: silentLog, root: dir });
+    const hooks = await registerMemoryHooks({ client: mkClient(), config: mkConfig(dir), log: silentLog, root: dir, deps: { embeddings: mkMockEmbeddings() } });
     const dbPath = dbPathFor(dir, dir);
     const { default: Database } = await import("better-sqlite3");
     const db = new Database(dbPath);
@@ -174,7 +182,7 @@ test("event dispatches session.deleted to storage.delete", async () => {
   const saved = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = dir;
   try {
-    const hooks = await registerMemoryHooks({ client: mkClient(), config: mkConfig(dir), log: silentLog, root: dir });
+    const hooks = await registerMemoryHooks({ client: mkClient(), config: mkConfig(dir), log: silentLog, root: dir, deps: { embeddings: mkMockEmbeddings() } });
     const dbPath = dbPathFor(dir, dir);
     const { default: Database } = await import("better-sqlite3");
     const db = new Database(dbPath);
@@ -204,7 +212,7 @@ test("event ignores unknown event types", async () => {
   const saved = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = dir;
   try {
-    const hooks = await registerMemoryHooks({ client: mkClient(), config: mkConfig(dir), log: silentLog, root: dir });
+    const hooks = await registerMemoryHooks({ client: mkClient(), config: mkConfig(dir), log: silentLog, root: dir, deps: { embeddings: mkMockEmbeddings() } });
     await hooks.event({ event: { type: "session.error", properties: { sessionID: "x" } } });
     await hooks.event({ event: { type: "session.status", properties: { sessionID: "x" } } });
     await hooks.dispose?.();
@@ -339,6 +347,7 @@ test("M2: auto_recall false → no chat.message/system.transform hooks", async (
       config: mkConfig(dir, { auto_recall: false }),
       log: silentLog,
       root: dir,
+      deps: { embeddings: mkMockEmbeddings() },
     });
     assert.ok(hooks.tool && hooks.tool.memory_search, "tool still present");
     assert.equal(hooks["chat.message"], undefined);
@@ -390,7 +399,7 @@ test("I6: onStartup is called (session.list invoked)", async () => {
   try {
     let listed = 0;
     const client = mkClient({ list: async () => { listed++; return { data: [] }; } });
-    const hooks = await registerMemoryHooks({ client, config: mkConfig(dir), log: silentLog, root: dir });
+    const hooks = await registerMemoryHooks({ client, config: mkConfig(dir), log: silentLog, root: dir, deps: { embeddings: mkMockEmbeddings() } });
     await new Promise((r) => setTimeout(r, 20));
     assert.ok(listed >= 1, "onStartup must call session.list");
     await hooks.dispose?.();
@@ -1719,7 +1728,7 @@ test("git-config dedup: one execSync per root, cached across core+memory init", 
     assert.equal(cfg.remote, "https://github.com/foo/bar.git");
 
     // Plugin init with memory enabled must reuse the cached config (no new exec).
-    const hooks = await registerMemoryHooks({ client: mkClient(), config: mkConfig(dir), log: silentLog, root: dir });
+    const hooks = await registerMemoryHooks({ client: mkClient(), config: mkConfig(dir), log: silentLog, root: dir, deps: { embeddings: mkMockEmbeddings() } });
     assert.equal(execCount, 1, "plugin init must reuse cached git config (no extra exec)");
     await hooks.dispose?.();
   } finally {
@@ -1934,6 +1943,7 @@ test("write-tools registered for permission enforcement (ask-gate contract)", as
       config: mkConfig(dir),
       log: silentLog,
       root: dir,
+      deps: { embeddings: mkMockEmbeddings() },
     });
     // memory_forget, memory_export, memory_import — write-tools covered by the
     // merge-config permission rule (permission: "ask").  Assert their presence so
@@ -2329,6 +2339,149 @@ test("I-2: explicit scope=branch + mainline unresolved → degraded mechanics (m
     assert.doesNotMatch(res, /# D/, "head ∉ ancestorSet → не в контексте");
     await hooks.dispose?.();
   } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── Task 5: provider dispatch + dim + api-key check + startup probe ─────
+
+test("openai provider missing api key env → memory off", async () => {
+  delete process.env.MM_KEY_UNSET;
+  const cfg = { memory: { enabled: true, storage: { type: "sqlite" }, embedding: { provider: "openai", model: "m", api_key_env: "MM_KEY_UNSET", dim: 3 } } };
+  const hooks = await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: tmpdir() });
+  assert.deepEqual(hooks, {});
+});
+
+test("openai provider with key + injected deps registers hooks", async () => {
+  process.env.MM_KEY_SET = "sk-test";
+  const dir = mkdtempSync(join(tmpdir(), "mem-openai-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const cfg = { memory: { enabled: true, storage: { type: "sqlite" }, embedding: { provider: "openai", model: "m", api_key_env: "MM_KEY_SET", base_url: "https://x/v1", dim: 3 } } };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(), config: cfg, log: mkLog(), root: dir,
+      deps: { storage: mkStorage(), embeddings: { probe: async () => ({ ok: true, hard: false, detail: "ok" }), dim: 3, modelId: "openai:m@https://x/v1" } },
+    });
+    assert.ok(hooks.tool.memory_search);
+  } finally {
+    delete process.env.MM_KEY_SET;
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("startup probe hard fail → memory off (hooks {})", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-probe-hard-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const cfg = { memory: { enabled: true, storage: { type: "sqlite" } } };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(), config: cfg, log: mkLog(), root: dir,
+      deps: { storage: mkStorage(), embeddings: { probe: async () => ({ ok: false, hard: true, detail: "dimension mismatch" }), dim: 3, modelId: "m" } },
+    });
+    assert.deepEqual(hooks, {});
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("startup probe soft fail → hooks registered (fail-soft)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-probe-soft-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const cfg = { memory: { enabled: true, storage: { type: "sqlite" } } };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(), config: cfg, log: mkLog(), root: dir,
+      deps: { storage: mkStorage(), embeddings: { probe: async () => ({ ok: false, hard: false, detail: "network" }), dim: 3, modelId: "m" } },
+    });
+    assert.ok(hooks.tool.memory_search);
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("cooldown cache keyed by identity: same config → single live probe", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-cache-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    let probes = 0;
+    const fake = { probe: async () => { probes++; return { ok: true, hard: false, detail: "ok" }; }, dim: 3, modelId: "m" };
+    const cfg = { memory: { enabled: true, storage: { type: "sqlite" } } };
+    await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: fake } });
+    await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: fake } });
+    assert.equal(probes, 1);
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("cache identity mismatch (different modelId) → live probe again", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-cache-mismatch-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    let probes = 0;
+    const mkFake = (modelId) => ({ probe: async () => { probes++; return { ok: true, hard: false, detail: "ok" }; }, dim: 3, modelId });
+    const cfg = { memory: { enabled: true, storage: { type: "sqlite" } } };
+    await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: mkFake("m") } });
+    await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: mkFake("m2") } });
+    assert.equal(probes, 2);
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("cached hard → live re-probe (no shortcut)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-cache-hard-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    let probes = 0;
+    const fake = { probe: async () => { probes++; return { ok: false, hard: true, detail: "dim mismatch" }; }, dim: 3, modelId: "m" };
+    const cfg = { memory: { enabled: true, storage: { type: "sqlite" } } };
+    const h1 = await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: fake } });
+    assert.deepEqual(h1, {});
+    const h2 = await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: fake } });
+    assert.deepEqual(h2, {});
+    assert.equal(probes, 2);
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("init-warn external_embedder_unmasked_queries when openai + confidential paths", async () => {
+  process.env.MM_KEY_SET = "k";
+  const dir = mkdtempSync(join(tmpdir(), "mem-openai-warn-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const logs = [];
+    const cfg = { memory: { enabled: true, storage: { type: "sqlite" }, embedding: { provider: "openai", model: "m", api_key_env: "MM_KEY_SET", dim: 3 } } };
+    cfg.confidential = { paths: ["docs/confidential/**"] };
+    await registerMemoryHooks({
+      client: mkClient(), config: cfg, log: { warn: (m) => logs.push(m) }, root: dir,
+      deps: { storage: mkStorage(), embeddings: { probe: async () => ({ ok: true, hard: false, detail: "ok" }), dim: 3, modelId: "openai:m@https://api.openai.com/v1" } },
+    });
+    assert.ok(logs.some((l) => String(l).includes("external_embedder_unmasked_queries")));
+  } finally {
+    delete process.env.MM_KEY_SET;
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = saved;
     rmSync(dir, { recursive: true, force: true });
