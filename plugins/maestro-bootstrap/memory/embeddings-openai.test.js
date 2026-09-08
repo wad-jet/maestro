@@ -52,14 +52,19 @@ test("probe classification", async () => {
   assert.deepEqual(await mk(async () => okRes()).probe(), { ok: true, hard: false, detail: "OK (dim 3)" });
   const p401 = await mk(async () => ({ ok: false, status: 401, statusText: "Unauthorized", text: async () => "" })).probe();
   assert.equal(p401.ok, false); assert.equal(p401.hard, true); assert.ok(p401.detail.includes("EMB_KEY"));
+  assert.equal(p401.error_class, "auth", "401 → error_class auth");
   const p404 = await mk(async () => ({ ok: false, status: 404, statusText: "Not Found", text: async () => "" })).probe();
   assert.equal(p404.hard, true);
+  assert.equal(p404.error_class, "not_found", "404 → error_class not_found");
   const p503 = await mk(async () => ({ ok: false, status: 503, statusText: "Busy", text: async () => "" })).probe();
   assert.equal(p503.hard, false);
+  assert.equal(p503.error_class, "http_5xx", "5xx → error_class http_5xx");
   const pNet = await mk(async () => { throw new Error("timeout"); }).probe();
   assert.equal(pNet.hard, false);
+  assert.equal(pNet.error_class, "network", "network/timeout → error_class network");
   const pDim = await mk(async () => ({ ok: true, status: 200, statusText: "OK", json: async () => ({ data: [{ embedding: [1, 2] }] }) })).probe();
   assert.equal(pDim.hard, true);
+  assert.equal(pDim.error_class, "dim_mismatch", "dim mismatch → error_class dim_mismatch");
 });
 
 // Task 5: аудит-события openai-embedder (spec §4.3) — duration с cache_hit

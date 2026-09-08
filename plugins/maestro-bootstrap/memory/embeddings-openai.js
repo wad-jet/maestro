@@ -96,19 +96,21 @@ export class OpenAiEmbedder {
     try {
       res = await this._post("probe");
     } catch (err) {
-      return { ok: false, hard: false, detail: err instanceof Error ? err.message : String(err) };
+      // Fix round 1 (C1): error_class enum (SEC-4b) — тело/сообщение ошибки
+      // (может содержать host) в аудит-лог не попадает; detail — для тула.
+      return { ok: false, hard: false, detail: err instanceof Error ? err.message : String(err), error_class: "network" };
     }
     if (res.status === 401 || res.status === 403) {
-      return { ok: false, hard: true, detail: `API-ключ отклонён (${res.status}) — проверьте env ${this.apiKeyEnv}` };
+      return { ok: false, hard: true, detail: `API-ключ отклонён (${res.status}) — проверьте env ${this.apiKeyEnv}`, error_class: "auth" };
     }
     if (res.status === 404) {
-      return { ok: false, hard: true, detail: "модель/URL не найдены (404) — проверьте model/base_url" };
+      return { ok: false, hard: true, detail: "модель/URL не найдены (404) — проверьте model/base_url", error_class: "not_found" };
     }
-    if (!res.ok) return { ok: false, hard: false, detail: `API временно недоступен (${res.status})` };
+    if (!res.ok) return { ok: false, hard: false, detail: `API временно недоступен (${res.status})`, error_class: "http_5xx" };
     const data = await res.json();
     const dim = data.data[0].embedding.length;
     if (this._dim != null && dim !== this._dim) {
-      return { ok: false, hard: true, detail: `dimension mismatch (api=${dim}, config=${this._dim})` };
+      return { ok: false, hard: true, detail: `dimension mismatch (api=${dim}, config=${this._dim})`, error_class: "dim_mismatch" };
     }
     return { ok: true, hard: false, detail: `OK (dim ${dim})` };
   }

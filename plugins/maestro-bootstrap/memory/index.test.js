@@ -4,7 +4,7 @@ import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync } from "node
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
-import { registerMemoryHooks } from "./index.js";
+import { registerMemoryHooks, shouldLogFtsFallback } from "./index.js";
 import { getGitConfig, makeLogger } from "../core.js";
 import { sanitizeDirName } from "./config.js";
 import { projectHashFromDir, projectHashFromRemote } from "./project.js";
@@ -458,6 +458,45 @@ test("pgvector without connection_string_env → memory off", async () => {
   });
   assert.equal(hooks.tool, undefined);
   assert.ok(logged.some(([m, e]) => m === "memory: disabled" && e.reason === "pgvector_config_invalid"));
+});
+
+// ── Fix round 1 (I3): fts.fallback (spec §4.2) ─────────────────────────
+
+test("fts.fallback predicate: invalid/non-russian text_search_config → true, valid → false", async () => {
+  // Defensive-путь: валидация конфига (pgvector_text_search_config_invalid)
+  // отсекает невалидные значения до pgvector-ветки, поэтому предикат
+  // тестируется напрямую (как normalizeBranch в Task 7).
+  assert.equal(shouldLogFtsFallback({ storage: { type: "pgvector", pgvector: { text_search_config: "Klingon" } } }), true, "invalid (uppercase) → fallback");
+  assert.equal(shouldLogFtsFallback({ storage: { type: "pgvector", pgvector: { text_search_config: "bad config" } } }), true, "invalid (space) → fallback");
+  assert.equal(shouldLogFtsFallback({ storage: { type: "pgvector", pgvector: { text_search_config: "english" } } }), false, "valid non-russian → no fallback");
+  assert.equal(shouldLogFtsFallback({ storage: { type: "pgvector", pgvector: { text_search_config: "russian" } } }), false, "russian → no fallback");
+  assert.equal(shouldLogFtsFallback({ storage: { type: "pgvector" } }), false, "absent → no fallback");
+  assert.equal(shouldLogFtsFallback({ storage: { type: "sqlite" } }), false, "sqlite → no fallback");
+});
+
+test("fts.fallback: valid non-russian pgvector config → no event emitted (no false positive)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-fts-fallback-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  process.env.MM_PG_DSN = "postgres://x";
+  try {
+    const debugged = [];
+    const log = { debug: (m) => debugged.push(m), info() {}, warn() {}, error() {} };
+    // pg-модуль не установлен в module_dir → init вернёт {} (fail-soft), но
+    // debug-события до этой точки уже захвачены.
+    await registerMemoryHooks({
+      client: mkClient(),
+      config: { memory: { enabled: true, storage: { type: "pgvector", pgvector: { connection_string_env: "MM_PG_DSN", text_search_config: "english" } }, identity: "x" } },
+      log,
+      root: dir,
+    });
+    assert.ok(!debugged.includes("memory:fts.fallback"), "valid non-russian → no fts.fallback");
+  } finally {
+    delete process.env.MM_PG_DSN;
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
 });
 
 // ── memory_search filters (Task 4) ─────────────────────────────────────
@@ -1959,7 +1998,7 @@ test("init: dangling head → isAncestor error → skip + debug log, pass contin
 
     assert.equal(await mergedOf(storage, "k", "good"), 1, "valid head promoted");
     assert.equal(await mergedOf(storage, "k", "bad"), 0, "dangling head skipped");
-    assert.ok(debugged.some((m) => m.includes("promotion skip")), "must debug-log promotion skip");
+    assert.ok(debugged.some((m) => m === "memory:promotion_skip"), "must debug-log promotion_skip (structured, no raw head)");
     await hooks.dispose?.();
     await storage.dispose?.();
   } finally {
@@ -2492,21 +2531,24 @@ test("cache identity mismatch (different modelId) → live probe again", async (
   }
 });
 
-test("cached hard → live re-probe (no shortcut)", async () => {
+test("cached hard → live re-probe (no shortcut) + probe.retry event", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mem-cache-hard-"));
   const saved = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = dir;
   try {
     let probes = 0;
-    const fake = { probe: async () => { probes++; return { ok: false, hard: true, detail: "dim mismatch" }; }, dim: 3, modelId: "m" };
+    const fake = { probe: async () => { probes++; return { ok: false, hard: true, detail: "dim mismatch", error_class: "dim_mismatch" }; }, dim: 3, modelId: "m" };
     const cfg = { memory: { enabled: true, storage: { type: "sqlite" } } };
-    const h1 = await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: fake } });
+    const infos = [];
+    const log = { debug() {}, info: (m) => infos.push(m), warn() {}, error() {} };
+    const h1 = await registerMemoryHooks({ client: mkClient(), config: cfg, log, root: dir, deps: { storage: mkStorage(), embeddings: fake } });
     assert.ok(h1.tool.memory_probe, "hard fail → memory_probe tool");
     assert.equal(h1.tool.memory_search, undefined, "no regular tool hooks on hard fail");
-    const h2 = await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: fake } });
+    const h2 = await registerMemoryHooks({ client: mkClient(), config: cfg, log, root: dir, deps: { storage: mkStorage(), embeddings: fake } });
     assert.ok(h2.tool.memory_probe, "cached hard → live re-probe → hard fail again → memory_probe");
     assert.equal(h2.tool.memory_search, undefined, "no regular tool hooks on second hard fail");
     assert.equal(probes, 2);
+    assert.ok(infos.includes("memory:probe.retry"), "cached hard → live re-probe must emit memory:probe.retry (info)");
     await h1.dispose?.();
     await h2.dispose?.();
   } finally {

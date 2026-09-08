@@ -699,16 +699,29 @@ opt-in на вставку замаскированных заголовков/s
 | `memory:storage_mismatch` (error) | type, model (имя без `@base_url`), dim_expected, dim_actual |
 | `memory:log_confidential_note` (warn) | — |
 | `memory:storage.stats` | entries, merged, experience |
+| `memory: embedder probe (cached)` (info) | ok, detail (нечувствительный «OK (dim N)») |
+| `memory: embedder probe (cached soft fail)` (warn) | error_class (enum-only; detail не логируется) |
+| `memory: embedder probe OK` (info) | detail (нечувствительный «OK (dim N)») |
+| `memory: embedder probe failed` (warn) | error_class (enum-only; detail не логируется) |
+| `memory:probe.retry` (info) | — (cached hard-fail → live re-probe) |
+| `memory:promotion_skip` (debug) | — (dangling/invalid head; без raw sha) |
+
+> **Probe-события (SEC-4b):** при неуспешном probe в лог попадает только
+> `error_class` enum (`network`/`auth`/`not_found`/`dim_mismatch`/`http_5xx`/
+> `timeout`/`storage_error`/`not_installed`) — `detail` (может содержать
+> `err.message`/host/путь) логируется только для успешного probe. `detail`
+> остаётся доступен в выдаче инструмента `memory_probe`.
 
 **Root-cause (warn/error + debug):**
 
 | Событие | Поля |
 |---|---|
-| `memory:search.no_hits` (warn) | reason (enum: `no_candidates`/`mainline_unresolved`/`min_score`/`fts_empty`) |
+| `memory:search.no_hits` (warn) | reason (enum: `no_candidates`/`mainline_unresolved`/`min_score`; `fts_empty` — зарезервирован, recall его не эмитит) |
 | `memory:storage.error` (error) | op, error_class |
-| `memory:http.error` (warn) | http_status_class, retryable (bool) |
+| `memory:http.error` (warn) | http_status_class, retryable (bool); сетевой вариант — `error_class: "network"`, retryable (без http_status_class) |
 | `memory:state.corrupt` (warn) | reason (enum: `parse_error`; ENOENT первого запуска не варн) |
 | `memory:cross_project_miss` (debug) | reason (enum), projectKey (hash соседнего проекта) |
+| `memory:fts.fallback` (debug) | backend (`pgvector`), fallback (`russian`) — невалидный/не-russian text_search_config |
 
 **Производительность (debug):**
 
@@ -721,6 +734,10 @@ opt-in на вставку замаскированных заголовков/s
 | `memory:recall.duration` | duration_ms, hits, topK, minScore, scope |
 | `memory:recall.hits` | hits |
 | `memory:recall.injected` (info) | records |
+
+> **`memory:recall.injected` — per-turn:** эмитится на **каждый** вызов
+> `experimental.chat.system.transform` (т.е. на каждый turn сессии с буфером
+> recall), а не один раз на сессию. При чтении логов учитывайте дубли per-turn.
 
 > **Тайминг `memory:storage.stats`:** эмитится **один раз** после завершения
 > стартового backfill-окна, **до** фактической индексации debounce-очереди

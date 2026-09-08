@@ -24,7 +24,9 @@ export class Embedder {
     try {
       await imp();
     } catch {
-      return { ok: false, hard: true, detail: `transformers не установлен — выполните npm install в ${this.moduleDir} (см. manual_docs/how-to/enable-memory.md)` };
+      // Fix round 1 (C1): error_class enum (SEC-4b) — путь module_dir в аудит-лог
+      // не попадает; detail (с путём) — только для тула memory_probe.
+      return { ok: false, hard: true, detail: `transformers не установлен — выполните npm install в ${this.moduleDir} (см. manual_docs/how-to/enable-memory.md)`, error_class: "not_installed" };
     }
     return { ok: true, hard: false, detail: "зависимость на месте; загрузка модели — лениво (первый embed)" };
   }

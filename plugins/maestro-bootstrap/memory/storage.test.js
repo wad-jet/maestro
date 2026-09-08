@@ -1064,7 +1064,7 @@ test("storage logs cross_project_miss on sibling model mismatch", async () => {
     const res = await active.search(new Float32Array([1, 0, 0]), { key: activeKey, project: other, top_k: 10, min_score: 0 });
     assert.ok(res.some((h) => h.entry.session_id === "a1"), "active hit present");
     assert.ok(!res.some((h) => h.entry.session_id === "o1"), "mismatched sibling skipped");
-    assert.ok(calls.some(([m, e]) => m === "memory:cross_project_miss" && e.reason === "model_mismatch"), "cross_project_miss logged with model_mismatch");
+    assert.ok(calls.some(([m, e]) => m === "memory:cross_project_miss" && e.reason === "model_mismatch" && e.projectKey === other), "cross_project_miss logged with model_mismatch + projectKey");
   } finally {
     await active.dispose();
     await otherDb.dispose();
@@ -1086,7 +1086,7 @@ test("storage logs cross_project_miss when sibling DB unavailable", async () => 
     // project "nonexistent" — sibling-файла нет → skip + cross_project_miss.
     const res = await active.search(new Float32Array([1, 0, 0]), { key: activeKey, project: "nonexistent", top_k: 5, min_score: 0 });
     assert.ok(res.some((h) => h.entry.session_id === "a1"), "active hit present");
-    assert.ok(calls.some(([m, e]) => m === "memory:cross_project_miss" && e.reason === "unavailable"), "cross_project_miss logged with unavailable");
+    assert.ok(calls.some(([m, e]) => m === "memory:cross_project_miss" && e.reason === "unavailable" && e.projectKey === "nonexistent"), "cross_project_miss logged with unavailable + projectKey");
   } finally {
     await active.dispose();
     rmSync(base, { recursive: true, force: true });

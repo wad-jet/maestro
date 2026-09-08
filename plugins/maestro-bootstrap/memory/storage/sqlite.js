@@ -242,8 +242,9 @@ export class SqliteStorage {
       sib = new Database(path, { readonly: true, fileMustExist: false });
     } catch (err) {
       console.error(`[memory] cross-project skip ${k}: ${err.message}`);
-      // Task 6: аудит-событие промаха cross-project (sibling-БД недоступна).
-      this.log?.debug?.("memory:cross_project_miss", { reason: "unavailable" });
+      // Task 6 + fix round 1 (I1): аудит-событие промаха cross-project
+      // (sibling-БД недоступна); projectKey = hash соседнего ключа (SEC-4b).
+      this.log?.debug?.("memory:cross_project_miss", { reason: "unavailable", projectKey: k });
       return;
     }
     try {
@@ -251,24 +252,26 @@ export class SqliteStorage {
       const model = sib.prepare("SELECT value FROM meta WHERE name = 'model_id'").get();
       if (model && model.value !== this.modelId) {
         console.error(`[memory] cross-project skip ${k}: model mismatch`);
-        // Task 6: аудит-событие промаха (модель sibling не совпала).
-        this.log?.debug?.("memory:cross_project_miss", { reason: "model_mismatch" });
+        // Task 6 + fix round 1 (I1): аудит-событие промаха (модель sibling не
+        // совпала); projectKey = hash соседнего ключа.
+        this.log?.debug?.("memory:cross_project_miss", { reason: "model_mismatch", projectKey: k });
         return;
       }
       const dim = sib.prepare("SELECT value FROM meta WHERE name = 'dim'").get();
       if (dim && parseInt(dim.value, 10) !== this.dim) {
         console.error(`[memory] cross-project skip ${k}: dim mismatch`);
-        // Task 6: аудит-событие промаха (размерность sibling не совпала — то же
-        // пространство эмбеддингов, что и model_mismatch).
-        this.log?.debug?.("memory:cross_project_miss", { reason: "model_mismatch" });
+        // Task 6 + fix round 1 (I1): аудит-событие промаха (размерность sibling
+        // не совпала — то же пространство эмбеддингов, что и model_mismatch).
+        this.log?.debug?.("memory:cross_project_miss", { reason: "model_mismatch", projectKey: k });
         return;
       }
       // Pre-v3 sibling (без колонки merged) → SQL-ошибка → fail-soft skip (§6.2).
       const cols = sib.prepare("PRAGMA table_info(memory)").all().map((c) => c.name);
       if (opts.mergedOnly && !cols.includes("merged")) {
         console.error(`[memory] cross-project skip ${k}: pre-v3 sibling without merged column`);
-        // Task 6: аудит-событие промаха (sibling-схема непригодна для merged-ноги).
-        this.log?.debug?.("memory:cross_project_miss", { reason: "unavailable" });
+        // Task 6 + fix round 1 (I1): аудит-событие промаха (sibling-схема
+        // непригодна для merged-ноги); projectKey = hash соседнего ключа.
+        this.log?.debug?.("memory:cross_project_miss", { reason: "unavailable", projectKey: k });
         return;
       }
       // Старая БД без FTS-таблицы → vector-only.

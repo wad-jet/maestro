@@ -358,7 +358,13 @@ Memory layer (при `memory.enabled: true`):
 - `memory: init failed` — ошибка инициализации (error; сессии работают)
 - `memory:index_error` — ошибка индексации сессии (error, с `sessionID` + `error_class` enum)
 - `memory:retention_pruned` — retention удалил записи при старте (info, с `count` + `older_than_days`)
-- `memory: transformers not installed — run npm install in <module_dir>` (error, actionable)
+
+> **Смешанный список:** `memory: disabled` и `memory: init failed` — carve-out,
+> пишутся в **bootstrap-лог** (видимость HITL-гейта «плагин работает»); остальные
+> события memory-модуля — в отдельный аудит-лог (ниже). «`memory: transformers
+> not installed — run npm install in <module_dir>`» — это **текст брошенного
+> `Error.message`** (init/embed), а не строка лога; в аудит-лог попадает только
+> `error_class` enum.
 
 Операции memory-модуля (lifecycle/root-cause/производительность) пишутся в
 **отдельный аудит-лог** `.maestro/logs/maestro-memory-<дата>.log` (JSONL;

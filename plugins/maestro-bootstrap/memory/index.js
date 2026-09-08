@@ -48,13 +48,15 @@ async function probeWithGuard(embeddings, guardMs) {
   if (!embeddings.probe) return { ok: true, hard: false, detail: "probe недоступен (deps mock)" };
   let timer;
   const guard = new Promise((resolve) => {
-    timer = setTimeout(() => resolve({ ok: false, hard: false, detail: "probe timeout (guard)" }), guardMs);
+    // Fix round 1 (C1): enum-only error_class (SEC-4b) — текст guard-сообщения
+    // в аудит-лог не попадает.
+    timer = setTimeout(() => resolve({ ok: false, hard: false, detail: "probe timeout (guard)", error_class: "timeout" }), guardMs);
   });
   try {
     return await Promise.race([
       // Promise.resolve().then() — синхронный throw из probe() превращается
       // в async-отклонение и ловится .catch ниже (не роняет init).
-      Promise.resolve().then(() => embeddings.probe()).catch((err) => ({ ok: false, hard: false, detail: `probe exception: ${err instanceof Error ? err.message : String(err)}` })),
+      Promise.resolve().then(() => embeddings.probe()).catch((err) => ({ ok: false, hard: false, detail: `probe exception: ${err instanceof Error ? err.message : String(err)}`, error_class: "storage_error" })),
       guard,
     ]);
   } finally {
@@ -130,6 +132,20 @@ function toF32(v) {
 export function normalizeBranch(name) {
   if (typeof name !== "string") return name ?? "";
   return name.replace(/[A-Z]{1,4}-\d+/g, "*");
+}
+
+/**
+ * Fix round 1 (I3): предикат fts.fallback (spec §4.2) — pgvector
+ * text_search_config невалиден/не-russian и resolveEffectiveTextConfig упал на
+ * "russian". Defensive: валидация конфига (pgvector_text_search_config_invalid)
+ * обычно отсекает невалидные значения до pgvector-ветки. qdrant/sqlite не имеют
+ * text-config fallback (всегда false).
+ * @param {object} config  Merged memory config (loadMemoryConfig output).
+ * @returns {boolean}
+ */
+export function shouldLogFtsFallback(config) {
+  const configured = config?.storage?.pgvector?.text_search_config;
+  return typeof configured === "string" && configured !== "russian" && resolveEffectiveTextConfig(config) === "russian";
 }
 
 /**
@@ -421,6 +437,14 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       });
     } else if (config.storage.type === "pgvector") {
       storageOptions.table = storageOptions.table ?? "maestro_memory";
+      // Fix round 1 (I3): fts.fallback (spec §4.2) — невалидный/не-russian
+      // text_search_config → эффективный fallback на "russian" (debug).
+      // qdrant/sqlite не имеют text-config fallback (skip). Defensive:
+      // валидация конфига (pgvector_text_search_config_invalid) обычно отсекает
+      // невалидные значения до этой точки.
+      if (shouldLogFtsFallback(config)) {
+        logDebug("memory:fts.fallback", { backend: "pgvector", fallback: "russian" });
+      }
       let pg;
       try {
         ({ default: pg } = await loadFromModuleDir(moduleDir, "pg"));
@@ -473,8 +497,12 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     if (cacheValid && Date.now() - cached.at < cooldownMs && cached.ok) {
       logInfo("memory: embedder probe (cached)", { ok: true, detail: cached.detail });
     } else if (cacheValid && Date.now() - cached.at < cooldownMs && !cached.hard) {
-      logWarn("memory: embedder probe (cached soft fail)", { detail: cached.detail });
+      // Fix round 1 (C1): enum-only error_class (SEC-4b) — cached detail может
+      // содержать err.message (host); fallback на generic для старых кэшей.
+      logWarn("memory: embedder probe (cached soft fail)", { error_class: cached.error_class ?? "storage_error" });
     } else {
+      // Fix round 1 (I3): cached hard-fail → live re-probe (spec §4.2 probe.retry).
+      if (cacheValid && cached.hard) logInfo("memory:probe.retry", {});
       const p = await probeWithGuard(embeddings, 20000); // guard > provider timeout 15s (follow-up 1)
       await state.setEmbedderProbe({ ...probeIdentity, ...p });
       if (p.ok) {
@@ -486,7 +514,9 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
         // core.js сливает только memoryHooks.tool → оборачиваем в { tool: {...} }.
         return { tool: { memory_probe: makeMemoryProbeTool({ embeddings, state, log, apiKeyEnv }) } };
       } else {
-        logWarn("memory: embedder probe failed", { detail: p.detail });
+        // Fix round 1 (C1): enum-only error_class (SEC-4b) — p.detail (err.message)
+        // в аудит-лог не попадает.
+        logWarn("memory: embedder probe failed", { error_class: p.error_class ?? "storage_error" });
       }
     }
 
@@ -551,7 +581,8 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
               }
             }
           } else if (r === "error") {
-            logDebug(`memory: promotion skip head=${head} (dangling/invalid)`);
+            // Fix round 1 (C1): structured event без raw head-sha (SEC-4b).
+            logDebug("memory:promotion_skip", {});
           } // 'no' → пропуск
         }
         if (promotedCount > 0) {

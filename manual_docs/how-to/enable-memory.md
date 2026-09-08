@@ -348,7 +348,8 @@ warmup-строкой. Результат кэшируется в `state.json` �
 **Где смотреть:**
 
 ```bash
-# Все события по конкретной сессии (lifecycle + перф):
+# Все lifecycle-события по конкретной сессии (indexed/reindexed/skipped/error/
+# summarize.duration — несут sessionID; перф-события embed/storage/recall его НЕ несут):
 grep '"sessionID":"<session-id>"' .maestro/logs/maestro-memory-$(date +%F).log
 
 # Медленные операции (латентность):
@@ -381,6 +382,8 @@ export MAESTRO_MEMORY_LOG_LEVEL=debug
 - **Память молчит** — `recall.injected` = 0 при `recall.hits > 0`: блок не
   попадает в system prompt (не top-level primary сессия / модель эмбеддингов
   ещё прогревается). `search.no_hits` с `no_candidates` — backfill ещё не прошёл.
+  > **`recall.injected` эмитится на каждый turn** (`system.transform`), а не один
+  > раз на сессию — при подсчёте учитывайте дубли per-turn.
 - **Покрытие** — `memory:backfill` (considered/indexed/skipped) и
   `memory:storage.stats` (entries + merged/experience): мало `indexed` при
   большом `considered` — сессии вне окна `backfill_window_days` или уже
