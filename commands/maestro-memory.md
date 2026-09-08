@@ -22,7 +22,9 @@ description: Показать статус memory layer плагина maestro-b
    `no_memory_section`; `memory.enabled: false` → `explicitly_disabled`; невалидные ключи
    (`retention_days`, `similarity_threshold`, `storage.type`, `branch_context`, `mainline`,
    `storage.pgvector.text_search_config`) → соответствующий код (`*_invalid`);
-   централизованный бэкенд без identity → `centralized_identity_missing`.
+   централизованный бэкенд без identity → `centralized_identity_missing`;
+   env-зависимые причины (`qdrant` без `url`/`api_key_env` → `qdrant_config_invalid`;
+   `pgvector` без `connection_string_env` → `pgvector_config_invalid`).
 
 3. Если инструмент вернул данные → продолжи к Шагу 2.
 

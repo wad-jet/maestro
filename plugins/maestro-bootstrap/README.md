@@ -241,6 +241,8 @@ untrusted, access-policy не enforced, дефолтные sanitizer-прави�
     "retention_days": null,
     "summarize_timeout_ms": 120000,
     "report": { "include_text": false },
+    "branch_context": true,
+    "mainline": null,
     "storage": {
       "type": "sqlite",
       "qdrant": { "url": "https://qdrant.internal:6333", "api_key_env": "MAESTRO_MEMORY_QDRANT_KEY", "collection": "maestro_memory" },
@@ -332,8 +334,8 @@ Memory layer (при `memory.enabled: true`):
 
 - `memory: disabled` — память выключена (info, с `reason`: `storage_type_invalid`,
   `centralized_identity_missing`, `qdrant_config_invalid`, `pgvector_config_invalid`,
-  `branch_context_invalid`, `mainline_invalid`, `retention_days_invalid`,
-  `similarity_threshold_invalid`)
+  `pgvector_text_search_config_invalid`, `branch_context_invalid`, `mainline_invalid`,
+  `retention_days_invalid`, `similarity_threshold_invalid`)
 - `memory: mainline_unresolved — branch-context flat (нет резолвнутого mainline)` (warn)
 - `memory: init failed` — ошибка инициализации (error; сессии работают)
 - `memory: indexer error` — ошибка индексации сессии (error, с `sessionID`)

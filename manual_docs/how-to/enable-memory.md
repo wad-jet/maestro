@@ -214,9 +214,11 @@ timeline-гистограмма по датам, кластеры тем, авт
 
 - **`mainline_unresolved`** — mainline не резолвнут (override именует
   несуществующую ветку, либо ни remote HEAD, ни `init.defaultBranch`, ни резерв
-  `main`/`master`/`develop` не подтвердились локально). Поведение: branch-context
-  эффективно off — **flat recall** (идентично `branch_context: false`) + warn в
-  лог; промоушен-проход пропускается. Как диагностировать: warn
+  `main`/`master`/`develop` не подтвердились локально). Поведение: при **неявном**
+  (дефолтном) `scope` — branch-context эффективно off, **flat recall** (идентично
+  `branch_context: false`); при **явном `scope: "branch"`** — degraded-режим
+  (general merged=1 + собственные unmerged experience, чужие unmerged исключены).
+  В обоих случаях — warn в лог; промоушен-проход пропускается. Как диагностировать: warn
   `memory: mainline_unresolved` в `.maestro/logs/maestro-bootstrap-<дата>.log`
   и/или строка «Диагностика: mainline_unresolved» в выдаче `@maestro-memory`.
   Исправление: задать `memory.mainline` явно (см. gitflow-guidance в
