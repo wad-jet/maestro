@@ -150,12 +150,18 @@ tier-схему агентов** (они не настраиваются чер�
 
 | Ключ (`memory.*`) | Дефолт | Роль |
 |---|---|---|
-| `embedding_model` | `Xenova/paraphrase-multilingual-MiniLM-L12-v2` | Эмбеддинги транскриптов/запросов (transformers.js, dim 384, RU+EN, q8 ~120 МБ, локальный кэш) |
+| `embedding_model` | `Xenova/paraphrase-multilingual-MiniLM-L12-v2` | **Legacy-алиас** для `embedding.model` (только при `provider: local`). Эмбеддинги транскриптов/запросов (transformers.js, dim 384, RU+EN, q8 ~120 МБ, локальный кэш) |
+| `embedding.provider` | `local` | Провайдер эмбеддингов: `local` (default) \| `openai` (внешний OpenAI-совместимый API, opt-in) |
+| `embedding.model` | `null` | local: имя ONNX-модели (fallback на `embedding_model`); openai: id модели API (обязателен) |
+| `embedding.base_url` | `https://api.openai.com/v1` | Базовый URL OpenAI-совместимого API (trailing-slash нормализуется) |
+| `embedding.api_key_env` | `null` | Имя env-переменной с ключом (обязателен для `openai`; никогда plaintext) |
+| `embedding.dim` | `null` | Размерность векторов (обязателен для `openai`; нативная dim, без Matryoshka; для `local` игнорируется) |
 | `summarizer_model` | `null` | Фоновая саммаризация сессий; `null` → модель саммаризируемой сессии |
 
 - **`embedding_model`** — локальная модель эмбеддингов (ONNX, transformers.js).
   Загружается один раз (~120 МБ) и кэшируется; после загрузки работает офлайн.
-  **Смена модели требует переиндексации** (вектора несовместимы).
+  **Смена модели требует переиндексации** (вектора несовместимы). Это
+  **legacy-алиас** для `embedding.model` (только при `provider: local`).
 - **`summarizer_model`** — модель фонового саммаризатора (создаёт служебную
   сессию `[maestro-memory]`, которая удаляется после ответа). `null` (default) —
   используется модель **саммаризируемой сессии** (последнее assistant-сообщение).
@@ -167,6 +173,38 @@ tier-схему агентов** (они не настраиваются чер�
   эмбеддинги — локальные, raw-confidential не покидает машину (санизированные
   данные могут храниться/читаться на централизованных бэкендах — решение
   локально/удалённо только через `storage.type`).
+
+### Внешний embedder (opt-in)
+
+Помимо локальной модели, memory layer поддерживает **опциональный внешний
+embedder** через любой OpenAI-совместимый `/embeddings` API
+(`memory.embedding.provider: "openai"`). Это **осознанный opt-in** — локальный
+embedder остаётся дефолтом (privacy/offline-инвариант).
+
+**Плюсы:**
+- более высокое качество recall (крупные провайдерские модели сильнее
+  MiniLM-384);
+- снятие локального бюджета (нет инференса в процессе opencode, нет ~120 МБ
+  загрузки);
+- гибкость размерности (конфигурируемый `embedding.dim` вместо захардкоженного
+  384).
+
+**Риски (документируются):**
+- **данные покидают машину** — контент записей и recall-запросы уходят
+  генерическому внешнему вендору (маскирование best-effort, см.
+  [Агенты и модель доверия](../explanation/agents-and-trust.md));
+- **нет offline** — внешний embedder требует сети на каждый вызов;
+- **стоимость** — платные API-вызовы на каждый embed;
+- `embedding.dim` **обязателен** и должен равняться **нативной** размерности
+  модели (без Matryoshka-усечения через параметр `dimensions` — иначе
+  dim-mismatch hard-fail);
+- ключ — только через `embedding.api_key_env` (имя env-переменной, никогда
+  plaintext в `maestro.json`);
+- **смена модели/провайдера/URL → переиндексация** (другой `model_id`; миграция
+  через `memory_export`/`memory_import` для разных `model_id` не поддерживается).
+
+Подробнее — [Память maestro (reference)](memory.md) и
+[Как включить память](../how-to/enable-memory.md).
 
 Подробнее — [Память maestro (reference)](memory.md).
 

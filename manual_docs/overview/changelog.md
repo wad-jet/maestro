@@ -11,6 +11,33 @@
 
 ### Добавлено
 
+- **Внешний OpenAI-совместимый embedder + probe (memory layer).** Опциональный
+  внешний embedder через любой OpenAI-совместимый `/embeddings` API
+  (`memory.embedding.provider: "openai"`):
+  - **Конфиг:** блок `memory.embedding` (`provider`/`model`/`base_url`/
+    `api_key_env`/`dim`); `embedding_model` — legacy-алиас для `embedding.model`
+    (только при `provider: local`); `probe_cooldown_min` (default `30`).
+    `dim` обязателен для `openai` (нативная размерность, без Matryoshka);
+    ключ — только через `api_key_env` (никогда plaintext).
+  - **Probe:** проверка работоспособности модели на старте (локальный — лёгкий
+    чек импортируемости; внешний — POST `/embeddings`), кэш в `state.json` с
+    cooldown; hard-fail → память off (`embedder_probe_hard_fail`), soft-fail →
+    fail-soft; on-demand инструмент `memory_probe` (live, минуя cooldown);
+    строка «Проверка embedder» в `@maestro-memory`.
+  - **Безопасность:** recall-запросы маскируются **всегда** (best-effort,
+    line-level по `confidential.paths`); init-warn
+    `external_embedder_unmasked_queries` при непустых `confidential.paths`;
+    внешний embedder — осознанный opt-in (trust-модель не меняется);
+    retryable embed-ошибки не считают в skip-after-3.
+  - Спека: `docs/superpowers/specs/2026-09-08-external-embeddings-design.md`.
+    Документация: `SECURITY.md` (§5a), канон `maestro-assistant`,
+    `manual_docs/reference/{config,model-selection,memory}.md`,
+    `manual_docs/how-to/enable-memory.md` (+ новый
+    `manual_docs/how-to/choose-embedding-model.md`),
+    `manual_docs/explanation/agents-and-trust.md`,
+    `plugins/maestro-bootstrap/README.md`, `commands/maestro-memory.md`,
+    `commands/maestro-memory-report.md`, `docs/project-context.md`.
+
 - **Memory layer v3: branch-aware memory.** Контекст памяти привязан к
   git-истории:
   - **Commit-based членство:** идентичность записи — по коммиту (`head`), имя

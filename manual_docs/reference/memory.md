@@ -48,6 +48,14 @@
     "retention_days": null,
     "summarize_timeout_ms": 120000,
     "report": { "include_text": false },
+    "embedding": {
+      "provider": "local",
+      "model": null,
+      "base_url": "https://api.openai.com/v1",
+      "api_key_env": null,
+      "dim": null
+    },
+    "probe_cooldown_min": 30,
     "storage": {
       "type": "sqlite",
       "qdrant": { "url": "https://qdrant.internal:6333", "api_key_env": "MAESTRO_MEMORY_QDRANT_KEY", "collection": "maestro_memory" },
@@ -63,7 +71,13 @@
 |---|---|---|---|
 | `enabled` | `boolean` | `false` | Включает память. Нет секции / `false` → полностью off |
 | `auto_recall` | `boolean` | `true` | Авто-вспоминание: первое сообщение top-level primary сессии → блок контекста в system prompt |
-| `embedding_model` | `string` | `Xenova/paraphrase-multilingual-MiniLM-L12-v2` | Модель эмбеддингов (transformers.js, dim 384, RU+EN, q8 ~120 МБ, кэш локально) |
+| `embedding_model` | `string` | `Xenova/paraphrase-multilingual-MiniLM-L12-v2` | **Legacy-алиас** для `embedding.model` (только при `provider: local`). Модель эмбеддингов (transformers.js, dim 384, RU+EN, q8 ~120 МБ, кэш локально). Для `openai` `model` берётся строго из `embedding.model` |
+| `embedding.provider` | `string` | `local` | Провайдер эмбеддингов: `local` (default) \| `openai` (внешний OpenAI-совместимый `/embeddings` API, осознанный opt-in) |
+| `embedding.model` | `string` \| `null` | `null` | local: имя ONNX-модели (fallback на `embedding_model`); openai: id модели API (**обязателен** для `openai`) |
+| `embedding.base_url` | `string` | `https://api.openai.com/v1` | Базовый URL OpenAI-совместимого API; trailing-slash нормализуется |
+| `embedding.api_key_env` | `string` \| `null` | `null` | **Имя env-переменной** с API-ключом (никогда plaintext); **обязателен** для `openai` |
+| `embedding.dim` | `number` \| `null` | `null` | Размерность векторов; **обязателен** для `openai` (нативная dim модели, без Matryoshka-усечения); для `local` игнорируется (остаётся 384) |
+| `probe_cooldown_min` | `number` | `30` | Интервал в минутах между live-probe модели на старте (кэш результата в `state.json`); число > 0 |
 | `summarizer_model` | `string` \| `null` | `null` | Модель фонового саммаризатора; `null` → модель саммаризируемой сессии |
 | `identity` | `string` \| `null` | `null` | Явный override identity (напр. сервисный аккаунт). Обычно identity берётся из `identity_env` → git `user.name` |
 | `identity_env` | `string` \| `null` | `null` | Имя env-переменной с identity (per-machine, не в общем `maestro.json`) |
@@ -103,6 +117,16 @@
   ≤ 100) → память off + лог (`mainline_invalid`). Regex ограничивает ТОЛЬКО
   явный конфиг-override; авто-детектированные имена веток (любой юникод) — не
   проходят валидацию конфига (источник — git).
+- Некорректный блок `embedding` (не объект; `provider`/`model`/`base_url`/
+  `api_key_env` — не строки; `dim` — не целое > 0; для `openai` отсутствуют
+  `model`/`api_key_env`/`dim`) → память off + лог (`embedding_invalid`).
+- Некорректный `probe_cooldown_min` (не число > 0) → память off + лог
+  (`probe_cooldown_min_invalid`).
+- Для `embedding.provider: openai` отсутствие `process.env[embedding.api_key_env]`
+  → память off + лог (`embedding_api_key_env_missing`).
+- Стартовый probe hard-fail (ключ/модель/размерность) → память off + лог
+  (`embedder_probe_hard_fail`); soft-fail (сеть/таймаут) → fail-soft (память
+  остаётся, первый embed упадёт per-call).
 - Централизованный бэкенд (`qdrant`/`pgvector`) требует **резолвнутую identity**
   (`identity` → `identity_env` → git `user.name`); иначе — память off + лог
   (`centralized_identity_missing`).
@@ -120,10 +144,14 @@
 | `qdrant` | Централизованный (команда) | `@qdrant/js-client-rest` (HTTP), коллекция `maestro_memory`, payload-фильтр по `key` | `url` + `api_key_env`; identity |
 | `pgvector` | Есть центральный Postgres | node-postgres + расширение `vector`, таблица с vector-колонкой | `connection_string_env`; identity |
 
-- Эмбеддинги **всегда локальные** (transformers.js, одна модель) — вектора
-  совместимы с любым бэкендом. `model_id` пишется в метаданные; при несовпадении
+- Эмбеддинги — **локальные по умолчанию** (transformers.js, одна модель) или
+  **внешние (opt-in)** через `memory.embedding.provider: "openai"` (OpenAI-
+  совместимый API). `model_id` пишется в метаданные; при несовпадении
   модели/размерности на бэкенде — ошибка с инструкцией переиндексации (без тихой
-  порчи).
+  порчи). Для `openai` `model_id` — канонический `openai:<model>@<base_url>`
+  (без сети; смена провайдера/модели/URL → другой `model_id` → переиндексация).
+  Экспорт/импорт валидируют `model_id`/размерность против активного хранилища —
+  перенос между разными `model_id` не поддерживается.
 - Переключение бэкенда **не мигрирует** данные автоматически; миграция — через
   `memory_export` → `memory_import` (JSONL с embedding, см.
   [Как включить память](../how-to/enable-memory.md)).
@@ -447,15 +475,18 @@ memory_stats_detail() → агрегаты (без summary-текста)
 
 ### `@maestro-memory`
 
-Статус memory layer: бэкенд, модель, активный `key`, число записей (по авторам
+Статус memory layer: бэкенд, модель (провайдер/модель), **проверка embedder**
+(probe-статус), активный `key`, число записей (по авторам
 и датам), **разбивка по тирам (merged/experience/unknown/dead) и веткам**,
 кластеры/граф, подсказки по тюнингу (`top_k`, `min_score`,
 `retention_days`). Данные — из `memory_stats_detail` + чтение `maestro.json`.
 **Только агрегаты (SEC-4b)** — без раскрытия содержимого записей. При
 выключенной памяти — дружественное сообщение со ссылкой на
 [Как включить память](../how-to/enable-memory.md). Диагностические строки
-(`mainline_unresolved`, `unmasked_branch_metadata`) дублируются в выдаче —
-диагностика без логов.
+(`mainline_unresolved`, `unmasked_branch_metadata`,
+`external_embedder_unmasked_queries`) дублируются в выдаче —
+диагностика без логов. При отсутствии/FAIL probe-статуса команда вызывает
+`memory_probe` (live-проверка, минуя cooldown) и показывает результат.
 
 ### `@maestro-memory-report`
 
@@ -596,6 +627,9 @@ opt-in на вставку замаскированных заголовков/s
 | Сбой | Поведение |
 |---|---|
 | Модель не загружена / нет сети | Память off, лог с инструкцией; сессии работают |
+| Внешний embedder: стартовый probe hard-fail (401/403/404/dim-mismatch) | Память off + лог (`embedder_probe_hard_fail`); авто-восстановление при исправлении конфига (cached hard не шорт-кейтится — live re-probe) |
+| Внешний embedder: стартовый probe soft-fail (5xx/timeout/network) | Fail-soft: память остаётся, первый embed упадёт per-call; не бьём API на каждом рестарте (cooldown-кэш) |
+| Внешний embedder: embed-ошибка retryable (сеть/timeout/5xx) | Не считает в skip-after-3 (сессия перепробуется в следующем цикле backfill); прочие ошибки — как сегодня |
 | deps не установлены (нет `node_modules`) | Память off, лог с actionable инструкцией (`npm install` в `module_dir` / ссылка на how-to); сессии работают |
 | Бэкенд недоступен (qdrant/pg) | Память off, лог; **не** молчаливый fallback на sqlite |
 | `mainline_unresolved` (нет резолвнутого mainline) | Неявный `scope` → flat recall (идентично `branch_context: false`); явный `scope: "branch"` → degraded (general merged=1 + собственные unmerged experience, чужие unmerged исключены). Warn в лог; промоушен-проход пропускается; диагностика дублируется в выдаче `@maestro-memory` |

@@ -243,6 +243,14 @@ untrusted, access-policy не enforced, дефолтные sanitizer-прави�
     "report": { "include_text": false },
     "branch_context": true,
     "mainline": null,
+    "embedding": {
+      "provider": "local",
+      "model": null,
+      "base_url": "https://api.openai.com/v1",
+      "api_key_env": null,
+      "dim": null
+    },
+    "probe_cooldown_min": 30,
     "storage": {
       "type": "sqlite",
       "qdrant": { "url": "https://qdrant.internal:6333", "api_key_env": "MAESTRO_MEMORY_QDRANT_KEY", "collection": "maestro_memory" },
@@ -267,6 +275,13 @@ untrusted, access-policy не enforced, дефолтные sanitizer-прави�
   (prune при старте, лог количества удалённых).
 - **`similarity_threshold`:** порог cosine для кластеров/графа в
   `memory_stats_detail` (default `0.7`).
+- **`embedding` (внешний embedder, opt-in):** `provider: "openai"` — внешний
+  OpenAI-совместимый `/embeddings` API (`model`/`base_url`/`api_key_env`/`dim`
+  обязательны для `openai`; `dim` — нативная размерность, без Matryoshka;
+  ключ — только через `api_key_env`). `embedding_model` — legacy-алиас для
+  `embedding.model` (только при `provider: local`). `probe_cooldown_min`
+  (default `30`) — интервал между live-probe на старте; hard-fail → память off,
+  soft-fail → fail-soft; on-demand — `memory_probe`.
 - **`report.include_text`:** `false` (default) — HTML-отчёт только агрегаты
   (SEC-4b); `true` — осознанный opt-in на маскированные тексты.
 - **Хуки:** `tool` (`memory_search`, `memory_forget`, `memory_export`,
@@ -335,7 +350,9 @@ Memory layer (при `memory.enabled: true`):
 - `memory: disabled` — память выключена (info, с `reason`: `storage_type_invalid`,
   `centralized_identity_missing`, `qdrant_config_invalid`, `pgvector_config_invalid`,
   `pgvector_text_search_config_invalid`, `branch_context_invalid`, `mainline_invalid`,
-  `retention_days_invalid`, `similarity_threshold_invalid`)
+  `retention_days_invalid`, `similarity_threshold_invalid`, `embedding_invalid`,
+  `probe_cooldown_min_invalid`, `embedding_api_key_env_missing`,
+  `embedder_probe_hard_fail`)
 - `memory: mainline_unresolved — branch-context flat (нет резолвнутого mainline)` (warn)
 - `memory: init failed` — ошибка инициализации (error; сессии работают)
 - `memory: indexer error` — ошибка индексации сессии (error, с `sessionID`)

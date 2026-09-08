@@ -86,6 +86,14 @@ description: Use when the user asks for help configuring maestro, organizing pro
     "retention_days": null,
     "summarize_timeout_ms": 120000,
     "report": { "include_text": false },
+    "embedding": {
+      "provider": "local",
+      "model": null,
+      "base_url": "https://api.openai.com/v1",
+      "api_key_env": null,
+      "dim": null
+    },
+    "probe_cooldown_min": 30,
     "storage": {
       "type": "sqlite",
       "qdrant": { "url": "https://qdrant.internal:6333", "api_key_env": "MAESTRO_MEMORY_QDRANT_KEY", "collection": "maestro_memory" },
@@ -140,8 +148,31 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
 - **`auto_recall`** — авто-вспоминание (первое сообщение top-level primary
   сессии → блок `## Контекст из памяти maestro` в system prompt). `false` —
   только ручной `memory_search`.
-- **`embedding_model`** — локальная модель эмбеддингов (transformers.js, dim 384,
-  RU+EN, q8 ~120 МБ, кэш). Смена → переиндексация.
+- **`embedding_model`** — **legacy-алиас** для `embedding.model` (только при
+  `provider: local`). Локальная модель эмбеддингов (transformers.js, dim 384,
+  RU+EN, q8 ~120 МБ, кэш). Смена → переиндексация. Для `openai` `model` берётся
+  строго из `embedding.model` (legacy-алиас не подставляется).
+- **`embedding`** — блок конфигурации embedder (backward-compatible):
+  - `embedding.provider` — `local` (default) | `openai` (внешний
+    OpenAI-совместимый `/embeddings` API, осознанный opt-in).
+  - `embedding.model` — `null` (default); local: имя ONNX-модели (fallback на
+    `embedding_model`); openai: id модели API (**обязателен**).
+  - `embedding.base_url` — `https://api.openai.com/v1` (default); базовый URL
+    OpenAI-совместимого API; trailing-slash нормализуется.
+  - `embedding.api_key_env` — `null` (default); **имя env-переменной** с ключом
+    (никогда plaintext); **обязателен** для `openai`.
+  - `embedding.dim` — `null` (default); размерность векторов; **обязателен** для
+    `openai` (нативная dim модели, без Matryoshka-усечения); для `local`
+    игнорируется (остаётся 384).
+  - Приоритет: при `provider: local` и одновременно заданных `embedding.model`
+    и `embedding_model` — приоритет у `embedding.model`. Для `openai` действует
+    только `embedding.model`. Валидация блока: объект; `provider`/`model`/
+    `base_url`/`api_key_env` — строки; `dim` — целое > 0; нарушение →
+    `embedding_invalid` (память off). Отсутствие `process.env[api_key_env]` при
+    `openai` → память off (`embedding_api_key_env_missing`).
+- **`probe_cooldown_min`** — интервал в минутах между live-probe модели на
+  старте (кэш результата в `state.json`), default `30`. Валидация: число > 0;
+  иначе → `probe_cooldown_min_invalid` (память off).
 - **`summarizer_model`** — модель фонового саммаризатора; `null` → модель
   саммаризируемой сессии.
 - **`identity` / `identity_env`** — подпись записей (`author`), **не

@@ -245,6 +245,63 @@ q8 ~120 МБ, ONNX) загружается однократно с HuggingFace �
 >
 > Методика выбора/замены модели — [Выбор и замена модели эмбеддингов](choose-embedding-model.md).
 
+### Внешний embedder (OpenAI-совместимый API)
+
+По умолчанию эмбеддинги — **локальные** (transformers.js, offline после загрузки).
+Опционально можно подключить **внешний embedder** через любой OpenAI-совместимый
+`/embeddings` API (`memory.embedding.provider: "openai"`). Это **осознанный opt-in**:
+контент записей и recall-запросы покидают машину (маскирование best-effort), нет
+offline-режима, есть стоимость вызовов.
+
+```json
+{
+  "memory": {
+    "enabled": true,
+    "embedding": {
+      "provider": "openai",
+      "model": "text-embedding-3-small",
+      "base_url": "https://api.openai.com/v1",
+      "api_key_env": "MAESTRO_MEMORY_EMBED_KEY",
+      "dim": 1536
+    }
+  }
+}
+```
+
+Требования:
+
+- **`embedding.dim` обязателен** и должен равняться **нативной** размерности
+  модели (без Matryoshka-усечения через параметр `dimensions` — иначе
+  dim-mismatch hard-fail).
+- **Ключ — только через `embedding.api_key_env`** (имя env-переменной, никогда
+  plaintext в `maestro.json`). Переменная должна быть задана в окружении
+  opencode; иначе память off (`embedding_api_key_env_missing`).
+- **Данные покидают машину** — для проектов с непустыми `confidential.paths`
+  при старте выводится init-warn `external_embedder_unmasked_queries` (запросы и
+  контент, замаскированные best-effort, уходят генерическому внешнему вендору).
+- **Смена модели/провайдера/URL → переиндексация** (другой `model_id`; миграция
+  через `memory_export`/`memory_import` для разных `model_id` не поддерживается).
+
+### Проверка работоспособности (probe)
+
+На старте плагин выполняет **проверку работоспособности (probe)** модели
+эмбеддингов: локальный — лёгкий чек импортируемости `@huggingface/transformers`
+(без форсирования загрузки ~120 МБ); внешний — один POST `/embeddings` с
+warmup-строкой. Результат кэшируется в `state.json` на `probe_cooldown_min`
+(default `30`) минут.
+
+- **hard-fail** (401/403 — ключ, 404 — модель/URL, dim-mismatch) → память off
+  (`embedder_probe_hard_fail`); авто-восстановление при исправлении конфига
+  (cached hard не шорт-кейтится — live re-probe на следующем старте).
+- **soft-fail** (5xx/timeout/network) → fail-soft: память остаётся, первый embed
+  упадёт per-call; не бьём API на каждом рестарте.
+- **on-demand:** инструмент `memory_probe` — live-проверка (минуя cooldown),
+  обновляет `state.json`, возвращает строку статуса. Команда `@maestro-memory`
+  показывает строку «Проверка embedder»; при FAIL/нет данных — вызывает
+  `memory_probe` и показывает результат + рекомендации.
+- **Ручное восстановление из off-состояния:** удалить запись `embedderProbe` из
+  `state.json` или снизить `probe_cooldown_min`.
+
 ### Границы удаления
 
 | Что удалить | Что произойдёт |
@@ -272,7 +329,7 @@ q8 ~120 МБ, ONNX) загружается однократно с HuggingFace �
 
 | Симптом | Причина / действие |
 |---|---|
-| Память не работает, в логе `memory: disabled` с `reason` | Конфигурация невалидна (см. `disabled_reason`: `storage_type_invalid`, `centralized_identity_missing`, `qdrant_config_invalid`, `pgvector_config_invalid`, `pgvector_text_search_config_invalid`, `branch_context_invalid`, `mainline_invalid`, `retention_days_invalid`, `similarity_threshold_invalid`) |
+| Память не работает, в логе `memory: disabled` с `reason` | Конфигурация невалидна (см. `disabled_reason`: `storage_type_invalid`, `centralized_identity_missing`, `qdrant_config_invalid`, `pgvector_config_invalid`, `pgvector_text_search_config_invalid`, `branch_context_invalid`, `mainline_invalid`, `retention_days_invalid`, `similarity_threshold_invalid`, `embedding_invalid`, `probe_cooldown_min_invalid`, `embedding_api_key_env_missing`, `embedder_probe_hard_fail`) |
 | В логе `memory: transformers not installed — run npm install in <module_dir>` | Не выполнена установка deps (шаг 3 краткой инструкции) |
 | В логе `memory: init failed` | Ошибка инициализации (бэкенд недоступен, модель не загрузилась и т.п.) — сессии работают |
 | Блок `## Контекст из памяти maestro` не появляется | Модель эмбеддингов ещё прогревается (первый запуск), либо нет записей выше `min_score`, либо сессия не top-level primary |

@@ -37,7 +37,7 @@ description: Сгенерировать статический HTML-отчёт �
 ### 3.1 Summary (верх страницы)
 
 - **Бэкенд:** `<sqlite | qdrant | pgvector>`
-- **Модель:** `<embedding_model>`
+- **Модель:** `<provider>: <model>` (для `openai` — `openai: <model>@<base_url>`; для `local` — имя ONNX-модели)
 - **Всего записей:** `<N>`
 - **Активный key:** `<key из отчёта>`
 
@@ -80,7 +80,7 @@ description: Сгенерировать статический HTML-отчёт �
 ```
 HTML-отчёт сохранён: <путь к файлу>
 
-Всего записей: <N>, бэкенд: <backend>, модель: <model>
+Всего записей: <N>, бэкенд: <backend>, модель: <provider>: <model>
 ```
 
 Ссылка на справку: `manual_docs/reference/memory.md`.

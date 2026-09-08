@@ -394,6 +394,14 @@ deny. Trust не наследуется вложенными субагента�
     "retention_days": null,
     "summarize_timeout_ms": 120000,
     "report": { "include_text": false },
+    "embedding": {
+      "provider": "local",
+      "model": null,
+      "base_url": "https://api.openai.com/v1",
+      "api_key_env": null,
+      "dim": null
+    },
+    "probe_cooldown_min": 30,
     "storage": {
       "type": "sqlite",
       "qdrant": { "url": "https://qdrant.internal:6333", "api_key_env": "MAESTRO_MEMORY_QDRANT_KEY", "collection": "maestro_memory" },
@@ -407,7 +415,13 @@ deny. Trust не наследуется вложенными субагента�
 |---|---|---|---|
 | `enabled` | `boolean` | `false` | Включает память. Нет секции / `false` → полностью off |
 | `auto_recall` | `boolean` | `true` | Авто-вспоминание: первое сообщение top-level primary сессии → блок контекста в system prompt |
-| `embedding_model` | `string` | `Xenova/paraphrase-multilingual-MiniLM-L12-v2` | Модель эмбеддингов (transformers.js, dim 384, RU+EN, q8 ~120 МБ, кэш локально) |
+| `embedding_model` | `string` | `Xenova/paraphrase-multilingual-MiniLM-L12-v2` | **Legacy-алиас** для `embedding.model` (только при `provider: local`). Модель эмбеддингов (transformers.js, dim 384, RU+EN, q8 ~120 МБ, кэш локально). Для `openai` `model` берётся строго из `embedding.model` |
+| `embedding.provider` | `string` | `local` | Провайдер эмбеддингов: `local` (default) \| `openai` (внешний OpenAI-совместимый `/embeddings` API, осознанный opt-in) |
+| `embedding.model` | `string` \| `null` | `null` | local: имя ONNX-модели (fallback на `embedding_model`); openai: id модели API (**обязателен** для `openai`) |
+| `embedding.base_url` | `string` | `https://api.openai.com/v1` | Базовый URL OpenAI-совместимого API; trailing-slash нормализуется |
+| `embedding.api_key_env` | `string` \| `null` | `null` | **Имя env-переменной** с API-ключом (никогда plaintext); **обязателен** для `openai` |
+| `embedding.dim` | `number` \| `null` | `null` | Размерность векторов; **обязателен** для `openai` (нативная dim модели, без Matryoshka-усечения); для `local` игнорируется (остаётся 384) |
+| `probe_cooldown_min` | `number` | `30` | Интервал в минутах между live-probe модели на старте (кэш результата в `state.json`); число > 0 |
 | `summarizer_model` | `string` \| `null` | `null` | Модель фонового саммаризатора; `null` → модель саммаризируемой сессии |
 | `identity` | `string` \| `null` | `null` | Явный override identity (напр. сервисный аккаунт) |
 | `identity_env` | `string` \| `null` | `null` | Имя env-переменной с identity (per-machine, не в общем `maestro.json`) |
@@ -438,13 +452,20 @@ deny. Trust не наследуется вложенными субагента�
 identity для централизованного бэкенда / некорректный `retention_days` /
 `similarity_threshold` вне `[0, 1]` / некорректный `branch_context` (не boolean) /
 некорректный `mainline` (не `null` и не строка `/^[a-zA-Z0-9_\/.-]+$/`, длина
-≤ 100) → память off + лог (`disabled_reason`: `storage_type_invalid`,
+≤ 100) / некорректный блок `embedding` (не объект; `provider`/`model`/
+`base_url`/`api_key_env` — не строки; `dim` — не целое > 0; для `openai`
+отсутствуют `model`/`api_key_env`/`dim`) / некорректный `probe_cooldown_min`
+(не число > 0) → память off + лог (`disabled_reason`: `storage_type_invalid`,
 `centralized_identity_missing`, `qdrant_config_invalid`,
 `pgvector_config_invalid`, `pgvector_text_search_config_invalid`,
 `retention_days_invalid`, `similarity_threshold_invalid`,
-`branch_context_invalid`, `mainline_invalid`), сессии работают (fail-soft).
+`branch_context_invalid`, `mainline_invalid`, `embedding_invalid`,
+`probe_cooldown_min_invalid`), сессии работают (fail-soft).
 Централизованные бэкенды требуют identity (`identity` → `identity_env` → git
-`user.name`).
+`user.name`). Для `embedding.provider: openai` отсутствие
+`process.env[embedding.api_key_env]` → память off
+(`embedding_api_key_env_missing`); стартовый probe hard-fail (ключ/модель/
+размерность) → память off (`embedder_probe_hard_fail`).
 
 #### Permission-правило для write/boundary-tools (обязательное)
 

@@ -21,7 +21,7 @@ description: Показать статус memory layer плагина maestro-b
    Причину (`disabled_reason`) определи по `maestro.json`: отсутствие секции `memory` →
    `no_memory_section`; `memory.enabled: false` → `explicitly_disabled`; невалидные ключи
    (`retention_days`, `similarity_threshold`, `storage.type`, `branch_context`, `mainline`,
-   `storage.pgvector.text_search_config`) → соответствующий код (`*_invalid`);
+   `storage.pgvector.text_search_config`, `embedding`, `probe_cooldown_min`) → соответствующий код (`*_invalid`);
    централизованный бэкенд без identity → `centralized_identity_missing`;
    env-зависимые причины (`qdrant` без `url`/`api_key_env` → `qdrant_config_invalid`;
    `pgvector` без `connection_string_env` → `pgvector_config_invalid`);
@@ -29,6 +29,13 @@ description: Показать статус memory layer плагина maestro-b
    `embedding.provider: openai` без `api_key_env`/ключа → `embedding_api_key_env_missing`;
    невалидный `probe_cooldown_min` → `probe_cooldown_min_invalid`;
    стартовый probe завершился hard-fail (ключ/модель/размерность) → `embedder_probe_hard_fail`.
+
+   **Диагностика в off-состоянии:** даже при выключенной памяти вызови инструмент
+   `memory_probe` (live-проверка embedder, минуя cooldown) и покажи результат +
+   рекомендации — это помогает отличить конфиг-ошибку от недоступности провайдера:
+   - `FAIL (конфигурация)` — проверь `embedding.api_key_env`/ключ, `embedding.model`, `embedding.dim` в `maestro.json`;
+   - `FAIL` (soft) — сеть/таймаут провайдера; проверь `embedding.base_url` и доступность эндпоинта;
+   - `OK` — embedder доступен; причина off — в `disabled_reason` (см. выше).
 
 3. Если инструмент вернул данные → продолжи к Шагу 2.
 
@@ -56,7 +63,7 @@ description: Показать статус memory layer плагина maestro-b
 ## Память maestro — статус
 
 **Бэкенд:** <sqlite | qdrant | pgvector>
-**Модель:** <embedding_model>
+**Модель:** <provider>: <model> (для `openai` — `openai: <model>@<base_url>`; для `local` — имя ONNX-модели)
 **Проверка embedder:** <OK | FAIL (конфигурация)> (<detail>, <ISO-время>)
 **Активный key:** <effective key из отчёта>
 
