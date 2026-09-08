@@ -5,7 +5,7 @@ import { createRequire } from "node:module";
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { makeBoundedMap, readPluginVersion, getGitConfig } from "../core.js";
 import { loadMemoryConfig, resolveEffectiveKey, resolveIdentity, resolveEffectiveTextConfig, sanitizeDirName } from "./config.js";
-import { maskEntry } from "./mask.js";
+import { maskEntry, maskTranscript } from "./mask.js";
 import { ensureModule } from "./provision.js";
 import { createStorage } from "./storage.js";
 import { Embedder } from "./embeddings.js";
@@ -492,6 +492,8 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       root,
       mainline: config.mainline ?? null,
       log,
+      // Task 6: паттерны confidential-путей — запрос маскируется перед embed.
+      confidentialPatterns: confidentialPaths,
     });
 
     const toolHooks = {
@@ -515,13 +517,20 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
           try {
             // I3: недоступен plugin-созданным сессиям саммаризатора.
             if (SESSIONS.has(ctx?.sessionID)) return "Инструмент недоступен для служебных сессий.";
-            const vec = await embeddings.embed(args.query);
+            // Task 6: маскируем запрос перед embed (best-effort). Полностью
+            // замаскированный запрос → short-circuit (ни embed, ни FTS).
+            const maskedQuery = maskTranscript(args.query, { confidentialPatterns: confidentialPaths });
+            if (!maskedQuery || maskedQuery.trim() === "[confidential]") return "Ничего не найдено.";
+            const vec = await embeddings.embed(maskedQuery);
             const searchOpts = {
               top_k: args.limit ?? config.top_k,
               min_score: config.min_score,
               key: effectiveKey,
               // C-1: pass the text query so the sqlite backend runs the FTS
               // hybrid path (not just vector-only). Mirrors memory_recall_preview.
+              // Task 6: searchOpts.query остаётся ОРИГИНАЛЬНЫМ запросом (raw) —
+              // маскируется только вход embed (egress на централизованных
+              // бэкендах вне scope).
               query: args.query,
             };
             if (args.date_from !== undefined) searchOpts.date_from = args.date_from;
@@ -715,7 +724,11 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             // I3: недоступен plugin-созданным сессиям саммаризатора.
             if (SESSIONS.has(ctx?.sessionID)) return "memory_recall_preview недоступен для служебных сессий.";
             if (!args?.query) return "memory_recall_preview: укажите query";
-            const vec = await embeddings.embed(args.query);
+            // Task 6: маскируем запрос перед embed (best-effort). Полностью
+            // замаскированный запрос → short-circuit (ни embed, ни FTS).
+            const maskedQuery = maskTranscript(args.query, { confidentialPatterns: confidentialPaths });
+            if (!maskedQuery || maskedQuery.trim() === "[confidential]") return "Ничего не найдено.";
+            const vec = await embeddings.embed(maskedQuery);
             // M-3 (§7): тот же scope-логика, что у memory_search (дефолтный
             // scope; branch_context=false → project). mainline unresolved →
             // flat (I-2: «эффективно off»).

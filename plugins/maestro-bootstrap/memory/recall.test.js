@@ -139,6 +139,45 @@ test("recall auto-recall: branch scope without git → debug log (not silent) (M
   assert.ok(block.includes("t"), "flat search still runs");
 });
 
+// ── Task 6 (external embedder): маскирование запроса перед embed ───────
+
+test("recall masks confidential query before embed", async () => {
+  let embedded = null;
+  const embedder = { embed: async (t) => { embedded = t; return new Float32Array([0.1, 0.2, 0.3]); }, dim: 3, modelId: "m" };
+  const storage = { search: async () => [] };
+  const r = new Recall({
+    embeddings: embedder, storage, topK: 3, minScore: 0.35, key: "p",
+    getUserMessageCount: async () => 1, confidentialPatterns: ["docs/confidential/**"],
+  });
+  await r.onChatMessage({ sessionID: "s1", text: "docs/confidential/roadmap.md какие сроки?\nкакие сроки по фиче?" });
+  assert.ok(!embedded.includes("roadmap"));
+});
+
+test("recall leaves non-confidential query unmasked", async () => {
+  let embedded = null;
+  const embedder = { embed: async (t) => { embedded = t; return new Float32Array([0.1, 0.2, 0.3]); }, dim: 3, modelId: "m" };
+  const storage = { search: async () => [] };
+  const r = new Recall({
+    embeddings: embedder, storage, topK: 3, minScore: 0.35, key: "p",
+    getUserMessageCount: async () => 1, confidentialPatterns: ["docs/confidential/**"],
+  });
+  await r.onChatMessage({ sessionID: "s1", text: "какие сроки по roadmap?" });
+  assert.ok(embedded.includes("roadmap"));
+});
+
+test("fully masked query → no embed, no search (short-circuit)", async () => {
+  let embeds = 0; let searches = 0;
+  const embedder = { embed: async (t) => { embeds++; return new Float32Array([0.1, 0.2, 0.3]); }, dim: 3, modelId: "m" };
+  const storage = { search: async () => { searches++; return []; } };
+  const r = new Recall({
+    embeddings: embedder, storage, topK: 3, minScore: 0.35, key: "p",
+    getUserMessageCount: async () => 1, confidentialPatterns: ["docs/confidential/**"],
+  });
+  await r.onChatMessage({ sessionID: "s1", text: "docs/confidential/a.md" });
+  assert.equal(embeds, 0);
+  assert.equal(searches, 0);
+});
+
 test("recall auto-recall: mainline unresolved → flat (no membership filter) (I-2)", async () => {
   const storage = {
     candidates: async () => [

@@ -1,14 +1,18 @@
 import { makeBoundedMap } from "../core.js";
 import { applyBranchScope, computeBranchSets } from "./membership.js";
+import { maskTranscript } from "./mask.js";
 
 export class Recall {
-  constructor({ embeddings, storage, topK, minScore, key, getUserMessageCount, branchContext = true, git = null, root = null, mainline = null, log = null }) {
+  constructor({ embeddings, storage, topK, minScore, key, getUserMessageCount, branchContext = true, git = null, root = null, mainline = null, log = null, confidentialPatterns = [] }) {
     this.embeddings = embeddings;
     this.storage = storage;
     this.topK = topK;
     this.minScore = minScore;
     this.key = key;
     this.getUserMessageCount = getUserMessageCount;
+    // Task 6: паттерны confidential-путей — запрос маскируется перед embed
+    // (best-effort, line-level); полностью замаскированный запрос → short-circuit.
+    this.confidentialPatterns = confidentialPatterns;
     // Task 6: дефолтный scope для auto-recall (branch_context=false → project).
     this.branchContext = branchContext;
     this.git = git;
@@ -21,7 +25,12 @@ export class Recall {
     try {
       const count = await this.getUserMessageCount(sessionID);
       if (count !== 1) return;
-      const vec = await this.embeddings.embed(text);
+      // Task 6: маскируем запрос перед embed (best-effort). Полностью
+      // замаскированный запрос (однострочный → "[confidential]") → short-circuit
+      // всего поиска: ни embed, ни FTS (follow-up 3).
+      const masked = maskTranscript(text, { confidentialPatterns: this.confidentialPatterns });
+      if (!masked || masked.trim() === "[confidential]") { this.buffer.set(sessionID, []); return; }
+      const vec = await this.embeddings.embed(masked);
       // Task 6: auto-recall использует дефолтный scope. В branch-scope —
       // членство по коммитам: поиск идёт ТОЛЬКО по кандидатам (I1: pre-filter,
       // чтобы unattributed/out-of-context записи не разбавляли top_k), затем

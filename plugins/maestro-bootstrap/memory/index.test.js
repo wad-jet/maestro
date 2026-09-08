@@ -2536,3 +2536,17 @@ test("init-warn external_embedder_unmasked_queries when openai + confidential pa
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── Task 6 (external embedder): маскирование запроса в memory_search ────
+
+test("memory_search masks confidential query before embed", async () => {
+  const seen = [];
+  const cfg = { memory: { enabled: true, storage: { type: "sqlite" } }, confidential: { paths: ["docs/confidential/**"] } };
+  const hooks = await registerMemoryHooks({
+    client: mkClient(), config: cfg, log: mkLog(), root: tmpdir(),
+    deps: { storage: mkStorage(), embeddings: { embed: async (t) => { seen.push(t); return new Float32Array([0.1, 0.2, 0.3]); }, probe: async () => ({ ok: true, hard: false, detail: "ok" }), dim: 3, modelId: "m" } },
+  });
+  await hooks.tool.memory_search.execute({ query: "docs/confidential/roadmap.md сроки\nкакие сроки?" }, { sessionID: "s1" });
+  assert.ok(!seen[0].includes("roadmap"));
+  await hooks.dispose?.();
+});
