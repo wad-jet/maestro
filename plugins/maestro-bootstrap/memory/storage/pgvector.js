@@ -239,14 +239,19 @@ export class PgVectorStorage {
   }
 
   // Кандидаты для recall (Task 6): записи ключа, которые либо влиты в mainline
-  // (merged=1), либо имеют атрибуцию head (head != '').
+  // (merged=1), либо имеют атрибуцию head (head != ''). Malformed decisions →
+  // [] (guard как в sqlite/get) — не ронять recall.
   async candidates(key) {
     if (typeof key !== "string" || !key) throw new Error("candidates: key required");
     const res = await this.pool.query(
       `SELECT session_id, key, origin_project_hash, title, summary, decisions, model_id, author, time_first, time_last, version, branch, head, merged
        FROM ${this.table} WHERE key = $1 AND (merged = 1 OR head != '')`,
       [key]);
-    return res.rows.map((r) => ({ ...r, embedding: undefined, decisions: JSON.parse(r.decisions) }));
+    return res.rows.map((r) => {
+      let parsed;
+      try { parsed = JSON.parse(r.decisions); } catch { parsed = []; }
+      return { ...r, embedding: undefined, decisions: parsed };
+    });
   }
 
   // Промоция (Task 5): пометить записи ключа с данным head как влитые в mainline.

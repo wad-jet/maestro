@@ -251,7 +251,8 @@ export class QdrantStorage {
 
   // Кандидаты для recall (Task 6): записи ключа, которые либо влиты в mainline
   // (merged=1), либо имеют атрибуцию head (head != ''). Qdrant не фильтрует
-  // `!= ''` дешёво → scroll по key + JS-фильтр.
+  // `!= ''` дешёво → scroll по key + JS-фильтр. Malformed decisions → []
+  // (guard как в sqlite/get) — не ронять recall.
   async candidates(key) {
     if (typeof key !== "string" || !key) throw new Error("candidates: key required");
     const res = await this.client.scroll(this.collection, {
@@ -264,7 +265,9 @@ export class QdrantStorage {
       .filter((p) => p.payload?.merged === 1 || (p.payload?.head ?? "") !== "")
       .map((p) => {
         const { text, ...rest } = p.payload;
-        return { ...rest, embedding: undefined, decisions: JSON.parse(rest.decisions) };
+        let parsed;
+        try { parsed = JSON.parse(rest.decisions); } catch { parsed = []; }
+        return { ...rest, embedding: undefined, decisions: parsed };
       });
   }
 

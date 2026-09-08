@@ -552,6 +552,22 @@ test("pgvector markMerged(key, head) sets merged=1 key-scoped", async () => {
   assert.equal(upd[1][1], "h");
 });
 
+test("pgvector candidates: malformed decisions JSON → [] (не throw)", async () => {
+  const p = fakePoolHybrid();
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, modelId: "m1" });
+  await st.init();
+  p.query = async (sql, params) => {
+    p.calls.push([sql, params]);
+    if (sql.includes("FROM maestro_memory")) {
+      return { rows: [{ session_id: "s1", key: "k1", decisions: "not-json", merged: 1, head: "" }] };
+    }
+    return { rows: [] };
+  };
+  const cands = await st.candidates("k1");
+  assert.equal(cands.length, 1);
+  assert.deepEqual(cands[0].decisions, [], "malformed decisions must fall back to []");
+});
+
 test("pgvector init: pg_catalog fallback to russian when config absent", async () => {
   // cfg="klingon" отсутствует в pg_ts_config → fallback на "russian".
   const logs = [];

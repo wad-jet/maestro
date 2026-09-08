@@ -604,6 +604,21 @@ test("qdrant markMerged(key, head) scrolls key+head then setPayload merged=1 per
   assert.deepEqual(setPayloadCalls[0], { payload: { merged: 1 }, points: ["pA"] });
 });
 
+test("qdrant candidates: malformed decisions JSON → [] (не throw)", async () => {
+  const c = fakeClient();
+  c.scroll = async (name, opts) => {
+    c.calls.push(["scroll", name, opts]);
+    const keyCond = opts.filter.must.find((m) => m.key === "key");
+    if (!keyCond) return { points: [], next_page_offset: null };
+    return { points: [{ id: "p1", payload: { session_id: "s1", key: "k1", decisions: "not-json", merged: 1, head: "" } }], next_page_offset: null };
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  const cands = await st.candidates("k1");
+  assert.equal(cands.length, 1);
+  assert.deepEqual(cands[0].decisions, [], "malformed decisions must fall back to []");
+});
+
 test("qdrant search: vector-leg entry excludes derived text field", async () => {
   const c = fakeClient();
   c.query = async (name, q) => {
