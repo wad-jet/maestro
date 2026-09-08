@@ -110,6 +110,27 @@ test("qdrant upsert maps entries to points with payload", async () => {
   assert.ok(point.vector.every((v, i) => Math.abs(v - [0.1, 0.2, 0.3][i]) < 1e-6));
 });
 
+test("qdrant upsert throws on model_id mismatch (parity with sqlite/pg)", async () => {
+  const c = fakeClient();
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  await assert.rejects(
+    () => st.upsert([{
+      session_id: "s1", key: "k1", origin_project_hash: "h1", title: "T",
+      summary: "S", decisions: [], embedding: new Float32Array([0.1, 0.2, 0.3]),
+      model_id: "other", author: "a", time_first: 1, time_last: 2, version: 1,
+    }]),
+    /переиндексируйте \(см\. how-to\/enable-memory\)/,
+    "model_id mismatch must throw with reindex instruction",
+  );
+  // Модель совпадает → upsert проходит (не бросает).
+  await st.upsert([{
+    session_id: "s1", key: "k1", origin_project_hash: "h1", title: "T",
+    summary: "S", decisions: [], embedding: new Float32Array([0.1, 0.2, 0.3]),
+    model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1,
+  }]);
+});
+
 test("qdrant search parses decisions and returns scored results", async () => {
   const c = fakeClient();
   c.query = async (name, q) => {

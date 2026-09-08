@@ -84,6 +84,14 @@ export class QdrantStorage {
   async dispose() {}
 
   async upsert(entries) {
+    // I3: паритет с sqlite/pgvector — несовпадение model_id → ошибка с
+    // инструкцией переиндексации (embedding dim проверяется сервер-стороной:
+    // collection создаётся с фикс. размерностью).
+    for (const e of entries) {
+      if (e.model_id !== this.modelId) {
+        throw new Error(`model_id mismatch: entry=${e.model_id} storage=${this.modelId} — переиндексируйте (см. how-to/enable-memory)`);
+      }
+    }
     const points = entries.map((e, i) => ({
       // I-3: deterministic UUID v5-like from sha256 (must be u64 or UUID, not string).
       // Fixed id per session (NOT per version) — re-summarize (version bump)

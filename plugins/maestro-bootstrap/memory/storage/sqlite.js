@@ -29,6 +29,9 @@ async function loadBetterSqlite3(moduleDir) {
       const resolved = require.resolve("better-sqlite3");
       return (await import(pathToFileURL(resolved).href)).default;
     } catch {
+      // I4: actionable-инструкция при недоступности better-sqlite3 в module_dir
+      // (дополняет голый ERR_MODULE_NOT_FOUND из index.js «memory: init failed»).
+      console.error(`[memory] better-sqlite3 не найден в module_dir. Выполните: cd ${moduleDir} && npm install (см. manual_docs/how-to/enable-memory.md)`);
       /* fall through to bare import */
     }
   }

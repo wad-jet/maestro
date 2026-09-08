@@ -747,6 +747,31 @@ test("sqlite lazy-loads better-sqlite3 from moduleDir/node_modules", async () =>
   }
 });
 
+test("sqlite logs actionable npm install message when better-sqlite3 missing in moduleDir", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  // moduleDir БЕЗ better-sqlite3 → require.resolve падает → actionable-лог
+  // (в тесте bare-import fallback успешен, поэтому init продолжается).
+  const logs = [];
+  const origError = console.error;
+  console.error = (msg) => { logs.push(msg); };
+  const st = createStorage({
+    type: "sqlite",
+    options: { dbPath: join(dir, "memory.db"), moduleDir: dir },
+    modelId: "m",
+    dim: 3,
+  });
+  try {
+    await st.init();
+    assert.ok(logs.some((l) => l.includes("npm install")), "must log npm install hint");
+    assert.ok(logs.some((l) => l.includes("enable-memory")), "must reference how-to/enable-memory");
+    assert.ok(logs.some((l) => l.includes(dir)), "must include module_dir path");
+  } finally {
+    console.error = origError;
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("qdrant factory returns QdrantStorage with valid options", async () => {
   const c = {
     collectionExists: async () => ({ exists: false }),
