@@ -24,7 +24,11 @@ description: Показать статус memory layer плагина maestro-b
    `storage.pgvector.text_search_config`) → соответствующий код (`*_invalid`);
    централизованный бэкенд без identity → `centralized_identity_missing`;
    env-зависимые причины (`qdrant` без `url`/`api_key_env` → `qdrant_config_invalid`;
-   `pgvector` без `connection_string_env` → `pgvector_config_invalid`).
+   `pgvector` без `connection_string_env` → `pgvector_config_invalid`);
+   embedder-причины: невалидная секция `embedding` → `embedding_invalid`;
+   `embedding.provider: openai` без `api_key_env`/ключа → `embedding_api_key_env_missing`;
+   невалидный `probe_cooldown_min` → `probe_cooldown_min_invalid`;
+   стартовый probe завершился hard-fail (ключ/модель/размерность) → `embedder_probe_hard_fail`.
 
 3. Если инструмент вернул данные → продолжи к Шагу 2.
 
@@ -53,6 +57,7 @@ description: Показать статус memory layer плагина maestro-b
 
 **Бэкенд:** <sqlite | qdrant | pgvector>
 **Модель:** <embedding_model>
+**Проверка embedder:** <OK | FAIL (конфигурация)> (<detail>, <ISO-время>)
 **Активный key:** <effective key из отчёта>
 
 **Записи:** всего <N>
@@ -73,6 +78,12 @@ description: Показать статус memory layer плагина maestro-b
 Если в отчёте `memory_stats_detail` есть диагностические строки — выведи их как есть:
 - `mainline_unresolved` — mainline не резолвнут (branch-context flat; guidance: `memory.mainline` override);
 - `unmasked_branch_metadata` — централизованный бэкенд + непустые `confidential.paths` (имена веток уходят на сервер).
+
+Если строка **Проверка embedder:** отсутствует или статус `FAIL` — вызови инструмент
+`memory_probe` (live-проверка, минуя cooldown) и покажи результат + рекомендации:
+- `FAIL (конфигурация)` — проверь `embedding.api_key_env`/ключ, `embedding.model`, `embedding.dim` в `maestro.json`;
+- `FAIL` (soft) — сеть/таймаут провайдера; проверь `embedding.base_url` и доступность эндпоинта;
+- `OK` — embedder доступен; если память всё ещё off — причина в другом `disabled_reason` (см. Шаг 1).
 
 Если в отчёте `memory_stats_detail` нет данных по кластерам/графу — напиши:
 `«Данные по кластерам/графу отсутствуют»`.

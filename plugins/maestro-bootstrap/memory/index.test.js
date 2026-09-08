@@ -2385,8 +2385,9 @@ test("startup probe hard fail → memory off (memory_probe only, no tool hooks)"
       client: mkClient(), config: cfg, log: mkLog(), root: dir,
       deps: { storage: mkStorage(), embeddings: { probe: async () => ({ ok: false, hard: true, detail: "dimension mismatch" }), dim: 3, modelId: "m" } },
     });
-    assert.ok(hooks.memory_probe, "memory_probe tool must be exposed on hard fail");
-    assert.equal(hooks.tool, undefined, "no regular tool hooks on hard fail");
+    assert.ok(hooks.tool.memory_probe, "memory_probe tool must be exposed on hard fail");
+    assert.equal(hooks.memory_search, undefined, "no top-level memory_search on hard fail");
+    assert.equal(hooks.tool.memory_search, undefined, "no regular tool hooks on hard fail");
     assert.equal(hooks["chat.message"], undefined, "no chat.message on hard fail");
     await hooks.dispose?.();
   } finally {
@@ -2464,11 +2465,11 @@ test("cached hard → live re-probe (no shortcut)", async () => {
     const fake = { probe: async () => { probes++; return { ok: false, hard: true, detail: "dim mismatch" }; }, dim: 3, modelId: "m" };
     const cfg = { memory: { enabled: true, storage: { type: "sqlite" } } };
     const h1 = await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: fake } });
-    assert.ok(h1.memory_probe, "hard fail → memory_probe tool");
-    assert.equal(h1.tool, undefined, "no regular tool hooks on hard fail");
+    assert.ok(h1.tool.memory_probe, "hard fail → memory_probe tool");
+    assert.equal(h1.tool.memory_search, undefined, "no regular tool hooks on hard fail");
     const h2 = await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: fake } });
-    assert.ok(h2.memory_probe, "cached hard → live re-probe → hard fail again → memory_probe");
-    assert.equal(h2.tool, undefined, "no regular tool hooks on second hard fail");
+    assert.ok(h2.tool.memory_probe, "cached hard → live re-probe → hard fail again → memory_probe");
+    assert.equal(h2.tool.memory_search, undefined, "no regular tool hooks on second hard fail");
     assert.equal(probes, 2);
     await h1.dispose?.();
     await h2.dispose?.();
@@ -2495,10 +2496,10 @@ test("memory_probe persists effective apiKeyEnv → identity cache stays valid (
     const cfg = { memory: { enabled: true, storage: { type: "sqlite" }, embedding: { provider: "openai", model: "m", api_key_env: "MM_KEY_SET", base_url: "https://x/v1", dim: 3 } } };
     // Первый init: hard-fail → только memory_probe.
     const h1 = await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: fake } });
-    assert.ok(h1.memory_probe, "hard fail → memory_probe tool");
+    assert.ok(h1.tool.memory_probe, "hard fail → memory_probe tool");
     // Ручной probe через инструмент → персистит apiKeyEnv из конфига.
     hard = false;
-    const res = await h1.memory_probe.execute({}, { sessionID: "s1" });
+    const res = await h1.tool.memory_probe.execute({}, { sessionID: "s1" });
     assert.match(res, /OK/, "manual probe must report OK");
     // Второй init: identity (включая apiKeyEnv) совпадает → cache hit, без live probe.
     const h2 = await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: fake } });
@@ -2508,6 +2509,52 @@ test("memory_probe persists effective apiKeyEnv → identity cache stays valid (
     await h2.dispose?.();
   } finally {
     delete process.env.MM_KEY_SET;
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── Task 8: memory_probe (on-demand) ───────────────────────────────────
+
+test("memory_probe tool runs live probe and reports", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-probe-live-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    let probed = 0;
+    const cfg = { memory: { enabled: true, storage: { type: "sqlite" } } };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(), config: cfg, log: mkLog(), root: dir,
+      deps: { storage: mkStorage(), embeddings: { probe: async () => { probed++; return { ok: true, hard: false, detail: "OK (dim 3)" }; }, dim: 3, modelId: "m" } },
+    });
+    const before = probed; // стартовый probe уже отработал (init)
+    const out = await hooks.tool.memory_probe.execute({}, { sessionID: "s1" });
+    assert.ok(String(out).includes("OK"));
+    assert.equal(probed, before + 1, "tool call must trigger exactly one live probe");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_probe registered even when probe hard-fail (off-state)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-probe-off-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const cfg = { memory: { enabled: true, storage: { type: "sqlite" } } };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(), config: cfg, log: mkLog(), root: dir,
+      deps: { storage: mkStorage(), embeddings: { probe: async () => ({ ok: false, hard: true, detail: "dim mismatch" }), dim: 3, modelId: "m" } },
+    });
+    assert.ok(hooks.tool.memory_probe, "memory_probe должен быть зарегистрирован при off");
+    assert.equal(hooks.memory_search, undefined);
+    assert.equal(hooks.tool.memory_search, undefined);
+    await hooks.dispose?.();
+  } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = saved;
     rmSync(dir, { recursive: true, force: true });
