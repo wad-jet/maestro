@@ -67,7 +67,8 @@ in-contour re-entry покрывается явным HITL-заверением 
 
 У плана (шаг 11) нет и не должно быть подписи: вход в реализацию уже жёстко
 гейтится обязательным HITL-аппрувом (шаг 12: Approve/Revise/Отмена). Ввести
-`<!-- maestro:plan -->` — избыточно.
+`
+` — избыточно.
 
 ### Р4. SECURITY.md — зафиксировать принцип
 
@@ -116,16 +117,3 @@ hash'а содержимому, не факт прохождения проце�
 5. manual_docs синхронизированы: hitl-gates, run-first-feature, changelog, **и
    `agents-and-trust.md`** (обязательный синк SECURITY.md → manual_docs по правилу
    AGENTS.md). Плагин/тесты не затронуты; `npm test` зелёный (регресс).
-
-<!-- maestro:sanitize
-status: CLEAN
-date: 2026-09-09
-hash: 179cd6cd3d956e132184bf7b2729879c7dae4db513844e49035307172d1813a9
--->
-
-<!-- maestro:review
-reviewer: opus
-date: 2026-09-09
-verdict: approve
-hash: 179cd6cd3d956e132184bf7b2729879c7dae4db513844e49035307172d1813a9
--->
