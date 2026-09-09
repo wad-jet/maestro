@@ -64,7 +64,7 @@
   provenance-рекомендация, не основание авто-пропуска 8.6/9 (для 7d-входов
   8.6 выполняется всегда, кроме HITL-заверения при валидной `CLEAN`).
 - **Нативный permission-бастион OpenCode (R1+R4+R2-конфиг, Этап A):**
-  `/maestro-new` пишет в merge-config deny-baseline для `docs/confidential/*` +
+  `/maestro-setup` пишет в merge-config deny-baseline для `docs/confidential/*` +
   built-in паттернов (`read`/`edit`) и эвристические deny для `bash`/`glob`/`grep` —
   fail-closed на уровне ядра OpenCode для `read`/`edit` (не зависит от плагина).
   `glob`/`grep` матчат аргумент-паттерн (не пути-результаты) — best-effort слой.

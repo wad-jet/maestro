@@ -1,25 +1,25 @@
 ---
-name: maestro-new
-description: Use when bootstrapping a NEW project with maestro — generates docs/project-context.md (14 categories), maestro config (maestro.json, .gitignore, plugin+models in .opencode/opencode.json or global), regression/ structure, and verifies prerequisites (AGENTS.md, superpowers, plugin)
+name: maestro-setup
+description: Use when initializing maestro for a new or existing project — generates docs/project-context.md (14 categories), maestro config (maestro.json, .gitignore, plugin+models in .opencode/opencode.json or global), regression/ structure, and verifies prerequisites (AGENTS.md, superpowers, plugin)
 ---
 
-# Init — Bootstrap нового проекта
+# Init — Setup для нового или уже существующего проекта
 
 ## Overview
 
-Сквозная инициализация нового проекта для maestro. Команда `/maestro-new`
-запускает этот скилл в любой primary-сессии. Цель — подготовить проект к работе
-pipeline maestro: есть `docs/project-context.md` (источник контекста шага 0),
-конфигурация maestro (`maestro.json` + `.gitignore` + плагин/модели в
-`.opencode/opencode.json` или глобально),
+Сквозная инициализация maestro для нового или уже существующего проекта. Команда
+`/maestro-setup` запускает этот скилл в любой primary-сессии. Цель — подготовить
+проект к работе pipeline maestro: есть `docs/project-context.md` (источник
+контекста шага 0), конфигурация maestro (`maestro.json` + `.gitignore` +
+плагин/модели в `.opencode/opencode.json` или глобально),
 структура `regression/` и проверенные предусловия (AGENTS.md, superpowers, плагин).
 
-**ВНИМАНИЕ:** `/maestro-new` выполняет **только setup-фазу**. Дизайн, scaffold
+**ВНИМАНИЕ:** `/maestro-setup` выполняет **только setup-фазу**. Дизайн, scaffold
 и roadmap — в отдельной команде `/maestro-design` (скилл `maestro-design`). Это разделение
 разделение setup и дизайна зафиксировано в спецификации пайплайна.
 
 **Мы НЕ переопределяем встроенный `/init` opencode** (тот создаёт `AGENTS.md`).
-`/maestro-new` — отдельная команда.
+`/maestro-setup` — отдельная команда.
 
 **Язык:** все HITL-вопросы, варианты и сообщения пользователю — только на русском.
 
@@ -42,7 +42,7 @@ pipeline maestro: есть `docs/project-context.md` (источник конт�
 
 - Если `AGENTS.md` отсутствует → HITL:
   (a) выполнить встроенный `/init` (системный setup), затем вернуться
-  (b) пропустить и продолжить `/maestro-new`
+  (b) пропустить и продолжить `/maestro-setup`
   (c) отмена
 
 ### 2. Проверка docs/project-context.md (задача 2)
@@ -131,7 +131,7 @@ pipeline maestro: есть `docs/project-context.md` (источник конт�
   `maestro.json` (четыре секции: `trust` / `access_policy` / `confidential` / `sanitizer_whitelist`;
   полный JSON-канон — в `skills/maestro-assistant/SKILL.md`).
 - **Скилла нет** → HITL-сообщение «необходимо установить скилл `maestro-assistant` для
-  продолжения» и **жёсткое прерывание задачи 3 и всего процесса `/maestro-new`** (не переходить
+  продолжения» и **жёсткое прерывание задачи 3 и всего процесса `/maestro-setup`** (не переходить
   к 4–5, без fallback-деградации). Идемпотентно: проверка выполняется только если задача 3
   реально генерирует/обновляет конфиг; при пропуске задачи (конфиг уже есть) — не проверяется.
 
@@ -150,7 +150,7 @@ pipeline maestro: есть `docs/project-context.md` (источник конт�
    `maestro-install.sh` «Подключить memory layer? (y/N)»). `<data-dir>`:
    `$XDG_DATA_HOME` → macOS `~/Library/Application Support` → `~/.local/share`;
    далее `/maestro/memory/enabled.flag`. Маркер — персистентный machine-level
-   default: каждый последующий `/maestro-new` в любом проекте машины добавляет
+   default: каждый последующий `/maestro-setup` в любом проекте машины добавляет
    секцию `memory`; отключается удалением файла.
 2. **Явный запрос HITL** — пользователь просит включить память.
 
@@ -199,7 +199,7 @@ OpenCode (`.opencode/opencode.json` или глобальный `~/.config/openc
 
 ### Нативный permission-бастион OpenCode (R1+R4)
 
-Помимо плагина, `/maestro-new` пишет **нативный permission-конфиг** в merge-config —
+Помимо плагина, `/maestro-setup` пишет **нативный permission-конфиг** в merge-config —
 fail-closed baseline, не зависящий от плагина. Идемпотентно: только добавлять ключи,
 **не перезаписывать существующий контент**, не дублировать уже присутствующие правила.
 

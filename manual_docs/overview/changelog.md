@@ -10,6 +10,15 @@
 ## [2026-09-09]
 
 ### Изменено
+- **Команда и скилл `maestro-new` → `maestro-setup`.** Переименованы
+  `commands/maestro-new.md` → `commands/maestro-setup.md` и
+  `skills/maestro-new/` → `skills/maestro-setup/` (путь в `agpack.yml` /
+  `maestro-install/agpack.yml` — `skills/maestro-setup`). Обновлены все ссылки
+  (`/maestro-setup`, `@maestro-setup`, `skills/maestro-setup`). Скилл теперь
+  явно описывает инициализацию maestro для **нового или уже существующего**
+  проекта. Обратная совместимость со старым именем не сохраняется: install/
+  update-скрипты мигрируют `skills/maestro-init`/`skills/maestro-new` →
+  `skills/maestro-setup` и вычищают stale `.opencode/.../maestro-new*`.
 - **Подписи spec — provenance-рекомендация, не авто-пропуск 8.6/9.** Для всех
   fast-track-входов (шаг 7d) подпись (`maestro:sanitize`/`maestro:review`) больше
   не пропускает гейты автоматически: sanitize (8.6) выполняется всегда (кроме

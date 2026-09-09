@@ -22,7 +22,7 @@
 Скрипт автоматизирует установку для нового или существующего проекта, где maestro
 ранее не применялся: устанавливает `agpack`, создаёт `agpack.yml`, запускает
 `agpack sync` (разворачивает skills/commands/agents в `.opencode/`), подключает
-плагин `maestro-bootstrap` и выдаёт инструкцию для `/maestro-new`.
+плагин `maestro-bootstrap` и выдаёт инструкцию для `/maestro-setup`.
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/wad-jet/maestro/main/maestro-install.sh -o maestro-install.sh
@@ -37,7 +37,7 @@ bash maestro-install.sh          # опции: --global (плагин в global-
 > Детали — в разделе «Быстрый старт» README репозитория.
 
 После скрипта — перезапустите OpenCode и выполните [Настройку проекта](../tutorials/setup-project.md)
-(`/maestro-new`).
+(`/maestro-setup`).
 
 > **Обновление** после установки — скрипт `maestro-update.sh` (см.
 > [Обновление maestro](update-maestro.md)). `maestro-install.sh` — только первичная
@@ -74,7 +74,7 @@ dependencies:
     - url: https://github.com/wad-jet/maestro
       path: skills/maestro
     - url: https://github.com/wad-jet/maestro
-      path: skills/maestro-new
+      path: skills/maestro-setup
     - url: https://github.com/wad-jet/maestro
       path: skills/maestro-design
     - url: https://github.com/wad-jet/maestro
@@ -101,7 +101,7 @@ agpack sync                    # разворачивает skills/commands/agen
 
 > **Примечание:** agpack не покрывает плагин `maestro-bootstrap` (ставится из git —
 > см. ниже) и конфиги (`maestro.json`, `.gitignore`, `regression/`; модели/плагин —
-> в `.opencode/opencode.json` или global) — их создаёт `/maestro-new`.
+> в `.opencode/opencode.json` или global) — их создаёт `/maestro-setup`.
 
 ### Вариант B — вручную (копированием)
 
@@ -111,8 +111,7 @@ agpack sync                    # разворачивает skills/commands/agen
 ```
 authors/repo              →  target/app
 skills/maestro/SKILL.md   →  .opencode/skills/maestro/SKILL.md
-skills/maestro-new/       →  .opencode/skills/maestro-new/
-skills/maestro-design/    →  .opencode/skills/maestro-design/
+skills/maestro-setup/       →  .opencode/skills/maestro-setup/skills/maestro-design/    →  .opencode/skills/maestro-design/
 skills/manual-docs/       →  .opencode/skills/manual-docs/
 agents/*.md               →  .opencode/agents/*.md
 commands/*.md             →  .opencode/commands/*.md
@@ -162,7 +161,7 @@ commands/*.md             →  .opencode/commands/*.md
 
 ## После установки
 
-Выполните [Настройку проекта](../tutorials/setup-project.md) (`/maestro-new`):
+Выполните [Настройку проекта](../tutorials/setup-project.md) (`/maestro-setup`):
 project-context, `maestro.json`, модели агентов, `.gitignore`, каталоги.
 
 Обновление maestro (повторная доставка) — [Обновление maestro](update-maestro.md).

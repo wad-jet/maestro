@@ -31,20 +31,20 @@
 /regression purge preview            # предпросмотр удаляемого
 ```
 
-### `/maestro-new`
+### `/maestro-setup`
 
 Setup-фаза bootstrap нового проекта: `docs/project-context.md` (14 категорий),
 конфигурация maestro (`maestro.json`, плагин+модели в `.opencode/opencode.json`
 или global, `.gitignore` — весь `.maestro/` и `.opencode/`), каталоги pipeline
 (`.maestro/` — весь в `.gitignore`,
 `docs/superpowers/{specs,plans}/`),
-`regression/` структура. Использует скилл `maestro-new`.
+`regression/` структура. Использует скилл `maestro-setup`.
 Проверяет предусловия: `AGENTS.md` (встроенный `/init`), скилы superpowers
 (предлагает установку через HITL), плагин `maestro-bootstrap` (не блокер).
 
 ### `/maestro-design`
 
-Дизайн/архитектура, scaffold и roadmap после `/maestro-new`:
+Дизайн/архитектура, scaffold и roadmap после `/maestro-setup`:
 - (a) spec через **primary brainstorm (superpowers:brainstorming) + custodian Q/A (trusted)** → spec пишет primary → `docs/superpowers/specs/YYYY-MM-DD-<project>-design.md`; опц. spec-review (`opus`).
 - (b) scaffold — каркас кода через `implementer-prompt.md` (TDD), диспатч `haiku`/`sonnet`.
 - (c) `docs/roadmap.md` (MVP + этапы).

@@ -19,7 +19,7 @@ primary-сессии.
 
 ## Tutorials (обучение)
 
-- [Настройка проекта для maestro](tutorials/setup-project.md) — подготовка проекта (`/maestro-new`, `/maestro-design`, модели по тирам)
+- [Настройка проекта для maestro](tutorials/setup-project.md) — подготовка проекта (`/maestro-setup`, `/maestro-design`, модели по тирам)
 - [Запуск первой фичи](tutorials/run-first-feature.md) — полный цикл 0→18
 
 ## How-to (инструкции)

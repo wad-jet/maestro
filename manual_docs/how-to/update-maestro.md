@@ -21,7 +21,7 @@
 
 > `agpack` не покрывает плагин и конфиги (`maestro.json`, `.gitignore`,
 > `regression/`; модели — `.opencode/opencode.json` или global) — их создаёт
-> `/maestro-new`. Скиллы/команды/агенты (`агpack`) и плагин/конфиги доставляются
+> `/maestro-setup`. Скиллы/команды/агенты (`агpack`) и плагин/конфиги доставляются
 > разными механизмами.
 
 ## 🔍 Единая версия и как её узнать
@@ -134,7 +134,7 @@ rm -rf ~/.cache/opencode/packages/maestro-bootstrap@git+https:...
 >
 > **Merge-add-семантика `agpack`:** `maestro-update.sh` добавляет отсутствующие
 > записи в `agpack.yml`, но **не удаляет** устаревшие. Единственное исключение —
-> переименование `skills/maestro-init` → `skills/maestro-new` (v2.0.0), которое
+> переименование `skills/maestro-init` → `skills/maestro-setup` (v2.0.0), которое
 > скрипт обрабатывает автоматически. Конвенция: каждый новый
 > компонент (skill/command/agent) релиза добавляется в `maestro-install/agpack.yml`.
 > Этот же канон читает и `maestro-install.sh` при первичной установке — единый

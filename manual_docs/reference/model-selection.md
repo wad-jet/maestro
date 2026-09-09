@@ -69,9 +69,9 @@ SDD-шаблон:  Subagent (general-purpose): model: haiku
 OpenCode:    task(subagent_type="haiku", prompt="...")
 ```
 
-## 💡 Настройка моделей через `/maestro-new`
+## 💡 Настройка моделей через `/maestro-setup`
 
-`/maestro-new` настраивает модели агентов в `.opencode/opencode.json` или global (M1):
+`/maestro-setup` настраивает модели агентов в `.opencode/opencode.json` или global (M1):
 
 - **Tier (мощность) и Trust (доверие) — ортогональные оси.** Trusted — атрибут
   безопасности, не мощность.
@@ -103,7 +103,7 @@ OpenCode:    task(subagent_type="haiku", prompt="...")
 > (`provider.use`) в merge-config: глобальный deny/allow провайдеров в ядре
 > OpenCode. В отличие от merge-конфига `agent.*.model` (не enforced в рантайме),
 > policies блокируют использование не-одобренного провайдера на уровне ядра.
-> Настраивается в `/maestro-new` (R5); global-конфиг приоритетнее project.
+> Настраивается в `/maestro-setup` (R5); global-конфиг приоритетнее project.
 > Enforce не заменяет выбор `agent.*.model` — он дополняет рекомендацию.
 
 Выбор моделей — **7 отдельных HITL-вопросов** (по одному на агента). Каждый
@@ -134,13 +134,13 @@ tier-подсказка.
 >
 > **Централизованная настройка (рекомендуется).** Настроить `agent.*`
 > (model + temperature) один раз в global-конфиге
-> `~/.config/opencode/opencode.json`. Проекты наследуют значения; `/maestro-new`
+> `~/.config/opencode/opencode.json`. Проекты наследуют значения; `/maestro-setup`
 > предлагает «оставить из global» первым вариантом. Project `.opencode/opencode.json`
 > переопределяет global, если нужен индивидуальный набор.
 
 > **Консультации по настройке моделей/конфигурации:** для вопросов по семантике моделей,
 > tier/trust, D2 — используйте `/maestro-assistant` (консультативная точка). M1/D2-воркфлоу
-> остаются в `/maestro-new`.
+> остаются в `/maestro-setup`.
 
 ## 📖 Модели памяти (memory layer) — вне agent-tier
 

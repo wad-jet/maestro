@@ -1,11 +1,11 @@
 ---
-description: Инициализация нового проекта: project-context.md (14 категорий), конфигурация maestro (maestro.json, .gitignore, plugin+models в .opencode/opencode.json или global), каталоги, проверка superpowers и плагина
+description: Инициализация maestro для нового или уже существующего проекта: project-context.md (14 категорий), конфигурация maestro (maestro.json, .gitignore, plugin+models в .opencode/opencode.json или global), каталоги, проверка superpowers и плагина
 ---
-Загрузи skill `maestro-new` (tool: skill) и следуй SKILL.md из `skills/maestro-new/`.
+Загрузи skill `maestro-setup` (tool: skill) и следуй SKILL.md из `skills/maestro-setup/`.
 
-`/maestro-new` — setup-фаза bootstrap нового проекта, НЕ системный `/init`
-opencode (тот создаёт AGENTS.md). НЕ выполняет дизайн/скаффолд/роадмап — они
-в отдельной команде `/maestro-design`. Действия:
+`/maestro-setup` — setup-фаза инициализации maestro для нового или уже
+существующего проекта, НЕ системный `/init` opencode (тот создаёт AGENTS.md).
+НЕ выполняет дизайн/скаффолд/роадмап — они в отдельной команде `/maestro-design`. Действия:
 1. Предусловие: если `AGENTS.md` нет — предложить выполнить встроенный `/init`.
 2. Проверка `docs/project-context.md` + запрос git-решения (без автокоммитов).
 3. Собрать контекст по 14 категориям -> `docs/project-context.md`.

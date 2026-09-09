@@ -180,7 +180,7 @@ def parse_section(text, section):
             cur = None
     return recs
 
-# Rename-aware: безусловно удалить устаревшую запись skills/maestro-init (M-5/M-9)
+# Rename-aware: безусловно удалить устаревшие записи skills/maestro-init и skills/maestro-new (M-5/M-9)
 def drop_old_init(lines):
     out = []
     i = 0
@@ -189,7 +189,7 @@ def drop_old_init(lines):
             j = i + 1
             is_old = False
             while j < len(lines) and (lines[j].strip().startswith("path:") or lines[j].strip() == "" or lines[j].startswith("-")):
-                if re.match(r"^\s{6}path:\s*skills/maestro-init\s*$", lines[j]):
+                if re.match(r"^\s{6}path:\s*skills/(maestro-init|maestro-new)\s*$", lines[j]):
                     is_old = True
                 j += 1
             if is_old:
@@ -246,6 +246,7 @@ for sec, recs in canon_sections.items():
         if m:
             existing.add(m.group(1).strip("\"'"))
     existing.discard("skills/maestro-init")
+    existing.discard("skills/maestro-new")
     if start is None:
         # Секции нет — вставить новую после `dependencies:`.
         dep_i = next((i for i, ln in enumerate(lines) if re.match(r"^dependencies:\s*$", ln)), None)
@@ -254,7 +255,7 @@ for sec, recs in canon_sections.items():
         # Собрать блок вставки корректно.
         add = ["  %s:" % sec]
         for r in recs:
-            if r["path"] == "skills/maestro-init" or r["path"] in existing:
+            if r["path"] in ("skills/maestro-init", "skills/maestro-new") or r["path"] in existing:
                 continue
             add.append("    - url: %s" % r["url"])
             add.append("      path: %s" % r["path"])
@@ -264,7 +265,7 @@ for sec, recs in canon_sections.items():
         continue
     add = []
     for r in recs:
-        if r["path"] == "skills/maestro-init" or r["path"] in existing:
+        if r["path"] in ("skills/maestro-init", "skills/maestro-new") or r["path"] in existing:
             continue
         add.append("    - url: %s" % r["url"])
         add.append("      path: %s" % r["path"])
@@ -287,7 +288,7 @@ info "запускаю 'agpack sync'..."
 "$AGPACK" sync
 
 # --- 3a. Очистка stale-артефактов (agpack не прунит) ---
-rm -rf .opencode/commands/maestro.md .opencode/skills/maestro-init
+rm -rf .opencode/commands/maestro.md .opencode/skills/maestro-init .opencode/commands/maestro-new.md .opencode/skills/maestro-new
 
 # --- 4. Очистка кэша плагина OpenCode ---------------------------------------
 

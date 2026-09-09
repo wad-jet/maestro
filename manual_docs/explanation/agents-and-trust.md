@@ -66,7 +66,7 @@ Trust-статус управляет **двумя** измерениями за
 `trust` перечисляет **только trusted** сабагентов. Всё, чего нет в файле —
 untrusted. Если файла нет — все untrusted.
 
-`maestro.json` **генерируется `/maestro-new`** (задача «Конфигурация maestro», по канону
+`maestro.json` **генерируется `/maestro-setup`** (задача «Конфигурация maestro», по канону
 скилла `maestro-assistant`) и коммитится в git. Настройка/консультации по конфигурации в
 течение жизни проекта — через `/maestro-assistant`. `custodian` и `sanitizer` — trusted по роли;
 модели у них **независимые** (trusted — атрибут безопасности, не мощность).
@@ -165,7 +165,7 @@ opus затрагивает помеченную `из confidential` секци�
 `bash cat`, `grep -r`, `glob` — эти тулы плагином не покрываются (пути из
 bash-команд ненадёжно извлекаются).
 
-**Нативный permission-бастион OpenCode (стандарт init, Этап A).** `/maestro-new`
+**Нативный permission-бастион OpenCode (стандарт init, Этап A).** `/maestro-setup`
 пишет нативный deny-baseline для confidential + 2-й эшелон в merge-config
 (`.opencode/opencode.json`/global) — **обязательная часть init**, а не рекомендация:
 

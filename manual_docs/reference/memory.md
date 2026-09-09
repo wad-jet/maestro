@@ -590,7 +590,7 @@ opt-in на вставку замаскированных заголовков/s
 | `<data-dir>/maestro/memory/state.json` | Retry/skip/first-run состояние индексатора | Нет |
 | `<data-dir>/maestro/memory/export-<key16hex>-<ts>.jsonl` | Экспорт `memory_export` (по умолчанию; путь можно задать явно) | Нет |
 | `<data-dir>/maestro/memory/` | Кэш модели эмбеддингов (transformers.js) | Нет |
-| `<data-dir>/maestro/memory/enabled.flag` | Маркер `maestro-install.sh` (читается `/maestro-new`) | Нет |
+| `<data-dir>/maestro/memory/enabled.flag` | Маркер `maestro-install.sh` (читается `/maestro-setup`) | Нет |
 
 **Разделение code/data:** код модуля — `module_dir`; runtime-данные (state.json,
 БД, кэш модели) — `<data-dir>/maestro/memory/`. Удаление `module_dir`

@@ -33,14 +33,14 @@
 | Команды (`@command`) | `reference/commands.md` |
 | `/maestro-assistant` (конфиг/структура/контекст) | `reference/commands.md`, `reference/config.md`, `explanation/agents-and-trust.md`, `how-to/manage-confidential-paths.md` |
 | `/maestro-assistant` — секция `memory` (память) | `how-to/enable-memory.md`, `reference/memory.md`, `reference/config.md` |
-| `/maestro-new` / `/maestro-design` (setup, конфиг, модели) | `tutorials/setup-project.md`, `reference/commands.md` |
+| `/maestro-setup` / `/maestro-design` (setup, конфиг, модели) | `tutorials/setup-project.md`, `reference/commands.md` |
 | Trust / санитайзер | `explanation/agents-and-trust.md`, `how-to/choose-models.md` |
 | Обновление/доставка до версии (skills + plugin, контроль) | `how-to/update-maestro.md` |
 | Security Review / sanitizer-сабагент / file access control | `explanation/agents-and-trust.md`, `reference/model-selection.md`, `reference/hitl-gates.md` |
 | Реестр регрессии | `how-to/use-regression-registry.md` |
 | Шаг 14 (docs: diff-сверка, HITL при расхождении) | `explanation/pipeline-overview.md`, `tutorials/run-first-feature.md` |
 | `DOCS_COVERAGE_COMMAND` (fallback diff-сверка) | `explanation/project-context.md`, `skills/maestro/stack-detection.md` |
-| Правила наполнения/гигиены project-context.md (/maestro-new, Задача 2, шаг 8.5) | `explanation/project-context.md` |
+| Правила наполнения/гигиены project-context.md (/maestro-setup, Задача 2, шаг 8.5) | `explanation/project-context.md` |
 | Любое изменение поведения | `overview/changelog.md` |
 
 > **Синк канона ↔ производные:** полный JSON-канон `maestro.json` живёт в

@@ -21,4 +21,4 @@ description: Вход в pipeline maestro — сквозная реализац�
 ## Связанные команды
 
 - `@regression` — реестр рисков регрессии
-- `@maestro-new` — bootstrap нового проекта
+- `@maestro-setup` — инициализация maestro для нового или уже существующего проекта

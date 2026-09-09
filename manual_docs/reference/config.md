@@ -26,7 +26,7 @@
 
 > **Генерация/настройка конфига — через `/maestro-assistant`.** Полный JSON-канон
 > `maestro.json` и правила вывода секций из контекста живут в скилле `maestro-assistant`
-> (`skills/maestro-assistant/SKILL.md`) — единый источник, доступный `/maestro-new`,
+> (`skills/maestro-assistant/SKILL.md`) — единый источник, доступный `/maestro-setup`,
 > `@maestro-init` и HITL-консультациям. Ниже — человеческие справочные таблицы по секциям.
 
 ### Версия плагина
@@ -206,7 +206,7 @@ deny. Trust не наследуется вложенными субагента�
 > единственный барьер** — при отключённом плагине данные доступны любому
 > (primary и untrusted). Для гарантированного барьера на уровне ОС ограничьте
 > права каталога средствами ОС/репозитория (read-only для не-нужного,
-> git-криптография и т.п.). `/maestro-new` задача 5 лишь проверяет подключение
+> git-криптография и т.п.). `/maestro-setup` задача 5 лишь проверяет подключение
 > плагина и **не блокирует** init при его отсутствии — плагин может быть не
 > поднят, а confidential-данные уже созданы.
 
@@ -557,7 +557,7 @@ global `~/.config/opencode/opencode.json`) **обязательно** прави
 Если условие не выполнено — жёсткий STOP без «продолжить»: только
 «(a) подключить плагин и перезапустить» / «(c) стоп». Причина: без плагина
 защита `docs/confidential/**` и sanitize не действуют (fail-open), confidential-
-данные доступны untrusted-агентам. `@maestro-new` и `@regression` не гейтятся.
+данные доступны untrusted-агентам. `@maestro-setup` и `@regression` не гейтятся.
 
 ### Агенты: модели
 
@@ -792,6 +792,6 @@ MAESTRO_MEMORY_LOG_DIR="/var/log/maestro"
   секции `confidential`/`trust`/`access_policy`
 - [Кастомизация скилла](../how-to/customize-maestro.md)
 - [Агенты и модель доверия](../explanation/agents-and-trust.md)
-- [Плагин maestro-bootstrap](../reference/commands.md) (установка из `@maestro-new`)
+- [Плагин maestro-bootstrap](../reference/commands.md) (установка из `@maestro-setup`)
 - Техническая деталь: `plugins/maestro-bootstrap/core.js` (loadMaestroConfig,
   resolveFileAccess, resolveSanitizeOptions)

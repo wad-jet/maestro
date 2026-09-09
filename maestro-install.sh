@@ -161,19 +161,22 @@ else
   fi
 fi
 
-# --- 3a. Миграция agpack.yml (rename skills/maestro-init -> skills/maestro-new) ---
+# --- 3a. Миграция agpack.yml (rename skills/maestro-init|maestro-new -> skills/maestro-setup) ---
 if [ -f "agpack.yml" ]; then
   python3 - <<'PY'
 path = "agpack.yml"
 with open(path, "r", encoding="utf-8") as f:
     text = f.read()
-old = '      path: skills/maestro-init'
-new = '      path: skills/maestro-new'
-if old in text:
-    text = text.replace(old, new)
+target = '      path: skills/maestro-setup'
+changed = False
+for old in ('      path: skills/maestro-init', '      path: skills/maestro-new'):
+    if old in text:
+        text = text.replace(old, target)
+        changed = True
+if changed:
     with open(path, "w", encoding="utf-8") as f:
         f.write(text)
-    print("maestro-install: agpack.yml: skills/maestro-init -> skills/maestro-new")
+    print("maestro-install: agpack.yml: skills/maestro-init|maestro-new -> skills/maestro-setup")
 PY
 fi
 
@@ -183,7 +186,7 @@ info "запускаю 'agpack sync'..."
 "$AGPACK" sync
 
 # --- 4a. Очистка stale-артефактов (agpack не прунит) ---
-rm -rf .opencode/commands/maestro.md .opencode/skills/maestro-init
+rm -rf .opencode/commands/maestro.md .opencode/skills/maestro-init .opencode/commands/maestro-new.md .opencode/skills/maestro-new
 
 # --- 5. Регистрация плагина maestro-bootstrap (идемпотентно) ------------------
 
@@ -279,7 +282,7 @@ cat <<EOT
 
 Что дальше:
   1. Запустите opencode в этом каталоге:  opencode
-  2. Выполните инициализацию проекта:     /maestro-new
+  2. Выполните инициализацию проекта:     /maestro-setup
      (создаёт project-context.md, maestro.json, модели агентов, каталоги)
   3. Для нового проекта — дизайн и каркас: /maestro-design
   4. Запуск фичи:                          /maestro-init "ваша задача"

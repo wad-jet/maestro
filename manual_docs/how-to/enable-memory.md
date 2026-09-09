@@ -31,7 +31,7 @@
    > Альтернатива: при установке maestro ответить «да» на опциональный шаг
    > `maestro-install.sh` «Подключить memory layer? (y/N)» — скрипт поставит
    > файл-маркер `<data-dir>/maestro/memory/enabled.flag`, который учтёт
-   > `/maestro-new` при генерации `maestro.json` (секция `memory` появится
+   > `/maestro-setup` при генерации `maestro.json` (секция `memory` появится
    > автоматически).
 
    > **Канонический способ настройки — через `/maestro-assistant`.** Ручное
@@ -361,7 +361,7 @@ warmup-строкой. Результат кэшируется в `state.json` �
 
 | Что удалить | Что произойдёт |
 |---|---|
-| `<data-dir>/maestro/memory/enabled.flag` | Маркер install.sh снят; последующие `/maestro-new` не добавляют секцию `memory` (уже добавленная секция в `maestro.json` остаётся) |
+| `<data-dir>/maestro/memory/enabled.flag` | Маркер install.sh снят; последующие `/maestro-setup` не добавляют секцию `memory` (уже добавленная секция в `maestro.json` остаётся) |
 | `module_dir` (`<data-dir>/maestro/memory/module/`) | Удаляется код модуля + `node_modules` (переустановка deps). **Данные не трогаются** |
 | `<data-dir>/maestro/memory/<hash>/memory.db` | Удаляется локальная память проекта (sqlite) |
 | `<data-dir>/maestro/memory/state.json` | Сбрасывается retry/skip/first-run состояние (backfill-окно отсчитывается заново) |

@@ -8,7 +8,7 @@
 стандарта безопасности (`SECURITY.md`) и пользовательской документации (`manual_docs/`).
 
 Проект self-hosted: он также установлен в сам себя (dogfooding) для разработки по
-собственному пайплайну (`@maestro-init`, `/maestro-new`, `/maestro-design`,
+собственному пайплайну (`@maestro-init`, `/maestro-setup`, `/maestro-design`,
 `/maestro-assistant`).
 
 Тип проекта: авторский репозиторий (набор инструментов для OpenCode), не целевое
@@ -59,11 +59,11 @@
 
 ## 4. Архитектура
 
-- **`skills/`** — источники скиллов maestro (`maestro`, `maestro-new`, `maestro-design`,
+- **`skills/`** — источники скиллов maestro (`maestro`, `maestro-setup`, `maestro-design`,
   `maestro-assistant`, `maestro-feedback-report`, `manual-docs`).
 - **`agents/`** — промпты субагентов (`custodian`, `sanitizer`, `opus`, `sonnet`,
   `haiku`, `fable`, `code-reviewer`).
-- **`commands/`** — команды `@maestro-init`, `/maestro-new`, `/maestro-design`, и др.
+- **`commands/`** — команды `@maestro-init`, `/maestro-setup`, `/maestro-design`, и др.
 - **`plugins/maestro-bootstrap/`** — плагин: санитайзинг промптов, access_policy,
   confidential-контур, observability-логи.
 - **`SECURITY.md`** — внутренний стандарт ИБ (источник истины для security-решений).

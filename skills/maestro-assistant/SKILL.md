@@ -1,6 +1,6 @@
 ---
 name: maestro-assistant
-description: Use when the user asks for help configuring maestro, organizing project structure/context, or wants to consult the rules of maestro (trust, access_policy, confidential, sanitizer_whitelist, opencode.json models, project-context, pipeline structure). Also loaded by maestro-new (tasks 2/3/3a) and maestro-init (pipeline config questions). Not for feature implementation.
+description: Use when the user asks for help configuring maestro, organizing project structure/context, or wants to consult the rules of maestro (trust, access_policy, confidential, sanitizer_whitelist, opencode.json models, project-context, pipeline structure). Also loaded by maestro-setup (tasks 2/3/3a) and maestro-init (pipeline config questions). Not for feature implementation.
 ---
 
 # Maestro Assistant — конфигурация, структура и консультации по maestro
@@ -18,7 +18,7 @@ description: Use when the user asks for help configuring maestro, organizing pro
 
 - Пользователь вызывает `/maestro-assistant <запрос>` для настройки конфигурации maestro,
   организации структуры/контекста, консультации по правилам.
-- `/maestro-new` (задачи 2/3/3а) загружает этот скилл и следует его правилам.
+- `/maestro-setup` (задачи 2/3/3а) загружает этот скилл и следует его правилам.
 - `@maestro-init` по ходу pipeline загружает этот скилл при вопросах конфигурации/процессов.
 
 ## Полномочия и границы
@@ -213,7 +213,7 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
   содержит **только агрегаты** (SEC-4b); `true` — осознанный opt-in на вставку
   замаскированных заголовков/summary (документированное понижение).
 
-Правила вывода (для `/maestro-new` и консультаций):
+Правила вывода (для `/maestro-setup` и консультаций):
 
 - Секция `memory` добавляется в `maestro.json` **только** если: (а) пользователь
   явно запросил память, или (б) существует маркер
@@ -269,7 +269,7 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
 
 ### Глобальные deny (R1+R4) — эталон конфигурации init
 
-Генерируется `/maestro-new`; assistant поддерживает/чинит:
+Генерируется `/maestro-setup`; assistant поддерживает/чинит:
 
 ```json
 {

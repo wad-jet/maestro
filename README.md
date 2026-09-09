@@ -17,7 +17,7 @@
 | **Субагенты** | `custodian`, `haiku`, `sonnet`, `opus`, `fable`, `code-reviewer`, `sanitizer` |
 | **Плагин** | `maestro-bootstrap` — санитайзинг промптов, file access control, audit-логи |
 | **Память (опционально)** | Memory layer плагина — векторная память сессий (`memory_search`, авто-вспоминание); включается секцией `memory` в `maestro.json` |
-| **Команды** | `/maestro-init`, `/maestro-new`, `/maestro-design`, `/regression`, `/test-agents` |
+| **Команды** | `/maestro-init`, `/maestro-setup`, `/maestro-design`, `/regression`, `/test-agents` |
 
 ## Maestro vs superpowers напрямую
 
@@ -63,7 +63,7 @@ bash maestro-install.sh
 
 > Предусловия: bash (macOS/Linux), python3 ≥ 3.11, git, curl или wget, сеть.
 > Windows — запускайте через WSL или Git Bash. После скрипта — перезапустите
-> OpenCode и выполните `/maestro-new` (см. шаг 3 ниже).
+> OpenCode и выполните `/maestro-setup` (см. шаг 3 ниже).
 
 Установить `maestro` можно также через **agpack** (вручную) или **копированием**.
 Подробная инструкция с `agpack.yml`, картой путей и подключением плагина —
@@ -107,23 +107,23 @@ bash maestro-install.sh
 
 | Команда | Для кого | Что делает |
 |---|---|---|
-| `/maestro-new` | Новый и существующий | Создаёт `project-context.md`, `maestro.json`, `.gitignore`, каталоги `.maestro/`, `regression/`; для существующего — детектит context и merge-ит конфиги |
+| `/maestro-setup` | Новый и существующий | Создаёт `project-context.md`, `maestro.json`, `.gitignore`, каталоги `.maestro/`, `regression/`; для существующего — детектит context и merge-ит конфиги |
 | `/maestro-design` | Новый (опционально) | Дизайн + spec + scaffold + roadmap |
 
-- **Новый проект:** `/maestro-new` → `/maestro-design` → `/maestro-init`
-- **Существующий:** `/maestro-new` → `/maestro-init`
+- **Новый проект:** `/maestro-setup` → `/maestro-design` → `/maestro-init`
+- **Существующий:** `/maestro-setup` → `/maestro-init`
 
 > **Внимание (v2.0.0):** команда `/maestro-init` теперь — **вход в пайплайн фич**
-> (ранее была bootstrap). Bootstrap нового проекта — `/maestro-new`. Старая команда
+> (ранее была bootstrap). Bootstrap нового проекта — `/maestro-setup`. Старая команда
 > `/maestro` удалена. При переходе обновите `agpack.yml` целевого проекта
-> (`skills/maestro-init` → `skills/maestro-new`) или перезапустите `maestro-install.sh`/
+> (`skills/maestro-init` → `skills/maestro-setup`) или перезапустите `maestro-install.sh`/
 > `maestro-update.sh` — они сделают это автоматически.
 
 Подробности — [Настройка проекта](manual_docs/tutorials/setup-project.md).
 
 #### Настройка моделей агентов по тирам
 
-M1-воркфлоу (`/maestro-new`) задаёт **7 отдельных HITL-вопросов** (по одному на
+M1-воркфлоу (`/maestro-setup`) задаёт **7 отдельных HITL-вопросов** (по одному на
 агента — гибкость выбора): `custodian` и `sanitizer` могут получить разные модели, но
 **одна модель тоже допустима** (см. выше). Для каждого агента предложение
 формируется из каскада:
@@ -157,7 +157,7 @@ Trusted по роли: `custodian` + `sanitizer` (обоим доступен `d
 **Рекомендуемый способ — централизованная глобальная настройка.** Настроить
 `agent.{custodian,haiku,sonnet,opus,fable,code-reviewer,sanitizer}` (model +
 `temperature`) один раз в `~/.config/opencode/opencode.json` — новые проекты
-наследуют значения, `/maestro-new` предлагает «оставить из global» первым
+наследуют значения, `/maestro-setup` предлагает «оставить из global» первым
 вариантом. Project `.opencode/opencode.json` переопределяет global при нужде в
 индивидуальном наборе. Корневой `opencode.json` не используется.
 
@@ -227,9 +227,9 @@ qdrant/pgvector. Управление: `memory_forget`, `memory_export`/`memory_
 
 ```
 agents/          — конфиги субагентов (custodian, haiku, sonnet, opus, fable, code-reviewer, sanitizer)
-commands/        — @command конфиги (/maestro-init, /maestro-new, /regression, /test-agents)
+commands/        — @command конфиги (/maestro-init, /maestro-setup, /regression, /test-agents)
 plugins/         — maestro-bootstrap (ESM-плагин: sanitize, access_policy, observability)
-skills/          — скиллы (maestro, maestro-new, maestro-design, manual-docs — generic user-docs)
+skills/          — скиллы (maestro, maestro-setup, maestro-design, manual-docs — generic user-docs)
 specs/           — дизайн-спеки и план-ы этого репо (never in root!)
 manual_docs/     — пользовательская документация скилла (Diátaxis)
 ```
