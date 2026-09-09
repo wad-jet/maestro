@@ -10,6 +10,12 @@
 ## [2026-09-09]
 
 ### Изменено
+- **Подписи spec — provenance-рекомендация, не авто-пропуск 8.6/9.** Для всех
+  fast-track-входов (шаг 7d) подпись (`maestro:sanitize`/`maestro:review`) больше
+  не пропускает гейты автоматически: sanitize (8.6) выполняется всегда (кроме
+  явного HITL-заверения доверия к источнику при валидной `CLEAN`),
+  ревью (9) предлагается всегда через HITL (a)/(b). Планы подписями не
+  маркируются (гейт — HITL-аппрув шага 12). Зафиксировано в `SECURITY.md` → P7.
 - **Memory layer помечен как beta.** Добавлен явный статус «beta» в
   `manual_docs/reference/memory.md`, `manual_docs/how-to/enable-memory.md`,
   `manual_docs/how-to/choose-embedding-model.md`,
