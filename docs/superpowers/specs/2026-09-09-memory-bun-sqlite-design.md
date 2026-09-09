@@ -47,8 +47,9 @@ Track the status in https://github.com/oven-sh/bun/issues/4290
 
 **node:sqlite — почему:** встроенный модуль Node ≥22.5 (у нас Node 24) и
 реализован в Bun (DatabaseSync). API-совместимость подтверждена
-диагностикой: BLOB→`Uint8Array` (Float32Array-view в `_searchIn` работает),
-bare named-params (`@x` в SQL + `{x}` в run), FTS5 + `bm25()`, `run().changes`.
+диагностикой на Node 24: BLOB→`Uint8Array` (Float32Array-view в `_searchIn`
+работает), bare named-params (`@x` в SQL + `{x}` в run), FTS5 + `bm25()`,
+`run().changes`.
 
 **Адаптер-шим** (малая поверхность, остальной код sqlite.js не трогаем):
 
@@ -57,7 +58,7 @@ bare named-params (`@x` в SQL + `{x}` в run), FTS5 + `bm25()`, `run().changes`
 | `db.pragma(s)` | `db.exec("PRAGMA " + s)` |
 | `db.transaction(fn)` | `BEGIN`/`COMMIT`/`ROLLBACK`-обёртка (2 места, оба top-level) |
 | `new Database(p, { readonly, fileMustExist })` | `readonly` → `readOnly`; fileMustExist не нужен (readonly+нет файла → throw → skip) |
-| `db.closed` | `!db.open` |
+| `db.closed` | `!db.isOpen` |
 
 Возвращаемый объект — единый лучше-sqlite3-подобный интерфейс `Database`,
 чтобы вызовы в `_init`/`_collectKey`/`_searchIn` и т.д. не менялись.
