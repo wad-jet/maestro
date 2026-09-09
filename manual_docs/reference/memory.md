@@ -146,7 +146,7 @@
 
 | Бэкенд | Сценарий | Реализация | Требования |
 |---|---|---|---|
-| `sqlite` (default) | Личный, локальный | better-sqlite3, per-key файл `<data-dir>/maestro/memory/<hash>/memory.db` | нет |
+| `sqlite` (default) | Личный, локальный | драйвер по рантайму: Bun → `node:sqlite` (DatabaseSync), Node → better-sqlite3; per-key файл `<data-dir>/maestro/memory/<hash>/memory.db` | нет |
 | `qdrant` | Централизованный (команда) | `@qdrant/js-client-rest` (HTTP), коллекция `maestro_memory`, payload-фильтр по `key` | `url` + `api_key_env`; identity |
 | `pgvector` | Есть центральный Postgres | node-postgres + расширение `vector`, таблица с vector-колонкой | `connection_string_env`; identity |
 
@@ -493,6 +493,8 @@ memory_stats_detail() → агрегаты (без summary-текста)
 `external_embedder_unmasked_queries`) дублируются в выдаче —
 диагностика без логов. При отсутствии/FAIL probe-статуса команда вызывает
 `memory_probe` (live-проверка, минуя cooldown) и показывает результат.
+Вывод также включает **`Каталог данных: <path>`** — резолвнутый
+`<data-dir>/maestro` (где лежат `memory.db`, `module/`, `state.json`).
 
 ### `@maestro-memory-report`
 
