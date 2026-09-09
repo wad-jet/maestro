@@ -169,6 +169,17 @@ silent opt-in).
 дефолты). После записи — напомнить про `npm install` в `module_dir`
 (`<data-dir>/maestro/memory/module/`) и перезапуск opencode (OP-1).
 
+При включении памяти в merge-конфиг (`.opencode/opencode.json` или global)
+добавить нативные permission для write/boundary-tools (обязательное правило,
+канон `maestro-assistant`):
+`permission: { memory_forget: "ask", memory_export: "ask", memory_import: "ask" }`
+(opencode default для новых тулов — allow, поэтому правило обязательно).
+
+Последовательность включения (канон, см. `manual_docs/how-to/enable-memory.md`):
+(1) добавить секцию `memory`, (2) рестарт opencode → self-provision `module_dir`,
+(3) `npm install` в `module_dir`, (4) рестарт №2, (5) верификация
+(probe-лог / `@maestro-memory` / блок «Контекст из памяти maestro»).
+
 ### Плагин + модели агентов (без корневого `opencode.json`)
 
 Корневой `opencode.json` **не создаётся**. Плагин и модели живут в merge-конфиге

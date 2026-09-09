@@ -228,13 +228,19 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
 - `identity_env` — имя env-переменной (напр. `MAESTRO_MEMORY_IDENTITY`), не
   значение; `identity` — только для сервисных аккаунтов.
 - **Write/boundary-tools → permission `ask` (обязательное правило).** При
-  включении памяти v2 в merge-config (`.opencode/opencode.json` или global)
+  включении памяти в merge-config (`.opencode/opencode.json` или global)
   добавляется нативное правило `permission: { memory_forget: "ask",
   memory_export: "ask", memory_import: "ask" }` (opencode default для новых
   тулов — allow, поэтому правило обязательно). Канон для будущих тулов: **новые
   write/boundary-tools → permission `ask`**.
-- После правки `memory` — **OP-1** (перезапуск opencode) + напоминание про
-  `npm install` в `module_dir` при первом включении.
+- **Онбординг memory (явная последовательность):** после добавления секции
+  `memory` в `maestro.json` — (1) рестарт opencode → плагин self-provision'ит
+  `module_dir` (создаёт каталог + `package.json`); (2) `npm install` в
+  `module_dir`; (3) рестарт №2 (активация; cached hard-fail → live re-probe при
+  старте); (4) верификация — probe-лог (`memory: embedder probe OK`, отсутствие
+  `memory: init failed`), `@maestro-memory`, блок «Контекст из памяти maestro»
+  в system prompt. Полная инструкция — `manual_docs/how-to/enable-memory.md`.
+  После правки `memory` — **OP-1** (перезапуск opencode).
 
 ## Канон нативных permissions OpenCode (R6)
 
