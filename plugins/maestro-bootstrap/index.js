@@ -1,8 +1,16 @@
 /**
  * maestro-bootstrap — OpenCode plugin entry point.
  *
- * Opencode v1.18 ждёт: export default async function() => { config, event, startup, dispose }.
- * config — ОБЯЗАТЕЛЬНО функция (async) — opencode вызывает N.config(ctx).
+ * opencode вызывает каждый function-export модуля (включая default) с
+ * (input, options) и использует ВЕСЬ возвращённый объект как hooks:
+ * hook[name] по любому ключу (event, tool, tool.execute.before/after,
+ * chat.message, experimental.*, dispose, ...). Поэтому адаптер ОБЯЗАН
+ * пробрасывать ВСЕ хуки core, а не только config/event/startup/dispose —
+ * иначе memory-инструменты (tool), санитайзер/access_policy/confidential
+ * (tool.execute.before/after) и auto_recall (chat.message +
+ * experimental.chat.system.transform) недоступны в сессиях.
+ *
+ * config — ОБЯЗАТЕЛЬНО функция (async) — opencode вызывает hook.config?.(cfg).
  *
  * Адаптер импортирует ядро из ./core.js и предоставляет чистую точку входа.
  * Ядро (MaestroBootstrapPlugin + helpers) вынесено в core.js, чтобы index.js
@@ -34,20 +42,24 @@ export default async function opencodePlugin(input) {
     }
   }
 
+  // Fail-soft: init упал → минимальный каркас (без защиты).
+  if (!_mbHooks) {
+    return {
+      config: async () => ({}),
+      event: async () => {},
+      startup: async () => {},
+      dispose: async () => {},
+    };
+  }
+
+  // Пробрасываем ВСЕ хуки core в opencode: event, dispose,
+  // tool.execute.before/after (санитайзер/access_policy/confidential),
+  // tool (memory-инструменты), chat.message + experimental.chat.system.transform
+  // (auto_recall). `config: undefined` из core перекрываем пустой функцией —
+  // opencode вызывает hook.config?.(cfg) (M12: НЕ форсируем file_access).
   return {
-    // M12: НЕ форсируем `file_access: "allow"` — это отключало бы нативные
-    // permissions OpenCode (ask) для read/bash/glob/grep и подрывало fail-open
-    // posture (см. README). Плагин управляет только `read` через access_policy
-    // в core.js (tool.execute.before); для прочих тулов — нативные permissions.
+    ..._mbHooks,
     config: async () => ({}),
-    event: async ({ event }) => {
-      if (!_mbHooks?.event) return;
-      try { await _mbHooks.event({ event }); } catch {}
-    },
     startup: async () => {},
-    dispose: async () => {
-      if (!_mbHooks?.dispose) return;
-      try { await _mbHooks.dispose(); } catch {}
-    },
   };
 }

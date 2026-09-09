@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile } from "./core.js";
+import opencodePlugin from "./index.js";
 
 function readLogs(dir, filePrefix = "maestro-bootstrap") {
   const logDir = path.join(dir, ".maestro/logs");
@@ -2094,5 +2095,36 @@ describe("maestro-bootstrap confidential enforcement by mask/filename", () => {
     const out = { args: { filePath: ".maestro/plugin-version" } };
     await hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "m6" }, out);
     assert.ok(true, "plugin version read must not be blocked by .maestro/** confidential");
+  });
+});
+
+describe("maestro-bootstrap adapter forwarding core hooks", () => {
+  const savedCwd = process.cwd();
+  let dir;
+
+  before(async () => {
+    // Пустой temp-dir без maestro.json → memory off → детерминированно,
+    // без тяжёлых импортов memory-модуля.
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "maestro-adapter-"));
+    process.chdir(dir);
+  });
+
+  after(() => {
+    process.chdir(savedCwd);
+    try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
+  });
+
+  it("forwards tool.execute hooks, event, dispose, config, startup and tool key", async () => {
+    const hooks = await opencodePlugin({});
+    assert.equal(typeof hooks["tool.execute.before"], "function");
+    assert.equal(typeof hooks["tool.execute.after"], "function");
+    assert.equal(typeof hooks.event, "function");
+    assert.equal(typeof hooks.dispose, "function");
+    assert.equal(typeof hooks.startup, "function");
+    assert.equal(typeof hooks.config, "function");
+    // M12: config НЕ форсирует file_access.
+    assert.equal((await hooks.config({})).file_access, undefined);
+    // memory-инструменты регистрируются в ключе `tool` (пусто при memory off).
+    assert.equal(Object.hasOwn(hooks, "tool"), true);
   });
 });
