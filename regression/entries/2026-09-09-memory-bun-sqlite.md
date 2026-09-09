@@ -1,0 +1,22 @@
+# Regression — memory-bun-sqlite
+
+- **version:** 1
+- **feature:** memory layer sqlite driver selection (node:sqlite under Bun, better-sqlite3 under Node)
+- **added:** 2026-09-09
+- **status:** active
+- **risk:** MEDIUM
+- **category:** memory plugin
+- **scenarios:**
+  - **sqlite driver selection** (`plugins/maestro-bootstrap/memory/storage/sqlite.js` — `loadSqliteDriver`/`NodeSqliteDatabase` шим не ломает Node-путь better-sqlite3 и покрывает node:sqlite-путь):
+    - run: `node --test plugins/maestro-bootstrap/memory/storage/sqlite.test.js`
+    - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent/.worktrees/fix/memory-bun-sqlite`
+  - **storage backends** (`plugins/maestro-bootstrap/memory/storage.test.js` — создание/upsert/search/cross-project через `createStorage` не регрессирует):
+    - run: `node --test plugins/maestro-bootstrap/memory/storage.test.js`
+    - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent/.worktrees/fix/memory-bun-sqlite`
+  - **memory plugin tests** (`plugins/maestro-bootstrap/memory/index.js` + memory_stats_detail вывод):
+    - run: `npm run test:memory`
+    - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent/.worktrees/fix/memory-bun-sqlite`
+  - **plugin bootstrap** (общий, без регрессий):
+    - run: `node --test plugins/maestro-bootstrap/index.test.js`
+    - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent/.worktrees/fix/memory-bun-sqlite`
+  - **[Manual] Bun runtime:** после релиза перезапустить opencode → лог без `memory: init failed`, `memory.db` создан, первый embed (~120 МБ модель), `@maestro-memory` показывает `Каталог данных: <path>` (`docs/testing/maestro-sandbox-checklist.md`)
