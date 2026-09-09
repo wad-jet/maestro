@@ -1,4 +1,4 @@
-# Spec: Адаптер maestro-bootstrap пробрасывает хуки core в opencode (3.0.2)
+# Spec: Адаптер maestro-bootstrap пробрасывает хуки core в opencode (3.0.2 → 3.0.3)
 
 Дата: 2026-09-09
 Маршрут: bugfix

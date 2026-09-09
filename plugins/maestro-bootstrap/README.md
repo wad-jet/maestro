@@ -288,7 +288,11 @@ untrusted, access-policy не enforced, дефолтные sanitizer-прави�
   `memory_import`, `memory_recall_preview`, `memory_stats_detail`), `chat.message`,
   `experimental.chat.system.transform`, `event` (`session.idle`/`session.deleted`),
   расширенный `dispose`. Инвариант: `experimental.chat.messages.transform` НЕ
-  присваивается.
+  присваивается. **Адаптер `index.js` (default export) обязан пробрасывать ВСЕ
+  хуки, которые собирает `MaestroBootstrapPlugin` (core.js)** — не только
+  `config`/`event`/`start`/`dispose`, но и `tool`, `tool.execute.before`/`after`,
+  `chat.message`, `experimental.*`. Иначе memory-инструменты и защитные хуки
+  недоступны в сессиях.
 - **Гибридный поиск (все бэкенды, v3a):** векторный KNN + лексические совпадения
   (title+summary+decisions), слияние RRF (k=60); sqlite — FTS5, pgvector —
   `tsvector`+`ts_rank`, qdrant — payload full-text (filter-leg); backfill при init,
