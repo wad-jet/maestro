@@ -55,5 +55,8 @@
     "patterns": [],
     "extra_fields": [],
     "extra_uri_schemes": []
+  },
+  "memory": {
+    "enabled": true
   }
 }
