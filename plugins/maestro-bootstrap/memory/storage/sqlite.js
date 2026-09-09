@@ -6,6 +6,57 @@ import { resolveSearchKeys } from "../project.js";
 import { sanitizeDirName } from "../config.js";
 import { timed } from "../storage.js";
 
+// Селектор sqlite-драйвера по рантайму:
+//  - Bun (opencode runtime): better-sqlite3 не поддерживается (oven-sh/bun#4290)
+//    → node:sqlite (DatabaseSync), обёрнутый в better-sqlite3-совместимый шим.
+//  - Node: better-sqlite3 как раньше (тесты/dev).
+//  - forceDriver (тесты): принудительно выбрать "node:sqlite" | "better-sqlite3".
+export async function loadSqliteDriver(moduleDir, { force = null } = {}) {
+  if (force === "node:sqlite" || (!force && process.versions.bun)) {
+    return makeNodeSqliteDatabase();
+  }
+  return loadBetterSqlite3(moduleDir);
+}
+
+// Шим: better-sqlite3-совместимая поверхность поверх node:sqlite DatabaseSync.
+// Ленивый импорт node:sqlite (встроенный модуль; Node ≥22.5, Bun) — чтобы не
+// ломать Node <22.5 и не грузить на better-sqlite3-пути.
+function requireNodeSqlite() {
+  // process.getBuiltinModule доступен в Node ≥22.3 и в Bun (node:sqlite реализован).
+  const m = globalThis.process?.getBuiltinModule?.("node:sqlite");
+  if (!m?.DatabaseSync) throw new Error("[memory] node:sqlite недоступен: запустите opencode на Bun или Node ≥22.5");
+  return m;
+}
+
+function makeNodeSqliteDatabase() {
+  return class NodeSqliteDatabase {
+    constructor(path, opts = {}) {
+      const { DatabaseSync } = requireNodeSqlite();
+      this._db = new DatabaseSync(path, { readOnly: !!opts.readonly, open: true });
+      this._readonly = !!opts.readonly;
+    }
+    pragma(sql) { this._db.exec(`PRAGMA ${sql}`); }
+    exec(sql) { this._db.exec(sql); }
+    prepare(sql) { return this._db.prepare(sql); }
+    transaction(fn) {
+      return (...args) => {
+        this._db.exec("BEGIN");
+        try {
+          const r = fn(...args);
+          this._db.exec("COMMIT");
+          return r;
+        } catch (e) {
+          try { this._db.exec("ROLLBACK"); } catch { /* noop */ }
+          throw e;
+        }
+      };
+    }
+    close() { this._db.close(); }
+    // node:sqlite: db.isOpen — boolean; db.open — метод открытия (не путать!).
+    get closed() { return !this._db.isOpen; }
+  };
+}
+
 // Whitelist of scan-able columns (mirrors the `memory` table schema). Default
 // scan returns everything EXCEPT embedding (large); embedding is opt-in.
 const SCAN_FIELDS = [
@@ -40,11 +91,12 @@ async function loadBetterSqlite3(moduleDir) {
 }
 
 export class SqliteStorage {
-  constructor({ dbPath, modelId, dim, moduleDir, log }) {
+  constructor({ dbPath, modelId, dim, moduleDir, log, forceDriver = null }) {
     this.dbPath = dbPath;
     this.modelId = modelId;
     this.dim = dim;
     this.moduleDir = moduleDir;
+    this.forceDriver = forceDriver; // тесты: "node:sqlite" | "better-sqlite3"
     // Task 6: аудит-лог (spec §4.3) — debug/error-события операций; default null (noop).
     this.log = log ?? null;
     this.db = null;
@@ -55,7 +107,7 @@ export class SqliteStorage {
   }
 
   async _init() {
-    const Database = await loadBetterSqlite3(this.moduleDir);
+    const Database = await loadSqliteDriver(this.moduleDir, { force: this.forceDriver });
     let db = new Database(this.dbPath);
     try {
       db.pragma("journal_mode = WAL");
@@ -236,7 +288,7 @@ export class SqliteStorage {
     // <dataDir>/maestro/memory/<hash>/memory.db до <dataDir>/maestro.
     const dataDir = join(dirname(this.dbPath), "..", "..");
     const path = join(dataDir, "memory", sanitizeDirName(k), "memory.db");
-    const Database = await loadBetterSqlite3(this.moduleDir);
+    const Database = await loadSqliteDriver(this.moduleDir, { force: this.forceDriver });
     let sib;
     try {
       sib = new Database(path, { readonly: true, fileMustExist: false });
