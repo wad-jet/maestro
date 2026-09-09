@@ -40,7 +40,9 @@ Track the status in https://github.com/oven-sh/bun/issues/4290
 В `storage/sqlite.js` заменить `loadBetterSqlite3()` на `loadSqliteDriver()`
 с выбором по рантайму:
 
-- `process.versions.bun` присутствует → драйвер **node:sqlite**
+- `process.versions.bun` присутствует → драйвер **bun:sqlite** (встроенный
+  модуль ядра Bun; в сборке opencode `node:sqlite` через `getBuiltinModule`
+  недоступен — проверено live, см. §5)
   (`DatabaseSync`), обёрнутый в better-sqlite3-совместимый адаптер.
 - иначе (Node) → **better-sqlite3** (текущее поведение, тесты не меняются).
 - недоступен ни один → actionable-ошибка с указанием шагов.
@@ -97,14 +99,17 @@ Track the status in https://github.com/oven-sh/bun/issues/4290
 
 ## 5. Риски
 
-1. **Bun `node:sqlite` не проверен локально** (нет bun CLI). Финальная
-   проверка — в самом opencode после деплоя; логика шима покрывается
-   adapter-тестами под Node (node:sqlite-путь).
+1. **Bun-рантайм live-проверка**: в сборке opencode `process.getBuiltinModule("node:sqlite")`
+   вернул `undefined` (в чистом Bun 1.4.2 — доступен) → принято решение под Bun
+   использовать встроенный `bun:sqlite`. Протестировано на Bun 1.4.2 локально
+   (bun-тесты, `sqlite.bun.test.js`); финальная проверка — в самом opencode
+   после релиза (Manual-сценарий regression-записи). Логика шима покрывается
+   bun-тестами (`bun test`) и node-путем (better-sqlite3).
 2. **transformers.js под Bun** на реальном embed — не проверен (probe грузит
    только модуль, не модель). Если embed упадёт после фикса sqlite — отдельный
    багфикс.
-3. FTS5 в Bun `node:sqlite` — ожидаемо есть (как в Node 24); если нет —
-   vector-only fallback уже заложен (`_searchIn`, allowFts).
+3. FTS5 в `bun:sqlite` — подтверждено (как в Node 24); если в сборке opencode
+   отсутствует — vector-only fallback уже заложен (`_searchIn`, allowFts).
 
 ## 6. DoD
 

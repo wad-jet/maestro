@@ -7,24 +7,79 @@ import { sanitizeDirName } from "../config.js";
 import { timed } from "../storage.js";
 
 // Селектор sqlite-драйвера по рантайму:
-//  - Bun (opencode runtime): better-sqlite3 не поддерживается (oven-sh/bun#4290)
-//    → node:sqlite (DatabaseSync), обёрнутый в better-sqlite3-совместимый шим.
+//  - Bun (opencode runtime): better-sqlite3 не поддерживается (oven-sh/bun#4290),
+//    а `node:sqlite` через process.getBuiltinModule в сборке opencode отсутствует
+//    (проверено live) → встроенный `bun:sqlite` (ядро Bun, есть всегда),
+//    обёрнутый в better-sqlite3-совместимый шим.
 //  - Node: better-sqlite3 как раньше (тесты/dev).
-//  - forceDriver (тесты): принудительно выбрать "node:sqlite" | "better-sqlite3".
+//  - forceDriver (тесты): "node:sqlite" | "bun:sqlite" | "better-sqlite3".
 export async function loadSqliteDriver(moduleDir, { force = null } = {}) {
-  if (force === "node:sqlite" || (!force && process.versions.bun)) {
-    return makeNodeSqliteDatabase();
+  if (force === "node:sqlite") return makeNodeSqliteDatabase();
+  if (force === "bun:sqlite") return makeBunSqliteDatabase();
+  if (process.versions.bun) {
+    try {
+      return await makeBunSqliteDatabase();
+    } catch {
+      return makeNodeSqliteDatabase();
+    }
   }
   return loadBetterSqlite3(moduleDir);
 }
 
+// Шим: better-sqlite3-совместимая поверхность поверх bun:sqlite Database.
+// bun:sqlite — встроенный модуль ядра Bun (dynamic import недоступен в Node →
+// только под Bun). Нативный API близок к better-sqlite3: exec/prepare/close,
+// transaction(fn) (BEGIN/COMMIT/ROLLBACK сам), BLOB→Uint8Array, FTS5+bm25.
+// Отличия от better-sqlite3/node:sqlite, компенсируемые здесь:
+//  - нет pragma() → exec("PRAGMA ...");
+//  - нет isOpen/closed → собственный флаг;
+//  - named params НЕ матчатся по bare-ключам ({ key } против @key) → prepare()
+//    оборачивается и конвертирует bare-ключи объекта в `@`-префикс
+//    (код sqlite.js использует bare named-params, как better-sqlite3).
+async function makeBunSqliteDatabase() {
+  const { Database } = await import("bun:sqlite");
+  return class BunSqliteDatabase {
+    constructor(path, opts = {}) {
+      // readOnly → не создавать файл (несуществующий → CANTOPEN → fail-soft
+      // sibling-skip в _collectKey); readwrite → создавать.
+      this._db = new Database(path, { readonly: !!opts.readonly, create: !opts.readonly });
+      this._closed = false;
+    }
+    pragma(sql) { this._db.exec(`PRAGMA ${sql}`); }
+    exec(sql) { this._db.exec(sql); }
+    prepare(sql) {
+      const st = this._db.prepare(sql);
+      // bun:sqlite named-params матчатся ТОЛЬКО по ключам с префиксом (@key).
+      // Код sqlite.js использует bare named-params (как better-sqlite3) →
+      // конвертируем единственный объект-аргумент в @-префиксованный объект.
+      const namedObj = (args) => {
+        if (args.length === 1 && args[0] && typeof args[0] === "object" && !Array.isArray(args[0]) && !(args[0] instanceof Uint8Array)) {
+          const out = {};
+          for (const [k, v] of Object.entries(args[0])) {
+            out[k[0] === "@" || k[0] === "$" || k[0] === ":" ? k : `@${k}`] = v;
+          }
+          return out;
+        }
+        return null;
+      };
+      return {
+        get: (...args) => { const o = namedObj(args); return o ? st.get(o) : st.get(...args); },
+        all: (...args) => { const o = namedObj(args); return o ? st.all(o) : st.all(...args); },
+        run: (...args) => { const o = namedObj(args); return o ? st.run(o) : st.run(...args); },
+      };
+    }
+    transaction(fn) { return this._db.transaction(fn); }
+    close() { this._db.close(); this._closed = true; }
+    get closed() { return this._closed; }
+  };
+}
+
 // Шим: better-sqlite3-совместимая поверхность поверх node:sqlite DatabaseSync.
-// Ленивый импорт node:sqlite (встроенный модуль; Node ≥22.5, Bun) — чтобы не
-// ломать Node <22.5 и не грузить на better-sqlite3-пути.
+// Ленивый импорт node:sqlite (встроенный модуль; Node ≥22.5) — чтобы не ломать
+// Node <22.5 и не грузить на better-sqlite3-пути.
 function requireNodeSqlite() {
-  // process.getBuiltinModule доступен в Node ≥22.3 и в Bun (node:sqlite реализован).
   const m = globalThis.process?.getBuiltinModule?.("node:sqlite");
-  if (!m?.DatabaseSync) throw new Error("[memory] node:sqlite недоступен: запустите opencode на Bun или Node ≥22.5");
+  if (!m?.DatabaseSync) throw new Error("[memory] node:sqlite недоступен: запустите opencode на Node ≥22.5");
   return m;
 }
 

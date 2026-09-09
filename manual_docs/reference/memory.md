@@ -146,7 +146,7 @@
 
 | Бэкенд | Сценарий | Реализация | Требования |
 |---|---|---|---|
-| `sqlite` (default) | Личный, локальный | драйвер по рантайму: Bun → `node:sqlite` (DatabaseSync), Node → better-sqlite3; per-key файл `<data-dir>/maestro/memory/<hash>/memory.db` | нет |
+| `sqlite` (default) | Личный, локальный | драйвер по рантайму: Bun → `bun:sqlite` (встроенный), Node → better-sqlite3; per-key файл `<data-dir>/maestro/memory/<hash>/memory.db` | нет |
 | `qdrant` | Централизованный (команда) | `@qdrant/js-client-rest` (HTTP), коллекция `maestro_memory`, payload-фильтр по `key` | `url` + `api_key_env`; identity |
 | `pgvector` | Есть центральный Postgres | node-postgres + расширение `vector`, таблица с vector-колонкой | `connection_string_env`; identity |
 
