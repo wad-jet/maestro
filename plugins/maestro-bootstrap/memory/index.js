@@ -973,6 +973,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
               `Key: ${effectiveKey}`,
               `Бэкенд: ${config.storage.type}`,
               `Модель: ${embeddings.modelId}`,
+              `Каталог данных: ${dataDir}`,
               `Записей: ${entries}`,
             ];
             // Task 8: последний cached-статус probe (из state) — для @maestro-memory.

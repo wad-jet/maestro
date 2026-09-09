@@ -1306,6 +1306,7 @@ test("memory_stats_detail clusters via scan", async () => {
     assert.match(res, /Key:/, "must include active key");
     assert.match(res, /Бэкенд: sqlite/, "must include backend type");
     assert.match(res, /Модель: m/, "must include embedding model");
+    assert.match(res, /Каталог данных: .+/, "must include data dir");
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
