@@ -47,12 +47,22 @@
   из-под `access_policy` — конфиг остаётся под контролем доступа (fail-closed).
   Предупреждение о версии (`/maestro-version`) использует только
   `.maestro/plugin-version` (semver-only) и НЕ ослабляет доступ к конфигу.
+- **P7.** Для fast-track-входов (шаг 7d) подпись spec (`maestro:sanitize`/
+  `maestro:review`) не является основанием авто-пропуска sanitize/review:
+  подпись подделываема и доказывает лишь соответствие hash'а содержимому, не
+  факт прохождения процесса в контуре. 8.6 для 7d-входов выполняется всегда,
+  кроме явного HITL-заверения доверия к источнику при валидной `CLEAN` (правило
+  4 «Подписи spec-файла» сохраняется). Статус: инструкция SKILL (не
+  enforcement), как P5-гейт.
 
 ## 4. Реализованные контрмеры
 
 - **Плагин `maestro-bootstrap`:** confidential deny (по имени/структуре сессии,
   fail-closed), sanitize промпта (Уровень 1, авто-маскирование), access_policy
   (HITL на `read`), аудит-лог.
+- **Правило подписей (P7):** в fast-track (шаг 7d) подпись spec =
+  provenance-рекомендация, не основание авто-пропуска 8.6/9 (для 7d-входов
+  8.6 выполняется всегда, кроме HITL-заверения при валидной `CLEAN`).
 - **Нативный permission-бастион OpenCode (R1+R4+R2-конфиг, Этап A):**
   `/maestro-new` пишет в merge-config deny-baseline для `docs/confidential/*` +
   built-in паттернов (`read`/`edit`) и эвристические deny для `bash`/`glob`/`grep` —
