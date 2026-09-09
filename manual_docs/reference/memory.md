@@ -11,13 +11,19 @@
 `memory_forget`, `memory_export`/`memory_import`, `memory_recall_preview`,
 `memory_stats_detail` и команды `@maestro-memory` / `@maestro-memory-report`.
 
+> **Статус: beta.** Memory layer — экспериментальный функционал: API
+> инструментов/команд, схема записей и конфигурация могут меняться между
+> версиями без обратной совместимости; данные (вектора, `state.json`) не
+> гарантируют миграцию при обновлении. Используйте с учётом этого ограничения
+> (например, в командном сценарии — согласуйте единую версию/модель заранее).
+
 Память — **опциональный модуль**: не входит в стандартную установку maestro,
 включается явно секцией `memory` в `maestro.json`. Без неё плагин работает
 идентично (нулевой footprint — зависимости не загружаются, LLM-вызовов нет).
 
 Включение и настройка — в [Как включить память](../how-to/enable-memory.md).
 Безопасность — в [Агенты и модель доверия](../explanation/agents-and-trust.md)
-и [`SECURITY.md`](../../../SECURITY.md).
+и [`SECURITY.md`](../../SECURITY.md).
 
 ## ⚙️ Конфигурация (секция `memory` в maestro.json)
 
@@ -783,4 +789,4 @@ opt-in на вставку замаскированных заголовков/s
 - [Команды](commands.md) — `@maestro-memory`, `@maestro-memory-report`
 - [Агенты и модель доверия](../explanation/agents-and-trust.md) — memory и confidential
 - [Выбор моделей](model-selection.md) — модели памяти вне agent-tier
-- [Требования и оценка ИБ (SECURITY.md)](../../../SECURITY.md) — правила §5
+- [Требования и оценка ИБ (SECURITY.md)](../../SECURITY.md) — правила §5

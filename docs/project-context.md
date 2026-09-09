@@ -39,7 +39,9 @@
   для скиллов и плагина, см. `manual_docs/how-to/update-maestro.md`).
 - **Memory layer:** опциональный модуль плагина (векторная память сессий); НЕ часть
   стандартной установки, включается по запросу (секция `memory` в `maestro.json`;
-  см. `manual_docs/reference/memory.md`). v2: гибридный FTS5-поиск, инструменты
+  см. `manual_docs/reference/memory.md`). **Статус: beta** — API/схема записей/конфиг
+  могут меняться без обратной совместимости, данные не гарантируют миграцию.
+  v2: гибридный FTS5-поиск, инструменты
   управления (`memory_forget`/`memory_export`/`memory_import`/`memory_recall_preview`/
   `memory_stats_detail`), команды `@maestro-memory`/`@maestro-memory-report`. v3a:
   **паритет бэкендов** — гибридный текстовый поиск (pg: tsvector+ts_rank, qdrant:

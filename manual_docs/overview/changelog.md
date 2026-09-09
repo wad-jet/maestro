@@ -10,6 +10,12 @@
 ## [2026-09-09]
 
 ### Изменено
+- **Memory layer помечен как beta.** Добавлен явный статус «beta» в
+  `manual_docs/reference/memory.md`, `manual_docs/how-to/enable-memory.md`,
+  `manual_docs/how-to/choose-embedding-model.md`,
+  `manual_docs/reference/model-selection.md` и `docs/project-context.md`:
+  экспериментальный функционал, API/схема записей/конфиг могут меняться без
+  обратной совместимости, данные не гарантируют миграцию.
 - **How-to «Выбор и замена модели эмбеддингов» расширен.** Добавлены:
   рекомендуемые модели (local: MiniLM-L12-v2 default, multilingual-e5-small;
   external: text-embedding-3-small/large), пошаговый процесс переиндексации при

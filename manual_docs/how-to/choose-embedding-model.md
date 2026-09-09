@@ -9,6 +9,10 @@
 ключей — [Память maestro (reference)](../reference/memory.md) и
 [Конфигурация (reference)](../reference/config.md).
 
+> **Статус: beta.** Memory layer — экспериментальный функционал (включается
+> явно, не часть стандартной установки); модель/данные памяти не гарантируют
+> обратную совместимость между версиями. См. [Память maestro (reference)](../reference/memory.md).
+
 ## 📖 Критерии выбора
 
 | Ось | Локальная (transformers.js) | Внешняя (OpenAI-совместимый API) |
