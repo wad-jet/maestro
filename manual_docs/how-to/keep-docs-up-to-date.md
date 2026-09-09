@@ -32,6 +32,7 @@
 | Модели / tier / субагенты | `reference/model-selection.md`, `explanation/agents-and-trust.md`, `how-to/choose-models.md` |
 | Команды (`@command`) | `reference/commands.md` |
 | `/maestro-assistant` (конфиг/структура/контекст) | `reference/commands.md`, `reference/config.md`, `explanation/agents-and-trust.md`, `how-to/manage-confidential-paths.md` |
+| `/maestro-assistant` — секция `memory` (память) | `how-to/enable-memory.md`, `reference/memory.md`, `reference/config.md` |
 | `/maestro-new` / `/maestro-design` (setup, конфиг, модели) | `tutorials/setup-project.md`, `reference/commands.md` |
 | Trust / санитайзер | `explanation/agents-and-trust.md`, `how-to/choose-models.md` |
 | Обновление/доставка до версии (skills + plugin, контроль) | `how-to/update-maestro.md` |

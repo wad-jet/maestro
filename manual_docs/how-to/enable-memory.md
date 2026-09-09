@@ -34,6 +34,14 @@
    > `/maestro-new` при генерации `maestro.json` (секция `memory` появится
    > автоматически).
 
+   > **Канонический способ настройки — через `/maestro-assistant`.** Ручное
+   > редактирование `maestro.json` допустимо, но конфигурация памяти (включение,
+   > выбор бэкенда, `identity_env`/`namespace`, `retention_days`, `report`,
+   > внешний embedder) штатно выполняется `/maestro-assistant` — он читает канон
+   > скилла `maestro-assistant`, сформирует diff-merge, добавит обязательное
+   > нативное permission-правило и пройдёт HITL-гейт. Подробнее — раздел
+   > «Настройка через `/maestro-assistant`» ниже.
+
 2. Запустить opencode один раз — плагин выполнит **self-provisioning**: создаст
    `<data-dir>/maestro/memory/module/`, запишет `package.json` (манифест
    опциональных зависимостей; single-writer — только плагин) и скопирует
@@ -68,6 +76,37 @@
 > по-прежнему используется `better-sqlite3`.
 
 ## 📖 Полная инструкция
+
+### Настройка через `/maestro-assistant`
+
+Канонический способ включить и настроить memory layer — команда
+`/maestro-assistant` (консультации и правка `maestro.json`; полный JSON-канон
+секции `memory` живёт в скилле `maestro-assistant` — см.
+[Команды](../reference/commands.md) и [Конфигурация](../reference/config.md)).
+
+1. Запросите `/maestro-assistant` с конкретной задачей, например:
+   - «включить memory layer (локальный sqlite)»;
+   - «настроить командную память на qdrant» / «перевести на pgvector»;
+   - «задать identity_env / namespace для командной памяти»;
+   - «установить retention_days 90»;
+   - «подключить внешний embedder (OpenAI-совместимый)».
+2. Ассистент прочитает текущий `maestro.json`, сформирует diff-merge
+   (идемпотентно, с сохранением пользовательских правок) и покажет
+   HITL-гейт: (a) approve — (b) правки — (c) отмена.
+3. Ассистент следует канону: при включении добавляет **минимальную** секцию
+   `{ "enabled": true }`; остальные ключи (бэкенд, `namespace`, `identity_env`,
+   модели, `retention_days`, `report`) — только по явному запросу HITL.
+4. При включении памяти ассистент **автоматически** добавит в merge-config
+   нативное правило `permission: { memory_forget: "ask", memory_export: "ask",
+   memory_import: "ask" }` (opencode default для новых инструментов — allow,
+   поэтому правило обязательно).
+5. После правки — напоминание про **онбординг**: рестарт opencode (OP-1) →
+   self-provision `module_dir` → `npm install` в `module_dir` → рестарт №2 →
+   верификация (`@maestro-memory`, блок «Контекст из памяти maestro»).
+
+> Полную последовательность онбординга см. в каноне скилла
+> `maestro-assistant` (раздел «Секция `memory`»). Далее в этой инструкции —
+> справочник ключей конфигурации и конкретные бэкенды.
 
 ### Выбор бэкенда (`storage.type`)
 
