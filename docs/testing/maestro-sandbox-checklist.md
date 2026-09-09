@@ -69,6 +69,30 @@
 | E2 | **S6:** User Review Gate = шаг 10 (не двойное одобрение) | ✅ | **проверка документации/порядка шагов** (структурная, не поведенческий smoke) | |
 | E3 | Доставка в app-репо (S2) | ✅ | custodian/trust/model в целевом приложении | |
 | E4 | superpowers-скиллы не изменены | ✅ | `git status` на `.opencode/skills/` чист | |
+| E5 | Memory layer smoke | ✅ | `- [ ] Memory layer smoke: unit-тесты памяти зелёные (sqlite backend, memory_search tool, session.idle → storage; интеграция registerMemoryHooks).` | |
+
+## F. Memory layer — реальный прогон (Bun/opencode)
+
+> Ручная проверка в реальном opencode-сессии с включённой памятью. Все шаги — в sandbox-проекте. Отметьте результат: ✅ прошёл · ❌ не прошёл · ⚠️ риск-контроль (не assert).
+
+| # | Сценарий | Тип | Проверка | Результат |
+|---|---|---|---|---|
+| F1 | `maestro.json` → `memory.enabled: true` | ✅ | в sandbox `maestro.json` есть `memory.enabled: true`; `memory.storage.type: "sqlite"` (или задан qdrant/pgvector); `module_dir` указан или резолвится | |
+| F2 | deps установлены в `module_dir` | ✅ | в `module_dir` есть `node_modules` с `better-sqlite3` (или `@qdrant/js-client-rest` / `pg`); `npm install` выполнен без ошибок | |
+| F3 | opencode сессия → запрос | ✅ | запущен `bun opencode` в sandbox; пользователь сделал запрос (например, «напомни, о чём мы говорили»); сессия не упала с error memory | |
+| F4 | `memory.db` создан | ✅ | `<data-dir>/maestro/memory/<key-hash>/memory.db` существует; `sqlite3 memory.db ".tables"` показывает `memory` | |
+| F5 | `memory_search` возвращает результат | ✅ | вызов `memory_search` (или через `@maestro-memory`) возвращает записи (или «Ничего не найдено» — если база пуста); без crash | |
+| F6 | `@maestro-memory` показывает статус | ✅ | вызов `@maestro-memory` возвращает статус памяти (число записей, кластеры и т.д.); без crash | |
+| F7 | `memory_forget` триггерит ask-подтверждение | ✅ | вызов `memory_forget` вызывает ask-gate (в TUI появляется запрос подтверждения); permission `ask` запрашивается через merge-config | |
+| F8 | `@maestro-memory-report` генерирует HTML-агрегаты | ✅ | вызов отчёта памяти возвращает агрегированный HTML/текст с кластерами, статистикой, графом; без crash | |
+| F9 | pgvector hybrid | ✅ | pgvector-проект в sandbox; `memory_search` с текстовым `query` возвращает лексические совпадения (ts_rank); без crash | |
+| F10 | qdrant hybrid | ✅ | qdrant-проект в sandbox; `memory_search` с `query` возвращает full-text совпадения через RRF; без crash | |
+| F11 | sqlite cross-project | ✅ | sqlite-проект; `memory_search { project: <сосед> }` возвращает записи соседа read-only; `origin_project_hash` в выдаче (провенанс); без crash | |
+| F12 | commit-scoped recall | ✅ | стек веток видит базу; переиспользование имени ветки НЕ контаминирует контекст; без crash | |
+| F13 | промоция после мержа | ✅ | ветка влита в mainline + `git pull` → записи становятся general (merged=1) на следующем init | |
+| F14 | scope=project override | ✅ | `memory_search { scope: "project" }` возвращает все записи ключа (плоско) | |
+| F15 | мульти-проект на centralized | ✅ | промоция одного проекта НЕ затрагивает записи другого (key-scoped) | |
+| F16 | heal (mainline_unresolved окно) | ✅ | записи транка, написанные при нерезолвнутом mainline, промоутятся после резолва | |
 
 ---
 

@@ -57,6 +57,12 @@ describe("maestro-bootstrap global logging", () => {
     assert.equal(hooks["chat.params"], undefined);
   });
 
+  it("should swallow errors from extended event handler (fail-soft)", async () => {
+    // The event hook must not throw even if the memory handler throws.
+    // Inject by calling the hook with a malformed event (e.g., session.idle with no properties).
+    await assert.doesNotReject(() => hooks.event({ event: { type: "session.idle", properties: {} } }));
+  });
+
   it("should log task dispatch (before/after) globally, no agent filter", async () => {
     await hooks["tool.execute.before"](
       { tool: "task", sessionID: "any-session", callID: "c-task" },
@@ -1629,6 +1635,20 @@ describe("maestro-bootstrap audit logger", () => {
       assert.equal(e.action, "allow");
       const bootstrap = readLogs(dir, "maestro-bootstrap");
       assert.equal(bootstrap.find((x) => x.msg === "confidential.access"), undefined);
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("makeLogger logDir option overrides env/directory", () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "mlog-"));
+    const custom = path.join(dir, "custom");
+    fs.mkdirSync(custom, { recursive: true });
+    try {
+      const log = makeLogger(dir, { filePrefix: "maestro-memory", logDir: custom, filterEnv: "MAESTRO_MEMORY" });
+      log.info("memory: test", {});
+      const files = fs.readdirSync(custom).filter((f) => f.includes("maestro-memory"));
+      assert.ok(files.length === 1, "log file written to explicit logDir");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
     }

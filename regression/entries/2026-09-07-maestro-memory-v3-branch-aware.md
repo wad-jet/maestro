@@ -1,0 +1,30 @@
+# Regression — maestro-memory-v3 branch-aware
+
+- **version:** 1
+- **feature:** memory layer v3 — branch-aware memory (commit-based membership/promotion, mainline auto-detect, centralized_confidential removal)
+- **added:** 2026-09-07
+- **status:** active
+- **risk:** HIGH
+- **category:** memory plugin
+- **scenarios:**
+  - **recall + promotion** (`plugins/maestro-bootstrap/memory/index.js`):
+    - run: `node --test plugins/maestro-bootstrap/memory/index.test.js`
+    - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent`
+  - **schema + candidates** (sqlite/pg/qdrant):
+    - run: `node --test plugins/maestro-bootstrap/memory/storage.test.js`
+    - run: `node --test plugins/maestro-bootstrap/memory/storage/pgvector.test.js`
+    - run: `node --test plugins/maestro-bootstrap/memory/storage/qdrant.test.js`
+    - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent`
+  - **git resolver** (`plugins/maestro-bootstrap/memory/git.js`):
+    - run: `node --test plugins/maestro-bootstrap/memory/git.test.js`
+    - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent`
+  - **config (branch_context/mainline, centralized_confidential removal)**:
+    - run: `node --test plugins/maestro-bootstrap/memory/config.test.js`
+    - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent`
+  - **полный прогон памяти:**
+    - run: `npm run test:memory`
+    - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent`
+  - **core:**
+    - run: `npm test`
+    - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent`
+  - **[Manual] Sandbox E2E F12–F16 (Bun/opencode, реальные git-сценарии):** commit-scoped recall (стек видит базу, имя-реюз), промоция после мержа (head-based), scope=project override, мульти-проект centralized, heal (`docs/testing/maestro-sandbox-checklist.md`)

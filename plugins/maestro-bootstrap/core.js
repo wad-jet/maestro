@@ -22,9 +22,58 @@
 
 import fs from "node:fs";
 import path from "node:path";
+import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+import { classifyMemoryConfig } from "./memory/config.js";
 
 const LOG_LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
+
+// Git config lookup (fail-soft). Используется для identity-фоллбека
+// централизованного memory gate (git user.name) и проектного ключа
+// (remote.origin.url). C5 (dedup): ОДИН `git config --list` на корень,
+// результат парсится и кэшируется в module-level Map — core gate и memory
+// переиспользуют его, не запуская повторные subprocess-вызовы.
+const gitConfigCache = new Map();
+
+/**
+ * Read git identity + remote in a single subprocess call, cached per root.
+ * C5: dedup — один `execSync("git config --list")` на корень; результат
+ * кэшируется в module-level Map (переживает несколько init в процессе).
+ * Fail-soft: git отсутствует / ключи не заданы → null (не бросаем).
+ * @param {string} root  Project directory (cwd for git).
+ * @param {(cmd: string, opts: object) => string} [exec]  Injectable execSync
+ *   (тесты). По умолчанию — node:child_process.execSync.
+ * @returns {{ name: string|null, remote: string|null }}
+ */
+export function getGitConfig(root, exec = execSync) {
+  const cached = gitConfigCache.get(root);
+  if (cached !== undefined) return cached;
+  let result = { name: null, remote: null };
+  try {
+    const out = exec("git config --list", {
+      cwd: root,
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    });
+    const lines = String(out ?? "").split("\n");
+    // I-3: `git config --list` prints in increasing precedence (system → global
+    // → local), so the LAST occurrence of a key is the highest-precedence value
+    // (what `git config --get` would return). Last-match-wins: overwrite on each
+    // match instead of keeping the first (lowest-precedence) line.
+    for (const line of lines) {
+      const eq = line.indexOf("=");
+      if (eq === -1) continue;
+      const key = line.slice(0, eq);
+      const value = line.slice(eq + 1).trim();
+      if (key === "user.name") result.name = value || null;
+      else if (key === "remote.origin.url") result.remote = value || null;
+    }
+  } catch {
+    /* fail-soft: git отсутствует → null */
+  }
+  gitConfigCache.set(root, result);
+  return result;
+}
 
 // --- Context Sanitizer (Уровень 1) -----------------------------------------
 
@@ -749,8 +798,10 @@ export function makeLogger(directory, {
   filePrefix = "maestro-bootstrap",
   logDirEnv = "MAESTRO_BOOTSTRAP_LOG_DIR",
   filterEnv = "MAESTRO_BOOTSTRAP",
+  logDir = null, // новая опция: явный каталог, приоритет над logDirEnv/directory
 } = {}) {
-  const logDir =
+  const dir =
+    logDir ||
     process.env[logDirEnv] ||
     path.join(directory, ".maestro/logs");
 
@@ -776,13 +827,13 @@ export function makeLogger(directory, {
   }
 
   try {
-    fs.mkdirSync(logDir, { recursive: true });
+    fs.mkdirSync(dir, { recursive: true });
   } catch {
     /* logging must never break the session */
   }
 
   const logFileFor = (date) =>
-    path.join(logDir, `${filePrefix}-${date}.log`);
+    path.join(dir, `${filePrefix}-${date}.log`);
 
   const write = (level, msg, extra) => {
     if (!enabled.has(level)) return;
@@ -807,7 +858,7 @@ export function makeLogger(directory, {
   };
 
   return {
-    logDir,
+    logDir: dir,
     filePrefix,
     level: levelEnv,
     mask: filterEnv === null ? "all" : [...enabled].join(","),
@@ -868,6 +919,7 @@ export function makeBoundedMap(max = 1024) {
     },
     delete: (k) => m.delete(k),
     size: () => m.size,
+    clear: () => m.clear(),
   };
 }
 
@@ -882,6 +934,15 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
     filePrefix: "maestro-audit",
     logDirEnv: "MAESTRO_AUDIT_LOG_DIR",
     filterEnv: null,
+  });
+  // Memory-лог — отдельный файл `maestro-memory-<date>.log` (аудит-фактура
+  // операций memory-модуля: recall/promote/forget и т.п.). Каталог:
+  // MAESTRO_MEMORY_LOG_DIR или каталог bootstrap-лога; фильтр —
+  // MAESTRO_MEMORY_LOG_LEVEL/_LOG_MASK (по умолчанию info).
+  const memoryLog = makeLogger(root, {
+    logDir: process.env.MAESTRO_MEMORY_LOG_DIR || log.logDir,
+    filePrefix: "maestro-memory",
+    filterEnv: "MAESTRO_MEMORY",
   });
   const config = loadMaestroConfig(undefined, root);
   const whitelist = loadWhitelist(config);
@@ -1123,5 +1184,41 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
       log.info("plugin disposing", {});
     },
   };
+
+  // Memory module (опционально): tool `memory_search`, chat.message,
+  // experimental.chat.system.transform, event-дополнения (session.idle /
+  // session.deleted). Fail-soft: любая ошибка инициализации → лог + {}.
+  // Инвариант: `experimental.chat.messages.transform` НЕ присваивается.
+  // C1 (zero-dep): импорт memory/index.js (тянет better-sqlite3 через
+  // storage/sqlite.js) происходит ТОЛЬКО при memory.enabled === true.
+  // Классификация — лёгкий classifyMemoryConfig (без storage-импортов).
+  const memClass = classifyMemoryConfig(config, { gitName: getGitConfig(root).name });
+  let memoryHooks = {};
+  if (memClass.enabled) {
+    try {
+      const { registerMemoryHooks } = await import("./memory/index.js");
+      memoryHooks = await registerMemoryHooks({ client, config, log, memoryLog, root });
+    } catch (err) {
+      log.error("memory: init failed", { error: err instanceof Error ? err.message : String(err) });
+    }
+  } else if (config?.memory && memClass.disabled_reason) {
+    log.info("memory: disabled", { reason: memClass.disabled_reason });
+  }
+  plugin.tool = { ...(memoryHooks.tool ?? {}) };
+  plugin["chat.message"] = memoryHooks["chat.message"];
+  plugin["experimental.chat.system.transform"] = memoryHooks["experimental.chat.system.transform"];
+  // Расширяем event: сначала существующая логика (session.error/retry), затем memory.
+  const baseEvent = plugin.event;
+  plugin.event = async (input) => {
+    try { await baseEvent(input); } catch {}
+    try { await memoryHooks.event?.(input); } catch {}
+  };
+  // Расширяем dispose: сначала существующая логика, затем memory.
+  const baseDispose = plugin.dispose;
+  plugin.dispose = async () => {
+    try { await baseDispose(); } catch {}
+    try { await memoryHooks.dispose?.(); } catch {}
+  };
+
   return plugin;
 };

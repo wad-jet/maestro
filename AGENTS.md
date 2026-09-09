@@ -12,7 +12,7 @@ This is the **authoring repo** for the OpenCode `maestro` system (the "maestro" 
 - `skills/maestro-design/SKILL.md` — `/maestro-design` skill for design + spec (via primary brainstorm + custodian Q/A), code scaffold (TDD), and roadmap.
 - `skills/maestro-assistant/SKILL.md` — `/maestro-assistant` skill: consultation & config/structure/context organization for maestro (single source of config rules). Self-contained; loaded by `/maestro-new` (tasks 2/3/3a) and `/maestro-init` (pipeline config questions).
 - `skills/manual-docs/SKILL.md` — generic user-docs skill (доки целевого приложения, Diátaxis), загружается на шаге 14 пайплайна maestro. Отдельно от правила синхронизации `manual_docs/` самого maestro (ниже).
-- `plugins/maestro-bootstrap/` — ESM OpenCode plugin.
+- `plugins/maestro-bootstrap/` — ESM OpenCode plugin. Contains an **optional memory module** (`plugins/maestro-bootstrap/memory/` — vector session memory: sqlite/qdrant/pgvector backends, embeddings, summarizer, recall, `memory_search` + management tools `memory_forget`/`memory_export`/`memory_import`/`memory_recall_preview`/`memory_stats_detail`, FTS5 hybrid search). Branch-aware (v3): commit-based record identity (`head`), commit-scoped recall (general/experience tiers), key-scoped promotion via `is-ancestor(head, mainline)`, mainline auto-detect (`branch_context`/`mainline` config keys). Not part of the standard install; enabled via the `memory` section in `maestro.json` (see `manual_docs/reference/memory.md`). Commands `@maestro-memory` (status) and `@maestro-memory-report` (HTML aggregates) live in `commands/`.
 - `specs/*.md` — **legacy** design specs and implementation plans for past work on this repo (kebab-case: `<topic>.md` for spec, `<topic>-plan.md` for plan). **New work (2026-09-02):** design docs are no longer created here. For **future** features/bugfixes on this repo, produce spec + plan via the **brainstorming skill** into `docs/superpowers/` (spec: `docs/superpowers/specs/YYYY-MM-DD-<feature-name>-design.md`; plan: `docs/superpowers/plans/YYYY-MM-DD-<feature-name>-plan.md`), never in the repo root or `specs/`. Keep `specs/` as historical record; do not add new files to it.
 - `SECURITY.md` — **internal security (ИБ) standard** for the maestro skill (trust model, ИБ requirements P1–P5, invariants, testing). Not part of `manual_docs/`. It is the source of truth for security decisions; specs/plans reference it.
 
@@ -39,6 +39,12 @@ Test (Node built-in test runner, no deps):
 ```bash
 node --test plugins/maestro-bootstrap/index.test.js
 # or: npm test
+```
+
+Memory module tests (optional deps in devDependencies):
+
+```bash
+npm run test:memory
 ```
 
 - Global observability (not bound to any agent): logs key events for all sessions — `session.error`, `task` dispatch (`tool.execute.before`/`tool.execute.after`, sanitized title), empty subagent result, access-policy blocks. Sanitizes `task` prompts (Level 1 Security Review) before untrusted subagents. The old bootstrap-directive injection via `experimental.chat.messages.transform` was removed — `transform` must stay `undefined`.

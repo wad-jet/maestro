@@ -209,6 +209,112 @@ Security-фактура по доступу пишется в **отдельны
 Если `maestro.json` отсутствует — плагин работает (fail-open): все агенты
 untrusted, access-policy не enforced, дефолтные sanitizer-правила.
 
+## Memory layer (опционально)
+
+Векторная память сессий: авто-саммаризация завершённых сессий, семантический
+поиск (`memory_search`) и авто-вспоминание релевантного контекста в новых
+сессиях. **Опциональный модуль** — не входит в стандартную установку; включается
+секцией `memory` в `maestro.json` (`enabled: true`). Нет секции / `false` →
+полностью off: хуки не регистрируются, зависимости не загружаются, LLM-вызовов
+нет (zero-dep default сохраняется — импорт `memory/index.js` происходит только
+при `enabled: true`).
+
+```json
+{
+  "memory": {
+    "enabled": true,
+    "auto_recall": true,
+    "embedding_model": "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
+    "summarizer_model": null,
+    "identity": null,
+    "identity_env": null,
+    "namespace": null,
+    "module_dir": null,
+    "idle_debounce_min": 10,
+    "min_new_messages": 3,
+    "backfill_window_days": 30,
+    "backfill_max_per_start": 5,
+    "retry_interval_min": 60,
+    "top_k": 3,
+    "min_score": 0.35,
+    "similarity_threshold": 0.7,
+    "retention_days": null,
+    "summarize_timeout_ms": 120000,
+    "report": { "include_text": false },
+    "branch_context": true,
+    "mainline": null,
+    "embedding": {
+      "provider": "local",
+      "model": null,
+      "base_url": "https://api.openai.com/v1",
+      "api_key_env": null,
+      "dim": null
+    },
+    "probe_cooldown_min": 30,
+    "storage": {
+      "type": "sqlite",
+      "qdrant": { "url": "https://qdrant.internal:6333", "api_key_env": "MAESTRO_MEMORY_QDRANT_KEY", "collection": "maestro_memory" },
+      "pgvector": { "connection_string_env": "MAESTRO_MEMORY_PG_DSN", "table": "maestro_memory" }
+    }
+  }
+}
+```
+
+- **Бэкенды:** `sqlite` (default, локальный, per-key
+  `<data-dir>/maestro/memory/<hash>/memory.db`) | `qdrant` (централизованный,
+  `url` + `api_key_env`) | `pgvector` (`connection_string_env`). Централизованные
+  требуют резолвнутую identity (`identity` → `identity_env` → git `user.name`).
+  Решение «локально vs удалённо» — только `storage.type`.
+- **Branch-aware (v3):** идентичность записи — по коммиту (`head`), имя ветки —
+  только display; recall по умолчанию commit-scoped (`scope: "branch"`), тиры
+  general/experience/не в контексте/unattributed; промоция на init по
+  `is-ancestor(head, mainline)` (key-scoped); mainline авто-детект
+  (`memory.mainline` override → remote HEAD → `init.defaultBranch` → резерв
+  `main`/`master`/`develop`); `branch_context: false` → flat project recall.
+- **`retention_days`:** `null` (default) — выключено; число — TTL записей
+  (prune при старте, лог количества удалённых).
+- **`similarity_threshold`:** порог cosine для кластеров/графа в
+  `memory_stats_detail` (default `0.7`).
+- **`embedding` (внешний embedder, opt-in):** `provider: "openai"` — внешний
+  OpenAI-совместимый `/embeddings` API (`model`/`base_url`/`api_key_env`/`dim`
+  обязательны для `openai`; `dim` — нативная размерность, без Matryoshka;
+  ключ — только через `api_key_env`). `embedding_model` — legacy-алиас для
+  `embedding.model` (только при `provider: local`). `probe_cooldown_min`
+  (default `30`) — интервал между live-probe на старте; hard-fail → память off,
+  soft-fail → fail-soft; on-demand — `memory_probe`.
+- **`report.include_text`:** `false` (default) — HTML-отчёт только агрегаты
+  (SEC-4b); `true` — осознанный opt-in на маскированные тексты.
+- **Хуки:** `tool` (`memory_search`, `memory_forget`, `memory_export`,
+  `memory_import`, `memory_recall_preview`, `memory_stats_detail`), `chat.message`,
+  `experimental.chat.system.transform`, `event` (`session.idle`/`session.deleted`),
+  расширенный `dispose`. Инвариант: `experimental.chat.messages.transform` НЕ
+  присваивается.
+- **Гибридный поиск (все бэкенды, v3a):** векторный KNN + лексические совпадения
+  (title+summary+decisions), слияние RRF (k=60); sqlite — FTS5, pgvector —
+  `tsvector`+`ts_rank`, qdrant — payload full-text (filter-leg); backfill при init,
+  sync при всех путях записи/удаления; ошибка лексической ветки → fallback
+  vector-only + лог.
+- **Фильтры `memory_search`:** `date_from`/`date_to` (time_last), `author`,
+  `project` (кросс-проектный opt-in, **все бэкенды**; sqlite — read-only соседняя
+  БД с fail-soft, qdrant/pg — key-filter).
+- **Permission (обязательное правило):** `memory_forget`/`memory_export`/
+  `memory_import` — write/boundary-tools; в merge-config пишется
+  `permission: { memory_forget: "ask", memory_export: "ask", memory_import: "ask" }`.
+- **Self-provisioning:** при `enabled: true` плагин создаёт `module_dir`
+  (`<data-dir>/maestro/memory/module/`), пишет `package.json` (single-writer,
+  `"type": "module"`) и копирует исходники модуля; пользователь выполняет
+  `npm install` в `module_dir`. Код обновляется в lockstep с плагином;
+  `node_modules` и данные переживают `maestro-update.sh`.
+- **Данные:** `<data-dir>/maestro/memory/` — per-key БД, `state.json`
+  (retry/skip/first-run), кэш модели эмбеддингов, экспорт `memory_export`
+  (`export-<key16hex>-<ts>.jsonl`). Вне git.
+- **Установка:** `maestro-install.sh` — опциональный шаг (y/N) ставит маркер
+  `<data-dir>/maestro/memory/enabled.flag` + preflight npm/bun (зависимости
+  ставит плагин, не install.sh).
+
+Полный справочник — `manual_docs/reference/memory.md`; включение —
+`manual_docs/how-to/enable-memory.md`.
+
 ## Логирование
 
 Плагин пишет JSONL-лог в `.maestro/logs/` (каталог создаётся автоматически).
@@ -221,6 +327,7 @@ logs/, feedback-reports/, plugin-version); конфиг проекта — `maes
 .maestro/logs/maestro-bootstrap-2026-08-02.log
 .maestro/logs/maestro-audit-2026-08-01.log       # security-фактура
 .maestro/logs/maestro-audit-2026-08-02.log
+.maestro/logs/maestro-memory-2026-09-08.log      # аудит-лог memory layer (при memory.enabled)
 ```
 
 Формат строки (bootstrap-лог):
@@ -239,6 +346,32 @@ logs/, feedback-reports/, plugin-version); конфиг проекта — `maes
 - `session.status.retry` — перезапрос модели (warn)
 - `sanitizer.redacted` — замаскировано N чувствительных элементов в промпте task (warn)
 
+Memory layer (при `memory.enabled: true`):
+
+- `memory: disabled` — память выключена (info, с `reason`: `storage_type_invalid`,
+  `centralized_identity_missing`, `qdrant_config_invalid`, `pgvector_config_invalid`,
+  `pgvector_text_search_config_invalid`, `branch_context_invalid`, `mainline_invalid`,
+  `retention_days_invalid`, `similarity_threshold_invalid`, `embedding_invalid`,
+  `probe_cooldown_min_invalid`, `embedding_api_key_env_missing`,
+  `embedder_probe_hard_fail`)
+- `memory:mainline_unresolved` — branch-context flat (нет резолвнутого mainline) (warn)
+- `memory: init failed` — ошибка инициализации (error; сессии работают)
+- `memory:index_error` — ошибка индексации сессии (error, с `sessionID` + `error_class` enum)
+- `memory:retention_pruned` — retention удалил записи при старте (info, с `count` + `older_than_days`)
+
+> **Смешанный список:** `memory: disabled` и `memory: init failed` — carve-out,
+> пишутся в **bootstrap-лог** (видимость HITL-гейта «плагин работает»); остальные
+> события memory-модуля — в отдельный аудит-лог (ниже). «`memory: transformers
+> not installed — run npm install in <module_dir>`» — это **текст брошенного
+> `Error.message`** (init/embed), а не строка лога; в аудит-лог попадает только
+> `error_class` enum.
+
+Операции memory-модуля (lifecycle/root-cause/производительность) пишутся в
+**отдельный аудит-лог** `.maestro/logs/maestro-memory-<дата>.log` (JSONL;
+aggregates-only field whitelist, SEC-4b+). Уровень/маска/каталог —
+`MAESTRO_MEMORY_LOG_LEVEL` (default `info`)/`MAESTRO_MEMORY_LOG_MASK`/
+`MAESTRO_MEMORY_LOG_DIR`. Полный список событий — `manual_docs/reference/memory.md`.
+
 Security-события доступа (`confidential.access`, `access_policy.blocked`) в
 bootstrap-лог **не пишутся** — они только в аудит-логе (см. раздел «Аудит-лог»).
 
@@ -252,7 +385,13 @@ bootstrap-лог **не пишутся** — они только в аудит-�
 | `MAESTRO_BOOTSTRAP_LOG_MASK` | список включённых уровней через запятую | выводится из `LOG_LEVEL` |
 | `MAESTRO_BOOTSTRAP_LOG_DIR` | каталог для лог-файлов (по умолчанию `<project>/.maestro/logs`) | `<project>/.maestro/logs` |
 | `MAESTRO_AUDIT_LOG_DIR` | каталог для аудит-лога `maestro-audit-*.log` | `<project>/.maestro/logs` |
+| `MAESTRO_MEMORY_LOG_LEVEL` | порог детализации аудит-лога memory layer (`maestro-memory-*.log`) | `info` |
+| `MAESTRO_MEMORY_LOG_MASK` | список включённых уровней через запятую (memory-лог) | выводится из `LOG_LEVEL` |
+| `MAESTRO_MEMORY_LOG_DIR` | каталог для аудит-лога memory layer | каталог bootstrap-лога |
 | `MAESTRO_CONFIG` | путь к maestro.json (консолидированный конфиг) | `<project>/maestro.json` |
+| `MAESTRO_MEMORY_IDENTITY` | identity для подписи записей памяти (через `memory.identity_env`) | — |
+| `MAESTRO_MEMORY_QDRANT_KEY` | API-ключ Qdrant (через `memory.storage.qdrant.api_key_env`) | — |
+| `MAESTRO_MEMORY_PG_DSN` | DSN Postgres для pgvector (через `memory.storage.pgvector.connection_string_env`) | — |
 
 `MAESTRO_BOOTSTRAP_LOG_LEVEL` — порог детализации (пишутся уровни `>=`
 заданного). `MAESTRO_BOOTSTRAP_LOG_MASK` — явный список включённых уровней;

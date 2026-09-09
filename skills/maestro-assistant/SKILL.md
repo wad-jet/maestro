@@ -65,6 +65,40 @@ description: Use when the user asks for help configuring maestro, organizing pro
     "patterns": [],
     "extra_fields": [],
     "extra_uri_schemes": []
+  },
+  "memory": {
+    "enabled": true,
+    "auto_recall": true,
+    "embedding_model": "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
+    "summarizer_model": null,
+    "identity": null,
+    "identity_env": null,
+    "namespace": null,
+    "module_dir": null,
+    "idle_debounce_min": 10,
+    "min_new_messages": 3,
+    "backfill_window_days": 30,
+    "backfill_max_per_start": 5,
+    "retry_interval_min": 60,
+    "top_k": 3,
+    "min_score": 0.35,
+    "similarity_threshold": 0.7,
+    "retention_days": null,
+    "summarize_timeout_ms": 120000,
+    "report": { "include_text": false },
+    "embedding": {
+      "provider": "local",
+      "model": null,
+      "base_url": "https://api.openai.com/v1",
+      "api_key_env": null,
+      "dim": null
+    },
+    "probe_cooldown_min": 30,
+    "storage": {
+      "type": "sqlite",
+      "qdrant": { "url": "https://qdrant.internal:6333", "api_key_env": "MAESTRO_MEMORY_QDRANT_KEY", "collection": "maestro_memory" },
+      "pgvector": { "connection_string_env": "MAESTRO_MEMORY_PG_DSN", "table": "maestro_memory" }
+    }
   }
 }
 ```
@@ -96,6 +130,111 @@ description: Use when the user asks for help configuring maestro, organizing pro
 - **`access_policy.allow`:** из §3 (стек) + §5 (домены): каталоги исходников + расширения языков.
 - **`access_policy.deny`:** секреты (`*.env`, `*.env.*`, `*.{pem,key,cert,secret}`).
 - **`sanitizer_whitelist`:** по §12; `extra_uri_schemes` из §3.
+
+### Секция `memory` (опциональный memory layer)
+
+**Опциональный модуль** плагина (векторная память сессий). НЕ часть стандартной
+установки; включается только по явному запросу HITL (или по маркеру
+`enabled.flag` от `maestro-install.sh`). **Default:** секции нет / `enabled: false`
+→ память полностью off (хуки не регистрируются, зависимости не загружаются,
+LLM-вызовов нет). Канон JSON — inline выше (поле `memory`).
+
+Семантика ключей (полный справочник — `manual_docs/reference/memory.md`):
+
+- **`enabled`** — единственный выключатель. `true` → плагин при старте
+  self-provisions `module_dir` (создаёт каталог, пишет `package.json`
+  single-writer, копирует исходники); пользователь выполняет `npm install` в
+  `module_dir` и перезапускает opencode.
+- **`auto_recall`** — авто-вспоминание (первое сообщение top-level primary
+  сессии → блок `## Контекст из памяти maestro` в system prompt). `false` —
+  только ручной `memory_search`.
+- **`embedding_model`** — **legacy-алиас** для `embedding.model` (только при
+  `provider: local`). Локальная модель эмбеддингов (transformers.js, dim 384,
+  RU+EN, q8 ~120 МБ, кэш). Смена → переиндексация. Для `openai` `model` берётся
+  строго из `embedding.model` (legacy-алиас не подставляется).
+- **`embedding`** — блок конфигурации embedder (backward-compatible):
+  - `embedding.provider` — `local` (default) | `openai` (внешний
+    OpenAI-совместимый `/embeddings` API, осознанный opt-in).
+  - `embedding.model` — `null` (default); local: имя ONNX-модели (fallback на
+    `embedding_model`); openai: id модели API (**обязателен**).
+  - `embedding.base_url` — `https://api.openai.com/v1` (default); базовый URL
+    OpenAI-совместимого API; trailing-slash нормализуется.
+  - `embedding.api_key_env` — `null` (default); **имя env-переменной** с ключом
+    (никогда plaintext); **обязателен** для `openai`.
+  - `embedding.dim` — `null` (default); размерность векторов; **обязателен** для
+    `openai` (нативная dim модели, без Matryoshka-усечения); для `local`
+    игнорируется (остаётся 384).
+  - Приоритет: при `provider: local` и одновременно заданных `embedding.model`
+    и `embedding_model` — приоритет у `embedding.model`. Для `openai` действует
+    только `embedding.model`. Валидация блока: объект; `provider`/`model`/
+    `base_url`/`api_key_env` — строки; `dim` — целое > 0; нарушение →
+    `embedding_invalid` (память off). Отсутствие `process.env[api_key_env]` при
+    `openai` → память off (`embedding_api_key_env_missing`).
+- **`probe_cooldown_min`** — интервал в минутах между live-probe модели на
+  старте (кэш результата в `state.json`), default `30`. Валидация: число > 0;
+  иначе → `probe_cooldown_min_invalid` (память off).
+- **`summarizer_model`** — модель фонового саммаризатора; `null` → модель
+  саммаризируемой сессии.
+- **`identity` / `identity_env`** — подпись записей (`author`), **не
+  access-control**. Источник: `identity_env` (env-переменная, per-machine) → git
+  `user.name` → OS username. `identity` в `maestro.json` — только явный override
+  (сервисный аккаунт). Не класть per-user значения в коммитимый `maestro.json`.
+- **`namespace`** — переопределяет ключ памяти `key` (monorepo / связанные
+  репозитории). Смена namespace = потеря доступа к старым записям.
+- **`module_dir`** — каталог кода модуля; `null` → `<data-dir>/maestro/memory/module`.
+- **`storage.type`** — `sqlite` (default, локальный) | `qdrant` | `pgvector`
+  (централизованные). Централизованные требуют **резолвнутую identity** (иначе
+  память off + лог) и `url`+`api_key_env` (qdrant) / `connection_string_env`
+  (pgvector). API-ключ — только через ссылку на env, никогда plaintext.
+  Решение «локально vs удалённо» — только `storage.type`.
+- **`branch_context`** — branch-scoped recall (default `true`): членство записей
+  по git-истории (тиры general/experience); `false` → flat project recall
+  (дефолтный scope = `project`). Валидация: boolean; иначе — память off + лог
+  (`branch_context_invalid`).
+- **`mainline`** — основная ветка для промоции (default `null` → авто-детект из
+  git: remote HEAD → `init.defaultBranch` → резерв `main`/`master`/`develop`).
+  Явный override авторитетен; несуществующее имя → `mainline_unresolved`
+  (branch-context flat + warn). Валидация: `null` или строка
+  `/^[a-zA-Z0-9_\/.-]+$/`, длина ≤ 100; иначе — память off + лог
+  (`mainline_invalid`). Gitflow-guidance: `memory.mainline: "develop"` (общий
+  контекст = интегрированная разработка) или `"main"` (только выпущенная
+  истина).
+- **`storage.pgvector.text_search_config`** — Postgres text-search конфигурация
+  для гибридного поиска, default `"russian"` (стеммер). Только при
+  `type: pgvector`. Валидация: `/^[a-z][a-z0-9_]*$/`, ≤63 символа; на кастомных
+  PG без `russian`-конфига — fail-loud.
+- **`retention_days`** — TTL записей: `null` (default) — выключено (данные не
+  удаляются молча); положительное число — prune при старте (записи старше N
+  дней по `time_last`). Некорректное значение → память off + лог.
+- **`similarity_threshold`** — порог косинусной близости для кластеров тем и
+  графа похожести (`memory_stats_detail` / отчёт), default `0.7`, диапазон
+  `[0, 1]`; вне диапазона → память off + лог.
+- **`report.include_text`** — `false` (default): HTML-отчёт `@maestro-memory-report`
+  содержит **только агрегаты** (SEC-4b); `true` — осознанный opt-in на вставку
+  замаскированных заголовков/summary (документированное понижение).
+
+Правила вывода (для `/maestro-new` и консультаций):
+
+- Секция `memory` добавляется в `maestro.json` **только** если: (а) пользователь
+  явно запросил память, или (б) существует маркер
+  `<data-dir>/maestro/memory/enabled.flag` (поставлен `maestro-install.sh`).
+  Без этого — секцию НЕ добавлять (никакого silent opt-in).
+- При добавлении — минимальный канон `{ "enabled": true }` (все остальные ключи
+  — дефолты); расширять только по запросу HITL (бэкенд, namespace, identity_env,
+  модели, retention_days, report).
+- `branch_context`/`mainline` — только по запросу HITL (branch-aware дефолты
+  включены и без них); squash/rebase-heavy флоу → рекомендация
+  `branch_context: false`.
+- `identity_env` — имя env-переменной (напр. `MAESTRO_MEMORY_IDENTITY`), не
+  значение; `identity` — только для сервисных аккаунтов.
+- **Write/boundary-tools → permission `ask` (обязательное правило).** При
+  включении памяти v2 в merge-config (`.opencode/opencode.json` или global)
+  добавляется нативное правило `permission: { memory_forget: "ask",
+  memory_export: "ask", memory_import: "ask" }` (opencode default для новых
+  тулов — allow, поэтому правило обязательно). Канон для будущих тулов: **новые
+  write/boundary-tools → permission `ask`**.
+- После правки `memory` — **OP-1** (перезапуск opencode) + напоминание про
+  `npm install` в `module_dir` при первом включении.
 
 ## Канон нативных permissions OpenCode (R6)
 

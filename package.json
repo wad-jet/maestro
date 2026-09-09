@@ -1,6 +1,6 @@
 {
   "name": "maestro",
-  "version": "2.5.0",
+  "version": "3.0.0",
   "description": "Maestro skill system for OpenCode: skills, commands, agents and the maestro-bootstrap plugin",
   "type": "module",
   "main": "./plugins/maestro-bootstrap/index.js",
@@ -10,6 +10,13 @@
     "url": "https://github.com/wad-jet/maestro.git"
   },
   "scripts": {
-    "test": "node --test plugins/maestro-bootstrap/index.test.js"
+    "test": "node --test plugins/maestro-bootstrap/index.test.js",
+    "test:memory": "node --test 'plugins/maestro-bootstrap/memory/**/*.test.js'"
+  },
+  "devDependencies": {
+    "@huggingface/transformers": "^3.0.0",
+    "@qdrant/js-client-rest": "^1.9.0",
+    "better-sqlite3": "^11.5.0",
+    "pg": "^8.13.0"
   }
 }

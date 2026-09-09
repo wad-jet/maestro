@@ -32,6 +32,8 @@ primary-сессии.
 - [Обновление maestro](how-to/update-maestro.md) — доставка новой версии скиллов и плагина, контроль версии
 - [Поддержание документации в актуальном состоянии](how-to/keep-docs-up-to-date.md)
 - [Подбор моделей для агентов](how-to/choose-models.md) — критерии (скорость/качество/стоимость), локальные vs внешние
+- [Как включить память maestro](how-to/enable-memory.md) — опциональный memory layer (sqlite/qdrant/pgvector)
+- [Выбор и замена модели эмбеддингов](how-to/choose-embedding-model.md) — критерии, рекомендуемые модели, настройка, переиндексация (пошагово), командный сценарий, чек-лист ошибок, проверка
 
 ## Reference (справочник)
 
@@ -40,6 +42,7 @@ primary-сессии.
 - [Выбор моделей](reference/model-selection.md) — tier и субагенты
 - [Команды](reference/commands.md) — доступные `@command`
 - [Конфигурация](reference/config.md) — maestro.json, .opencode/opencode.json, env vars
+- [Память maestro](reference/memory.md) — memory layer: конфиг, бэкенды, memory_search, данные
 
 ## Explanation (пояснения)
 

@@ -364,6 +364,135 @@ deny. Trust не наследуется вложенными субагента�
 "extra_uri_schemes": ["kafka", "custom-proto", "zookeeper"]
 ```
 
+### Секция `memory` (опциональный memory layer)
+
+Векторная память сессий плагина `maestro-bootstrap`: авто-саммаризация,
+`memory_search`, авто-вспоминание. **Опциональный модуль** — не входит в
+стандартную установку; включается явно. **Default:** секции нет **или**
+`enabled: false` → память полностью выключена (хуки не регистрируются,
+зависимости не загружаются, LLM-вызовов нет).
+
+```json
+{
+  "memory": {
+    "enabled": true,
+    "auto_recall": true,
+    "embedding_model": "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
+    "summarizer_model": null,
+    "identity": null,
+    "identity_env": null,
+    "namespace": null,
+    "module_dir": null,
+    "idle_debounce_min": 10,
+    "min_new_messages": 3,
+    "backfill_window_days": 30,
+    "backfill_max_per_start": 5,
+    "retry_interval_min": 60,
+    "top_k": 3,
+    "min_score": 0.35,
+    "similarity_threshold": 0.7,
+    "retention_days": null,
+    "summarize_timeout_ms": 120000,
+    "report": { "include_text": false },
+    "embedding": {
+      "provider": "local",
+      "model": null,
+      "base_url": "https://api.openai.com/v1",
+      "api_key_env": null,
+      "dim": null
+    },
+    "probe_cooldown_min": 30,
+    "storage": {
+      "type": "sqlite",
+      "qdrant": { "url": "https://qdrant.internal:6333", "api_key_env": "MAESTRO_MEMORY_QDRANT_KEY", "collection": "maestro_memory" },
+      "pgvector": { "connection_string_env": "MAESTRO_MEMORY_PG_DSN", "table": "maestro_memory" }
+    }
+  }
+}
+```
+
+| Ключ | Тип | Дефолт | Описание |
+|---|---|---|---|
+| `enabled` | `boolean` | `false` | Включает память. Нет секции / `false` → полностью off |
+| `auto_recall` | `boolean` | `true` | Авто-вспоминание: первое сообщение top-level primary сессии → блок контекста в system prompt |
+| `embedding_model` | `string` | `Xenova/paraphrase-multilingual-MiniLM-L12-v2` | **Legacy-алиас** для `embedding.model` (только при `provider: local`). Модель эмбеддингов (transformers.js, dim 384, RU+EN, q8 ~120 МБ, кэш локально). Для `openai` `model` берётся строго из `embedding.model` |
+| `embedding.provider` | `string` | `local` | Провайдер эмбеддингов: `local` (default) \| `openai` (внешний OpenAI-совместимый `/embeddings` API, осознанный opt-in) |
+| `embedding.model` | `string` \| `null` | `null` | local: имя ONNX-модели (fallback на `embedding_model`); openai: id модели API (**обязателен** для `openai`) |
+| `embedding.base_url` | `string` | `https://api.openai.com/v1` | Базовый URL OpenAI-совместимого API; trailing-slash нормализуется |
+| `embedding.api_key_env` | `string` \| `null` | `null` | **Имя env-переменной** с API-ключом (никогда plaintext); **обязателен** для `openai` |
+| `embedding.dim` | `number` \| `null` | `null` | Размерность векторов; **обязателен** для `openai` (нативная dim модели, без Matryoshka-усечения); для `local` игнорируется (остаётся 384) |
+| `probe_cooldown_min` | `number` | `30` | Интервал в минутах между live-probe модели на старте (кэш результата в `state.json`); число > 0 |
+| `summarizer_model` | `string` \| `null` | `null` | Модель фонового саммаризатора; `null` → модель саммаризируемой сессии |
+| `identity` | `string` \| `null` | `null` | Явный override identity (напр. сервисный аккаунт) |
+| `identity_env` | `string` \| `null` | `null` | Имя env-переменной с identity (per-machine, не в общем `maestro.json`) |
+| `namespace` | `string` \| `null` | `null` | Переопределяет ключ памяти `key` (monorepo / связанные репозитории) |
+| `module_dir` | `string` \| `null` | `null` | Каталог кода модуля; `null` → `<data-dir>/maestro/memory/module` |
+| `idle_debounce_min` | `number` | `10` | Debounce индексации после `session.idle` (минуты) |
+| `min_new_messages` | `number` | `3` | Мин. новых сообщений с последнего саммари для повторной индексации |
+| `backfill_window_days` | `number` | `30` | Окно backfill при первом включении |
+| `backfill_max_per_start` | `number` | `5` | Cap саммаризаций за один старт плагина |
+| `retry_interval_min` | `number` | `60` | Интервал ретрая упавшей сессии (минуты) |
+| `top_k` | `number` | `3` | Число результатов поиска / авто-вспоминания |
+| `min_score` | `number` | `0.35` | Порог косинусной близости |
+| `similarity_threshold` | `number` | `0.7` | Порог косинусной близости для кластеров тем и графа похожести (`memory_stats_detail` / отчёт); диапазон `[0, 1]` |
+| `retention_days` | `number` \| `null` | `null` | TTL записей: prune при старте (записи старше N дней по `time_last`). `null` — выключено |
+| `summarize_timeout_ms` | `number` | `120000` | Таймаут цепочки «саммаризация → эмбеддинг → запись» |
+| `report.include_text` | `boolean` | `false` | Разрешает вставку замаскированных заголовков/summary в HTML-отчёт `@maestro-memory-report`; `false` — только агрегаты (SEC-4b) |
+| `branch_context` | `boolean` | `true` | Branch-scoped recall (default-on): членство записей по git-истории (тиры general/experience); `false` → flat project recall (дефолтный scope = `project`) |
+| `mainline` | `string` \| `null` | `null` | Основная ветка для промоции; `null` → авто-детект из git (remote HEAD → `init.defaultBranch` → резерв `main`/`master`/`develop`); явный override авторитетен (несуществующее имя → `mainline_unresolved`) |
+| `storage.type` | `string` | `sqlite` | Бэкенд: `sqlite` \| `qdrant` \| `pgvector` |
+| `storage.qdrant.url` | `string` | — | URL Qdrant (обязателен для `type: qdrant`) |
+| `storage.qdrant.api_key_env` | `string` | — | Имя env-переменной с API-ключом (никогда plaintext) |
+| `storage.qdrant.collection` | `string` | `maestro_memory` | Коллекция Qdrant |
+| `storage.pgvector.connection_string_env` | `string` | — | Имя env-переменной с DSN Postgres (обязателен для `type: pgvector`) |
+| `storage.pgvector.table` | `string` | `maestro_memory` | Таблица pgvector |
+| `storage.pgvector.text_search_config` | `string` | `russian` | Postgres text-search конфигурация для гибридного поиска (только при `type: pgvector`). Валидация: `/^[a-z][a-z0-9_]*$/`, ≤63 символа; default `russian` — стеммер; на кастомных PG без `russian`-конфига — fail-loud |
+
+**Валидация:** некорректный `storage.type` / отсутствие URL / нерезолвнутая
+identity для централизованного бэкенда / некорректный `retention_days` /
+`similarity_threshold` вне `[0, 1]` / некорректный `branch_context` (не boolean) /
+некорректный `mainline` (не `null` и не строка `/^[a-zA-Z0-9_\/.-]+$/`, длина
+≤ 100) / некорректный блок `embedding` (не объект; `provider`/`model`/
+`base_url`/`api_key_env` — не строки; `dim` — не целое > 0; для `openai`
+отсутствуют `model`/`api_key_env`/`dim`) / некорректный `probe_cooldown_min`
+(не число > 0) → память off + лог (`disabled_reason`: `storage_type_invalid`,
+`centralized_identity_missing`, `qdrant_config_invalid`,
+`pgvector_config_invalid`, `pgvector_text_search_config_invalid`,
+`retention_days_invalid`, `similarity_threshold_invalid`,
+`branch_context_invalid`, `mainline_invalid`, `embedding_invalid`,
+`probe_cooldown_min_invalid`), сессии работают (fail-soft).
+Централизованные бэкенды требуют identity (`identity` → `identity_env` → git
+`user.name`). Для `embedding.provider: openai` отсутствие
+`process.env[embedding.api_key_env]` → память off
+(`embedding_api_key_env_missing`); стартовый probe hard-fail (ключ/модель/
+размерность) → память off (`embedder_probe_hard_fail`).
+
+#### Permission-правило для write/boundary-tools (обязательное)
+
+`memory_forget` / `memory_export` / `memory_import` — операции, пересекающие
+границу (удаление, запись файла, запись в память). OpenCode по умолчанию
+разрешает новые тулы, поэтому в merge-config (`.opencode/opencode.json` или
+global `~/.config/opencode/opencode.json`) **обязательно** правило:
+
+```json
+{
+  "permission": {
+    "memory_forget": "ask",
+    "memory_export": "ask",
+    "memory_import": "ask"
+  }
+}
+```
+
+Включение памяти v2 без этого правила — документированный обязательный шаг
+(канон — в скилле `maestro-assistant`). Правило для будущих write/boundary-tools:
+**новые write/boundary-tools → permission `ask`**.
+
+> Полный справочник (бэкенды, изоляция key/namespace/identity, `memory_search`,
+> индексация, расположение данных, ESM-контракт) — в
+> [Память maestro (reference)](memory.md). Включение — в
+> [Как включить память](../how-to/enable-memory.md).
+
 ## 📄 opencode.json (`.opencode/opencode.json` или global)
 
 Корневой `opencode.json` в проекте **не используется**. Плагин и модели агентов
@@ -611,6 +740,35 @@ MAESTRO_BOOTSTRAP_LOG_DIR="/var/log/maestro"
 
 По умолчанию: `<project>/.maestro/logs`. Логи разбиваются по дням:
 `.maestro/logs/maestro-bootstrap-2026-08-01.log`.
+
+### `MAESTRO_MEMORY_LOG_LEVEL`
+
+Порог детализации **аудит-лога memory layer** (`.maestro/logs/maestro-memory-<дата>.log`).
+Пишутся уровни `>=` заданного; default `info`:
+
+| Значение | Что логируется |
+|---|---|
+| `debug` | Всё: debug, info, warn, error (включая перф-события) |
+| `info` | info, warn, error (по умолчанию) |
+| `warn` | warn, error |
+| `error` | Только error |
+
+### `MAESTRO_MEMORY_LOG_MASK`
+
+Явный список включённых уровней через запятую (как у bootstrap-лога): запись
+пишется при **пересечении** двух условий — уровень входит в маску И не ниже
+порога `MAESTRO_MEMORY_LOG_LEVEL`. Если не задана — выводится из порога.
+
+### `MAESTRO_MEMORY_LOG_DIR`
+
+Каталог для аудит-лога memory layer:
+
+```bash
+MAESTRO_MEMORY_LOG_DIR="/var/log/maestro"
+```
+
+По умолчанию — каталог bootstrap-лога (`<project>/.maestro/logs`). Логи
+разбиваются по дням: `.maestro/logs/maestro-memory-2026-09-08.log`.
 
 ## 📁 Файлы, создаваемые / используемые pipeline
 

@@ -92,6 +92,21 @@ primary-сессия при чтении того же файла получае
 правилам работы maestro. Плагин-гейт не требуется. Если запрос требует изменения кода/spec/плана
 или запуска pipeline — редирект на `@maestro-init`/`/maestro-design`/`@regression`.
 
+### `@maestro-memory`
+
+Статус memory layer плагина `maestro-bootstrap`: бэкенд, модель, активный `key`,
+число записей (по авторам и датам), кластеры/граф, подсказки по тюнингу
+(`top_k`, `min_score`, `retention_days`). Данные — из `memory_stats_detail` +
+чтение `maestro.json`. Только агрегаты (SEC-4b). Подробнее —
+[Память](../reference/memory.md).
+
+### `@maestro-memory-report`
+
+Генерация самодостаточного статического HTML-отчёта по memory layer
+(агрегаты, timeline-гистограмма, кластеры, граф; SEC-4b) в
+`.maestro/memory-report-<YYYYMMDD-HHMMSS>.html`. Подробнее —
+[Память](../reference/memory.md).
+
 ## 💡 Примечания
 
 - Все HITL-вопросы и сообщения пользователю — только на русском.

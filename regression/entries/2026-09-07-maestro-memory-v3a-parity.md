@@ -1,0 +1,25 @@
+# Regression — maestro-memory-v3a backend parity
+
+- **version:** 1
+- **feature:** memory layer v3a — backend parity (hybrid text search + cross-project on all backends)
+- **added:** 2026-09-07
+- **status:** active
+- **risk:** MEDIUM
+- **category:** memory plugin
+- **scenarios:**
+  - **sqlite hybrid + cross-project** (`plugins/maestro-bootstrap/memory/storage/sqlite.js`):
+    - run: `node --test plugins/maestro-bootstrap/memory/storage.test.js`
+    - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent`
+  - **qdrant hybrid** (`plugins/maestro-bootstrap/memory/storage/qdrant.js`):
+    - run: `node --test plugins/maestro-bootstrap/memory/storage/qdrant.test.js`
+    - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent`
+  - **pgvector hybrid** (`plugins/maestro-bootstrap/memory/storage/pgvector.js`):
+    - run: `node --test plugins/maestro-bootstrap/memory/storage/pgvector.test.js`
+    - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent`
+  - **config validation** (`plugins/maestro-bootstrap/memory/config.js`):
+    - run: `node --test plugins/maestro-bootstrap/memory/config.test.js`
+    - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent`
+  - **полный прогон памяти:**
+    - run: `npm run test:memory`
+    - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent`
+  - **[Manual] Sandbox E2E F9–F11 (Bun/opencode, реальные бэкенды):** pgvector hybrid, qdrant hybrid, sqlite cross-project read-only (`docs/testing/maestro-sandbox-checklist.md`)

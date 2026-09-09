@@ -35,6 +35,27 @@
 - **Инструменты:** git, `agpack` (доставка скиллов/команд/агентов в `.opencode/`),
   bash (скрипты `maestro-install.sh`, `maestro-sandbox.sh`).
 - **Менеджер:** npm (только для плагина, `package.json`).
+- **Текущая версия дистрибутива:** `3.0.0` (корневой `package.json → version`; единая
+  для скиллов и плагина, см. `manual_docs/how-to/update-maestro.md`).
+- **Memory layer:** опциональный модуль плагина (векторная память сессий); НЕ часть
+  стандартной установки, включается по запросу (секция `memory` в `maestro.json`;
+  см. `manual_docs/reference/memory.md`). **Статус: beta** — API/схема записей/конфиг
+  могут меняться без обратной совместимости, данные не гарантируют миграцию.
+  v2: гибридный FTS5-поиск, инструменты
+  управления (`memory_forget`/`memory_export`/`memory_import`/`memory_recall_preview`/
+  `memory_stats_detail`), команды `@maestro-memory`/`@maestro-memory-report`. v3a:
+  **паритет бэкендов** — гибридный текстовый поиск (pg: tsvector+ts_rank, qdrant:
+  payload full-text) и кросс-проектный поиск (sqlite: read-only соседние БД) на всех
+  трёх бэкендах; ключ `storage.pgvector.text_search_config` (default `russian`). v3:
+  **branch-aware memory** — идентичность записи по коммиту (`head`), commit-scoped
+  recall (general/experience/не в контексте), промоция по `is-ancestor(head, mainline)`,
+  mainline авто-детект из git, ключи `branch_context`/`mainline`; **`centralized_confidential`
+  удалён** (решение локально/удалённо — только `storage.type`). **v4 (external
+  embeddings):** опциональный внешний OpenAI-совместимый embedder
+  (`memory.embedding.provider: "openai"`), probe доступности модели (старт+cooldown+
+  on-demand `memory_probe`), маскирование recall-запросов. **v4 (audit log):**
+  отдельный аудит-лог memory layer (`.maestro/logs/maestro-memory-<дата>.log`,
+  aggregates-only field whitelist, env `MAESTRO_MEMORY_LOG_LEVEL/_MASK/_DIR`).
 
 ## 4. Архитектура
 
@@ -57,6 +78,18 @@
 ## 5. Домены / модули
 
 - `plugins/maestro-bootstrap/` — логика плагина (core.js, index.js, тесты).
+- `plugins/maestro-bootstrap/memory/` — **опциональный** модуль памяти сессий
+  (векторное хранилище sqlite/qdrant/pgvector, эмбеддинги, саммаризатор, recall,
+  гибридный FTS5-поиск, инструменты `memory_search`/`memory_forget`/
+  `memory_export`/`memory_import`/`memory_recall_preview`/`memory_stats_detail`/
+  `memory_probe`);
+  **branch-aware (v3):** идентичность записи по коммиту (`head`), commit-scoped
+  recall (тиры general/experience/не в контексте/unattributed), промоция по
+  `is-ancestor(head, mainline)`, mainline авто-детект, ключи
+  `branch_context`/`mainline`; **`centralized_confidential` удалён** (решение
+  локально/удалённо — только `storage.type`); не часть стандартной установки,
+  включается по запросу (секция `memory` в `maestro.json`; см.
+  `manual_docs/reference/memory.md`).
 - `skills/` — скилл-спеки и поддерживающие промпты/схемы.
 - `agents/` + `commands/` — определения субагентов и точек входа.
 - `docs/` — project-context, тестовая документация (testing/), каталоги пайплайна
@@ -107,7 +140,7 @@
 ## 10. Тестирование
 
 - **Unit (плагин):** встроенный Node test runner — `node --test
-  plugins/maestro-bootstrap/index.test.js` (173 теста).
+  plugins/maestro-bootstrap/index.test.js` (174 теста).
 - **QA-чеклист (e2e-смоук):** `./maestro-sandbox.sh` создаёт `.sandbox/` (фиктивное
   целевое приложение), чеклист `docs/testing/maestro-sandbox-checklist.md`.
 - Команды тестирования зафиксированы в §14.
@@ -129,6 +162,12 @@
 - **Секреты:** `.env`, `*.env.*`, `*.{pem,key,cert,secret}` — deny (built-in + config).
 - **Санитайзинг:** маскировка чувствительных данных перед untrusted-диспатчем
   (`sanitizer_whitelist`).
+- **Память (memory layer):** маскирование `sanitize()` до и после саммаризации —
+  жёсткий инвариант: raw-confidential и секреты не уходят на сервер
+  (санизированное не блокируется); решение локально/удалённо — только
+  `storage.type` (`centralized_confidential` удалён); риск unmasked git-метаданных
+  (`branch`/`head`/`merged`) на централизованном бэкенде (правила — `SECURITY.md`
+  §5a и `manual_docs/explanation/agents-and-trust.md`).
 - Источник истины — `SECURITY.md` (требования P1–P5).
 
 ## 13. Мониторинг и observability
@@ -148,3 +187,7 @@ E2E_COMMAND: "./maestro-sandbox.sh"
 LINT_COMMAND: "none"
 DOCS_COVERAGE_COMMAND: "none"
 OBSERVABILITY_COVERAGE_COMMAND: "none"
+
+### Команды памяти (memory layer v2)
+- `@maestro-memory` — статус memory layer (бэкенд, модель, записи, кластеры/граф, тюнинг; только агрегаты).
+- `@maestro-memory-report` — статический HTML-отчёт в `.maestro/` (только агрегаты, SEC-4b; `report.include_text` — opt-in).
