@@ -51,12 +51,17 @@ export function resolveProjectKey(project) {
  * Legacy key resolver for migration (spec §3.6): URL/scp → hash, 64-hex → as-is,
  * namespace → passthrough. Used by migrate to convert old-format keys to
  * namespace-only form.
+ *
+ * Remote-детекция зеркалит canonicalizeRemote: remote — это строка с "://"
+ * (URL) ИЛИ с ":" (scp-синтаксис, включая `gitlab.example.com:group/repo.git`
+ * без user@). Namespace-формат (namespaceValid) никогда не содержит ":" —
+ * поэтому `s.includes(":")` безопасно отличает scp-remote от namespace.
  * @param {string} v
  * @returns {string} resolved legacy key
  */
 export function legacyKey(v) {
   const s = String(v).trim();
-  if (s.includes("://") || s.startsWith("git@")) return projectHashFromRemote(s);
+  if (s.includes("://") || s.includes(":")) return projectHashFromRemote(s);
   if (/^[0-9a-f]{64}$/i.test(s)) return s;
   return s;
 }

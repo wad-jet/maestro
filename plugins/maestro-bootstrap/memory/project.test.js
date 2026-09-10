@@ -55,6 +55,19 @@ test("legacyKey resolves URL→hash, hash as-is, namespace passthrough", () => {
   assert.equal(legacyKey("microservices.sales"), "microservices.sales");
 });
 
+test("legacyKey resolves scp-remote without user (gitlab.example.com:group/repo.git) → hash", () => {
+  // I2 (review): scp-синтаксис без user@ (gitlab.example.com:group/repo.git)
+  // раньше падал в namespace-passthrough → migrate уходил в несуществующий
+  // бакет. Детекция зеркалит canonicalizeRemote: ":" → remote.
+  const remote = "gitlab.example.com:group/repo.git";
+  assert.equal(legacyKey(remote), projectHashFromRemote(remote));
+  assert.match(legacyKey(remote), /^[0-9a-f]{64}$/);
+  // scp с user@ тоже remote (регрессия прежнего поведения).
+  assert.equal(legacyKey("git@github.com:org/api.git"), projectHashFromRemote("git@github.com:org/api.git"));
+  // namespace без ":" — passthrough (не сломан).
+  assert.equal(legacyKey("microservices.sales"), "microservices.sales");
+});
+
 test("resolveSearchKeys: own + related (own excluded, dedup, normalized)", () => {
   const keys = resolveSearchKeys({ key: "a.b.c", related: ["a.b", "a.b.c", "MyApp", "a.b"] });
   assert.deepEqual(keys, ["a.b.c", "a.b", "myapp"]);

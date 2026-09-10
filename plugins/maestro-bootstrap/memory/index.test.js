@@ -7,7 +7,7 @@ import { fileURLToPath } from "node:url";
 import { registerMemoryHooks } from "./index.js";
 import { getGitConfig, makeLogger } from "../core.js";
 import { sanitizeDirName } from "./config.js";
-import { projectHashFromDir } from "./project.js";
+import { projectHashFromDir, projectHashFromRemote } from "./project.js";
 import { SESSIONS } from "./summarize.js";
 
 const silentLog = { debug() {}, info() {}, warn() {}, error() {} };
@@ -3743,6 +3743,133 @@ test("memory_prune marks foreign-origin records and excludes them from category 
     assert.equal(seen.length, 1, "only local-origin dead record deleted");
     assert.equal(seen[0].session_id, "local", "foreign-origin record excluded from batch-all");
     assert.match(delRes, /Удалено 1 записей \(1 session_id\)/, "must report count");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── Final review fixes: C1 (Indexer wiring), I1 (preview merged filter), I2 (legacyKey scp) ──
+
+test("C1: indexing pass stamps origin_remote (from git remote) + prefixes (from namespace)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-c1-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    // Mock git config: remote.origin.url → provenance-штамп в записи. Кэш
+    // getGitConfig (module-level, per root) переиспользуется registerMemoryHooks.
+    getGitConfig(dir, () => "user.name=alice\nremote.origin.url=https://github.com/foo/bar.git\n");
+
+    const client = {
+      session: {
+        list: async () => ({ data: [{ id: "s1", parentID: null, title: "T", time: { created: 1, updated: Date.now() - 1000 } }] }),
+        get: async () => ({ data: { id: "s1", parentID: null, title: "T", time: { created: 1, updated: Date.now() - 1000 } } }),
+        messages: async () => ({ data: [
+          { info: { role: "user" }, parts: [{ type: "text", text: "hello" }] },
+          { info: { role: "assistant", providerID: "openai", modelID: "gpt-4o" }, parts: [{ type: "text", text: "hi" }] },
+        ] }),
+        create: async () => ({ data: { id: "summ-1" } }),
+        prompt: async () => ({ data: { parts: [{ type: "text", text: '{"title":"T","summary":"S","decisions":["d"]}' }] } }),
+        delete: async () => ({ data: {} }),
+      },
+    };
+
+    const storage = await mkSqliteStorage(dir);
+    const hooks = await registerMemoryHooks({
+      client,
+      config: mkConfig(dir, { namespace: "a.b.c", idle_debounce_min: 0, backfill_max_per_start: 5 }),
+      log: silentLog,
+      root: dir,
+      deps: {
+        storage,
+        embeddings: mkMockEmbeddings(),
+        // resolveHead — write-gate индексатора (иначе index_unattributed).
+        git: { resolveHead: async () => "a".repeat(40), detectMainline: () => ({ name: "main" }), revList: () => new Set() },
+      },
+    });
+
+    // Ждём backfill (debounce 0) → summarize → upsert.
+    await new Promise((r) => setTimeout(r, 300));
+
+    const rows = await storage.scan({ key: "a.b.c", fields: ["session_id", "key", "origin_remote", "prefixes"] });
+    assert.equal(rows.length, 1, "indexing pass must write the record");
+    assert.equal(rows[0].key, "a.b.c", "record key = effectiveKey (namespace)");
+    assert.equal(rows[0].origin_remote, "github.com/foo/bar", "origin_remote must be canonicalized from git remote");
+    assert.deepEqual(rows[0].prefixes, ["a", "a.b"], "prefixes must be derived from namespace a.b.c");
+
+    await hooks.dispose?.();
+    await storage.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("I1: memory_recall_preview keeps merged=1 sibling hits (mainline resolved)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-prev-merged-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.candidates = async () => [{ session_id: "a", merged: 1, head: "" }];
+    storage.search = async function (vec, opts) {
+      this.searches++;
+      return [
+        { entry: { session_id: "a", title: "A", summary: "SA", decisions: [], author: "alice", time_last: 1, origin_project_hash: "h", merged: 1 }, score: 0.9 },
+        // sibling-хит (merged=1 по построению) — НЕ в own-key кандидатах.
+        { entry: { session_id: "o1", title: "O", summary: "SO", decisions: [], author: "bob", time_last: 2, origin_project_hash: "ho", merged: 1 }, score: 0.8 },
+      ];
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git: mkScopeGit() },
+    });
+    const res = await hooks.tool.memory_recall_preview.execute({ query: "x" }, { sessionID: "s1" });
+    assert.match(res, /# A/, "own-key candidate returned");
+    assert.match(res, /# O/, "merged=1 sibling hit must survive the preview filter");
+    assert.match(res, /этого проекта и связанных доменов/, "preview header must mention related domains (parity with recall)");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("I2: memory_migrate from:auto resolves scp-remote without user (gitlab.example.com:group/repo.git)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-migrate-scp-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    // Mock git config: scp-remote без user@ (gitlab.example.com:group/repo.git).
+    getGitConfig(dir, () => "user.name=alice\nremote.origin.url=gitlab.example.com:group/repo.git\n");
+
+    const storage = mkMockStorage();
+    const seen = [];
+    storage.migrateKey = async function (from, to, opts) { seen.push({ from, to, opts }); return 5; };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    const res = await hooks.tool.memory_migrate.execute({ from: "auto" }, { sessionID: "s1" });
+    assert.match(res, /Перенесено 5 записей/);
+    assert.equal(seen.length, 1, "migrateKey must be called");
+    assert.equal(
+      seen[0].from,
+      projectHashFromRemote("gitlab.example.com:group/repo.git"),
+      "scp-no-user remote must resolve to the legacy bucket hash (canonicalizeRemote)",
+    );
+    assert.match(seen[0].from, /^[0-9a-f]{64}$/);
+    assert.equal(seen[0].to, "test.ns");
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
