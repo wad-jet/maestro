@@ -117,14 +117,14 @@ test("indexer skips subagent sessions (parentID present)", async () => {
   idx.dispose();
 });
 
-test("indexer deletes on session deleted", async () => {
+test("indexer deletes on session deleted when delete_on_session_delete flag ON", async () => {
   let deletedId = null;
   const storage = {
     upsert: async () => {}, search: async () => [],
     delete: async (sid) => { deletedId = sid; }, stats: async () => ({ entries: 0 }),
   };
   const idx = new Indexer({
-    client: mkClient(), config: mkConfig(),
+    client: mkClient(), config: mkConfig({ delete_on_session_delete: true }),
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(),
     summarize: async () => ({}),
@@ -132,6 +132,24 @@ test("indexer deletes on session deleted", async () => {
   });
   await idx.onSessionDeleted({ sessionID: "s1" });
   assert.equal(deletedId, "s1");
+  idx.dispose();
+});
+
+test("indexer keeps record on session deleted by default (flag OFF)", async () => {
+  const client = mkClient();
+  const storage = mkStorage(client);
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+  });
+  await idx._run("s1");
+  assert.equal(client.upserts.length, 1, "record upserted first");
+  await idx.onSessionDeleted({ sessionID: "s1" });
+  assert.ok(await storage.get("s1"), "record survives session.deleted by default");
   idx.dispose();
 });
 
@@ -899,7 +917,7 @@ test("indexer logs index_retryable on retryable error (error_class enum)", async
   idx.dispose();
 });
 
-test("indexer logs session_deleted on onSessionDeleted", async () => {
+test("indexer logs session_closed on onSessionDeleted by default (flag OFF)", async () => {
   const cap = captureLog();
   const idx = new Indexer({
     client: mkClient(), config: mkConfig(),
@@ -910,7 +928,93 @@ test("indexer logs session_deleted on onSessionDeleted", async () => {
     logInfo: cap.log.info, logDebug: cap.log.debug, logWarn: cap.log.warn, logError: cap.log.error,
   });
   await idx.onSessionDeleted({ sessionID: "s1" });
+  assert.ok(cap.calls.some(([lvl, m]) => lvl === "info" && m === "memory:session_closed"));
+  assert.ok(!cap.calls.some(([lvl, m]) => m === "memory:session_deleted"), "no session_deleted when flag OFF");
+  idx.dispose();
+});
+
+test("indexer logs session_deleted on onSessionDeleted when flag ON (success path)", async () => {
+  const cap = captureLog();
+  const idx = new Indexer({
+    client: mkClient(), config: mkConfig({ delete_on_session_delete: true }),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(null), state: mkState(),
+    summarize: async () => ({}),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    logInfo: cap.log.info, logDebug: cap.log.debug, logWarn: cap.log.warn, logError: cap.log.error,
+  });
+  await idx.onSessionDeleted({ sessionID: "s1" });
   assert.ok(cap.calls.some(([lvl, m]) => lvl === "info" && m === "memory:session_deleted"));
+  idx.dispose();
+});
+
+test("indexer logs session_delete_failed (not session_deleted) when storage.delete throws (flag ON)", async () => {
+  const cap = captureLog();
+  const storage = {
+    upsert: async () => {}, search: async () => [],
+    delete: async () => { throw new Error("db down"); }, stats: async () => ({ entries: 0 }),
+  };
+  const idx = new Indexer({
+    client: mkClient(), config: mkConfig({ delete_on_session_delete: true }),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({}),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    logInfo: cap.log.info, logDebug: cap.log.debug, logWarn: cap.log.warn, logError: cap.log.error,
+  });
+  await idx.onSessionDeleted({ sessionID: "s1" });
+  assert.ok(cap.calls.some(([lvl, m]) => lvl === "error" && m === "memory:session_delete_failed"), "session_delete_failed logged");
+  assert.ok(!cap.calls.some(([lvl, m]) => m === "memory:session_deleted"), "session_deleted NOT logged on failure");
+  idx.dispose();
+});
+
+// ── Task 5: tombstone race-guard (spec §5) ───────────────────────────
+
+test("tombstone pre-check: tombstoned session does not write a record (spec §5)", async () => {
+  const client = mkClient();
+  const storage = mkStorage(client);
+  const idx = new Indexer({
+    client, config: mkConfig({ delete_on_session_delete: true }),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+  });
+  idx._tombstones.add("s1");
+  await idx._run("s1");
+  assert.equal(client.upserts.length, 0, "no upsert for tombstoned session");
+  assert.equal(await storage.get("s1"), null, "no record written");
+  idx.dispose();
+});
+
+test("tombstone post-upsert recheck deletes resurrected record (spec §5)", async () => {
+  const client = mkClient();
+  const store = new Map();
+  let idx;
+  const storage = {
+    upsert: async (es) => {
+      for (const e of es) store.set(e.session_id, e);
+      if (client) client.upserts.push(es);
+      // simulate session deleted mid-upsert → tombstone set after pre-check
+      idx._tombstones.add("s1");
+    },
+    get: async (sid) => store.get(sid) ?? null,
+    search: async () => [],
+    delete: async (sid) => { store.delete(sid); },
+    stats: async () => ({ entries: 0 }),
+  };
+  idx = new Indexer({
+    client, config: mkConfig({ delete_on_session_delete: true }),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+  });
+  await idx._run("s1");
+  assert.equal(await storage.get("s1"), null, "no resurrected record after tombstone");
+  assert.ok(!idx._tombstones.has("s1"), "tombstone cleared after recheck");
   idx.dispose();
 });
 

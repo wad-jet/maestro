@@ -49,6 +49,10 @@ export class Indexer {
     this.timers = new Map();
     this.running = false;
     this.queue = new Set();
+    // Task 5: tombstones (spec §5) — race-guard для режима флага
+    // delete_on_session_delete: post-upsert recheck удаляет запись, если
+    // сессия была удалена во время индексации (не даём «воскреснуть»).
+    this._tombstones = new Set();
   }
 
   /**
@@ -136,19 +140,25 @@ export class Indexer {
   }
 
   async onSessionDeleted({ sessionID }) {
-    try {
-      await this.storage.delete(sessionID);
-    } catch {
-      // best-effort
-    }
-    // M2: clear pending timer for deleted session
+    // Runtime-очистка ВСЕГДА (spec §3.2): таймер, очередь, sticky, state.
     const t = this.timers.get(sessionID);
     if (t) { clearTimeout(t); this.timers.delete(sessionID); }
-    // M-a: clear sticky branch/head context so a re-summarize of the same
-    // session re-resolves branch/head (no stale state after deletion).
+    this.queue.delete(sessionID);
     this._branchContext.delete(sessionID);
-    // Task 3: lifecycle-аудит удаления (spec §4.1 memory:session_deleted).
-    this.logInfo?.("memory:session_deleted", { sessionID });
+    try { await this.state.delete?.(sessionID); } catch {}
+    // Race-guard (spec §5): tombstone для режима флага — post-upsert recheck.
+    if (this.config.delete_on_session_delete) {
+      this._tombstones.add(sessionID);
+      try {
+        await this.storage.delete(sessionID);
+        this.logInfo?.("memory:session_deleted", { sessionID });
+      } catch {
+        // Audit-integrity: событие только по факту успеха (spec §5/§7).
+        this.logError?.("memory:session_delete_failed", { sessionID });
+      }
+    } else {
+      this.logInfo?.("memory:session_closed", { sessionID });
+    }
   }
 
   async _run(sessionID) {
@@ -284,7 +294,18 @@ export class Indexer {
           maskedEntry.merged = effBranch && this.mainline && effBranch === this.mainline ? 1 : 0;
         }
 
+        // Task 5: tombstone race-guard (spec §5) — pre-check перед upsert:
+        // если сессия удалена во время summarize, не пишем запись вовсе.
+        if (this._tombstones.has(sessionID)) return;
         await this.storage.upsert([maskedEntry]);
+        // Task 5: post-upsert recheck — сессия могла быть удалена между
+        // pre-check и upsert; тогда удаляем только что записанную запись
+        // (не даём «воскреснуть» удалённой сессии).
+        if (this._tombstones.has(sessionID)) {
+          try { await this.storage.delete(sessionID); } catch {}
+          this._tombstones.delete(sessionID);
+          return;
+        }
         await this.state.setSummarized(sessionID);
         // Task 3: lifecycle-аудит (spec §4.1) — indexed при первой записи,
         // reindexed при пере-саммаризации повторно посещённой сессии
@@ -337,5 +358,6 @@ export class Indexer {
     this.timers.clear();
     this._branchContext.clear();
     this._fails.clear();
+    this._tombstones.clear();
   }
 }

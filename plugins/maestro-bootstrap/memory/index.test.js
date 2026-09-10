@@ -177,7 +177,7 @@ test("I8: sqlite db stored per-key under dataDir", async () => {
 
 // ── event dispatch ─────────────────────────────────────────────────────
 
-test("event dispatches session.deleted to storage.delete", async () => {
+test("event session.deleted keeps the memory entry by default (flag OFF)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mem-hooks-"));
   const saved = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = dir;
@@ -198,7 +198,37 @@ test("event dispatches session.deleted to storage.delete", async () => {
     const db2 = new Database(dbPath);
     const row = db2.prepare("SELECT * FROM memory WHERE session_id = ?").get("victim");
     db2.close();
-    assert.equal(row, undefined, "session.deleted must remove the memory entry");
+    assert.ok(row, "session.deleted keeps the memory entry by default (delete_on_session_delete=false)");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("event session.deleted removes the memory entry when delete_on_session_delete flag ON", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-hooks-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const hooks = await registerMemoryHooks({ client: mkClient(), config: mkConfig(dir, { delete_on_session_delete: true }), log: silentLog, root: dir, deps: { embeddings: mkMockEmbeddings() } });
+    const dbPath = dbPathFor(dir, dir);
+    const { default: Database } = await import("better-sqlite3");
+    const db = new Database(dbPath);
+    db.prepare(
+      `INSERT INTO memory (session_id, key, origin_project_hash, title, summary, decisions, embedding, model_id, author, time_first, time_last, version)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+    ).run("victim", "k", "h", "t", "s", "[]", Buffer.from(new Float32Array([0.1, 0.2, 0.3]).buffer), "x", "a", 1, 2, 0);
+    db.close();
+
+    await hooks.event({ event: { type: "session.idle", properties: { sessionID: "victim" } } });
+    await hooks.event({ event: { type: "session.deleted", properties: { sessionID: "victim" } } });
+
+    const db2 = new Database(dbPath);
+    const row = db2.prepare("SELECT * FROM memory WHERE session_id = ?").get("victim");
+    db2.close();
+    assert.equal(row, undefined, "session.deleted removes the memory entry when flag ON");
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
