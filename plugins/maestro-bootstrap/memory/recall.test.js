@@ -229,3 +229,73 @@ test("recall no_hits logs reason enum", async () => {
   await r.onChatMessage({ sessionID: "s1", text: "hi" });
   assert.ok(calls.some(([m, e]) => m === "memory:search.no_hits" && (e.reason === "min_score" || e.reason === "no_candidates")));
 });
+
+// ── Task 7: мульти-ноги (domain+related), merged-фильтр, заголовок ──────
+
+test("recall passes subtree legs (domain+related) to search", async () => {
+  let captured = null;
+  const storage = { search: async (emb, o) => { captured = o; return []; } };
+  const r = new Recall({
+    embeddings: { embed: async () => new Float32Array([0.1, 0.2, 0.3]) },
+    storage, topK: 3, minScore: 0.35, key: "project-key",
+    getUserMessageCount: async () => 1,
+    branchContext: false,
+    domainTarget: "a.b", relatedKeys: ["x.y"], domainRecall: true,
+  });
+  await r.onChatMessage({ sessionID: "s1", text: "hello" });
+  assert.deepEqual(captured.subtree, ["a.b", "x.y"], "subtree must carry domain+related legs");
+});
+
+test("domain_recall:false → no domain leg, related remain", async () => {
+  let captured = null;
+  const storage = { search: async (emb, o) => { captured = o; return []; } };
+  const r = new Recall({
+    embeddings: { embed: async () => new Float32Array([0.1, 0.2, 0.3]) },
+    storage, topK: 3, minScore: 0.35, key: "project-key",
+    getUserMessageCount: async () => 1,
+    branchContext: false,
+    domainTarget: "a.b", relatedKeys: ["x.y"], domainRecall: false,
+  });
+  await r.onChatMessage({ sessionID: "s1", text: "hello" });
+  assert.deepEqual(captured.subtree, ["x.y"], "domain leg must be dropped when domain_recall=false");
+});
+
+test("branch filter keeps sibling merged hits", async () => {
+  const storage = {
+    candidates: async () => [
+      { session_id: "a", merged: 1, head: "" },
+    ],
+    search: async () => [
+      { entry: { session_id: "a", merged: 1, title: "A", summary: "SA", decisions: [], author: "a", time_last: 1, origin_project_hash: "k" }, score: 0.9 },
+      { entry: { session_id: "sib", merged: 1, title: "SIB", summary: "SS", decisions: [], author: "a", time_last: 2, origin_project_hash: "k" }, score: 0.8 },
+      { entry: { session_id: "sib0", merged: 0, title: "SIB0", summary: "S0", decisions: [], author: "a", time_last: 3, origin_project_hash: "k" }, score: 0.7 },
+      { entry: { session_id: "other", merged: 0, title: "OTHER", summary: "SO", decisions: [], author: "a", time_last: 4, origin_project_hash: "k" }, score: 0.6 },
+    ],
+  };
+  const r = new Recall({
+    embeddings: { embed: async () => new Float32Array([0.1, 0.2, 0.3]) },
+    storage, topK: 3, minScore: 0.35, key: "project-key",
+    getUserMessageCount: async () => 1,
+    branchContext: true,
+    git: {
+      revList: (root, ref) => (ref === "HEAD" ? new Set(["hb"]) : new Set()),
+      detectMainline: () => ({ name: "main" }),
+    },
+    root: "/tmp/x",
+    domainTarget: "a.b", relatedKeys: ["x.y"], domainRecall: true,
+  });
+  await r.onChatMessage({ sessionID: "s1", text: "hello" });
+  const block = await r.systemBlock({ sessionID: "s1" });
+  assert.ok(block.includes("A"), "in-context own hit must be kept");
+  assert.ok(block.includes("SIB"), "sibling merged=1 hit must survive branch filter");
+  assert.ok(!block.includes("SIB0"), "sibling merged=0 hit must be dropped");
+  assert.ok(!block.includes("OTHER"), "non-candidate own merged=0 hit must be dropped");
+});
+
+test("systemBlock header mentions related domains", async () => {
+  const { embedder, storage } = mkDeps();
+  const r = new Recall({ embeddings: embedder, storage, topK: 3, minScore: 0.35, key: "project-key", getUserMessageCount: async () => 1 });
+  await r.onChatMessage({ sessionID: "s1", text: "hello" });
+  const block = await r.systemBlock({ sessionID: "s1" });
+  assert.ok(block.includes("этого проекта и связанных доменов"), "header must mention related domains");
+});

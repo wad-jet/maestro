@@ -35,7 +35,7 @@
 - **Инструменты:** git, `agpack` (доставка скиллов/команд/агентов в `.opencode/`),
   bash (скрипты `maestro-install.sh`, `maestro-sandbox.sh`).
 - **Менеджер:** npm (только для плагина, `package.json`).
-- **Текущая версия дистрибутива:** `3.1.0` (корневой `package.json → version`; единая
+- **Текущая версия дистрибутива:** `3.2.0` (корневой `package.json → version`; единая
   для скиллов и плагина, см. `manual_docs/how-to/update-maestro.md`).
 - **Memory layer:** опциональный модуль плагина (векторная память сессий); НЕ часть
   стандартной установки, включается по запросу (секция `memory` в `maestro.json`;
@@ -50,7 +50,15 @@
   **branch-aware memory** — идентичность записи по коммиту (`head`), commit-scoped
   recall (general/experience/не в контексте), промоция по `is-ancestor(head, mainline)`,
   mainline авто-детект из git, ключи `branch_context`/`mainline`; **`centralized_confidential`
-  удалён** (решение локально/удалённо — только `storage.type`). **v4 (external
+  удалён** (решение локально/удалённо — только `storage.type`). **v5 (branch-governed
+  lifecycle):** жизненный цикл записей — по git-якорю (head/ветка), а не сессии;
+  `session.deleted` сохраняет запись (флаг `delete_on_session_delete`, default false);
+  write-gate по head (non-git инертны); поле `host`; HITL `/maestro-memory-prune`.
+  **v5.1 (namespace-идентичность):** обязательный валидируемый namespace
+  (формат `a.b.c`, 1–3 сегмента, lowercase) — единственный ключ; домен-авто-related
+  (родитель+братья, merged-only); `related` (кросс-домен, merged-only, 1:1);
+  коллизии (warn-on-new); `memory_migrate` (from:auto); поля `origin_remote`/`prefixes`.
+  **v4 (external
   embeddings):** опциональный внешний OpenAI-совместимый embedder
   (`memory.embedding.provider: "openai"`), probe доступности модели (старт+cooldown+
   on-demand `memory_probe`), маскирование recall-запросов. **v4 (audit log):**
@@ -87,7 +95,9 @@
   recall (тиры general/experience/не в контексте/unattributed), промоция по
   `is-ancestor(head, mainline)`, mainline авто-детект, ключи
   `branch_context`/`mainline`; **`centralized_confidential` удалён** (решение
-  локально/удалённо — только `storage.type`); не часть стандартной установки,
+  локально/удалённо — только `storage.type`); **v5: жизненный цикл по git-якорю,
+  `delete_on_session_delete` (default false), write-gate по head, поле `host`,
+  `/maestro-memory-prune`**; не часть стандартной установки,
   включается по запросу (секция `memory` в `maestro.json`; см.
   `manual_docs/reference/memory.md`).
 - `skills/` — скилл-спеки и поддерживающие промпты/схемы.
@@ -191,3 +201,4 @@ OBSERVABILITY_COVERAGE_COMMAND: "none"
 ### Команды памяти (memory layer v2)
 - `@maestro-memory` — статус memory layer (бэкенд, модель, записи, кластеры/граф, тюнинг; только агрегаты).
 - `@maestro-memory-report` — статический HTML-отчёт в `.maestro/` (только агрегаты, SEC-4b; `report.include_text` — opt-in).
+- `@maestro-memory-prune` — HITL-утилизация брошенных/unknown записей (листинг → подтверждение → удаление).

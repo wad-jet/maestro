@@ -1,6 +1,8 @@
+import { hostname } from "node:os";
 import { maskTranscript, maskEntry } from "./mask.js";
 import { resolveEffectiveKey } from "./config.js";
 import { SESSIONS } from "./summarize.js";
+import { prefixesOf } from "./project.js";
 
 function withTimeout(p, ms) {
   return Promise.race([
@@ -14,7 +16,7 @@ function withTimeout(p, ms) {
 export class Indexer {
   constructor({
     client, config, embeddings, storage, state, summarize,
-    projectKey, confidentialPatterns = [], log = console, author = null,
+    projectKey, key, originRemote = "", confidentialPatterns = [], log = console, author = null,
     git = null, mainline = null, root = null, branchContextCap = 1000,
     // Task 3: аудит-лог-хелперы (spec §2.2) — пишут в memoryLog ?? log;
     // default — заглушки (backward compat: без хелперов события не пишутся).
@@ -27,6 +29,8 @@ export class Indexer {
     this.state = state;
     this.summarize = summarize;
     this.projectKey = projectKey;
+    this.key = key;
+    this.originRemote = originRemote;
     this.confidentialPatterns = confidentialPatterns;
     this.log = log;
     this.logInfo = logInfo;
@@ -48,6 +52,10 @@ export class Indexer {
     this.timers = new Map();
     this.running = false;
     this.queue = new Set();
+    // Task 5: tombstones (spec §5) — race-guard для режима флага
+    // delete_on_session_delete: post-upsert recheck удаляет запись, если
+    // сессия была удалена во время индексации (не даём «воскреснуть»).
+    this._tombstones = new Set();
   }
 
   /**
@@ -69,7 +77,11 @@ export class Indexer {
       try { head = (await this.git.resolveHead(this.root)) ?? ""; } catch { head = ""; }
     }
     const ctx = { branch, head };
-    this._branchContext.set(sessionID, ctx);
+    // Task 4: sticky-фикс (spec §3.3) — не кэшируем резолв с пустым head,
+    // чтобы следующий re-summarize попробовал резолв заново.
+    if (head) {
+      this._branchContext.set(sessionID, ctx);
+    }
     // M-7: bound — FIFO-эвикция старейшего ключа при превышении cap (Map
     // сохраняет порядок вставки; keys().next() — самый старый).
     if (this._branchContext.size > this._branchContextCap) {
@@ -131,19 +143,25 @@ export class Indexer {
   }
 
   async onSessionDeleted({ sessionID }) {
-    try {
-      await this.storage.delete(sessionID);
-    } catch {
-      // best-effort
-    }
-    // M2: clear pending timer for deleted session
+    // Runtime-очистка ВСЕГДА (spec §3.2): таймер, очередь, sticky, state.
     const t = this.timers.get(sessionID);
     if (t) { clearTimeout(t); this.timers.delete(sessionID); }
-    // M-a: clear sticky branch/head context so a re-summarize of the same
-    // session re-resolves branch/head (no stale state after deletion).
+    this.queue.delete(sessionID);
     this._branchContext.delete(sessionID);
-    // Task 3: lifecycle-аудит удаления (spec §4.1 memory:session_deleted).
-    this.logInfo?.("memory:session_deleted", { sessionID });
+    try { await this.state.delete?.(sessionID); } catch {}
+    // Race-guard (spec §5): tombstone для режима флага — post-upsert recheck.
+    if (this.config.delete_on_session_delete) {
+      this._tombstones.add(sessionID);
+      try {
+        await this.storage.delete(sessionID);
+        this.logInfo?.("memory:session_deleted", { sessionID });
+      } catch {
+        // Audit-integrity: событие только по факту успеха (spec §5/§7).
+        this.logError?.("memory:session_delete_failed", { sessionID });
+      }
+    } else {
+      this.logInfo?.("memory:session_closed", { sessionID });
+    }
   }
 
   async _run(sessionID) {
@@ -211,6 +229,18 @@ export class Indexer {
       // so a hanging client.session.prompt cannot hold this.running (the concurrency lock) forever.
       const timeoutMs = this.config.summarize_timeout_ms ?? 120_000;
       const work = (async () => {
+        // Task 4: write-gate (spec §3.3) — resolve branch/head BEFORE summarize;
+        // abort early if no head (unattributed session). Sticky cache + existing
+        // entry preserve previously-resolved head/branch across re-summarizes.
+        const { branch, head } = await this._resolveBranchContext(sessionID);
+        const existing = await this.storage.get(sessionID);
+        const effHead = head || existing?.head || "";
+        if (!effHead) {
+          this.logDebug?.("memory:index_unattributed", { sessionID });
+          return;
+        }
+        const effBranch = branch || existing?.branch || "";
+
         // Summarize inside withTimeout (I1) — if client.session.prompt hangs, timeout releases lock
         const summarizeStart = Date.now();
         const { title, summary, decisions } = await this.summarize({
@@ -228,9 +258,6 @@ export class Indexer {
           model: modelRef?.modelID ?? null,
         });
 
-        // Task 4: sticky branch/head (resolved once per session).
-        const { branch, head } = await this._resolveBranchContext(sessionID);
-
         // Build entry, mask FIRST, then embed masked content (I1: embed after maskEntry)
         const entry = {
           session_id: sessionID,
@@ -245,9 +272,12 @@ export class Indexer {
           time_first: sess?.time?.created ?? 0,
           time_last: sess?.time?.updated ?? 0,
           version: 0,
-          branch,
-          head,
+          branch: effBranch,
+          head: effHead,
           merged: 0,
+          host: hostname(),
+          origin_remote: this.originRemote ?? "",
+          prefixes: prefixesOf(this.key ?? ""),
         };
 
         // G2: re-mask entry before write (defense-in-depth)
@@ -257,8 +287,7 @@ export class Indexer {
         const vec = await this.embeddings.embed(`${maskedEntry.title}\n${maskedEntry.summary}\n${maskedEntry.decisions.join("\n")}`);
         maskedEntry.embedding = vec;
 
-        // G5: version increment via storage.get
-        const existing = await this.storage.get(sessionID);
+        // G5: version increment — reuse `existing` fetched by the write-gate.
         maskedEntry.version = (existing?.version ?? 0) + 1;
 
         // Task 4: merged fast-path — branch === mainline → 1; branch='' or
@@ -267,10 +296,21 @@ export class Indexer {
         if (existing?.merged === 1) {
           maskedEntry.merged = 1;
         } else {
-          maskedEntry.merged = branch && this.mainline && branch === this.mainline ? 1 : 0;
+          maskedEntry.merged = effBranch && this.mainline && effBranch === this.mainline ? 1 : 0;
         }
 
+        // Task 5: tombstone race-guard (spec §5) — pre-check перед upsert:
+        // если сессия удалена во время summarize, не пишем запись вовсе.
+        if (this._tombstones.has(sessionID)) return;
         await this.storage.upsert([maskedEntry]);
+        // Task 5: post-upsert recheck — сессия могла быть удалена между
+        // pre-check и upsert; тогда удаляем только что записанную запись
+        // (не даём «воскреснуть» удалённой сессии).
+        if (this._tombstones.has(sessionID)) {
+          try { await this.storage.delete(sessionID); } catch {}
+          this._tombstones.delete(sessionID);
+          return;
+        }
         await this.state.setSummarized(sessionID);
         // Task 3: lifecycle-аудит (spec §4.1) — indexed при первой записи,
         // reindexed при пере-саммаризации повторно посещённой сессии
@@ -323,5 +363,6 @@ export class Indexer {
     this.timers.clear();
     this._branchContext.clear();
     this._fails.clear();
+    this._tombstones.clear();
   }
 }

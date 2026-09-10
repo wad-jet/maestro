@@ -165,6 +165,13 @@ silent opt-in).
 - **Командная память:** `identity_env` (имя env-переменной) и `namespace`
   (monorepo / связанные репозитории) — по запросу.
 
+- **Namespace (обязательно):** формат `a.b.c` (1–3 сегмента, lowercase, точка-
+  разделитель). Предложить значение из git remote: `org.<repo>` lowercase, пользователь
+  правит. Невалидный/отсутствующий → memory off (disabled_reason: `namespace_missing`).
+- **Related (опционально):** список namespace-prefix целей для кросс-доменной
+  интеграции (merged-only, предпочтение 1:1, ≤16 записей).
+- **Domain recall (опционально):** `true` по умолчанию. `false` = off-switch домен-ног.
+
 Минимальный канон при добавлении: `{ "enabled": true }` (остальные ключи —
 дефолты). После записи — напомнить про `npm install` в `module_dir`
 (`<data-dir>/maestro/memory/module/`) и перезапуск opencode (OP-1).
@@ -172,7 +179,8 @@ silent opt-in).
 При включении памяти в merge-конфиг (`.opencode/opencode.json` или global)
 добавить нативные permission для write/boundary-tools (обязательное правило,
 канон `maestro-assistant`):
-`permission: { memory_forget: "ask", memory_export: "ask", memory_import: "ask" }`
+`permission: { memory_forget: "ask", memory_export: "ask", memory_import: "ask",
+memory_prune: "ask" }`
 (opencode default для новых тулов — allow, поэтому правило обязательно).
 
 Последовательность включения (канон, см. `manual_docs/how-to/enable-memory.md`):

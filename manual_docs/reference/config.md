@@ -381,7 +381,7 @@ deny. Trust не наследуется вложенными субагента�
     "summarizer_model": null,
     "identity": null,
     "identity_env": null,
-    "namespace": null,
+    "namespace": "microservices.sales.pay",
     "module_dir": null,
     "idle_debounce_min": 10,
     "min_new_messages": 3,
@@ -392,6 +392,7 @@ deny. Trust не наследуется вложенными субагента�
     "min_score": 0.35,
     "similarity_threshold": 0.7,
     "retention_days": null,
+    "delete_on_session_delete": false,
     "summarize_timeout_ms": 120000,
     "report": { "include_text": false },
     "embedding": {
@@ -425,7 +426,9 @@ deny. Trust не наследуется вложенными субагента�
 | `summarizer_model` | `string` \| `null` | `null` | Модель фонового саммаризатора; `null` → модель саммаризируемой сессии |
 | `identity` | `string` \| `null` | `null` | Явный override identity (напр. сервисный аккаунт) |
 | `identity_env` | `string` \| `null` | `null` | Имя env-переменной с identity (per-machine, не в общем `maestro.json`) |
-| `namespace` | `string` \| `null` | `null` | Переопределяет ключ памяти `key` (monorepo / связанные репозитории) |
+| `namespace` | `string` | — | **Обязателен** (v5.1). Ключ изоляции памяти; формат `microservices.sales.pay` (1–3 сегмента, lowercase, разделитель `.`); нормализация trim+lowercase. Отсутствует/невалиден → память disabled (`namespace_missing`/`namespace_invalid`) |
+| `related` | `string[]` | `[]` | Кросс-доменные связи: массив namespace-префиксов (≤16), merged-only точечная связь с записями другого домена. Невалиден (не массив / >16 / не namespace-префикс) → память disabled (`related_invalid`) |
+| `domain_recall` | `boolean` | `true` | Авто-related по домену (родитель + братья namespace, merged-only) в recall. `false` — off-switch. Невалиден (не boolean) → память disabled (`domain_recall_invalid`) |
 | `module_dir` | `string` \| `null` | `null` | Каталог кода модуля; `null` → `<data-dir>/maestro/memory/module` |
 | `idle_debounce_min` | `number` | `10` | Debounce индексации после `session.idle` (минуты) |
 | `min_new_messages` | `number` | `3` | Мин. новых сообщений с последнего саммари для повторной индексации |
@@ -439,6 +442,7 @@ deny. Trust не наследуется вложенными субагента�
 | `summarize_timeout_ms` | `number` | `120000` | Таймаут цепочки «саммаризация → эмбеддинг → запись» |
 | `report.include_text` | `boolean` | `false` | Разрешает вставку замаскированных заголовков/summary в HTML-отчёт `@maestro-memory-report`; `false` — только агрегаты (SEC-4b) |
 | `branch_context` | `boolean` | `true` | Branch-scoped recall (default-on): членство записей по git-истории (тиры general/experience); `false` → flat project recall (дефолтный scope = `project`) |
+| `delete_on_session_delete` | `boolean` | `false` | Удалять запись при `session.deleted` (v1-приватность; рекомендуется только для sqlite — на централизованных бэкендах удаляет командное знание) |
 | `mainline` | `string` \| `null` | `null` | Основная ветка для промоции; `null` → авто-детект из git (remote HEAD → `init.defaultBranch` → резерв `main`/`master`/`develop`); явный override авторитетен (несуществующее имя → `mainline_unresolved`) |
 | `storage.type` | `string` | `sqlite` | Бэкенд: `sqlite` \| `qdrant` \| `pgvector` |
 | `storage.qdrant.url` | `string` | — | URL Qdrant (обязателен для `type: qdrant`) |
@@ -460,7 +464,14 @@ identity для централизованного бэкенда / некорр
 `pgvector_config_invalid`, `pgvector_text_search_config_invalid`,
 `retention_days_invalid`, `similarity_threshold_invalid`,
 `branch_context_invalid`, `mainline_invalid`, `embedding_invalid`,
-`probe_cooldown_min_invalid`), сессии работают (fail-soft).
+`probe_cooldown_min_invalid`, `delete_on_session_delete_invalid`,
+`namespace_missing`, `namespace_invalid`, `related_invalid`,
+`domain_recall_invalid`), сессии
+работают (fail-soft).
+Приоритет disabled-причин: `namespace_missing`/`namespace_invalid` — первичны
+(без валидного namespace память не включается независимо от остального
+конфига); `related_invalid`/`domain_recall_invalid` — вторичны (проверяются
+после валидного namespace).
 Централизованные бэкенды требуют identity (`identity` → `identity_env` → git
 `user.name`). Для `embedding.provider: openai` отсутствие
 `process.env[embedding.api_key_env]` → память off
@@ -469,17 +480,20 @@ identity для централизованного бэкенда / некорр
 
 #### Permission-правило для write/boundary-tools (обязательное)
 
-`memory_forget` / `memory_export` / `memory_import` — операции, пересекающие
-границу (удаление, запись файла, запись в память). OpenCode по умолчанию
-разрешает новые тулы, поэтому в merge-config (`.opencode/opencode.json` или
-global `~/.config/opencode/opencode.json`) **обязательно** правило:
+`memory_forget` / `memory_export` / `memory_import` / `memory_migrate` /
+`memory_prune` — операции, пересекающие границу (удаление, запись файла, запись
+в память, пере-keying). OpenCode по умолчанию разрешает новые тулы, поэтому в
+merge-config (`.opencode/opencode.json`
+или global `~/.config/opencode/opencode.json`) **обязательно** правило:
 
 ```json
 {
   "permission": {
     "memory_forget": "ask",
     "memory_export": "ask",
-    "memory_import": "ask"
+    "memory_import": "ask",
+    "memory_migrate": "ask",
+    "memory_prune": "ask"
   }
 }
 ```

@@ -7,6 +7,36 @@
 > Хронология составлена по истории authoring-репо `maestro-agent`. Даты
 > приблизительные (по коммитам).
 
+## [2026-09-10]
+
+### Изменено
+
+- **Memory layer — branch-governed lifecycle (v5), без обратной совместимости.**
+  Жизненный цикл записей памяти управляется git-якорем (`head`/ветка), а не
+  opencode-сессией. Важные изменения:
+  1. **`session.deleted` больше НЕ удаляет запись по умолчанию** — знание
+     переживает удаление сессии. Для v1-приватности включите
+     `memory.delete_on_session_delete: true` (рекомендуется только для sqlite;
+     на централизованных бэкендах удаление сессии сносит командное знание).
+  2. **Write-gate по `head`:** сессии без git-якоря не суммаризируются — non-git
+     проекты не получают память (warn при init; существующие записи читаемы).
+  3. Новое поле записи `host` (hostname — «где лежит полный контекст»).
+  4. Новая команда **`/maestro-memory-prune`** — HITL-утилизация брошенных/unknown
+     записей (листинг по категориям надёжности git-якоря → подтверждение →
+     удаление; permission `ask`).
+  5. **Для существующих сетапов:** добавьте `memory_prune: "ask"` в `permission`
+     (иначе новый tool получает ungated-доступ).
+- **Memory layer — namespace-идентичность (v5.1), без обратной совместимости.**
+  1. `memory.namespace` обязателен (формат `microservices.sales.pay`, 1–3 сегмента,
+     lowercase; нормализация trim+lowercase). Без него память disabled
+     (`namespace_missing`); восстановление — задать namespace + `memory_migrate from:auto`.
+  2. Убраны URL/hash-формы адресации (`related`/`project:` — namespace-префиксы).
+  3. Домен-авто-related (иерархия: родитель+братья, merged-only; `domain_recall` off-switch).
+  4. `related` — кросс-доменные связи (merged-only, 1:1 предпочтение).
+  5. `memory_migrate` — пере-keying (from: auto|namespace|hash).
+  6. Поля записей `origin_remote`/`prefixes`.
+- **Версия дистрибутива 3.2.0** (package.json; memory layer — v5, beta).
+
 ## [2026-09-09]
 
 ### Изменено

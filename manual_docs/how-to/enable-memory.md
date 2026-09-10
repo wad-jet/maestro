@@ -98,8 +98,8 @@
    модели, `retention_days`, `report`) — только по явному запросу HITL.
 4. При включении памяти ассистент **автоматически** добавит в merge-config
    нативное правило `permission: { memory_forget: "ask", memory_export: "ask",
-   memory_import: "ask" }` (opencode default для новых инструментов — allow,
-   поэтому правило обязательно).
+   memory_import: "ask", memory_prune: "ask" }` (opencode default для новых
+   инструментов — allow, поэтому правило обязательно).
 5. После правки — напоминание про **онбординг**: рестарт opencode (OP-1) →
    self-provision `module_dir` → `npm install` в `module_dir` → рестарт №2 →
    верификация (`@maestro-memory`, блок «Контекст из памяти maestro»).
@@ -186,7 +186,7 @@
 
 > ⚠️ Экспорт/импорт работают **в пределах одного `key`** (активного проекта).
 > Для переноса в другой `namespace`/проект — сначала импорт в тот же key, затем
-> смена namespace (с потерей доступа к старым записям, миграции нет).
+> смена namespace через `memory_migrate` (пере-keying, см. ниже).
 
 ### Ретеншен (TTL записей)
 
@@ -238,21 +238,34 @@ timeline-гистограмма по датам, кластеры тем, авт
   `maestro.json` — иначе вечные merge-конфликты per-user значения). Fallback —
   git `user.name`, затем OS username. `identity` в `maestro.json` — только явный
   override (напр. сервисный аккаунт).
-- **`namespace`** — переопределяет ключ памяти `key`:
+- **`namespace`** — **обязателен** (v5.1): ключ изоляции памяти. Формат
+  `microservices.sales.pay` — 1–3 сегмента, lowercase, разделитель `.`;
+  нормализация trim+lowercase. Примеры:
   - **Monorepo** (один remote, несколько подпроектов): общий `namespace` →
-    общая память подпроектов.
+    общая память подпроектов (напр. `microservices.sales` для всех подпроектов
+    sales).
   - **Связанные репозитории** команды: одинаковый `namespace` в каждом → общая
     память.
-  - Без `namespace` `key = project_hash` (стабильный hash от git remote `origin`;
-    нет remote — hash абсолютного пути).
-  - ⚠️ **Смена namespace = потеря доступа к старым записям** (миграции нет).
+  - **Домены:** сегменты образуют иерархию — `microservices.sales.orders` и
+    `microservices.sales.web` в домене `sales` merged-видят друг друга
+    (авто-related); кросс-доменные связи — через `related`
+    (напр. `microservices.checkout.notifications` →
+    `related: ["microservices.sales.orders"]`).
+  - Без `namespace` память **disabled** (`namespace_missing`).
+  - **Upgrading-путь (v5.1):** задать `namespace` → `memory_migrate from:auto`
+    (легаси hash-бакет переносится в namespace-бакет; max-version-wins на
+    sqlite). Смена namespace — через `memory_migrate`, не потеря доступа.
 
 ### Branch-aware память (тиры и диагностика)
 
-С v3 память привязана к git-истории: идентичность записи — по коммиту (`head`),
-имя ветки — только display. Recall по умолчанию **commit-scoped** (`scope:
-"branch"`): общий (mainline) контекст + собственный «опыт» (неслитые коммиты,
-достижимые из checkout). Тиры:
+С v3 память привязана к git-истории: идентичность записи (критерий
+матчинга/промоции) — по коммиту (`head`); ключ хранения — `session_id`;
+жизненный цикл — по ветке/HEAD; имя ветки — только display. Recall по умолчанию
+**commit-scoped** (`scope: "branch"`): общий (mainline) контекст + собственный
+«опыт» (неслитые коммиты, достижимые из checkout). Тиры:
+
+> **Память требует git-якоря (write-gate по `head`):** non-git проекты не получают
+> новые записи (warn при init); существующие записи остаются читаемыми.
 
 - **general** — запись вошла в mainline (`merged = 1` или `head` достижим из
   mainline);
@@ -384,7 +397,7 @@ warmup-строкой. Результат кэшируется в `state.json` �
 
 | Симптом | Причина / действие |
 |---|---|
-| Память не работает, в логе `memory: disabled` с `reason` | Конфигурация невалидна (см. `disabled_reason`: `storage_type_invalid`, `centralized_identity_missing`, `qdrant_config_invalid`, `pgvector_config_invalid`, `pgvector_text_search_config_invalid`, `branch_context_invalid`, `mainline_invalid`, `retention_days_invalid`, `similarity_threshold_invalid`, `embedding_invalid`, `probe_cooldown_min_invalid`, `embedding_api_key_env_missing`, `embedder_probe_hard_fail`) |
+| Память не работает, в логе `memory: disabled` с `reason` | Конфигурация невалидна (см. `disabled_reason`: `storage_type_invalid`, `centralized_identity_missing`, `qdrant_config_invalid`, `pgvector_config_invalid`, `pgvector_text_search_config_invalid`, `branch_context_invalid`, `mainline_invalid`, `retention_days_invalid`, `similarity_threshold_invalid`, `embedding_invalid`, `probe_cooldown_min_invalid`, `embedding_api_key_env_missing`, `embedder_probe_hard_fail`, `namespace_missing`, `namespace_invalid`, `related_invalid`, `domain_recall_invalid`) |
 | В логе `memory: transformers not installed — run npm install in <module_dir>` | Не выполнена установка deps (шаг 3 краткой инструкции) |
 | В логе `memory: init failed` | Ошибка инициализации (бэкенд недоступен, модель не загрузилась и т.п.) — сессии работают |
 | Блок `## Контекст из памяти maestro` не появляется | Модель эмбеддингов ещё прогревается (первый запуск), либо нет записей выше `min_score`, либо сессия не top-level primary |

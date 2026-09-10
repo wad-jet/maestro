@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { PgVectorStorage } from "./pgvector.js";
+import { prefixesOf } from "../project.js";
 function fakePool() {
   const calls = [];
   const handle = async (sql, params) => {
@@ -570,6 +571,30 @@ test("pgvector init: ADD COLUMN IF NOT EXISTS branch/head/merged", async () => {
   assert.ok(addSql.includes("branch TEXT NOT NULL DEFAULT ''"), addSql);
   assert.ok(addSql.includes("head TEXT NOT NULL DEFAULT ''"), addSql);
   assert.ok(addSql.includes("merged INT NOT NULL DEFAULT 0"), addSql);
+  assert.ok(addSql.includes("host TEXT NOT NULL DEFAULT ''"), addSql);
+});
+
+test("pgvector upsert/get/scan carry host", async () => {
+  const p = fakePoolHybrid();
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, modelId: "m1" });
+  await st.init();
+  await st.upsert([{
+    session_id: "s1", key: "k1", origin_project_hash: "h1", title: "t1", summary: "s1",
+    decisions: [], embedding: new Float32Array([0.1, 0.2, 0.3]),
+    model_id: "m1", author: "a1", time_first: 1, time_last: 2, version: 1,
+    branch: "feature/x", head: "abc123", merged: 0, host: "host-a",
+  }]);
+  const ins = p.calls.find(([sql]) => sql.includes("INSERT INTO"));
+  assert.ok(ins[0].includes("host"), "INSERT must include host");
+  assert.ok(ins[0].includes("host=$16"), "INSERT SET must include host=$16");
+  // get: явный список колонок включает host.
+  await st.get("s1");
+  const getCall = p.calls.find(([sql]) => sql.includes("WHERE session_id = $1"));
+  assert.ok(getCall[0].includes("host"), "get must select host");
+  // scan: whitelist включает host.
+  await st.scan({ key: "k1", fields: ["session_id", "host"] });
+  const scanCall = p.calls.find(([sql]) => sql.includes("WHERE key=$1"));
+  assert.ok(scanCall[0].includes("host"), "scan must select host");
 });
 
 test("pgvector upsert/get/scan carry branch/head/merged", async () => {
@@ -610,6 +635,7 @@ test("pgvector M-4: vector-leg SELECT carries branch/head/merged (entry contract
   assert.ok(sel[0].includes("branch"), "vector-leg SELECT must include branch");
   assert.ok(sel[0].includes("head"), "vector-leg SELECT must include head");
   assert.ok(sel[0].includes("merged"), "vector-leg SELECT must include merged");
+  assert.ok(sel[0].includes("host"), "vector-leg SELECT must include host");
 });
 
 test("pgvector candidates(key) filters merged=1 OR head != ''", async () => {
@@ -688,4 +714,121 @@ test("pgvector init: fts.fallback audit event on pg_ts_config miss", async () =>
   const ev = calls.find(([m]) => m === "memory:fts.fallback");
   assert.ok(ev, "must emit memory:fts.fallback");
   assert.deepEqual(ev[1], { backend: "pgvector", fallback: "russian" });
+});
+
+// ── Task 3 (namespace-related): origin_remote + prefixes поля, subtree-ноги, migrateKey ──
+
+test("pgvector init: ADD COLUMN IF NOT EXISTS origin_remote/prefixes", async () => {
+  const p = fakePoolHybrid();
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, modelId: "m1" });
+  await st.init();
+  const adds = p.calls.filter(([sql]) => sql.includes("ADD COLUMN IF NOT EXISTS"));
+  const addSql = adds.map(([sql]) => sql).join("\n");
+  assert.ok(addSql.includes("origin_remote TEXT NOT NULL DEFAULT ''"), addSql);
+  assert.ok(addSql.includes("prefixes TEXT NOT NULL DEFAULT ''"), addSql);
+});
+
+test("pgvector upsert/get/scan carry origin_remote + prefixes", async () => {
+  const p = fakePoolHybrid();
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, modelId: "m1" });
+  await st.init();
+  await st.upsert([{
+    session_id: "s1", key: "a.b.c", origin_project_hash: "h1", title: "t1", summary: "s1",
+    decisions: [], embedding: new Float32Array([0.1, 0.2, 0.3]),
+    model_id: "m1", author: "a1", time_first: 1, time_last: 2, version: 1,
+    origin_remote: "github.com/org/api", prefixes: ["a", "a.b"],
+  }]);
+  const ins = p.calls.find(([sql]) => sql.includes("INSERT INTO"));
+  assert.ok(ins[0].includes("origin_remote"), "INSERT must include origin_remote");
+  assert.ok(ins[0].includes("prefixes"), "INSERT must include prefixes");
+  assert.ok(ins[0].includes("origin_remote=$17"), "INSERT SET must include origin_remote=$17");
+  assert.ok(ins[0].includes("prefixes=$18"), "INSERT SET must include prefixes=$18");
+  assert.equal(ins[1][16], "github.com/org/api");
+  assert.equal(ins[1][17], JSON.stringify(["a", "a.b"]));
+  // get: явный список колонок включает origin_remote/prefixes.
+  await st.get("s1");
+  const getCall = p.calls.find(([sql]) => sql.includes("WHERE session_id = $1"));
+  assert.ok(getCall[0].includes("origin_remote"), "get must select origin_remote");
+  assert.ok(getCall[0].includes("prefixes"), "get must select prefixes");
+  // scan: whitelist включает origin_remote/prefixes.
+  await st.scan({ key: "a.b.c", fields: ["session_id", "origin_remote", "prefixes"] });
+  const scanCall = p.calls.find(([sql]) => sql.includes("WHERE key=$1"));
+  assert.ok(scanCall[0].includes("origin_remote"), "scan must select origin_remote");
+  assert.ok(scanCall[0].includes("prefixes"), "scan must select prefixes");
+});
+
+test("pgvector M-4: vector-leg SELECT carries origin_remote/prefixes (entry contract)", async () => {
+  const p = fakePool();
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3 });
+  await st.init();
+  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "k1" });
+  const sel = p.calls.find(([sql]) => sql.includes("FROM maestro_memory"));
+  assert.ok(sel, "vector leg must run");
+  assert.ok(sel[0].includes("origin_remote"), "vector-leg SELECT must include origin_remote");
+  assert.ok(sel[0].includes("prefixes"), "vector-leg SELECT must include prefixes");
+});
+
+test("pgvector subtree leg: (key = $x OR key LIKE $x || '.%') AND merged = 1", async () => {
+  const p = fakePoolHybrid();
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3 });
+  await st.init();
+  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "a.b.c", subtree: ["a.b"] });
+  const sels = p.calls.filter(([sql]) => sql.includes("FROM maestro_memory"));
+  // Активная нога: key = $2 (own key), без merged-фильтра.
+  const active = sels.find(([sql, params]) => sql.includes("key = $2") && params[1] === "a.b.c");
+  assert.ok(active, "active leg with key = $2 (a.b.c)");
+  assert.ok(!active[0].includes("merged = 1"), "active leg must NOT be merged-only");
+  // Subtree-нога: (key = $2 OR key LIKE $2 || '.%') + merged = 1 (§3.3 subtreeLeg).
+  const subtree = sels.find(([sql, params]) => sql.includes("key LIKE $2 || '.%'") && params[1] === "a.b");
+  assert.ok(subtree, "subtree leg with key LIKE $2 || '.%'");
+  assert.ok(subtree[0].includes("merged = 1"), "subtree leg must be merged-only");
+  assert.ok(!subtree[0].includes("session_id IN"), "own-key filterSessionIds must NOT leak into subtree leg");
+});
+
+test("pgvector subtree leg excludes own bucket (key <> ownKey) — own merged not double-collected (§3.3)", async () => {
+  const p = fakePoolHybrid();
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3 });
+  await st.init();
+  // Активный ключ a.b.c, subtree-цель a.b (ancestor) → subtree-нога матчила бы
+  // и own bucket (a.b.c LIKE a.b.%), поэтому должна исключить own key.
+  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "a.b.c", subtree: ["a.b"] });
+  const sels = p.calls.filter(([sql]) => sql.includes("FROM maestro_memory"));
+  // Активная нога: key = $2 (own key), БЕЗ key <> (исключение только в subtree-ноге).
+  const active = sels.find(([sql, params]) => sql.includes("key = $2") && params[1] === "a.b.c");
+  assert.ok(active, "active leg with key = $2 (a.b.c)");
+  assert.ok(!active[0].includes("key <>"), "active leg must NOT exclude own key");
+  // Subtree-нога: (key = $2 OR key LIKE $2 || '.%') AND key <> $3 (ownKey).
+  const subtree = sels.find(([sql, params]) => sql.includes("key LIKE $2 || '.%'") && params[1] === "a.b");
+  assert.ok(subtree, "subtree leg with key LIKE $2 || '.%'");
+  assert.ok(subtree[0].includes("key <> $3"), subtree[0]);
+  assert.equal(subtree[1][2], "a.b.c", "subtree leg excludes own key a.b.c");
+  // Цель a.b всё ещё включена (LIKE-условие не тронуто).
+  assert.ok(subtree[0].includes("key = $2 OR key LIKE $2 || '.%'"), subtree[0]);
+});
+
+test("pgvector migrateKey max-version-wins via NOT EXISTS", async () => {
+  const p = fakePoolHybrid();
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3 });
+  await st.init();
+  const n = await st.migrateKey("old.ns", "new.ns");
+  const upd = p.calls.find(([sql]) => sql.includes("UPDATE"));
+  assert.ok(upd, "migrateKey must run UPDATE");
+  assert.ok(upd[0].includes("SET key = $1"), upd[0]);
+  assert.ok(upd[0].includes("prefixes = $2"), upd[0]);
+  assert.ok(upd[0].includes("WHERE key = $3"), upd[0]);
+  assert.ok(upd[0].includes("NOT EXISTS"), upd[0]);
+  assert.ok(upd[0].includes("t.version >= "), upd[0]);
+  assert.equal(upd[1][0], "new.ns");
+  assert.equal(upd[1][1], JSON.stringify(prefixesOf("new.ns")));
+  assert.equal(upd[1][2], "old.ns");
+  assert.equal(n, 0, "rowCount undefined in mock → 0");
+});
+
+test("pgvector migrateKey delete_source is no-op (source empty after UPDATE)", async () => {
+  const p = fakePoolHybrid();
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3 });
+  await st.init();
+  await st.migrateKey("old.ns", "new.ns", { deleteSource: true });
+  // deleteSource → no-op: только UPDATE, без DELETE.
+  assert.ok(!p.calls.some(([sql]) => sql.startsWith("DELETE")), "deleteSource must not issue DELETE");
 });

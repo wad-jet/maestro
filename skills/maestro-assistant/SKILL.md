@@ -206,12 +206,27 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
 - **`retention_days`** — TTL записей: `null` (default) — выключено (данные не
   удаляются молча); положительное число — prune при старте (записи старше N
   дней по `time_last`). Некорректное значение → память off + лог.
+- **`delete_on_session_delete`** — удалять запись при `session.deleted`
+  (default `false` — запись выживает, жизненный цикл по git-якорю v5).
+  `true` возвращает v1-приватность; рекомендуется только для sqlite — на
+  централизованных бэкендах удаление сессии сносит командное знание
+  (init-warn `delete_on_session_delete_centralized`). Валидация: boolean; иначе
+  — память off + лог (`delete_on_session_delete_invalid`).
 - **`similarity_threshold`** — порог косинусной близости для кластеров тем и
   графа похожести (`memory_stats_detail` / отчёт), default `0.7`, диапазон
   `[0, 1]`; вне диапазона → память off + лог.
 - **`report.include_text`** — `false` (default): HTML-отчёт `@maestro-memory-report`
   содержит **только агрегаты** (SEC-4b); `true` — осознанный opt-in на вставку
   замаскированных заголовков/summary (документированное понижение).
+- **`namespace`** — обязателен при `enabled: true`; формат `a.b.c` (1–3 сегмента,
+  lowercase, точка-разделитель); нормализация: trim + lowercase; absent/невалидный →
+  память off (`namespace_missing` / `namespace_invalid`).
+- **`related`** — список namespace-prefix целей для кросс-доменной интеграции
+  (merged-only, предпочтение точный leaf 1:1, ≤16 записей).
+- **`domain_recall`** — boolean, default `true`; `false` = off-switch домен-ног.
+- **`memory_migrate`** (from: `auto` | `namespace` | `hash`) — инструмент миграции;
+  permission ask перед запуском. Изменения memory — config-as-code (часть task-ветки)
+  + opencode restart.
 
 Правила вывода (для `/maestro-setup` и консультаций):
 
@@ -230,9 +245,10 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
 - **Write/boundary-tools → permission `ask` (обязательное правило).** При
   включении памяти в merge-config (`.opencode/opencode.json` или global)
   добавляется нативное правило `permission: { memory_forget: "ask",
-  memory_export: "ask", memory_import: "ask" }` (opencode default для новых
-  тулов — allow, поэтому правило обязательно). Канон для будущих тулов: **новые
-  write/boundary-tools → permission `ask`**.
+  memory_export: "ask", memory_import: "ask", memory_migrate: "ask",
+  memory_prune: "ask" }` (opencode
+  default для новых тулов — allow, поэтому правило обязательно). Канон для
+  будущих тулов: **новые write/boundary-tools → permission `ask`**.
 - **Онбординг memory (явная последовательность):** после добавления секции
   `memory` в `maestro.json` — (1) рестарт opencode → плагин self-provision'ит
   `module_dir` (создаёт каталог + `package.json`); (2) `npm install` в

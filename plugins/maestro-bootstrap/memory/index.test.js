@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerMemoryHooks } from "./index.js";
@@ -16,6 +16,7 @@ function mkConfig(dir, extra = {}) {
   return {
     memory: {
       enabled: true,
+      namespace: "test.ns",
       auto_recall: true,
       top_k: 3,
       min_score: 0.35,
@@ -73,8 +74,9 @@ function mkStorage() {
 }
 
 // Per-key sqlite path (I8): <XDG_DATA_HOME>/maestro/memory/<key-hash>/memory.db
+// mkConfig default namespace = "test.ns" → effectiveKey = "test.ns".
 function dbPathFor(dataHome, root) {
-  return join(dataHome, "maestro", "memory", sanitizeDirName(projectHashFromDir(root)), "memory.db");
+  return join(dataHome, "maestro", "memory", sanitizeDirName("test.ns"), "memory.db");
 }
 
 // ── memory off ─────────────────────────────────────────────────────────
@@ -177,7 +179,7 @@ test("I8: sqlite db stored per-key under dataDir", async () => {
 
 // ── event dispatch ─────────────────────────────────────────────────────
 
-test("event dispatches session.deleted to storage.delete", async () => {
+test("event session.deleted keeps the memory entry by default (flag OFF)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mem-hooks-"));
   const saved = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = dir;
@@ -198,7 +200,37 @@ test("event dispatches session.deleted to storage.delete", async () => {
     const db2 = new Database(dbPath);
     const row = db2.prepare("SELECT * FROM memory WHERE session_id = ?").get("victim");
     db2.close();
-    assert.equal(row, undefined, "session.deleted must remove the memory entry");
+    assert.ok(row, "session.deleted keeps the memory entry by default (delete_on_session_delete=false)");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("event session.deleted removes the memory entry when delete_on_session_delete flag ON", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-hooks-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const hooks = await registerMemoryHooks({ client: mkClient(), config: mkConfig(dir, { delete_on_session_delete: true }), log: silentLog, root: dir, deps: { embeddings: mkMockEmbeddings() } });
+    const dbPath = dbPathFor(dir, dir);
+    const { default: Database } = await import("better-sqlite3");
+    const db = new Database(dbPath);
+    db.prepare(
+      `INSERT INTO memory (session_id, key, origin_project_hash, title, summary, decisions, embedding, model_id, author, time_first, time_last, version)
+       VALUES (?,?,?,?,?,?,?,?,?,?,?,?)`,
+    ).run("victim", "k", "h", "t", "s", "[]", Buffer.from(new Float32Array([0.1, 0.2, 0.3]).buffer), "x", "a", 1, 2, 0);
+    db.close();
+
+    await hooks.event({ event: { type: "session.idle", properties: { sessionID: "victim" } } });
+    await hooks.event({ event: { type: "session.deleted", properties: { sessionID: "victim" } } });
+
+    const db2 = new Database(dbPath);
+    const row = db2.prepare("SELECT * FROM memory WHERE session_id = ?").get("victim");
+    db2.close();
+    assert.equal(row, undefined, "session.deleted removes the memory entry when flag ON");
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
@@ -417,7 +449,7 @@ test("invalid storage type → disabled with reason logged", async () => {
   const log = { debug() {}, info: (m, e) => logged.push([m, e]), warn() {}, error() {} };
   const hooks = await registerMemoryHooks({
     client: {},
-    config: { memory: { enabled: true, storage: { type: "bogus" } } },
+    config: { memory: { enabled: true, namespace: "test.ns", storage: { type: "bogus" } } },
     log,
   });
   assert.equal(hooks.tool, undefined);
@@ -441,7 +473,7 @@ test("qdrant without url/api_key_env → memory off", async () => {
   const log = { debug() {}, info: (m, e) => logged.push([m, e]), warn() {}, error() {} };
   const hooks = await registerMemoryHooks({
     client: {},
-    config: { memory: { enabled: true, storage: { type: "qdrant", qdrant: {} }, identity: "x" } },
+    config: { memory: { enabled: true, namespace: "test.ns", storage: { type: "qdrant", qdrant: {} }, identity: "x" } },
     log,
   });
   assert.equal(hooks.tool, undefined);
@@ -453,7 +485,7 @@ test("pgvector without connection_string_env → memory off", async () => {
   const log = { debug() {}, info: (m, e) => logged.push([m, e]), warn() {}, error() {} };
   const hooks = await registerMemoryHooks({
     client: {},
-    config: { memory: { enabled: true, storage: { type: "pgvector", pgvector: {} }, identity: "x" } },
+    config: { memory: { enabled: true, namespace: "test.ns", storage: { type: "pgvector", pgvector: {} }, identity: "x" } },
     log,
   });
   assert.equal(hooks.tool, undefined);
@@ -500,7 +532,7 @@ test("F1: storage.*.duration events land in memory log when storage created by r
 
 // ── memory_search filters (Task 4) ─────────────────────────────────────
 
-test("memory_search passes filters and project", async () => {
+test("memory_search passes filters and project (namespace-only → subtree)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mem-hooks-"));
   const saved = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = dir;
@@ -516,18 +548,18 @@ test("memory_search passes filters and project", async () => {
       deps: { storage, embeddings: mkMockEmbeddings() },
     });
     const res = await hooks.tool.memory_search.execute(
-      { query: "x", date_from: 100, date_to: 500, author: "alice", project: "https://github.com/foo/bar.git" },
+      { query: "x", date_from: 100, date_to: 500, author: "alice", project: "other.ns" },
       { sessionID: "s1" },
     );
     assert.equal(seen.length, 1, "storage.search must be called once");
     assert.equal(seen[0].date_from, 100);
     assert.equal(seen[0].date_to, 500);
     assert.equal(seen[0].author, "alice");
-    assert.equal(
-      seen[0].project,
-      projectHashFromRemote("https://github.com/foo/bar.git"),
-      "URL project must be canonicalized+hashed before search",
-    );
+    // Task 6: project → namespace-only, добавляется в subtree-ноги.
+    assert.ok(Array.isArray(seen[0].subtree), "subtree must be an array");
+    assert.ok(seen[0].subtree.includes("other.ns"), "project namespace must be in subtree");
+    assert.ok(seen[0].subtree.includes("test"), "domain target (parent prefix of test.ns) must be in subtree");
+    assert.equal(seen[0].project, undefined, "project must NOT be passed as a separate field");
     assert.equal(typeof seen[0].key, "string");
     assert.equal(seen[0].query, "x", "FTS query must be passed to search (hybrid path)");
     await hooks.dispose?.();
@@ -642,6 +674,319 @@ test("memory_forget passes key and filters to deleteByFilter", async () => {
     assert.equal(seen[0].before, 123);
     assert.equal(typeof seen[0].key, "string");
     assert.ok(seen[0].key.length > 0, "deleteByFilter must be called with the effective key");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── memory_prune (Task 7) ──────────────────────────────────────────────
+
+test("memory_prune list groups candidates by git-anchor category", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-prune-list-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.scan = async () => [
+      { session_id: "s1", head: "hm", branch: "main", host: hostname(), author: "alice", time_last: 1 }, // remote-merged
+      { session_id: "s2", head: "", branch: "", host: hostname(), author: "bob", time_last: 2 }, // unknown
+      { session_id: "s3", head: "hd", branch: "feature/y", host: hostname(), author: "carol", time_last: 3 }, // dead
+    ];
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      revList: (root, ref) => (ref === "main" ? new Set(["hm"]) : new Set()),
+      revListAll: () => ({ local: new Set(["hl"]), remote: new Set(["hm"]) }),
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+    const res = await hooks.tool.memory_prune.execute({ action: "list" }, { sessionID: "s1" });
+    assert.match(res, /## remote-merged \(1\)/, "merged head in mainline → remote-merged");
+    assert.match(res, /## dead \(1\)/, "unreachable head → dead");
+    assert.match(res, /## unknown \(1\)/, "empty head → unknown");
+    assert.match(res, /s1/, "session id s1 listed");
+    assert.match(res, /s2/, "session id s2 listed");
+    assert.match(res, /s3/, "session id s3 listed");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_prune delete by session_ids calls deleteByFilter per id", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-prune-del-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.scan = async () => [];
+    const seen = [];
+    storage.deleteByFilter = async function (args) { seen.push(args); return 1; };
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      revList: () => new Set(),
+      revListAll: () => ({ local: new Set(), remote: new Set() }),
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+    const res = await hooks.tool.memory_prune.execute({ action: "delete", session_ids: "s1,s2" }, { sessionID: "s1" });
+    assert.equal(seen.length, 2, "deleteByFilter called once per id");
+    assert.equal(seen[0].session_id, "s1");
+    assert.equal(seen[1].session_id, "s2");
+    assert.equal(typeof seen[0].key, "string");
+    assert.ok(seen[0].key.length > 0, "deleteByFilter must be called with the effective key");
+    assert.match(res, /Удалено 2 записей \(2 session_id\)/, "must report count");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_prune delete category dead excludes foreign-host records on centralized backend", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-prune-cat-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.scan = async () => [
+      { session_id: "foreign", head: "hd1", branch: "f", host: "other-host", author: "a", time_last: 1 },
+      { session_id: "local", head: "hd2", branch: "f", host: hostname(), author: "b", time_last: 2 },
+    ];
+    const seen = [];
+    storage.deleteByFilter = async function (args) { seen.push(args); return 1; };
+    const config = mkConfig(dir, {
+      storage: { type: "qdrant", qdrant: { url: "http://localhost:6333", api_key_env: "Q_KEY" } },
+      identity: "x",
+    });
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      revList: () => new Set(),
+      revListAll: () => ({ local: new Set(), remote: new Set() }),
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config,
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+    // delete по категории резолвится по снапшоту листинга — сначала list.
+    await hooks.tool.memory_prune.execute({ action: "list" }, { sessionID: "s1" });
+    const res = await hooks.tool.memory_prune.execute({ action: "delete", category: "dead" }, { sessionID: "s1" });
+    assert.equal(seen.length, 1, "only local dead record deleted");
+    assert.equal(seen[0].session_id, "local", "foreign-host record excluded from batch-all");
+    assert.match(res, /Удалено 1 записей \(1 session_id\)/, "must report count");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_prune delete category dead without prior list → 'сначала list' message", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-prune-nolist-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.scan = async () => [
+      { session_id: "s1", head: "hd", branch: "f", host: hostname(), author: "a", time_last: 1 },
+    ];
+    const seen = [];
+    storage.deleteByFilter = async function (args) { seen.push(args); return 1; };
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      revList: () => new Set(),
+      revListAll: () => ({ local: new Set(), remote: new Set() }),
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+    const res = await hooks.tool.memory_prune.execute({ action: "delete", category: "dead" }, { sessionID: "s1" });
+    assert.match(res, /сначала выполните list/, "delete by category without prior list must demand list first");
+    assert.equal(seen.length, 0, "no deleteByFilter without a snapshot");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_prune delete by heads resolves against listing snapshot", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-prune-heads-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.scan = async () => [
+      { session_id: "s1", head: "hd1", branch: "f", host: hostname(), author: "a", time_last: 1 },
+      { session_id: "s2", head: "hd2", branch: "f", host: hostname(), author: "b", time_last: 2 },
+    ];
+    const seen = [];
+    storage.deleteByFilter = async function (args) { seen.push(args); return 1; };
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      revList: () => new Set(),
+      revListAll: () => ({ local: new Set(), remote: new Set() }),
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+    await hooks.tool.memory_prune.execute({ action: "list" }, { sessionID: "s1" });
+    const res = await hooks.tool.memory_prune.execute({ action: "delete", heads: "hd1" }, { sessionID: "s1" });
+    assert.equal(seen.length, 1, "only matching head deleted");
+    assert.equal(seen[0].session_id, "s1");
+    assert.match(res, /Удалено 1 записей \(1 session_id\)/, "must report count");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_prune list: origin/mainline head → remote-merged", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-prune-om-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.scan = async () => [
+      { session_id: "s1", head: "hom", branch: "main", host: hostname(), author: "alice", time_last: 1 },
+    ];
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      revList: (root, ref) => (ref === "origin/main" ? new Set(["hom"]) : new Set()),
+      revListAll: () => ({ local: new Set(["hl"]), remote: new Set(["hm"]) }),
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+    const res = await hooks.tool.memory_prune.execute({ action: "list" }, { sessionID: "s1" });
+    assert.match(res, /## remote-merged \(1\)/, "head in origin/mainline → remote-merged");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_prune blocked for [maestro-memory] sessions", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-prune-gate-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    SESSIONS.add("summ-session");
+    try {
+      const res = await hooks.tool.memory_prune.execute({ action: "list" }, { sessionID: "summ-session" });
+      assert.match(res, /недоступен для служебных сессий/);
+    } finally {
+      SESSIONS.delete("summ-session");
+    }
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("init-warn delete_on_session_delete_centralized when flag + centralized backend", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-prune-warn-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const warned = [];
+    const log = { debug() {}, info() {}, warn: (m) => warned.push(m), error() {} };
+    const storage = mkMockStorage();
+    const config = mkConfig(dir, {
+      delete_on_session_delete: true,
+      storage: { type: "qdrant", qdrant: { url: "http://localhost:6333", api_key_env: "Q_KEY" } },
+      identity: "x",
+    });
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config,
+      log,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git: mkScopeGit() },
+    });
+    assert.ok(
+      warned.some((m) => m === "memory:delete_on_session_delete_centralized"),
+      "must warn delete_on_session_delete_centralized",
+    );
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("init-warn git_anchor_unavailable when resolveHead returns '' (non-git project)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-anchor-warn-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const warned = [];
+    const log = { debug() {}, info() {}, warn: (m) => warned.push(m), error() {} };
+    const storage = mkMockStorage();
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      revList: () => new Set(),
+      revListAll: () => ({ local: new Set(), remote: new Set() }),
+      resolveHead: async () => "",
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+    assert.ok(
+      warned.some((m) => m === "memory:git_anchor_unavailable"),
+      "must warn git_anchor_unavailable when no git anchor",
+    );
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
@@ -1556,7 +1901,7 @@ test("memory_stats_detail duplicates external_embedder_unmasked_queries (openai 
     storage.scan = async () => [
       { session_id: "s1", title: "T1", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]), merged: 1, head: "", branch: "" },
     ];
-    const cfg = { memory: { enabled: true, storage: { type: "sqlite" }, embedding: { provider: "openai", model: "m", api_key_env: "MM_KEY_SET", dim: 3 } } };
+    const cfg = { memory: { enabled: true, namespace: "test.ns", storage: { type: "sqlite" }, embedding: { provider: "openai", model: "m", api_key_env: "MM_KEY_SET", dim: 3 } } };
     cfg.confidential = { paths: ["docs/confidential/**"] };
     const hooks = await registerMemoryHooks({
       client: mkClient(),
@@ -2026,6 +2371,7 @@ test("write-tools registered for permission enforcement (ask-gate contract)", as
     assert.ok(hooks.tool && hooks.tool.memory_forget, "memory_forget must be registered");
     assert.ok(hooks.tool && hooks.tool.memory_export, "memory_export must be registered");
     assert.ok(hooks.tool && hooks.tool.memory_import, "memory_import must be registered");
+    assert.ok(hooks.tool && hooks.tool.memory_prune, "memory_prune must be registered");
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
@@ -2435,7 +2781,7 @@ test("openai provider with key + injected deps registers hooks", async () => {
   const saved = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = dir;
   try {
-    const cfg = { memory: { enabled: true, storage: { type: "sqlite" }, embedding: { provider: "openai", model: "m", api_key_env: "MM_KEY_SET", base_url: "https://x/v1", dim: 3 } } };
+    const cfg = { memory: { enabled: true, namespace: "test.ns", storage: { type: "sqlite" }, embedding: { provider: "openai", model: "m", api_key_env: "MM_KEY_SET", base_url: "https://x/v1", dim: 3 } } };
     const hooks = await registerMemoryHooks({
       client: mkClient(), config: cfg, log: mkLog(), root: dir,
       deps: { storage: mkStorage(), embeddings: { probe: async () => ({ ok: true, hard: false, detail: "ok" }), dim: 3, modelId: "openai:m@https://x/v1" } },
@@ -2455,7 +2801,7 @@ test("startup probe hard fail → memory off (memory_probe only, no tool hooks)"
   const saved = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = dir;
   try {
-    const cfg = { memory: { enabled: true, storage: { type: "sqlite" } } };
+    const cfg = { memory: { enabled: true, namespace: "test.ns", storage: { type: "sqlite" } } };
     const hooks = await registerMemoryHooks({
       client: mkClient(), config: cfg, log: mkLog(), root: dir,
       deps: { storage: mkStorage(), embeddings: { probe: async () => ({ ok: false, hard: true, detail: "dimension mismatch" }), dim: 3, modelId: "m" } },
@@ -2477,7 +2823,7 @@ test("startup probe soft fail → hooks registered (fail-soft)", async () => {
   const saved = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = dir;
   try {
-    const cfg = { memory: { enabled: true, storage: { type: "sqlite" } } };
+    const cfg = { memory: { enabled: true, namespace: "test.ns", storage: { type: "sqlite" } } };
     const hooks = await registerMemoryHooks({
       client: mkClient(), config: cfg, log: mkLog(), root: dir,
       deps: { storage: mkStorage(), embeddings: { probe: async () => ({ ok: false, hard: false, detail: "network" }), dim: 3, modelId: "m" } },
@@ -2498,7 +2844,7 @@ test("cooldown cache keyed by identity: same config → single live probe", asyn
   try {
     let probes = 0;
     const fake = { probe: async () => { probes++; return { ok: true, hard: false, detail: "ok" }; }, dim: 3, modelId: "m" };
-    const cfg = { memory: { enabled: true, storage: { type: "sqlite" } } };
+    const cfg = { memory: { enabled: true, namespace: "test.ns", storage: { type: "sqlite" } } };
     const h1 = await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: fake } });
     const h2 = await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: fake } });
     assert.equal(probes, 1);
@@ -2518,7 +2864,7 @@ test("cache identity mismatch (different modelId) → live probe again", async (
   try {
     let probes = 0;
     const mkFake = (modelId) => ({ probe: async () => { probes++; return { ok: true, hard: false, detail: "ok" }; }, dim: 3, modelId });
-    const cfg = { memory: { enabled: true, storage: { type: "sqlite" } } };
+    const cfg = { memory: { enabled: true, namespace: "test.ns", storage: { type: "sqlite" } } };
     const h1 = await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: mkFake("m") } });
     const h2 = await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: mkFake("m2") } });
     assert.equal(probes, 2);
@@ -2538,7 +2884,7 @@ test("cached hard → live re-probe (no shortcut) + probe.retry event", async ()
   try {
     let probes = 0;
     const fake = { probe: async () => { probes++; return { ok: false, hard: true, detail: "dim mismatch", error_class: "dim_mismatch" }; }, dim: 3, modelId: "m" };
-    const cfg = { memory: { enabled: true, storage: { type: "sqlite" } } };
+    const cfg = { memory: { enabled: true, namespace: "test.ns", storage: { type: "sqlite" } } };
     const infos = [];
     const log = { debug() {}, info: (m) => infos.push(m), warn() {}, error() {} };
     const h1 = await registerMemoryHooks({ client: mkClient(), config: cfg, log, root: dir, deps: { storage: mkStorage(), embeddings: fake } });
@@ -2571,7 +2917,7 @@ test("memory_probe persists effective apiKeyEnv → identity cache stays valid (
       dim: 3,
       modelId: "openai:m@https://x/v1",
     };
-    const cfg = { memory: { enabled: true, storage: { type: "sqlite" }, embedding: { provider: "openai", model: "m", api_key_env: "MM_KEY_SET", base_url: "https://x/v1", dim: 3 } } };
+    const cfg = { memory: { enabled: true, namespace: "test.ns", storage: { type: "sqlite" }, embedding: { provider: "openai", model: "m", api_key_env: "MM_KEY_SET", base_url: "https://x/v1", dim: 3 } } };
     // Первый init: hard-fail → только memory_probe.
     const h1 = await registerMemoryHooks({ client: mkClient(), config: cfg, log: mkLog(), root: dir, deps: { storage: mkStorage(), embeddings: fake } });
     assert.ok(h1.tool.memory_probe, "hard fail → memory_probe tool");
@@ -2601,7 +2947,7 @@ test("memory_probe tool runs live probe and reports", async () => {
   process.env.XDG_DATA_HOME = dir;
   try {
     let probed = 0;
-    const cfg = { memory: { enabled: true, storage: { type: "sqlite" } } };
+    const cfg = { memory: { enabled: true, namespace: "test.ns", storage: { type: "sqlite" } } };
     const hooks = await registerMemoryHooks({
       client: mkClient(), config: cfg, log: mkLog(), root: dir,
       deps: { storage: mkStorage(), embeddings: { probe: async () => { probed++; return { ok: true, hard: false, detail: "OK (dim 3)" }; }, dim: 3, modelId: "m" } },
@@ -2623,7 +2969,7 @@ test("memory_probe registered even when probe hard-fail (off-state)", async () =
   const saved = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = dir;
   try {
-    const cfg = { memory: { enabled: true, storage: { type: "sqlite" } } };
+    const cfg = { memory: { enabled: true, namespace: "test.ns", storage: { type: "sqlite" } } };
     const hooks = await registerMemoryHooks({
       client: mkClient(), config: cfg, log: mkLog(), root: dir,
       deps: { storage: mkStorage(), embeddings: { probe: async () => ({ ok: false, hard: true, detail: "dim mismatch" }), dim: 3, modelId: "m" } },
@@ -2646,7 +2992,7 @@ test("init-warn external_embedder_unmasked_queries when openai + confidential pa
   process.env.XDG_DATA_HOME = dir;
   try {
     const logs = [];
-    const cfg = { memory: { enabled: true, storage: { type: "sqlite" }, embedding: { provider: "openai", model: "m", api_key_env: "MM_KEY_SET", dim: 3 } } };
+    const cfg = { memory: { enabled: true, namespace: "test.ns", storage: { type: "sqlite" }, embedding: { provider: "openai", model: "m", api_key_env: "MM_KEY_SET", dim: 3 } } };
     cfg.confidential = { paths: ["docs/confidential/**"] };
     const hooks = await registerMemoryHooks({
       client: mkClient(), config: cfg, log: { warn: (m) => logs.push(m) }, root: dir,
@@ -2666,7 +3012,7 @@ test("init-warn external_embedder_unmasked_queries when openai + confidential pa
 
 test("memory_search masks confidential query before embed", async () => {
   const seen = [];
-  const cfg = { memory: { enabled: true, storage: { type: "sqlite" } }, confidential: { paths: ["docs/confidential/**"] } };
+  const cfg = { memory: { enabled: true, namespace: "test.ns", storage: { type: "sqlite" } }, confidential: { paths: ["docs/confidential/**"] } };
   const hooks = await registerMemoryHooks({
     client: mkClient(), config: cfg, log: mkLog(), root: tmpdir(),
     deps: { storage: mkStorage(), embeddings: { embed: async (t) => { seen.push(t); return new Float32Array([0.1, 0.2, 0.3]); }, probe: async () => ({ ok: true, hard: false, detail: "ok" }), dim: 3, modelId: "m" } },
@@ -2698,7 +3044,7 @@ test("memory events go to memoryLog when passed; bootstrap log stays clean (anti
   const saved = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = dir;
   try {
-    const cfg = { memory: { enabled: true, storage: { type: "sqlite" } } };
+    const cfg = { memory: { enabled: true, namespace: "test.ns", storage: { type: "sqlite" } } };
     const memoryLog = makeLogger(dir, { filePrefix: "maestro-memory", filterEnv: "MAESTRO_MEMORY" });
     const log = makeLogger(dir, { filePrefix: "maestro-bootstrap", filterEnv: "MAESTRO_BOOTSTRAP" });
     const hooks = await registerMemoryHooks({
@@ -2766,7 +3112,7 @@ test("storage.stats logs entries + tier counts after backfill", async () => {
     ];
     const hooks = await registerMemoryHooks({
       client: mkClient(),
-      config: { memory: { enabled: true, storage: { type: "sqlite" } } },
+      config: { memory: { enabled: true, namespace: "test.ns", storage: { type: "sqlite" } } },
       log,
       root: dir,
       deps: { storage, embeddings: mkMockEmbeddings() },
@@ -3041,6 +3387,491 @@ test("SEC-4b: memory log contains no record text, paths, base_url, raw branch", 
   } finally {
     if (savedLevel === undefined) delete process.env.MAESTRO_MEMORY_LOG_LEVEL;
     else process.env.MAESTRO_MEMORY_LOG_LEVEL = savedLevel;
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── Task 6: namespace identity init-warns, domain/related legs, memory_migrate, prune foreign-origin ──
+
+test("namespace_missing: memory enabled without namespace → disabled with reason logged", async () => {
+  const logged = [];
+  const log = { debug() {}, info: (m, e) => logged.push([m, e]), warn() {}, error() {} };
+  const hooks = await registerMemoryHooks({ client: {}, config: { memory: { enabled: true } }, log });
+  assert.equal(hooks.tool, undefined);
+  assert.ok(
+    logged.some(([m, e]) => m === "memory: disabled" && e.reason === "namespace_missing"),
+    "must log memory: disabled with namespace_missing",
+  );
+});
+
+test("init-warn key_changed when per-project lastKey differs from namespace", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-keychg-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const projStatePath = join(dir, "maestro", "memory", sanitizeDirName(dir), "state.json");
+    mkdirSync(dirname(projStatePath), { recursive: true });
+    writeFileSync(projStatePath, JSON.stringify({ lastKey: "old.ns" }), "utf8");
+
+    const warned = [];
+    const log = { debug() {}, info() {}, warn: (m) => warned.push(m), error() {} };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log,
+      root: dir,
+      deps: { storage: mkMockStorage(), embeddings: mkMockEmbeddings() },
+    });
+    assert.ok(warned.includes("memory:key_changed"), "must warn key_changed when lastKey differs");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("init-warn key_changed NOT emitted when lastKey matches namespace", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-keychg-ok-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const { mkdirSync, writeFileSync } = await import("node:fs");
+    const projStatePath = join(dir, "maestro", "memory", sanitizeDirName(dir), "state.json");
+    mkdirSync(dirname(projStatePath), { recursive: true });
+    writeFileSync(projStatePath, JSON.stringify({ lastKey: "test.ns" }), "utf8");
+
+    const warned = [];
+    const log = { debug() {}, info() {}, warn: (m) => warned.push(m), error() {} };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log,
+      root: dir,
+      deps: { storage: mkMockStorage(), embeddings: mkMockEmbeddings() },
+    });
+    assert.ok(!warned.includes("memory:key_changed"), "must NOT warn key_changed when lastKey matches");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("namespace_shared: warn on new foreign origin, then info when all seen (persisted seen-set)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-nsshared-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.scan = async () => [{ origin_project_hash: "foreignhash" }, { origin_project_hash: "otherhash" }];
+    const warns = [];
+    const infos = [];
+    const log = { debug() {}, info: (m, e) => infos.push([m, e]), warn: (m, e) => warns.push([m, e]), error() {} };
+
+    // First init: foreign origins not in seen → warn.
+    const h1 = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    assert.ok(warns.some(([m]) => m === "memory:namespace_shared"), "first run must warn namespace_shared");
+    assert.ok(!infos.some(([m]) => m === "memory:namespace_shared"), "first run must NOT info namespace_shared");
+    await h1.dispose?.();
+
+    // Second init: seen-set persisted → no new origins → info (distinct > 1).
+    warns.length = 0;
+    infos.length = 0;
+    const h2 = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    assert.ok(infos.some(([m]) => m === "memory:namespace_shared"), "second run must info namespace_shared");
+    assert.ok(!warns.some(([m]) => m === "memory:namespace_shared"), "second run must NOT warn namespace_shared");
+    await h2.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_search subtree legs: domain target + related keys; own excluded; domain_recall=false drops domain", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-subtree-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    const seen = [];
+    storage.search = async function (vec, opts) { this.searches++; seen.push(opts); return []; };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir, { related: ["rel.ns", "test.ns"] }),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    await hooks.tool.memory_search.execute({ query: "x" }, { sessionID: "s1" });
+    assert.equal(seen.length, 1, "search must be called once");
+    assert.ok(seen[0].subtree.includes("test"), "domain target (parent prefix of test.ns) in subtree");
+    assert.ok(seen[0].subtree.includes("rel.ns"), "related key in subtree");
+    assert.ok(!seen[0].subtree.includes("test.ns"), "own namespace excluded from related legs");
+    await hooks.dispose?.();
+
+    // domain_recall=false → domain target dropped, related kept.
+    const storage2 = mkMockStorage();
+    const seen2 = [];
+    storage2.search = async function (vec, opts) { this.searches++; seen2.push(opts); return []; };
+    const hooks2 = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir, { domain_recall: false, related: ["rel.ns"] }),
+      log: silentLog,
+      root: dir,
+      deps: { storage: storage2, embeddings: mkMockEmbeddings() },
+    });
+    await hooks2.tool.memory_search.execute({ query: "x" }, { sessionID: "s1" });
+    assert.ok(!seen2[0].subtree.includes("test"), "domain target dropped when domain_recall=false");
+    assert.ok(seen2[0].subtree.includes("rel.ns"), "related key still present when domain_recall=false");
+    await hooks2.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_recall_preview subtree legs: domain target + related keys; domain_recall=false drops domain (parity with search)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-prev-subtree-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    const seen = [];
+    storage.search = async function (vec, opts) { this.searches++; seen.push(opts); return []; };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir, { related: ["rel.ns", "test.ns"] }),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    await hooks.tool.memory_recall_preview.execute({ query: "x" }, { sessionID: "s1" });
+    assert.equal(seen.length, 1, "search must be called once");
+    assert.ok(Array.isArray(seen[0].subtree), "subtree must be an array");
+    assert.ok(seen[0].subtree.includes("test"), "domain target (parent prefix of test.ns) in subtree");
+    assert.ok(seen[0].subtree.includes("rel.ns"), "related key in subtree");
+    assert.ok(!seen[0].subtree.includes("test.ns"), "own namespace excluded from related legs");
+    await hooks.dispose?.();
+
+    // domain_recall=false → domain target dropped, related kept.
+    const storage2 = mkMockStorage();
+    const seen2 = [];
+    storage2.search = async function (vec, opts) { this.searches++; seen2.push(opts); return []; };
+    const hooks2 = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir, { domain_recall: false, related: ["rel.ns"] }),
+      log: silentLog,
+      root: dir,
+      deps: { storage: storage2, embeddings: mkMockEmbeddings() },
+    });
+    await hooks2.tool.memory_recall_preview.execute({ query: "x" }, { sessionID: "s1" });
+    assert.ok(!seen2[0].subtree.includes("test"), "domain target dropped when domain_recall=false");
+    assert.ok(seen2[0].subtree.includes("rel.ns"), "related key still present when domain_recall=false");
+    await hooks2.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_search project: invalid (URL) → 'только namespace' error", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-proj-invalid-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    const res = await hooks.tool.memory_search.execute(
+      { query: "x", project: "https://github.com/foo/bar.git" },
+      { sessionID: "s1" },
+    );
+    assert.match(res, /только namespace/, "URL project must be rejected (namespace-only)");
+    assert.equal(storage.searches, 0, "search must NOT run for invalid project");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_migrate: namespace/hash/URL sources, no-op, invalid, auto-without-remote, delete_source", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-migrate-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    const seen = [];
+    storage.migrateKey = async function (from, to, opts) { seen.push({ from, to, opts }); return 5; };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+
+    // namespace source
+    const resNs = await hooks.tool.memory_migrate.execute({ from: "old.ns" }, { sessionID: "s1" });
+    assert.match(resNs, /Перенесено 5 записей из old\.ns/);
+    assert.equal(seen[0].from, "old.ns");
+    assert.equal(seen[0].to, "test.ns");
+    assert.equal(seen[0].opts.deleteSource, false, "delete_source defaults to false");
+
+    // hash source (64-hex passthrough)
+    const hash = "a".repeat(64);
+    const resHash = await hooks.tool.memory_migrate.execute({ from: hash }, { sessionID: "s1" });
+    assert.match(resHash, /Перенесено 5 записей/);
+    assert.equal(seen[1].from, hash);
+
+    // URL source → legacyKey converts to hash
+    const resUrl = await hooks.tool.memory_migrate.execute({ from: "https://github.com/foo/bar.git" }, { sessionID: "s1" });
+    assert.match(resUrl, /Перенесено 5 записей/);
+    assert.match(seen[2].from, /^[0-9a-f]{64}$/, "URL must be converted to hash");
+
+    // delete_source
+    const resDel = await hooks.tool.memory_migrate.execute({ from: "old.ns", delete_source: true }, { sessionID: "s1" });
+    assert.match(resDel, /Источник удалён/);
+    assert.equal(seen[3].opts.deleteSource, true);
+
+    // no-op: from == current namespace
+    const resNoop = await hooks.tool.memory_migrate.execute({ from: "test.ns" }, { sessionID: "s1" });
+    assert.match(resNoop, /no-op/);
+    assert.equal(seen.length, 4, "no migrateKey call on no-op");
+
+    // invalid namespace
+    const resBad = await hooks.tool.memory_migrate.execute({ from: "bad!name" }, { sessionID: "s1" });
+    assert.match(resBad, /невалидный from/);
+    assert.equal(seen.length, 4, "no migrateKey call on invalid from");
+
+    // auto without remote (temp dir is not a git repo)
+    const resAuto = await hooks.tool.memory_migrate.execute({ from: "auto" }, { sessionID: "s1" });
+    assert.match(resAuto, /репо без remote/);
+    assert.equal(seen.length, 4, "no migrateKey call when auto without remote");
+
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_migrate blocked for [maestro-memory] sessions", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-migrate-gate-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.migrateKey = async () => 0;
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    SESSIONS.add("summ-session");
+    try {
+      const res = await hooks.tool.memory_migrate.execute({ from: "old.ns" }, { sessionID: "summ-session" });
+      assert.match(res, /недоступен для служебных сессий/);
+    } finally {
+      SESSIONS.delete("summ-session");
+    }
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_prune marks foreign-origin records and excludes them from category batch", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-prune-foreign-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    const ownHash = projectHashFromDir(dir);
+    storage.scan = async () => [
+      { session_id: "foreign", head: "hd1", branch: "f", host: hostname(), author: "a", time_last: 1, origin_project_hash: "foreignhash" },
+      { session_id: "local", head: "hd2", branch: "f", host: hostname(), author: "b", time_last: 2, origin_project_hash: ownHash },
+    ];
+    const seen = [];
+    storage.deleteByFilter = async function (args) { seen.push(args); return 1; };
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      revList: () => new Set(),
+      revListAll: () => ({ local: new Set(), remote: new Set() }),
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+    const listRes = await hooks.tool.memory_prune.execute({ action: "list" }, { sessionID: "s1" });
+    assert.match(listRes, /⚠️ чужой проект/, "foreign-origin record must be marked in list");
+    const delRes = await hooks.tool.memory_prune.execute({ action: "delete", category: "dead" }, { sessionID: "s1" });
+    assert.equal(seen.length, 1, "only local-origin dead record deleted");
+    assert.equal(seen[0].session_id, "local", "foreign-origin record excluded from batch-all");
+    assert.match(delRes, /Удалено 1 записей \(1 session_id\)/, "must report count");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── Final review fixes: C1 (Indexer wiring), I1 (preview merged filter), I2 (legacyKey scp) ──
+
+test("C1: indexing pass stamps origin_remote (from git remote) + prefixes (from namespace)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-c1-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    // Mock git config: remote.origin.url → provenance-штамп в записи. Кэш
+    // getGitConfig (module-level, per root) переиспользуется registerMemoryHooks.
+    getGitConfig(dir, () => "user.name=alice\nremote.origin.url=https://github.com/foo/bar.git\n");
+
+    const client = {
+      session: {
+        list: async () => ({ data: [{ id: "s1", parentID: null, title: "T", time: { created: 1, updated: Date.now() - 1000 } }] }),
+        get: async () => ({ data: { id: "s1", parentID: null, title: "T", time: { created: 1, updated: Date.now() - 1000 } } }),
+        messages: async () => ({ data: [
+          { info: { role: "user" }, parts: [{ type: "text", text: "hello" }] },
+          { info: { role: "assistant", providerID: "openai", modelID: "gpt-4o" }, parts: [{ type: "text", text: "hi" }] },
+        ] }),
+        create: async () => ({ data: { id: "summ-1" } }),
+        prompt: async () => ({ data: { parts: [{ type: "text", text: '{"title":"T","summary":"S","decisions":["d"]}' }] } }),
+        delete: async () => ({ data: {} }),
+      },
+    };
+
+    const storage = await mkSqliteStorage(dir);
+    const hooks = await registerMemoryHooks({
+      client,
+      config: mkConfig(dir, { namespace: "a.b.c", idle_debounce_min: 0, backfill_max_per_start: 5 }),
+      log: silentLog,
+      root: dir,
+      deps: {
+        storage,
+        embeddings: mkMockEmbeddings(),
+        // resolveHead — write-gate индексатора (иначе index_unattributed).
+        git: { resolveHead: async () => "a".repeat(40), detectMainline: () => ({ name: "main" }), revList: () => new Set() },
+      },
+    });
+
+    // Ждём backfill (debounce 0) → summarize → upsert.
+    await new Promise((r) => setTimeout(r, 300));
+
+    const rows = await storage.scan({ key: "a.b.c", fields: ["session_id", "key", "origin_remote", "prefixes"] });
+    assert.equal(rows.length, 1, "indexing pass must write the record");
+    assert.equal(rows[0].key, "a.b.c", "record key = effectiveKey (namespace)");
+    assert.equal(rows[0].origin_remote, "github.com/foo/bar", "origin_remote must be canonicalized from git remote");
+    assert.deepEqual(rows[0].prefixes, ["a", "a.b"], "prefixes must be derived from namespace a.b.c");
+
+    await hooks.dispose?.();
+    await storage.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("I1: memory_recall_preview keeps merged=1 sibling hits (mainline resolved)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-prev-merged-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.candidates = async () => [{ session_id: "a", merged: 1, head: "" }];
+    storage.search = async function (vec, opts) {
+      this.searches++;
+      return [
+        { entry: { session_id: "a", title: "A", summary: "SA", decisions: [], author: "alice", time_last: 1, origin_project_hash: "h", merged: 1 }, score: 0.9 },
+        // sibling-хит (merged=1 по построению) — НЕ в own-key кандидатах.
+        { entry: { session_id: "o1", title: "O", summary: "SO", decisions: [], author: "bob", time_last: 2, origin_project_hash: "ho", merged: 1 }, score: 0.8 },
+      ];
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git: mkScopeGit() },
+    });
+    const res = await hooks.tool.memory_recall_preview.execute({ query: "x" }, { sessionID: "s1" });
+    assert.match(res, /# A/, "own-key candidate returned");
+    assert.match(res, /# O/, "merged=1 sibling hit must survive the preview filter");
+    assert.match(res, /этого проекта и связанных доменов/, "preview header must mention related domains (parity with recall)");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("I2: memory_migrate from:auto resolves scp-remote without user (gitlab.example.com:group/repo.git)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-migrate-scp-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    // Mock git config: scp-remote без user@ (gitlab.example.com:group/repo.git).
+    getGitConfig(dir, () => "user.name=alice\nremote.origin.url=gitlab.example.com:group/repo.git\n");
+
+    const storage = mkMockStorage();
+    const seen = [];
+    storage.migrateKey = async function (from, to, opts) { seen.push({ from, to, opts }); return 5; };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    const res = await hooks.tool.memory_migrate.execute({ from: "auto" }, { sessionID: "s1" });
+    assert.match(res, /Перенесено 5 записей/);
+    assert.equal(seen.length, 1, "migrateKey must be called");
+    assert.equal(
+      seen[0].from,
+      projectHashFromRemote("gitlab.example.com:group/repo.git"),
+      "scp-no-user remote must resolve to the legacy bucket hash (canonicalizeRemote)",
+    );
+    assert.match(seen[0].from, /^[0-9a-f]{64}$/);
+    assert.equal(seen[0].to, "test.ns");
+    await hooks.dispose?.();
+  } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = saved;
     rmSync(dir, { recursive: true, force: true });

@@ -284,6 +284,19 @@ untrusted работают по очищенным артефактам, а до
   бэкенде + непустых `confidential.paths`; warn дублируется в выдаче
   `@maestro-memory`. `memory.mainline` — только локальные git-команды, машину не
   покидает.
+- **Экспозиция читаемых ключей/`origin_remote` на centralized (класс
+  git-метаданных, SECURITY §5a).** `key` (namespace) и `origin_remote` —
+  структурные идентификаторы (как `branch`/`head`/`merged`), не контент: на
+  централизованном бэкенде они видны серверу (key-фильтрация, провенанс).
+  Маскированию не подлежат — документируются как класс git-метаданных.
+- **Trust-модель домен-ног (v5.1).** Доменные ноги recall (братья/родитель
+  namespace, `related`) авто-попадают в контекст **merged-only**: в recall
+  включаются только записи, вошедшие в mainline соседнего домена (общее знание
+  команды); unmerged-опыт соседей не подмешивается. Writer-side маскирование
+  (double-masking) применяется ко всем записям независимо от домена. Граница
+  доверия — **конвенционная**: namespace/`related` задаёт владелец конфига,
+  плагин не имеет учётных границ. Off-switch — `memory.domain_recall: false`
+  (отключить доменные ноги целиком).
 - **Identity ≠ access-control.** `identity`/`identity_env`/git `user.name` —
   только **подпись записей** (`author`, атрибуция в поиске). Клиентский плагин
   не имеет границы учётных записей: любой член команды с ключом читает всю
@@ -307,9 +320,9 @@ untrusted работают по очищенным артефактам, а до
   индексаторе) + **permission `ask`** (защита от poison-JSONL в shared-бэкенд:
   injection-текст в summary не попадает в system-prompt сокомандников).
 - **Write/boundary-tools → permission `ask` (канон).** `memory_forget`,
-  `memory_export`, `memory_import` требуют нативного правила `"ask"` в
-  merge-config (обязательный шаг включения памяти v2). Правило для будущих
-  тулов: **новые write/boundary-tools → permission `ask`**.
+  `memory_export`, `memory_import`, `memory_prune` требуют нативного правила
+  `"ask"` в merge-config (обязательный шаг включения памяти v2). Правило для
+  будущих тулов: **новые write/boundary-tools → permission `ask`**.
 - **Отчёт — только агрегаты (SEC-4b).** `@maestro-memory-report` пишет
   HTML-артефакт без текстов записей: при `report.include_text: false` (default)
   в файл не попадают ни title, ни summary, ни decisions — только числа, имена

@@ -41,7 +41,7 @@
     "summarizer_model": null,
     "identity": null,
     "identity_env": null,
-    "namespace": null,
+    "namespace": "microservices.sales.pay",
     "module_dir": null,
     "idle_debounce_min": 10,
     "min_new_messages": 3,
@@ -87,7 +87,7 @@
 | `summarizer_model` | `string` \| `null` | `null` | Модель фонового саммаризатора; `null` → модель саммаризируемой сессии |
 | `identity` | `string` \| `null` | `null` | Явный override identity (напр. сервисный аккаунт). Обычно identity берётся из `identity_env` → git `user.name` |
 | `identity_env` | `string` \| `null` | `null` | Имя env-переменной с identity (per-machine, не в общем `maestro.json`) |
-| `namespace` | `string` \| `null` | `null` | Переопределяет ключ памяти `key` (monorepo-сплит / группировка связанных репозиториев) |
+| `namespace` | `string` | — | **Обязателен** (v5.1). Ключ изоляции памяти; формат `microservices.sales.pay` (1–3 сегмента, lowercase, разделитель `.`); нормализация trim+lowercase. Отсутствует/невалиден → память disabled (`namespace_missing`/`namespace_invalid`) |
 | `module_dir` | `string` \| `null` | `null` | Каталог кода модуля; `null` → `<data-dir>/maestro/memory/module` |
 | `idle_debounce_min` | `number` | `10` | Debounce индексации после события `session.idle` (минуты) |
 | `min_new_messages` | `number` | `3` | Мин. новых сообщений с последнего саммари для повторной индексации |
@@ -192,33 +192,61 @@
     в data-dir; митигация — framing).
   - pg fallback на `russian` fail-loud на кастомных PG без `russian`-конфига.
 
-## 🔑 Изоляция: key, project_hash, namespace, identity
+## 🔑 Изоляция: namespace, key, identity
 
-- **`key`** — эффективный ключ изоляции памяти. Все запросы фильтруются по `key`.
-  `key = namespace ?? project_hash`.
+- **`namespace`** — **обязательный** ключ изоляции памяти (v5.1). Формат
+  `microservices.sales.pay` — 1–3 сегмента, lowercase, разделитель `.`;
+  нормализация — trim + lowercase. **Отсутствует / невалиден → память disabled**
+  (`namespace_missing` / `namespace_invalid`); восстановление — задать namespace
+  + `memory_migrate from:auto` (легаси hash-бакет переносится). `key = namespace`.
 - **`project_hash`** — стабильный идентификатор проекта: sha256 от канонической
   формы git remote `origin` (strip scheme/credentials, lowercase host, strip
   `.git`; `git@github.com:org/repo.git` и `https://github.com/org/repo.git` →
-  одинаковый `github.com/org/repo`). Нет remote → hash абсолютного пути директории
-  (кросс-машинная стабильность для no-remote недостижима; для командной памяти
-  нужен remote или явный `namespace`).
-- **`namespace`** — переопределяет `key`: monorepo (общий key для подпроектов)
-  или связанные репозитории команды (одинаковый `namespace` в каждом → общая
-  память). **Смена namespace = потеря доступа к старым записям** (миграции нет).
+  одинаковый `github.com/org/repo`). Нет remote → hash абсолютного пути директории.
+  Используется как **провенанс** (`origin_project_hash` / `origin_remote`), не как
+  ключ изоляции.
+- **Домены (иерархия namespace).** Сегменты namespace образуют доменную
+  иерархию: `microservices.sales.orders` и `microservices.sales.web` — домен
+  `sales`. **Авто-related:** родитель и братья домена попадают в recall
+  **merged-only** (общее знание домена). Off-switch — `memory.domain_recall:
+  false`.
+- **`related`** — кросс-доменные связи (массив namespace-префиксов, ≤16):
+  точечная merged-связь с записями другого домена (напр. сервис
+  `microservices.checkout.notifications` с `related: ["microservices.sales.orders"]`).
+  Предпочтение — 1:1 leaf (точечный target); поддерево — opt-in.
+- **`memory_migrate`** — пере-keying при смене namespace: `from: auto |
+  namespace | hash`, max-version-wins на sqlite, `delete_source` — удалить
+  исходный бакет после переноса. **Смена namespace больше не = потеря доступа** —
+  используйте `memory_migrate`.
+- **Коллизии.** Детекция при записи: warn-on-new (новый namespace, уже
+  существующий в хранилище → warn, не перезапись). «Проекты в ключе» — по
+  `origin_remote` (провенанс, отображается в поиске).
+- **Адресация — namespace-only.** URL/hash-формы адресации убраны: `related` и
+  `project:` принимают только namespace-префиксы.
 - **`identity`** — подпись записи (`author`), атрибуция в поиске. Источник:
   `identity_env` → git `user.name` → OS username; `identity` в `maestro.json` —
   только явный override (напр. сервисный аккаунт). **Identity ≠ access-control**:
   клиентский плагин не имеет границы учётных записей — любой член команды с
   ключом читает всю память проекта. Per-account RBAC — server-side задача, вне
   scope плагина.
-- Запись хранит и `key` (фильтр), и `origin_project_hash` (провенанс —
-  отображается в поиске).
+- Запись хранит `key` (фильтр), `origin_project_hash`/`origin_remote` (провенанс)
+  и `prefixes` (доменные префиксы).
+
+**Сценарий (домен + related):** API `microservices.sales.orders` и frontend
+`microservices.sales.web` — общий домен `sales`: братья merged-видимы друг другу
+(авто-related). Сервис `microservices.checkout.notifications` с
+`related: ["microservices.sales.orders"]` — точечная merged-связь с записями
+`orders` (без общего домена).
 
 ## 🌿 Branch-aware memory (v3)
 
+> **Изменение жизненного цикла (3.2.0):** запись выживает при удалении сессии;
+> жизненный цикл — по git-якорю; см. changelog.
+
 Память привязана к git-истории: каждая запись несёт git-метаданные
-(`branch`/`head`/`merged`), **идентичность записи — по коммиту (`head`)**, имя
-ветки — только display/stats. Recall по умолчанию **commit-scoped**: общий
+(`branch`/`head`/`merged`), **идентичность записи (критерий матчинга/промоции) —
+по коммиту (`head`); ключ хранения — `session_id`; жизненный цикл — по ветке/HEAD**,
+имя ветки — только display/stats. Recall по умолчанию **commit-scoped**: общий
 (mainline) контекст + собственный «опыт» (неслитые коммиты, достижимые из
 checkout); чужие unmerged-коммиты не попадают в контекст. Слияние работы в
 mainline промоутирует её записи в общий контекст.
@@ -349,8 +377,8 @@ memory_search(query: string, {limit?, date_from?, date_to?, author?, project?, s
   - `date_from` / `date_to` — диапазон `time_last` (epoch ms).
   - `author` — фильтр по атрибуции (identity).
   - `project` — **кросс-проектный opt-in** (не default): поиск по записям другого
-    проекта. Принимает `namespace` | git-remote/URL (канонизация → hash) |
-    готовый `project_hash`. Работает на **всех бэкендах** (v3a): централизованные
+    проекта. Принимает **namespace-префикс** (адресация namespace-only;
+    URL/hash-формы убраны). Работает на **всех бэкендах** (v3a): централизованные
     (qdrant/pgvector) — единая коллекция/таблица с key-фильтром; sqlite — чтение
     соседней БД **read-only** (fail-soft: при недоступности/несовпадении
     `model_id`/dim — пропуск + лог). Данные маскированы; в выдаче показывается
@@ -374,8 +402,9 @@ memory_search(query: string, {limit?, date_from?, date_to?, author?, project?, s
 
 Все инструменты — хуки `tool`, доступны агентам в сессиях; **недоступны
 plugin-созданным сессиям `[maestro-memory]`** (как `memory_search`).
-`memory_forget`/`memory_export`/`memory_import` — **write/boundary-tools**:
-требуют нативного permission-правила `"ask"` в merge-config (см. ниже).
+`memory_forget`/`memory_export`/`memory_import`/`memory_migrate` —
+**write/boundary-tools**: требуют нативного permission-правила `"ask"` в
+merge-config (см. ниже).
 
 ### `memory_forget`
 
@@ -390,6 +419,28 @@ memory_forget({session_id?, author?, before?}) → «Удалено N запис
   замаскированными записями, нейтральна к границе доверия; `author` —
   метаданные, не access-control.
 - **Permission:** `memory_forget: "ask"` в merge-config (обязательное правило).
+
+### `memory_prune` (v5)
+
+```
+memory_prune({action: "list" | "delete", session_ids?, heads?, category?}) → листинг/удаление
+```
+
+- **HITL-утилизация** брошенных/unknown записей: `action: "list"` показывает
+  категории надёжности git-якоря, `action: "delete"` удаляет строго по явным
+  `session_ids`/`heads` (или по `category: dead|unknown`).
+- Категории: **remote-merged** (слито в mainline), **remote-alive** (живая
+  remote-ветка), **local-only** (только локальная ветка), **dead** (ветка/коммит
+  недостижимы), **unknown** (нет git-якоря). Листинг — по категориям, удаление —
+  по явным идентификаторам.
+- **Host-guard на централизованных бэкендах:** foreign-host записи исключены из
+  batch-all/категорийных удалений (нельзя снести чужое знание с другой машины).
+- **Squash/rebase-предупреждение:** после переписывания истории категории могут
+  быть неточными — перед массовым удалением сверяйте листинг.
+- Удаление — строго по явным `session_ids`/`heads`; «все» резолвится tool-слоем
+  в явный набор после host-guard.
+- **Permission:** `memory_prune: "ask"` в merge-config (обязательное правило —
+  без него новый tool получает ungated-доступ по дефолту OpenCode).
 
 ### `memory_export`
 
@@ -432,6 +483,24 @@ memory_import({path, replace?}) → «Импортировано N записе�
   после успешной валидации всех строк).
 - **Permission:** `memory_import: "ask"` в merge-config (обязательное правило).
 
+### `memory_migrate`
+
+```
+memory_migrate({from: "auto" | "namespace" | "hash", delete_source?}) → «Перенесено N записей из <fromKey>.»
+```
+
+- **Пере-keying при смене namespace:** перенос записей из бакета-источника в
+  текущий `namespace` (смена namespace больше не = потеря доступа).
+- `from: "auto"` — легаси hash-бакет по git remote (репо без remote → ошибка,
+  укажите `from: <hash>` или `from: <namespace>`); `from: <namespace>` /
+  `from: <hash>` — явный источник (namespace валидируется, hash — passthrough).
+- `from`, совпадающий с текущим ключом → no-op.
+- **Max-version-wins на sqlite:** при конфликте версий записей выигрывает
+  запись с большей версией (источник/приёмник — по `version`).
+- `delete_source: true` — удалить исходный бакет после переноса (default
+  `false`).
+- **Permission:** `memory_migrate: "ask"` в merge-config (обязательное правило).
+
 ### `memory_recall_preview`
 
 ```
@@ -459,9 +528,10 @@ memory_stats_detail() → агрегаты (без summary-текста)
 
 ### Permission-правило (write/boundary-tools)
 
-`memory_forget`/`memory_export`/`memory_import` — операции, пересекающие границу
-(удаление, запись файла, запись в память). OpenCode по умолчанию разрешает новые
-тулы, поэтому **обязательное правило** в merge-config
+`memory_forget`/`memory_export`/`memory_import`/`memory_migrate`/`memory_prune` —
+операции, пересекающие границу (удаление, запись файла, запись в память,
+пере-keying). OpenCode по умолчанию разрешает новые тулы, поэтому
+**обязательное правило** в merge-config
 (`.opencode/opencode.json` или global):
 
 ```json
@@ -469,7 +539,9 @@ memory_stats_detail() → агрегаты (без summary-текста)
   "permission": {
     "memory_forget": "ask",
     "memory_export": "ask",
-    "memory_import": "ask"
+    "memory_import": "ask",
+    "memory_migrate": "ask",
+    "memory_prune": "ask"
   }
 }
 ```
@@ -575,8 +647,13 @@ opt-in на вставку замаскированных заголовков/s
 `retry_interval_min`; после 3 неудач — помечается «skip» (state-файл), повторно
 не трогается.
 
-**Удаление сессии:** событие `session.deleted` → `storage.delete(session_id)`
-(best-effort) + сброс debounce-таймера.
+**Удаление сессии (жизненный цикл — по git-якорю, v5):** по умолчанию запись
+**выживает** — знание привязано к `head`, а не к сессии; runtime-очистка (таймер,
+очередь, sticky branch/head, state-строка) выполняется всегда. Флаг
+`delete_on_session_delete: true` возвращает v1-поведение (удаление записи при
+`session.deleted`; рекомендуется только для sqlite). Событие `memory:session_closed`
+— запись сохранена; `memory:session_deleted` — удалена (только при успехе);
+`memory:session_delete_failed` — ошибка удаления.
 
 ## 📁 Расположение данных
 
@@ -695,6 +772,11 @@ opt-in на вставку замаскированных заголовков/s
 | `memory:index_retryable` (debug) | sessionID |
 | `memory:index_error` (error) | sessionID, error_class |
 | `memory:session_deleted` | sessionID |
+| `memory:session_closed` | sessionID (запись сохранена при закрытии сессии) |
+| `memory:session_delete_failed` (error) | sessionID |
+| `memory:index_unattributed` (debug) | sessionID (нет git-якоря — запись не индексируется) |
+| `memory:pruned` | count, records (число удалённых записей и session_id) |
+| `memory:delete_on_session_delete_centralized` (warn) | — (флаг `delete_on_session_delete` на централизованном бэкенде) |
 | `memory:forgotten` | count, filters (массив enum: `session_id`/`author`/`before`, без значений) |
 | `memory:backfill` | considered, indexed, skipped |
 | `memory:backfill.done` | duration_ms |

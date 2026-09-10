@@ -1753,6 +1753,11 @@ Pipeline не имеет механизма cross-repo координации (�
           unit + e2e тесты, CI/CD, auth
         - HITL: "Контекст актуален? (a) да — (b) обновить"
         -> Пользователь: (a) да
+        - Если memory.enabled: true и memory.namespace отсутствует — информативная
+          HITL-заметка (не блокирует): «Память maestro выключена (disabled_reason:
+          namespace_missing). Задайте memory.namespace (формат: microservices.sales.pay
+          — 1–3 сегмента, lowercase, точка-разделитель) — см.
+          manual_docs/how-to/enable-memory.md.»
         - PROJECT_CONTEXT загружен
 Шаг 1:  [agent] Загружает skill maestro
         -> HITL: "Что делаем? (f) feature — (b) bugfix"
@@ -1775,6 +1780,11 @@ Pipeline не имеет механизма cross-repo координации (�
          - Primary пишет spec (activation flow, idempotency, error handling)
          - Открытых вопросов нет
          - Контекст не изменился (нет новых категорий/команд/стека) → шаг 8.5: изменений нет
+         - **Related-чек (namespace-идентичность):** если фича/spec затрагивает
+           интеграцию с другими проектами/репозиториями (вне текущего домена) — проверить,
+           что цель объявлена в memory.related (maestro.json). Нет → предложить правку
+           конфига как задачу плана (config-as-code; после смены — рестарт opencode).
+           Цель — namespace-префикс, предпочтение — точный leaf (1:1), merged-only.
 Шаг 9:  [HITL] Оркестратор предлагает Spec Review на spec (фича сложная)
          -> Пользователь подтверждает
          - [agent] Диспатчит opus-сабагента (subagent_type=opus) с mode=spec

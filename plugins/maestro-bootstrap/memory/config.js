@@ -1,5 +1,26 @@
 import { createHash } from "node:crypto";
 
+const NAMESPACE_RE = /^[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?(\.[a-z0-9]([a-z0-9-]{0,30}[a-z0-9])?){0,2}$/;
+export function normalizeNamespace(ns) {
+  if (typeof ns !== "string") return null;
+  return ns.trim().toLowerCase();
+}
+export function namespaceValid(ns) {
+  const n = normalizeNamespace(ns);
+  return typeof n === "string" && n.length > 0 && n.length <= 100 && NAMESPACE_RE.test(n);
+}
+function namespaceMissing(m) { return !m?.namespace; }
+function namespaceInvalid(m) { return m?.namespace != null && !namespaceValid(m.namespace); }
+function relatedValid(m) {
+  const r = m?.related;
+  if (r == null) return true;
+  return Array.isArray(r) && r.length <= 16 && r.every((x) => namespaceValid(x));
+}
+function domainRecallValid(m) {
+  if (m?.domain_recall == null) return true;
+  return typeof m.domain_recall === "boolean";
+}
+
 export const DEFAULTS = {
   enabled: false,
   auto_recall: true,
@@ -18,9 +39,12 @@ export const DEFAULTS = {
   min_score: 0.35,
   similarity_threshold: 0.7,
   retention_days: null,
+  delete_on_session_delete: false,
   summarize_timeout_ms: 120000,
   branch_context: true,
   mainline: null,
+  related: null,
+  domain_recall: true,
   storage: { type: "sqlite", qdrant: null, pgvector: null },
   embedding: {
     provider: "local",
@@ -52,6 +76,8 @@ function mergedConfig(m) {
   return {
     ...DEFAULTS,
     ...m,
+    namespace: m?.namespace != null ? normalizeNamespace(m.namespace) : null,
+    related: m?.related != null ? m.related.map((x) => normalizeNamespace(x)) : null,
     embedding,
     probe_cooldown_min: m.probe_cooldown_min ?? DEFAULTS.probe_cooldown_min,
     storage: {
@@ -135,6 +161,11 @@ function branchContextValid(m) {
   return typeof m.branch_context === "boolean";
 }
 
+function deleteOnSessionDeleteValid(m) {
+  if (m?.delete_on_session_delete == null) return true;
+  return typeof m.delete_on_session_delete === "boolean";
+}
+
 // Идентификаторы провайдеров эмбеддингов, поддерживаемых в конфиге.
 const EMBEDDING_PROVIDERS = new Set(["local", "openai"]);
 
@@ -186,12 +217,17 @@ export function classifyMemoryConfig(maestroJson, { gitName = null } = {}) {
   const m = maestroJson?.memory;
   if (!m) return { enabled: false, disabled_reason: "no_memory_section" };
   if (m.enabled !== true) return { enabled: false, disabled_reason: "explicitly_disabled" };
+  if (namespaceMissing(m)) return { enabled: false, disabled_reason: "namespace_missing" };
+  if (namespaceInvalid(m)) return { enabled: false, disabled_reason: "namespace_invalid" };
+  if (!relatedValid(m)) return { enabled: false, disabled_reason: "related_invalid" };
+  if (!domainRecallValid(m)) return { enabled: false, disabled_reason: "domain_recall_invalid" };
   if (!retentionDaysValid(m)) return { enabled: false, disabled_reason: "retention_days_invalid" };
   if (!similarityThresholdValid(m)) return { enabled: false, disabled_reason: "similarity_threshold_invalid" };
   const type = m.storage?.type ?? "sqlite";
   if (!STORAGE_TYPES.has(type)) return { enabled: false, disabled_reason: "storage_type_invalid" };
   if (!pgvectorTextSearchConfigValid(m)) return { enabled: false, disabled_reason: "pgvector_text_search_config_invalid" };
   if (!branchContextValid(m)) return { enabled: false, disabled_reason: "branch_context_invalid" };
+  if (!deleteOnSessionDeleteValid(m)) return { enabled: false, disabled_reason: "delete_on_session_delete_invalid" };
   if (!embeddingValid(m)) return { enabled: false, disabled_reason: "embedding_invalid" };
   if (!probeCooldownValid(m)) return { enabled: false, disabled_reason: "probe_cooldown_min_invalid" };
   if (!mainlineValid(m)) return { enabled: false, disabled_reason: "mainline_invalid" };
