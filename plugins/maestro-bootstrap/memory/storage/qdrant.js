@@ -430,9 +430,12 @@ export class QdrantStorage {
 
   /**
    * Миграция namespace (spec §3.6): перенести точки key=fromKey в key=toKey.
-   * max-version-wins: существующая точка (детерминированный id
-   * uuidFrom(session_id)) с version >= источника → skip. prefixes
-   * пересчитываются от toKey; origin_remote сохраняется (provenance).
+   * На qdrant session_id глобально уникален (детерминированный id точки
+   * uuidFrom(session_id)) → same-session cross-bucket конфликт структурно
+   * невозможен, max-version-wins не применяется (в отличие от sqlite, где
+   * отдельные DB-файлы дают независимые PK-пространства). Миграция — это
+   * безусловный re-key: каждая точка источника получает key=toKey и
+   * пересчитанные prefixes; origin_remote сохраняется (provenance).
    * @param {string} fromKey  Ключ источника.
    * @param {string} toKey  Ключ цели.
    * @param {{ deleteSource?: boolean }} [opts]  deleteSource → собрать ids ДО
@@ -460,25 +463,18 @@ export class QdrantStorage {
     } while (offset != null);
 
     const newPrefixes = prefixesOf(toKey);
-    const skippedIds = [];
-    let processed = 0;
-    for (const p of sourcePoints) {
-      const existing = await this._get(p.payload.session_id);
-      if (existing && existing.version >= p.payload.version) {
-        skippedIds.push(p.id); // max-version-wins: источник остаётся в бакете
-        continue;
-      }
+    const sourceIds = sourcePoints.map((p) => p.id);
+    for (const id of sourceIds) {
       await this.client.setPayload(this.collection, {
         payload: { key: toKey, prefixes: newPrefixes },
-        points: [p.id],
+        points: [id],
       });
-      processed++;
     }
-    // deleteSource: удалить остатки источника (пропущенные точки), НЕ
-    // перенесённые (они уже живут в цели под key=to).
-    if (deleteSource && skippedIds.length) {
-      await this.client.delete(this.collection, { points: skippedIds });
+    // deleteSource: удалить исходные точки по собранным ДО setPayload ids
+    // (после обновления фильтр key=from пуст, delete по фильтру невозможен).
+    if (deleteSource && sourceIds.length) {
+      await this.client.delete(this.collection, { points: sourceIds });
     }
-    return processed;
+    return sourceIds.length;
   }
 }

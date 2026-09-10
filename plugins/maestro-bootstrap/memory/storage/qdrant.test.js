@@ -900,15 +900,15 @@ test("qdrant subtree leg: key = T OR prefixes match any [T] + merged=1", async (
   assert.ok(!subtree[2].filter.must.some((m) => m.key === "session_id"), "own-key filterSessionIds must NOT leak into subtree leg");
 });
 
-test("qdrant migrateKey max-version-wins", async () => {
+test("qdrant migrateKey: unconditional re-key (deterministic id — no cross-bucket conflict)", async () => {
   const c = fakeClient();
-  // Имитация коллекции: source-точки (key=old.ns) + target-точка (key=new.ns).
+  // Одна коллекция: source-точки (key=old.ns). На qdrant id точки
+  // детерминирован uuidFrom(session_id) → same-session cross-bucket конфликт
+  // структурно невозможен → max-version-wins не применяется, каждая точка
+  // безусловно re-key'ится в toKey (payload.key + пересчитанные prefixes).
   const sourcePoints = [
     { id: uuidFrom("s1"), payload: { session_id: "s1", key: "old.ns", version: 2, decisions: "[]" } },
     { id: uuidFrom("s2"), payload: { session_id: "s2", key: "old.ns", version: 7, decisions: "[]" } },
-  ];
-  const target = [
-    { id: uuidFrom("s1"), payload: { session_id: "s1", key: "new.ns", version: 5, decisions: "[]" } },
   ];
   const setPayloadCalls = [];
   c.scroll = async (name, opts) => {
@@ -916,12 +916,6 @@ test("qdrant migrateKey max-version-wins", async () => {
     const keyCond = opts.filter.must.find((m) => m.key === "key");
     if (!keyCond) return { points: [], next_page_offset: null };
     return { points: sourcePoints.filter((p) => p.payload.key === keyCond.match.value), next_page_offset: null };
-  };
-  c.query = async (name, q) => {
-    c.calls.push(["query", name, q]);
-    const sid = q.filter?.must?.[0]?.match?.value;
-    const t = target.find((p) => p.payload.session_id === sid);
-    return { points: t ? [t] : [] };
   };
   c.setPayload = async (name, opts) => {
     c.calls.push(["setPayload", name, opts]);
@@ -930,10 +924,13 @@ test("qdrant migrateKey max-version-wins", async () => {
   const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
   await st.init();
   const n = await st.migrateKey("old.ns", "new.ns");
-  // s1: source v2 <= target v5 → skip (max-version-wins). s2: no target → migrate.
-  assert.equal(n, 1, "only s2 migrated (s1 max-version-wins)");
-  assert.equal(setPayloadCalls.length, 1);
-  assert.deepEqual(setPayloadCalls[0], { payload: { key: "new.ns", prefixes: prefixesOf("new.ns") }, points: [uuidFrom("s2")] });
+  // Обе точки перенесены (никакого skip по версии).
+  assert.equal(n, 2, "all source points re-keyed unconditionally");
+  assert.equal(setPayloadCalls.length, 2);
+  assert.deepEqual(setPayloadCalls[0], { payload: { key: "new.ns", prefixes: prefixesOf("new.ns") }, points: [uuidFrom("s1")] });
+  assert.deepEqual(setPayloadCalls[1], { payload: { key: "new.ns", prefixes: prefixesOf("new.ns") }, points: [uuidFrom("s2")] });
+  // Никакого _get/query-лукапа по session_id (нет max-version-wins).
+  assert.equal(c.calls.some(([k]) => k === "query"), false, "no per-point get lookup");
 });
 
 test("qdrant migrateKey delete_source: ids collected pre-setPayload, delete by ids after", async () => {
@@ -942,9 +939,6 @@ test("qdrant migrateKey delete_source: ids collected pre-setPayload, delete by i
     { id: uuidFrom("s1"), payload: { session_id: "s1", key: "old.ns", version: 7, decisions: "[]" } },
     { id: uuidFrom("s2"), payload: { session_id: "s2", key: "old.ns", version: 2, decisions: "[]" } },
   ];
-  const target = [
-    { id: uuidFrom("s2"), payload: { session_id: "s2", key: "new.ns", version: 5, decisions: "[]" } },
-  ];
   const setPayloadCalls = [];
   const deleteCalls = [];
   c.scroll = async (name, opts) => {
@@ -952,12 +946,6 @@ test("qdrant migrateKey delete_source: ids collected pre-setPayload, delete by i
     const keyCond = opts.filter.must.find((m) => m.key === "key");
     if (!keyCond) return { points: [], next_page_offset: null };
     return { points: sourcePoints.filter((p) => p.payload.key === keyCond.match.value), next_page_offset: null };
-  };
-  c.query = async (name, q) => {
-    c.calls.push(["query", name, q]);
-    const sid = q.filter?.must?.[0]?.match?.value;
-    const t = target.find((p) => p.payload.session_id === sid);
-    return { points: t ? [t] : [] };
   };
   c.setPayload = async (name, opts) => {
     c.calls.push(["setPayload", name, opts]);
@@ -970,12 +958,13 @@ test("qdrant migrateKey delete_source: ids collected pre-setPayload, delete by i
   const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
   await st.init();
   const n = await st.migrateKey("old.ns", "new.ns", { deleteSource: true });
-  // s1: v7 > no target → migrated. s2: v2 <= target v5 → skipped → deleted (source remnant).
-  assert.equal(n, 1);
-  assert.equal(setPayloadCalls.length, 1);
+  // Обе точки re-key'нуты; deleteSource удаляет исходные ids (собранные ДО setPayload).
+  assert.equal(n, 2);
+  assert.equal(setPayloadCalls.length, 2);
   assert.deepEqual(setPayloadCalls[0].points, [uuidFrom("s1")]);
+  assert.deepEqual(setPayloadCalls[1].points, [uuidFrom("s2")]);
   assert.equal(deleteCalls.length, 1);
-  assert.deepEqual(deleteCalls[0], { points: [uuidFrom("s2")] }, "skipped source point deleted by id");
+  assert.deepEqual(deleteCalls[0], { points: [uuidFrom("s1"), uuidFrom("s2")] }, "all source ids deleted by id");
   // Порядок: scroll (ids собраны ДО setPayload) → setPayload → delete.
   const keyScrollIdx = c.calls.findIndex(([k, , opts]) => k === "scroll" && opts?.filter?.must?.some((m) => m.key === "key"));
   const setPayloadIdx = c.calls.findIndex(([k]) => k === "setPayload");
@@ -983,4 +972,15 @@ test("qdrant migrateKey delete_source: ids collected pre-setPayload, delete by i
   assert.ok(keyScrollIdx !== -1 && setPayloadIdx !== -1 && deleteIdx !== -1, "scroll/setPayload/delete all present");
   assert.ok(keyScrollIdx < setPayloadIdx, "ids collected (scroll) before setPayload");
   assert.ok(setPayloadIdx < deleteIdx, "delete after setPayload");
+});
+
+test("qdrant migrateKey no-op when fromKey === toKey", async () => {
+  const c = fakeClient();
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  c.calls.length = 0; // сброс: init() сам делает scroll (backfill)
+  const n = await st.migrateKey("same.ns", "same.ns");
+  assert.equal(n, 0, "no-op guard returns 0");
+  assert.equal(c.calls.some(([k]) => k === "scroll"), false, "no scroll on no-op");
+  assert.equal(c.calls.some(([k]) => k === "setPayload"), false, "no setPayload on no-op");
 });
