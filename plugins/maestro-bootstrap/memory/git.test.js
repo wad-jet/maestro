@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { resolveBranch, resolveHead, detectMainline, revList, isAncestor, verifyBranch } from "./git.js";
+import { resolveBranch, resolveHead, detectMainline, revList, isAncestor, verifyBranch, revListAll } from "./git.js";
 
 function makeRepo() {
   const dir = mkdtempSync(join(tmpdir(), "mm-git-"));
@@ -102,4 +102,51 @@ test("detectMainline step 3: init.defaultBranch naming absent branch → skipped
   // настройка может именовать отсутствующую) → verifyBranch провал → шаг 4.
   execFileSync("git", ["config", "init.defaultBranch", "trunk"], { cwd: dir, stdio: "ignore" });
   assert.equal(detectMainline(dir).name, "main");
+});
+
+// ── §3.6: revListAll local/remote reachability ───────────────────────────
+
+test("revListAll: empty opts → {local:null, remote:null}", () => {
+  const dir = makeRepo();
+  const r1 = revListAll(dir, {});
+  assert.equal(r1.local, null);
+  assert.equal(r1.remote, null);
+  const r2 = revListAll(dir);
+  assert.equal(r2.local, null);
+  assert.equal(r2.remote, null);
+});
+
+test("revListAll: local set contains branch commits", () => {
+  const dir = makeRepo();
+  const head = resolveHead(dir);
+  const { local } = revListAll(dir, { local: true });
+  assert.ok(local instanceof Set);
+  assert.ok(local.has(head));
+});
+
+test("revListAll: local + remote — remote is a Set (may be empty without remotes)", () => {
+  const dir = makeRepo();
+  const head = resolveHead(dir);
+  const { local, remote } = revListAll(dir, { local: true, remote: true });
+  assert.ok(local instanceof Set);
+  assert.ok(local.has(head));
+  assert.ok(remote instanceof Set);
+  // Без remote-репозитория --remotes не возвращает commit'ов, но должен вернуть Set.
+  assert.equal(remote.size, 0);
+});
+
+test("revListAll: multiple branches — local contains all commits", () => {
+  const dir = makeRepo();
+  // Создаём боковую ветку с дополнительным коммитом.
+  execFileSync("git", ["checkout", "-b", "feature"], { cwd: dir, stdio: "ignore" });
+  writeFileSync(join(dir, "b.txt"), "b");
+  execFileSync("git", ["add", "."], { cwd: dir });
+  execFileSync("git", ["commit", "-m", "c2"], { cwd: dir });
+  const sideHead = resolveHead(dir);
+
+  const head = resolveHead(dir);
+  const { local } = revListAll(dir, { local: true });
+  assert.ok(local.has(head));
+  assert.ok(local.has(sideHead));
+  // HEAD (c2) достижим из main через feature.
 });

@@ -113,6 +113,21 @@ export function revList(root, ref) {
 }
 
 /**
+ * Множества достижимости из групп refs (spec §3.6 prune-категорий).
+ * local: `git rev-list --branches` (refs/heads/*); remote: `git rev-list --remotes`
+ * (refs/remotes/*). Теги исключены. Fail-soft: ошибка → null.
+ * @param {string} root
+ * @param {{ local?: boolean, remote?: boolean }} [opts]
+ * @returns {{ local: Set<string>|null, remote: Set<string>|null }}
+ */
+export function revListAll(root, { local = false, remote = false } = {}) {
+  const out = { local: null, remote: null };
+  if (local) out.local = revList(root, "--branches");
+  if (remote) out.remote = revList(root, "--remotes");
+  return out;
+}
+
+/**
  * Предикат «head достижим из mainline» (`git merge-base --is-ancestor`).
  * exit 0 → "yes", 1 → "no", >1 или spawn-ошибка → "error" (dangling/invalid).
  * @param {string} root
