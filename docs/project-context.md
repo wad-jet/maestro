@@ -54,6 +54,10 @@
   lifecycle):** жизненный цикл записей — по git-якорю (head/ветка), а не сессии;
   `session.deleted` сохраняет запись (флаг `delete_on_session_delete`, default false);
   write-gate по head (non-git инертны); поле `host`; HITL `/maestro-memory-prune`.
+  **v5.1 (namespace-идентичность):** обязательный валидируемый namespace
+  (формат `a.b.c`, 1–3 сегмента, lowercase) — единственный ключ; домен-авто-related
+  (родитель+братья, merged-only); `related` (кросс-домен, merged-only, 1:1);
+  коллизии (warn-on-new); `memory_migrate` (from:auto); поля `origin_remote`/`prefixes`.
   **v4 (external
   embeddings):** опциональный внешний OpenAI-совместимый embedder
   (`memory.embedding.provider: "openai"`), probe доступности модели (старт+cooldown+
