@@ -1087,3 +1087,43 @@ test("M-7: _branchContext bounded — oldest evicted on overflow (re-resolves)",
   assert.equal(ctx.branch, "main", "evicted session re-resolves current git state");
   idx.dispose();
 });
+
+// ── Task 4: origin_remote + prefixes (spec §3.3/§5) ───────────────────
+
+test("entry carries origin_remote and prefixes", async () => {
+  const client = mkClient();
+  const storage = mkStorage(client);
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, key: "microservices.sales", originRemote: "github.com/org/api",
+    confidentialPatterns: [],
+    git: mkGit(),
+  });
+  await idx._run("s1");
+  const e = client.upserts[0][0];
+  assert.equal(e.origin_remote, "github.com/org/api");
+  assert.deepEqual(e.prefixes, ["microservices"]);
+  idx.dispose();
+});
+
+test("single-segment namespace → prefixes empty; no originRemote → ''", async () => {
+  const client = mkClient();
+  const storage = mkStorage(client);
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, key: "k",
+    confidentialPatterns: [],
+    git: mkGit(),
+  });
+  await idx._run("s1");
+  const e = client.upserts[0][0];
+  assert.deepEqual(e.prefixes, []);
+  assert.equal(e.origin_remote, "");
+  idx.dispose();
+});

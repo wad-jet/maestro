@@ -2,6 +2,7 @@ import { hostname } from "node:os";
 import { maskTranscript, maskEntry } from "./mask.js";
 import { resolveEffectiveKey } from "./config.js";
 import { SESSIONS } from "./summarize.js";
+import { prefixesOf } from "./project.js";
 
 function withTimeout(p, ms) {
   return Promise.race([
@@ -15,7 +16,7 @@ function withTimeout(p, ms) {
 export class Indexer {
   constructor({
     client, config, embeddings, storage, state, summarize,
-    projectKey, confidentialPatterns = [], log = console, author = null,
+    projectKey, key, originRemote = "", confidentialPatterns = [], log = console, author = null,
     git = null, mainline = null, root = null, branchContextCap = 1000,
     // Task 3: аудит-лог-хелперы (spec §2.2) — пишут в memoryLog ?? log;
     // default — заглушки (backward compat: без хелперов события не пишутся).
@@ -28,6 +29,8 @@ export class Indexer {
     this.state = state;
     this.summarize = summarize;
     this.projectKey = projectKey;
+    this.key = key;
+    this.originRemote = originRemote;
     this.confidentialPatterns = confidentialPatterns;
     this.log = log;
     this.logInfo = logInfo;
@@ -273,6 +276,8 @@ export class Indexer {
           head: effHead,
           merged: 0,
           host: hostname(),
+          origin_remote: this.originRemote ?? "",
+          prefixes: prefixesOf(this.key ?? ""),
         };
 
         // G2: re-mask entry before write (defense-in-depth)
