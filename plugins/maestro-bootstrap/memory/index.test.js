@@ -3549,6 +3549,51 @@ test("memory_search subtree legs: domain target + related keys; own excluded; do
   }
 });
 
+test("memory_recall_preview subtree legs: domain target + related keys; domain_recall=false drops domain (parity with search)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-prev-subtree-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    const seen = [];
+    storage.search = async function (vec, opts) { this.searches++; seen.push(opts); return []; };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir, { related: ["rel.ns", "test.ns"] }),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    await hooks.tool.memory_recall_preview.execute({ query: "x" }, { sessionID: "s1" });
+    assert.equal(seen.length, 1, "search must be called once");
+    assert.ok(Array.isArray(seen[0].subtree), "subtree must be an array");
+    assert.ok(seen[0].subtree.includes("test"), "domain target (parent prefix of test.ns) in subtree");
+    assert.ok(seen[0].subtree.includes("rel.ns"), "related key in subtree");
+    assert.ok(!seen[0].subtree.includes("test.ns"), "own namespace excluded from related legs");
+    await hooks.dispose?.();
+
+    // domain_recall=false → domain target dropped, related kept.
+    const storage2 = mkMockStorage();
+    const seen2 = [];
+    storage2.search = async function (vec, opts) { this.searches++; seen2.push(opts); return []; };
+    const hooks2 = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir, { domain_recall: false, related: ["rel.ns"] }),
+      log: silentLog,
+      root: dir,
+      deps: { storage: storage2, embeddings: mkMockEmbeddings() },
+    });
+    await hooks2.tool.memory_recall_preview.execute({ query: "x" }, { sessionID: "s1" });
+    assert.ok(!seen2[0].subtree.includes("test"), "domain target dropped when domain_recall=false");
+    assert.ok(seen2[0].subtree.includes("rel.ns"), "related key still present when domain_recall=false");
+    await hooks2.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("memory_search project: invalid (URL) → 'только namespace' error", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mem-proj-invalid-"));
   const saved = process.env.XDG_DATA_HOME;

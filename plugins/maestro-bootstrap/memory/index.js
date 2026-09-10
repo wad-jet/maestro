@@ -681,6 +681,11 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     // (own исключён). Используются в subtree-ногах memory_search и recall.
     const domainTarget = prefixesOf(config.namespace).slice(-1)[0] ?? null;
     const relatedKeys = (config.related ?? []).map((r) => resolveProjectKey(r)).filter((r) => r !== config.namespace);
+    // Task 6: subtree-ноги — domain (родительский префикс, если domain_recall
+    // не off) + related-ключи. Общий источник для memory_search и
+    // memory_recall_preview (parity: preview показывает те же ноги, что и
+    // реальный recall/search). Дедупликация — на случай пересечения ног.
+    const subtreeLegs = () => [...new Set([...(config.domain_recall !== false && domainTarget ? [domainTarget] : []), ...relatedKeys])];
     const recall = new Recall({
       embeddings,
       storage,
@@ -754,7 +759,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             // Task 6: subtree-ноги — domain (родительский префикс, если
             // domain_recall не off) + related-ключи. Явный project → namespace-only
             // (resolveProjectKey бросает на URL/hash — «только namespace»).
-            searchOpts.subtree = [...(config.domain_recall !== false && domainTarget ? [domainTarget] : []), ...relatedKeys];
+            searchOpts.subtree = subtreeLegs();
             if (args.project !== undefined) {
               try {
                 searchOpts.subtree.push(resolveProjectKey(args.project));
@@ -1092,6 +1097,9 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
               min_score: config.min_score,
               key: effectiveKey,
               query: args.query,
+              // Task 6: subtree-ноги — те же, что у memory_search/recall
+              // (parity: preview показывает те же ноги, что и реальный recall).
+              subtree: subtreeLegs(),
             };
             let inContext = null;
             let experienceIds = new Set();
