@@ -1,3 +1,4 @@
+import { hostname } from "node:os";
 import { maskTranscript, maskEntry } from "./mask.js";
 import { resolveEffectiveKey } from "./config.js";
 import { SESSIONS } from "./summarize.js";
@@ -69,7 +70,11 @@ export class Indexer {
       try { head = (await this.git.resolveHead(this.root)) ?? ""; } catch { head = ""; }
     }
     const ctx = { branch, head };
-    this._branchContext.set(sessionID, ctx);
+    // Task 4: sticky-фикс (spec §3.3) — не кэшируем резолв с пустым head,
+    // чтобы следующий re-summarize попробовал резолв заново.
+    if (head) {
+      this._branchContext.set(sessionID, ctx);
+    }
     // M-7: bound — FIFO-эвикция старейшего ключа при превышении cap (Map
     // сохраняет порядок вставки; keys().next() — самый старый).
     if (this._branchContext.size > this._branchContextCap) {
@@ -211,6 +216,18 @@ export class Indexer {
       // so a hanging client.session.prompt cannot hold this.running (the concurrency lock) forever.
       const timeoutMs = this.config.summarize_timeout_ms ?? 120_000;
       const work = (async () => {
+        // Task 4: write-gate (spec §3.3) — resolve branch/head BEFORE summarize;
+        // abort early if no head (unattributed session). Sticky cache + existing
+        // entry preserve previously-resolved head/branch across re-summarizes.
+        const { branch, head } = await this._resolveBranchContext(sessionID);
+        const existing = await this.storage.get(sessionID);
+        const effHead = head || existing?.head || "";
+        if (!effHead) {
+          this.logDebug?.("memory:index_unattributed", { sessionID });
+          return;
+        }
+        const effBranch = branch || existing?.branch || "";
+
         // Summarize inside withTimeout (I1) — if client.session.prompt hangs, timeout releases lock
         const summarizeStart = Date.now();
         const { title, summary, decisions } = await this.summarize({
@@ -228,9 +245,6 @@ export class Indexer {
           model: modelRef?.modelID ?? null,
         });
 
-        // Task 4: sticky branch/head (resolved once per session).
-        const { branch, head } = await this._resolveBranchContext(sessionID);
-
         // Build entry, mask FIRST, then embed masked content (I1: embed after maskEntry)
         const entry = {
           session_id: sessionID,
@@ -245,9 +259,10 @@ export class Indexer {
           time_first: sess?.time?.created ?? 0,
           time_last: sess?.time?.updated ?? 0,
           version: 0,
-          branch,
-          head,
+          branch: effBranch,
+          head: effHead,
           merged: 0,
+          host: hostname(),
         };
 
         // G2: re-mask entry before write (defense-in-depth)
@@ -257,8 +272,7 @@ export class Indexer {
         const vec = await this.embeddings.embed(`${maskedEntry.title}\n${maskedEntry.summary}\n${maskedEntry.decisions.join("\n")}`);
         maskedEntry.embedding = vec;
 
-        // G5: version increment via storage.get
-        const existing = await this.storage.get(sessionID);
+        // G5: version increment — reuse `existing` fetched by the write-gate.
         maskedEntry.version = (existing?.version ?? 0) + 1;
 
         // Task 4: merged fast-path — branch === mainline → 1; branch='' or
@@ -267,7 +281,7 @@ export class Indexer {
         if (existing?.merged === 1) {
           maskedEntry.merged = 1;
         } else {
-          maskedEntry.merged = branch && this.mainline && branch === this.mainline ? 1 : 0;
+          maskedEntry.merged = effBranch && this.mainline && effBranch === this.mainline ? 1 : 0;
         }
 
         await this.storage.upsert([maskedEntry]);

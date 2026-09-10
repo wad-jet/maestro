@@ -66,6 +66,15 @@ function mkState(extra = {}) {
   };
 }
 
+// Task 4: write-gate requires a resolvable head — default git mock returns a
+// valid 40-hex head so tests that expect a record pass the gate.
+function mkGit({ branch = "feature/x", head = "a".repeat(40) } = {}) {
+  return {
+    resolveBranch: async () => branch,
+    resolveHead: async () => head,
+  };
+}
+
 // ── Basic functionality ──────────────────────────────────────────────
 
 test("indexer summarizes and upserts on _run, masking secrets", async () => {
@@ -77,6 +86,7 @@ test("indexer summarizes and upserts on _run, masking secrets", async () => {
     state: mkState(),
     summarize: async ({ transcript }) => ({ title: "t", summary: "s", decisions: [] }),
     projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
   });
   await idx._run("s1");
   assert.equal(client.upserts.length, 1);
@@ -159,6 +169,7 @@ test("indexer retryable embed error does not recordFail", async () => {
     state: { ...mkState(), recordFail: async () => { failCalled = true; } },
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
     projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
   });
   await idx._run("s1");
   assert.equal(failCalled, false);
@@ -176,6 +187,7 @@ test("indexer records summarized state after success", async () => {
     state: { ...mkState(), setSummarized: async (sid) => { summarizedId = sid; } },
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
     projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
   });
   await idx._run("s1");
   assert.equal(summarizedId, "s1");
@@ -211,6 +223,7 @@ test("indexer extracts model from last assistant message (C-1)", async () => {
     storage, state: mkState(),
     summarize: async ({ model }) => { capturedModel = model; return { title: "t", summary: "s", decisions: [] }; },
     projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
   });
   await idx._run("s1");
   assert.equal(capturedModel.providerID, "google");
@@ -260,6 +273,7 @@ test("indexer proceeds when messages >= min_new_messages (G1)", async () => {
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state, summarize,
     projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
   });
   await idx._run("s1");
   assert.equal(callCount, 1);
@@ -277,6 +291,7 @@ test("indexer first summary proceeds with no lastSummarized (G1)", async () => {
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(), summarize,
     projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
   });
   await idx._run("s1");
   assert.equal(callCount, 1);
@@ -296,6 +311,7 @@ test("indexer re-masks entry before upsert (G2)", async () => {
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(), summarize,
     projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
   });
   await idx._run("s1");
   assert.equal(client.upserts.length, 1);
@@ -322,6 +338,7 @@ test("indexer serializes concurrent _run calls (G3)", async () => {
     storage: mkStorage(null),
     state: mkState(), summarize,
     projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
   });
 
   const p1 = idx._run("s1");
@@ -348,6 +365,7 @@ test("indexer dedups queued sessions (M3)", async () => {
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage: mkStorage(null), state: mkState(), summarize,
     projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
   });
   // First call acquires lock
   const p1 = idx._run("s1");
@@ -368,6 +386,7 @@ test("indexer increments version on re-summarize (G5)", async () => {
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(), summarize,
     projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
   });
   await idx._run("s1");
   assert.equal(client.upserts[0][0].version, 1);
@@ -387,6 +406,7 @@ test("indexer skips maestro-memory sessions from SESSIONS set (I2)", async () =>
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(), summarize,
     projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
   });
   await idx._run("mem-session-1");
   assert.equal(client.upserts.length, 0);
@@ -414,6 +434,7 @@ test("indexer deletes [maestro-memory] sessions during backfill (I2)", async () 
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: { ...mkState(), isSkipped: async () => false },
     summarize, projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
   });
   await idx.onStartup();
   await new Promise((r) => setTimeout(r, 100));
@@ -474,6 +495,7 @@ test("indexer onStartup caps backfill at backfill_max_per_start (I5)", async () 
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: { ...mkState(), isSkipped: async () => false },
     summarize, projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
   });
   await idx.onStartup();
   await new Promise((r) => setTimeout(r, 100));
@@ -497,6 +519,7 @@ test("indexer queued session runs after first _run throws (queue-after-error)", 
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage: mkStorage(null), state: mkState(), summarize,
     projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
   });
 
   // First call: acquires lock, throws in summarize (sync) → caught → finally → processes queue → s2 runs
@@ -534,6 +557,7 @@ test("indexer timeout bounds hanging summarize (I1)", async () => {
     state: { ...mkState(), recordFail: async (sid) => { failCalled = true; failSessionId = sid; } },
     summarize,
     projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
   });
 
   const start = Date.now();
@@ -560,6 +584,7 @@ test("indexer uses explicit author param (M7)", async () => {
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
     projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
     author: "custom-author",
+    git: mkGit(),
   });
   await idx._run("s1");
   assert.equal(client.upserts[0][0].author, "custom-author");
@@ -689,6 +714,83 @@ test("detached → branch='' but head recorded", async () => {
   idx.dispose();
 });
 
+// ── Task 4: write-gate (spec §3.3) ──────────────────────────────────
+
+test("write-gate: no head → no record, summarize NOT called (spec §3.3)", async () => {
+  const client = mkClient();
+  const storage = mkStorage(client);
+  let summarizeCalls = 0;
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => { summarizeCalls++; return { title: "t", summary: "s", decisions: [] }; },
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: { resolveBranch: async () => "", resolveHead: async () => "" },
+  });
+  await idx._run("s1");
+  assert.equal(summarizeCalls, 0, "summarize NOT called without head");
+  assert.equal(await storage.get("s1"), null, "no record written");
+  assert.equal(client.upserts.length, 0);
+  idx.dispose();
+});
+
+test("sticky-фикс: empty head resolution is NOT cached — re-resolves on next run (spec §3.3)", async () => {
+  const client = mkClient();
+  const storage = mkStorage(client);
+  let headResolves = 0;
+  const git = {
+    resolveBranch: async () => "",
+    resolveHead: async () => { headResolves++; return ""; },
+  };
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git,
+  });
+  await idx._run("s1");
+  assert.equal(headResolves, 1, "first run resolves head");
+  await idx._run("s1");
+  assert.equal(headResolves, 2, "empty head NOT cached — second run re-resolves");
+  assert.equal(client.upserts.length, 0, "no record without head");
+  idx.dispose();
+});
+
+test("head-preserve: re-summarize with empty head resolve keeps existing head (spec §3.3)", async () => {
+  const client = mkClient();
+  const storage = mkStorage(client);
+  const head = "a".repeat(40);
+  let resolveHead = async () => head;
+  const git = {
+    resolveBranch: async () => "feature/x",
+    resolveHead: async () => resolveHead(),
+  };
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git,
+  });
+  await idx._run("s1");
+  assert.equal(client.upserts[0][0].head, head, "first run records head");
+
+  // Re-summarize with empty head resolve: clear sticky cache so the resolver
+  // runs again, flip the mock to return empty head.
+  idx._branchContext.delete("s1");
+  resolveHead = async () => "";
+  await idx._run("s1");
+  const e = client.upserts[1][0];
+  assert.equal(e.head, head, "existing head preserved on re-summarize");
+  assert.equal(e.branch, "feature/x", "existing branch preserved");
+  assert.equal(e.version, 2);
+  idx.dispose();
+});
+
 // ── Task 3: lifecycle-аудит (spec §4.1) ─────────────────────────────
 
 function captureLog() {
@@ -713,6 +815,7 @@ test("indexer logs indexed + summarize.duration on success", async () => {
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
     projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
     logInfo: cap.log.info, logDebug: cap.log.debug, logWarn: cap.log.warn, logError: cap.log.error,
+    git: mkGit(),
   });
   await idx._run("s1");
   assert.ok(cap.calls.some(([lvl, m]) => lvl === "info" && m === "memory:indexed"));
@@ -745,6 +848,7 @@ test("indexer logs reindexed on re-summarize (version > 1)", async () => {
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
     projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
     logInfo: cap.log.info, logDebug: cap.log.debug, logWarn: cap.log.warn, logError: cap.log.error,
+    git: mkGit(),
   });
   await idx._run("s1");
   await idx._run("s1");
@@ -785,6 +889,7 @@ test("indexer logs index_retryable on retryable error (error_class enum)", async
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
     projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
     logInfo: cap.log.info, logDebug: cap.log.debug, logWarn: cap.log.warn, logError: cap.log.error,
+    git: mkGit(),
   });
   await idx._run("s1");
   const err = cap.calls.find(([lvl, m]) => m === "memory:index_error");
@@ -831,6 +936,7 @@ test("indexer logs backfill + backfill.done on onStartup (considered/indexed/ski
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
     projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
     logInfo: cap.log.info, logDebug: cap.log.debug, logWarn: cap.log.warn, logError: cap.log.error,
+    git: mkGit(),
   });
   await idx.onStartup();
   const bf = cap.calls.find(([lvl, m]) => m === "memory:backfill");
