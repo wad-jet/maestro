@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync } from "node:fs";
-import { tmpdir } from "node:os";
+import { tmpdir, hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerMemoryHooks } from "./index.js";
@@ -672,6 +672,182 @@ test("memory_forget passes key and filters to deleteByFilter", async () => {
     assert.equal(seen[0].before, 123);
     assert.equal(typeof seen[0].key, "string");
     assert.ok(seen[0].key.length > 0, "deleteByFilter must be called with the effective key");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── memory_prune (Task 7) ──────────────────────────────────────────────
+
+test("memory_prune list groups candidates by git-anchor category", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-prune-list-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.scan = async () => [
+      { session_id: "s1", head: "hm", branch: "main", host: hostname(), author: "alice", time_last: 1 }, // remote-merged
+      { session_id: "s2", head: "", branch: "", host: hostname(), author: "bob", time_last: 2 }, // unknown
+      { session_id: "s3", head: "hd", branch: "feature/y", host: hostname(), author: "carol", time_last: 3 }, // dead
+    ];
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      revList: (root, ref) => (ref === "main" ? new Set(["hm"]) : new Set()),
+      revListAll: () => ({ local: new Set(["hl"]), remote: new Set(["hm"]) }),
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+    const res = await hooks.tool.memory_prune.execute({ action: "list" }, { sessionID: "s1" });
+    assert.match(res, /## remote-merged \(1\)/, "merged head in mainline → remote-merged");
+    assert.match(res, /## dead \(1\)/, "unreachable head → dead");
+    assert.match(res, /## unknown \(1\)/, "empty head → unknown");
+    assert.match(res, /s1/, "session id s1 listed");
+    assert.match(res, /s2/, "session id s2 listed");
+    assert.match(res, /s3/, "session id s3 listed");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_prune delete by session_ids calls deleteByFilter per id", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-prune-del-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.scan = async () => [];
+    const seen = [];
+    storage.deleteByFilter = async function (args) { seen.push(args); return 1; };
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      revList: () => new Set(),
+      revListAll: () => ({ local: new Set(), remote: new Set() }),
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+    const res = await hooks.tool.memory_prune.execute({ action: "delete", session_ids: "s1,s2" }, { sessionID: "s1" });
+    assert.equal(seen.length, 2, "deleteByFilter called once per id");
+    assert.equal(seen[0].session_id, "s1");
+    assert.equal(seen[1].session_id, "s2");
+    assert.equal(typeof seen[0].key, "string");
+    assert.ok(seen[0].key.length > 0, "deleteByFilter must be called with the effective key");
+    assert.match(res, /Удалено 2 записей \(2 session_id\)/, "must report count");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_prune delete category dead excludes foreign-host records on centralized backend", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-prune-cat-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.scan = async () => [
+      { session_id: "foreign", head: "hd1", branch: "f", host: "other-host", author: "a", time_last: 1 },
+      { session_id: "local", head: "hd2", branch: "f", host: hostname(), author: "b", time_last: 2 },
+    ];
+    const seen = [];
+    storage.deleteByFilter = async function (args) { seen.push(args); return 1; };
+    const config = mkConfig(dir, {
+      storage: { type: "qdrant", qdrant: { url: "http://localhost:6333", api_key_env: "Q_KEY" } },
+      identity: "x",
+    });
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      revList: () => new Set(),
+      revListAll: () => ({ local: new Set(), remote: new Set() }),
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config,
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+    const res = await hooks.tool.memory_prune.execute({ action: "delete", category: "dead" }, { sessionID: "s1" });
+    assert.equal(seen.length, 1, "only local dead record deleted");
+    assert.equal(seen[0].session_id, "local", "foreign-host record excluded from batch-all");
+    assert.match(res, /Удалено 1 записей \(1 session_id\)/, "must report count");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_prune blocked for [maestro-memory] sessions", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-prune-gate-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    SESSIONS.add("summ-session");
+    try {
+      const res = await hooks.tool.memory_prune.execute({ action: "list" }, { sessionID: "summ-session" });
+      assert.match(res, /недоступен для служебных сессий/);
+    } finally {
+      SESSIONS.delete("summ-session");
+    }
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("init-warn delete_on_session_delete_centralized when flag + centralized backend", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-prune-warn-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const warned = [];
+    const log = { debug() {}, info() {}, warn: (m) => warned.push(m), error() {} };
+    const storage = mkMockStorage();
+    const config = mkConfig(dir, {
+      delete_on_session_delete: true,
+      storage: { type: "qdrant", qdrant: { url: "http://localhost:6333", api_key_env: "Q_KEY" } },
+      identity: "x",
+    });
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config,
+      log,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git: mkScopeGit() },
+    });
+    assert.ok(
+      warned.some((m) => m === "memory:delete_on_session_delete_centralized"),
+      "must warn delete_on_session_delete_centralized",
+    );
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
@@ -2056,6 +2232,7 @@ test("write-tools registered for permission enforcement (ask-gate contract)", as
     assert.ok(hooks.tool && hooks.tool.memory_forget, "memory_forget must be registered");
     assert.ok(hooks.tool && hooks.tool.memory_export, "memory_export must be registered");
     assert.ok(hooks.tool && hooks.tool.memory_import, "memory_import must be registered");
+    assert.ok(hooks.tool && hooks.tool.memory_prune, "memory_prune must be registered");
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;

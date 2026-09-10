@@ -1,4 +1,4 @@
-import os from "node:os";
+import os, { hostname } from "node:os";
 import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
@@ -15,7 +15,7 @@ import { Recall } from "./recall.js";
 import { createState } from "./state.js";
 import { summarizeSession, SESSIONS } from "./summarize.js";
 import { deriveProjectKey, resolveProjectKey } from "./project.js";
-import { resolveBranch, resolveHead, detectMainline as detectMainlineReal, isAncestor as isAncestorReal, revList as revListReal } from "./git.js";
+import { resolveBranch, resolveHead, detectMainline as detectMainlineReal, isAncestor as isAncestorReal, revList as revListReal, revListAll as revListAllReal } from "./git.js";
 import { applyBranchScope, computeBranchSets } from "./membership.js";
 
 // `@opencode-ai/plugin` не установлен в node_modules этого репо (zero-dep
@@ -544,7 +544,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     // (key-scoped markMerged). Heal-путь: транковые записи окна unresolved
     // (merged=0, head=предок mainline) промоутятся на первом резолвнутом init.
     // Fail-soft: ошибка промоции не роняет init (лог + continue).
-    const { detectMainline = detectMainlineReal, isAncestor = isAncestorReal, revList = revListReal } = deps.git ?? {};
+    const { detectMainline = detectMainlineReal, isAncestor = isAncestorReal, revList = revListReal, revListAll = revListAllReal } = deps.git ?? {};
     try {
       const mainline = detectMainline(root, { override: config.mainline ?? null });
       if (!mainline) {
@@ -594,6 +594,12 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     const centralized = config.storage.type === "qdrant" || config.storage.type === "pgvector";
     if (centralized && confidentialPaths.length > 0) {
       logWarn("memory: unmasked_branch_metadata — имена веток (минуя sanitize) уходят на сервер");
+    }
+    // Task 7: init-warn — delete_on_session_delete на централизованном бэкенде:
+    // удаление записей по session.deleted уходит на сервер (необратимо, вне
+    // локальной границы). Spec §3.6/§5.
+    if (config.delete_on_session_delete && (config.storage?.type === "qdrant" || config.storage?.type === "pgvector")) {
+      logWarn("memory:delete_on_session_delete_centralized", {});
     }
     // Task 5: init-warn — внешний (openai) embedder + непустые confidential.paths:
     // запросы и контент (замаскированные best-effort) уходят генерическому вендору.
@@ -785,6 +791,73 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
           }
         },
       }),
+      memory_prune: tool({
+        description:
+          "HITL-утилизация брошенных/unknown записей памяти: листинг по категориям надёжности git-якоря и удаление строго по явному набору session_ids/heads (permission: ask).",
+        args: {
+          action: tool.schema.string().describe("list | delete"),
+          session_ids: tool.schema.string().optional().describe("явный список session_id через запятую"),
+          heads: tool.schema.string().optional().describe("явный список head через запятую"),
+          category: tool.schema.string().optional().describe("для delete: dead | unknown"),
+        },
+        execute: async (args, ctx) => {
+          try {
+            if (SESSIONS.has(ctx?.sessionID)) return "memory_prune недоступен для служебных сессий.";
+            if (!args?.action) return "memory_prune: укажите action (list | delete)";
+            const host = hostname();
+            const sets = revListAll(root, { local: true, remote: true });
+            const mainline = detectMainline(root, { override: config.mainline ?? null });
+            const mainlineSet = mainline ? (revList(root, mainline.name) ?? new Set()) : new Set();
+            const candidates = await storage.scan({ key: effectiveKey, fields: ["session_id", "branch", "head", "host", "author", "time_last"] });
+            const classify = (c) => {
+              const head = c.head ?? "";
+              if (!head) return "unknown";
+              if (sets.remote && mainlineSet.has(head)) return "remote-merged";
+              if (sets.remote?.has(head)) return "remote-alive";
+              if (sets.local?.has(head)) return "local-only";
+              return "dead";
+            };
+            const central = config.storage?.type === "qdrant" || config.storage?.type === "pgvector";
+            if (args.action === "list") {
+              const lines = [`Git-якорь по состоянию refs на ${host} (mainline: ${mainline?.name ?? "не определён"})`];
+              const grouped = {};
+              for (const c of candidates) { const cat = classify(c); (grouped[cat] ??= []).push(c); }
+              for (const cat of ["remote-merged", "remote-alive", "local-only", "dead", "unknown"]) {
+                const g = grouped[cat] ?? [];
+                if (!g.length) continue;
+                lines.push(`## ${cat} (${g.length})`);
+                for (const c of g) {
+                  const foreign = central && c.host && c.host !== host ? " ⚠️ чужой хост" : "";
+                  lines.push(`- ${c.session_id} | head=${c.head || "(нет)"} | ветка=${c.branch || "-"} | host=${c.host || "?"} | автор=${c.author} | ${c.time_last}${foreign}`);
+                }
+              }
+              lines.push("Предупреждение: head-недостижимость ≠ ветка не влита — squash-merge/rebase/cherry-pick тоже дают недостижимость.");
+              lines.push("dead/unknown — кандидаты; foreign-host записи исключены из batch-all (выбор по явным session_ids/heads).");
+              return lines.join("\n");
+            }
+            // delete — только явный набор после host-guard (spec §3.6 шаг 4)
+            let ids = args.session_ids ? args.session_ids.split(",").map((s) => s.trim()).filter(Boolean) : [];
+            if (args.heads) {
+              for (const h of args.heads.split(",").map((s) => s.trim()).filter(Boolean)) {
+                ids.push(...candidates.filter((c) => c.head === h).map((c) => c.session_id));
+              }
+            }
+            if (args.category) {
+              const cand = candidates.filter((c) => classify(c) === args.category);
+              const allowed = central ? cand.filter((c) => !c.host || c.host === host) : cand;
+              ids.push(...allowed.map((c) => c.session_id));
+            }
+            const snapshot = [...new Set(ids)];
+            if (!snapshot.length) return "memory_prune: ничего не выбрано для удаления.";
+            let total = 0;
+            for (const sid of snapshot) { total += await storage.deleteByFilter({ key: effectiveKey, session_id: sid }); }
+            logInfo("memory:pruned", { count: total, records: snapshot.length });
+            return `Удалено ${total} записей (${snapshot.length} session_id).`;
+          } catch (err) {
+            return `memory_prune failed: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        },
+      }),
       memory_export: tool({
         description:
           "Экспорт всех записей памяти активного проекта в JSONL (полная схема v3, включая embedding, model_id и git-метаданные branch/head/merged). Путь по умолчанию — локальный; путь наружу машины — осознанный выбор пользователя.",
@@ -799,7 +872,8 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
               "session_id", "key", "origin_project_hash", "title", "summary", "decisions",
               "model_id", "author", "time_first", "time_last", "version", "embedding",
               // I-3: branch/head/merged — легитимные метаданные v3, в экспорте.
-              "branch", "head", "merged",
+              // Task 7: host — provenance (откуда записана запись), в экспорте.
+              "branch", "head", "merged", "host",
             ];
             const entries = await storage.scan({ key: effectiveKey, fields });
             // M-8: пустой экспорт — понятная ошибка, файл не пишем.
