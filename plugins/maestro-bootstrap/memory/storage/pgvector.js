@@ -181,15 +181,15 @@ export class PgVectorStorage {
     const vectorHits = [];
     const textLists = [];
 
-    await this._collectLeg(activeKey, { filterSessionIds, merged: false }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists);
+    await this._collectLeg(activeKey, { filterSessionIds, merged: false, ownKey: activeKey }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists);
     if (siblingKeys.length) {
-      await this._collectLeg(siblingKeys, { merged: true }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists);
+      await this._collectLeg(siblingKeys, { merged: true, ownKey: activeKey }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists);
     }
     // Subtree-ноги (spec §3.3): префикс-цели → (key = T OR key LIKE T || '.%')
     // + merged=1 (sibling). LIKE безопасен: алфавит namespace без %/_.
     const targets = subtreeTargets(subtree, activeKey);
     if (targets.length) {
-      await this._collectLeg([], { merged: true, subtreeTargets: targets }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists);
+      await this._collectLeg([], { merged: true, subtreeTargets: targets, ownKey: activeKey }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists);
     }
 
     vectorHits.sort((a, b) => b.score - a.score);
@@ -204,13 +204,13 @@ export class PgVectorStorage {
    * векторная + текстовая ветки с общими фильтрами. Хиты накапливаются в
    * переданные массивы.
    * @param {string|string[]} keys  Ключ(и) ноги.
-   * @param {{ filterSessionIds?: string[], merged?: boolean, subtreeTargets?: string[] }} legOpts
+   * @param {{ filterSessionIds?: string[], merged?: boolean, subtreeTargets?: string[], ownKey?: string }} legOpts
    * @param {Float32Array} embedding
    * @param {{ top_k: number, min_score: number, date_from?: number, date_to?: number, author?: string, query?: string }} opts
    * @param {Array} vectorHits  Накопитель векторных хитов (мутируется).
    * @param {Array} textLists  Накопитель текстовых списков (мутируется).
    */
-  async _collectLeg(keys, { filterSessionIds, merged, subtreeTargets }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists) {
+  async _collectLeg(keys, { filterSessionIds, merged, subtreeTargets, ownKey }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists) {
     const ks = Array.isArray(keys) ? keys : [keys];
     const conds = [];
     const params = [`[${Array.from(embedding)}]`];
@@ -224,6 +224,10 @@ export class PgVectorStorage {
         i++;
       }
       conds.push(`(${ors.join(" OR ")})`);
+      // §3.3: subtree-нога не должна захватывать own bucket (иначе own merged
+      // записи попадают и в активную, и в subtree-ногу → двойной вес в fuseRrf).
+      // Исключение применяется ТОЛЬКО к subtree-ноге (не к активной).
+      if (ownKey) { conds.push(`key <> $${i++}`); params.push(ownKey); }
     } else if (ks.length === 1) {
       conds.push(`key = $${i++}`);
       params.push(ks[0]);
@@ -270,6 +274,8 @@ export class PgVectorStorage {
             j++;
           }
           tconds.push(`(${ors.join(" OR ")})`);
+          // §3.3: исключение own bucket из subtree-ноги (см. векторную ветку).
+          if (ownKey) { tconds.push(`key <> $${j++}`); tparams.push(ownKey); }
         } else if (ks.length === 1) {
           tconds.push(`key = $${j++}`);
           tparams.push(ks[0]);

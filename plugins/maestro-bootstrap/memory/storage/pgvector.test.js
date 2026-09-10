@@ -785,6 +785,27 @@ test("pgvector subtree leg: (key = $x OR key LIKE $x || '.%') AND merged = 1", a
   assert.ok(!subtree[0].includes("session_id IN"), "own-key filterSessionIds must NOT leak into subtree leg");
 });
 
+test("pgvector subtree leg excludes own bucket (key <> ownKey) — own merged not double-collected (§3.3)", async () => {
+  const p = fakePoolHybrid();
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3 });
+  await st.init();
+  // Активный ключ a.b.c, subtree-цель a.b (ancestor) → subtree-нога матчила бы
+  // и own bucket (a.b.c LIKE a.b.%), поэтому должна исключить own key.
+  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "a.b.c", subtree: ["a.b"] });
+  const sels = p.calls.filter(([sql]) => sql.includes("FROM maestro_memory"));
+  // Активная нога: key = $2 (own key), БЕЗ key <> (исключение только в subtree-ноге).
+  const active = sels.find(([sql, params]) => sql.includes("key = $2") && params[1] === "a.b.c");
+  assert.ok(active, "active leg with key = $2 (a.b.c)");
+  assert.ok(!active[0].includes("key <>"), "active leg must NOT exclude own key");
+  // Subtree-нога: (key = $2 OR key LIKE $2 || '.%') AND key <> $3 (ownKey).
+  const subtree = sels.find(([sql, params]) => sql.includes("key LIKE $2 || '.%'") && params[1] === "a.b");
+  assert.ok(subtree, "subtree leg with key LIKE $2 || '.%'");
+  assert.ok(subtree[0].includes("key <> $3"), subtree[0]);
+  assert.equal(subtree[1][2], "a.b.c", "subtree leg excludes own key a.b.c");
+  // Цель a.b всё ещё включена (LIKE-условие не тронуто).
+  assert.ok(subtree[0].includes("key = $2 OR key LIKE $2 || '.%'"), subtree[0]);
+});
+
 test("pgvector migrateKey max-version-wins via NOT EXISTS", async () => {
   const p = fakePoolHybrid();
   const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3 });

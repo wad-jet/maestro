@@ -900,6 +900,29 @@ test("qdrant subtree leg: key = T OR prefixes match any [T] + merged=1", async (
   assert.ok(!subtree[2].filter.must.some((m) => m.key === "session_id"), "own-key filterSessionIds must NOT leak into subtree leg");
 });
 
+test("qdrant subtree leg excludes own bucket (must_not key=ownKey) — own merged not double-collected (§3.3)", async () => {
+  const c = fakeClient();
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  // Активный ключ a.b.c, subtree-цель a.b (ancestor) → subtree-нога матчила бы
+  // и own bucket (a.b.c LIKE a.b.%), поэтому должна исключить own key.
+  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "a.b.c", subtree: ["a.b"] });
+  const queries = c.calls.filter(([k]) => k === "query");
+  // Активная нога: own key, БЕЗ must_not (исключение только в subtree-ноге).
+  const active = queries.find(([, , q]) => q.filter.must[0]?.key === "key" && q.filter.must[0]?.match?.value === "a.b.c");
+  assert.ok(active, "active leg with key match value a.b.c");
+  assert.ok(!active[2].filter.must_not, "active leg must NOT exclude own key");
+  // Subtree-нога: must_not содержит key-not-match для ownKey.
+  const subtree = queries.find(([, , q]) => q.filter.should?.some((m) => m.key === "prefixes"));
+  assert.ok(subtree, "subtree leg with prefixes should-filter");
+  assert.deepEqual(subtree[2].filter.must_not, [{ key: "key", match: { value: "a.b.c" } }], "subtree leg must exclude own key via must_not");
+  // Цель a.b всё ещё включена (should-фильтр не тронут).
+  assert.deepEqual(subtree[2].filter.should, [
+    { key: "key", match: { value: "a.b" } },
+    { key: "prefixes", match: { any: ["a.b"] } },
+  ]);
+});
+
 test("qdrant migrateKey: unconditional re-key (deterministic id — no cross-bucket conflict)", async () => {
   const c = fakeClient();
   // Одна коллекция: source-точки (key=old.ns). На qdrant id точки
@@ -933,7 +956,7 @@ test("qdrant migrateKey: unconditional re-key (deterministic id — no cross-buc
   assert.equal(c.calls.some(([k]) => k === "query"), false, "no per-point get lookup");
 });
 
-test("qdrant migrateKey delete_source: ids collected pre-setPayload, delete by ids after", async () => {
+test("qdrant migrateKey delete_source is no-op: re-key in-place, points NOT deleted", async () => {
   const c = fakeClient();
   const sourcePoints = [
     { id: uuidFrom("s1"), payload: { session_id: "s1", key: "old.ns", version: 7, decisions: "[]" } },
@@ -958,20 +981,14 @@ test("qdrant migrateKey delete_source: ids collected pre-setPayload, delete by i
   const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
   await st.init();
   const n = await st.migrateKey("old.ns", "new.ns", { deleteSource: true });
-  // Обе точки re-key'нуты; deleteSource удаляет исходные ids (собранные ДО setPayload).
+  // Обе точки re-key'нуты in-place (тот же id). deleteSource → no-op: точки
+  // НЕ удаляются (они и есть перенесённые; удаление = потеря данных).
   assert.equal(n, 2);
   assert.equal(setPayloadCalls.length, 2);
   assert.deepEqual(setPayloadCalls[0].points, [uuidFrom("s1")]);
   assert.deepEqual(setPayloadCalls[1].points, [uuidFrom("s2")]);
-  assert.equal(deleteCalls.length, 1);
-  assert.deepEqual(deleteCalls[0], { points: [uuidFrom("s1"), uuidFrom("s2")] }, "all source ids deleted by id");
-  // Порядок: scroll (ids собраны ДО setPayload) → setPayload → delete.
-  const keyScrollIdx = c.calls.findIndex(([k, , opts]) => k === "scroll" && opts?.filter?.must?.some((m) => m.key === "key"));
-  const setPayloadIdx = c.calls.findIndex(([k]) => k === "setPayload");
-  const deleteIdx = c.calls.findIndex(([k]) => k === "delete");
-  assert.ok(keyScrollIdx !== -1 && setPayloadIdx !== -1 && deleteIdx !== -1, "scroll/setPayload/delete all present");
-  assert.ok(keyScrollIdx < setPayloadIdx, "ids collected (scroll) before setPayload");
-  assert.ok(setPayloadIdx < deleteIdx, "delete after setPayload");
+  assert.equal(deleteCalls.length, 0, "deleteSource must NOT delete re-keyed points (in-place re-key)");
+  assert.equal(c.calls.some(([k]) => k === "delete"), false, "no delete call at all");
 });
 
 test("qdrant migrateKey no-op when fromKey === toKey", async () => {

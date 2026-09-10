@@ -172,15 +172,15 @@ export class QdrantStorage {
     const vectorHits = [];
     const textLists = [];
 
-    await this._collectLeg(activeKey, { filterSessionIds, merged: false }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists);
+    await this._collectLeg(activeKey, { filterSessionIds, merged: false, ownKey: activeKey }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists);
     if (siblingKeys.length) {
-      await this._collectLeg(siblingKeys, { merged: true }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists);
+      await this._collectLeg(siblingKeys, { merged: true, ownKey: activeKey }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists);
     }
     // Subtree-ноги (spec §3.3): префикс-цели → key = T OR prefixes: match any [T]
     // + merged=1 (sibling). prefixes keyword-индексируются (init).
     const targets = subtreeTargets(subtree, activeKey);
     if (targets.length) {
-      await this._collectLeg([], { merged: true, subtreeTargets: targets }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists);
+      await this._collectLeg([], { merged: true, subtreeTargets: targets, ownKey: activeKey }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists);
     }
 
     vectorHits.sort((a, b) => b.score - a.score);
@@ -197,13 +197,13 @@ export class QdrantStorage {
    * векторная + текстовая ветки с общими фильтрами. Хиты накапливаются в
    * переданные массивы.
    * @param {string|string[]} keys  Ключ(и) ноги.
-   * @param {{ filterSessionIds?: string[], merged?: boolean, subtreeTargets?: string[] }} legOpts
+   * @param {{ filterSessionIds?: string[], merged?: boolean, subtreeTargets?: string[], ownKey?: string }} legOpts
    * @param {Float32Array} embedding
    * @param {{ top_k: number, min_score: number, date_from?: number, date_to?: number, author?: string, query?: string }} opts
    * @param {Array} vectorHits  Накопитель векторных хитов (мутируется).
    * @param {Array} textLists  Накопитель текстовых списков (мутируется).
    */
-  async _collectLeg(keys, { filterSessionIds, merged, subtreeTargets }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists) {
+  async _collectLeg(keys, { filterSessionIds, merged, subtreeTargets, ownKey }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists) {
     const ks = Array.isArray(keys) ? keys : [keys];
     const must = [];
     const should = [];
@@ -218,6 +218,13 @@ export class QdrantStorage {
     } else {
       must.push({ key: "key", match: { any: ks } });
     }
+    // §3.3: subtree-нога не должна захватывать own bucket (иначе own merged
+    // записи попадают и в активную, и в subtree-ногу → двойной вес в fuseRrf).
+    // Исключение применяется ТОЛЬКО к subtree-ноге (не к активной).
+    const mustNot = [];
+    if (subtreeTargets && subtreeTargets.length && ownKey) {
+      mustNot.push({ key: "key", match: { value: ownKey } });
+    }
     if (date_from !== undefined) must.push({ key: "time_last", range: { gte: date_from } });
     if (date_to !== undefined) must.push({ key: "time_last", range: { lte: date_to } });
     if (author !== undefined) must.push({ key: "author", match: { value: author } });
@@ -229,6 +236,7 @@ export class QdrantStorage {
     if (merged) must.push({ key: "merged", match: { value: 1 } });
     const filter = { must };
     if (should.length) filter.should = should;
+    if (mustNot.length) filter.must_not = mustNot;
 
     const res = await this.client.query(this.collection, {
       query: { nearest: Array.from(embedding) },
@@ -252,6 +260,7 @@ export class QdrantStorage {
         tmust.push({ key: "text", full_text_match: { text: query } });
         const tfilter = { must: tmust };
         if (should.length) tfilter.should = should;
+        if (mustNot.length) tfilter.must_not = mustNot;
         // Filter-only leg — top-level `filter` БЕЗ `query` (у Query enum нет
         // FilterQuery-варианта; сервер вернул бы 400). Не должен быть
         // векторно-упорядочен (нет `nearest`).
@@ -438,8 +447,9 @@ export class QdrantStorage {
    * пересчитанные prefixes; origin_remote сохраняется (provenance).
    * @param {string} fromKey  Ключ источника.
    * @param {string} toKey  Ключ цели.
-   * @param {{ deleteSource?: boolean }} [opts]  deleteSource → собрать ids ДО
-   *   setPayload (после — фильтр key=from пуст), удалить по ids после.
+   * @param {{ deleteSource?: boolean }} [opts]  deleteSource → no-op: re-key
+   *   происходит in-place (тот же id точки), поэтому «исходные» точки — это и
+   *   есть перенесённые; удаление по их ids = потеря данных (зеркалит pg).
    * @returns {Promise<number>}  Число перенесённых точек.
    */
   async migrateKey(fromKey, toKey, { deleteSource = false } = {}) {
@@ -470,11 +480,9 @@ export class QdrantStorage {
         points: [id],
       });
     }
-    // deleteSource: удалить исходные точки по собранным ДО setPayload ids
-    // (после обновления фильтр key=from пуст, delete по фильтру невозможен).
-    if (deleteSource && sourceIds.length) {
-      await this.client.delete(this.collection, { points: sourceIds });
-    }
+    // deleteSource → no-op: re-key происходит in-place (тот же id точки), поэтому
+    // «исходные» точки — это и есть перенесённые; удаление по их ids = потеря
+    // данных (зеркалит pg, где после UPDATE источник уже пуст).
     return sourceIds.length;
   }
 }
