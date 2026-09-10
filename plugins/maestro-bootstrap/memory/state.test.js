@@ -45,6 +45,16 @@ test("state prune removes entries without recent activity", async () => {
   rmSync(dir, { recursive: true, force: true });
 });
 
+test("state delete removes session row", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createState(join(dir, "state.json"));
+  await st.setSummarized("s5");
+  assert.notEqual(await st.getLastSummarized("s5"), null);
+  await st.delete("s5");
+  assert.equal(await st.getLastSummarized("s5"), null);
+  rmSync(dir, { recursive: true, force: true });
+});
+
 test("embedder probe cache round-trip", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mm-state-"));
   const s = createState(join(dir, "state.json"));

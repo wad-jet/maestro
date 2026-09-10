@@ -17,6 +17,7 @@ import { dirname } from "node:path";
  *   getLastAttempt(id): Promise<number|null>,
  *   getFirstRun(): Promise<number>,
  *   prune(maxAgeMs): Promise<void>,
+ *   delete(id): Promise<void>,
  *   getEmbedderProbe(): object|null,
  *   setEmbedderProbe(info): Promise<void>,
  * }}
@@ -67,6 +68,10 @@ export function createState(path, { log } = {}) {
       for (const [k, v] of Object.entries(data.sessions)) {
         if (!v.lastAttempt || v.lastAttempt < cutoff) delete data.sessions[k];
       }
+      persist();
+    },
+    async delete(id) {
+      delete data.sessions[id];
       persist();
     },
     getEmbedderProbe() {
