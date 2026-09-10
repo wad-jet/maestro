@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, writeFileSync, mkdirSync, renameSync } from "node:fs";
 import { dirname } from "node:path";
 
 /**
@@ -81,5 +81,53 @@ export function createState(path, { log } = {}) {
       data.embedderProbe = { at: Date.now(), ...info };
       persist();
     },
+  };
+}
+
+/**
+ * Atomic write helper — writes to `.tmp` then renames.
+ * @param {string} path
+ * @param {object} data
+ */
+function persistAtomic(path, data) {
+  mkdirSync(dirname(path), { recursive: true });
+  const tmp = `${path}.tmp`;
+  writeFileSync(tmp, JSON.stringify(data), "utf8");
+  renameSync(tmp, path);
+}
+
+/**
+ * Per-project state: tracks `lastKey` (e.g. "embedding.model@hash") per project.
+ * @param {string} path  Path to the project-state JSON file.
+ * @returns {{
+ *   getLastKey(): Promise<string|null>,
+ *   setLastKey(k): Promise<void>,
+ * }}
+ */
+export function createProjectState(path) {
+  let data = { lastKey: null };
+  try { data = JSON.parse(readFileSync(path, "utf8")); } catch { /* first run */ }
+  return {
+    async getLastKey() { return data.lastKey ?? null; },
+    async setLastKey(k) { data.lastKey = k; persistAtomic(path, data); },
+  };
+}
+
+/**
+ * Per-key seen-set: tracks origin hashes that have been indexed for a key.
+ * @param {string} path  Path to the key-state JSON file.
+ * @returns {{
+ *   getSeenOrigins(): Promise<string[]>,
+ *   setSeenOrigins(list): Promise<void>,
+ *   addSeenOrigin(h): Promise<void>,
+ * }}
+ */
+export function createKeyState(path) {
+  let data = { seen: [] };
+  try { data = JSON.parse(readFileSync(path, "utf8")); } catch { /* first run */ }
+  return {
+    async getSeenOrigins() { return Array.isArray(data.seen) ? [...data.seen] : []; },
+    async setSeenOrigins(list) { data.seen = [...new Set(list)]; persistAtomic(path, data); },
+    async addSeenOrigin(h) { data.seen = [...new Set([...(data.seen ?? []), h])]; persistAtomic(path, data); },
   };
 }
