@@ -218,6 +218,15 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
 - **`report.include_text`** — `false` (default): HTML-отчёт `@maestro-memory-report`
   содержит **только агрегаты** (SEC-4b); `true` — осознанный opt-in на вставку
   замаскированных заголовков/summary (документированное понижение).
+- **`namespace`** — обязателен при `enabled: true`; формат `a.b.c` (1–3 сегмента,
+  lowercase, точка-разделитель); нормализация: trim + lowercase; absent/невалидный →
+  память off (`namespace_missing` / `namespace_invalid`).
+- **`related`** — список namespace-prefix целей для кросс-доменной интеграции
+  (merged-only, предпочтение точный leaf 1:1, ≤16 записей).
+- **`domain_recall`** — boolean, default `true`; `false` = off-switch домен-ног.
+- **`memory_migrate`** (from: `auto` | `namespace` | `hash`) — инструмент миграции;
+  permission ask перед запуском. Изменения memory — config-as-code (часть task-ветки)
+  + opencode restart.
 
 Правила вывода (для `/maestro-setup` и консультаций):
 

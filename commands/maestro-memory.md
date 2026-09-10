@@ -40,8 +40,11 @@ description: Показать статус memory layer плагина maestro-b
    - `OK` — embedder доступен; причина off — в другом `disabled_reason` (см. выше).
    Для прочих `disabled_reason` (`no_memory_section`, `explicitly_disabled`,
    `*_invalid`, `centralized_identity_missing`, `qdrant_config_invalid`,
-   `pgvector_config_invalid`, `embedding_api_key_env_missing`) `memory_probe`
-   **не зарегистрирован** — диагностика только по конфигу (см. выше).
+   `pgvector_config_invalid`, `embedding_api_key_env_missing`,
+   `namespace_missing`, `namespace_invalid`, `related_invalid`, `domain_recall_invalid`)
+   `memory_probe` **не зарегистрирован** — диагностика только по конфигу (см. выше).
+   При `namespace_missing` — напомнить: «Задайте memory.namespace (формат: a.b.c,
+   1–3 сегмента, lowercase) — см. manual_docs/how-to/enable-memory.md.»
 
 3. Если инструмент вернул данные → продолжи к Шагу 2.
 
@@ -72,6 +75,12 @@ description: Показать статус memory layer плагина maestro-b
 **Модель:** <provider>: <model> (для `openai` — `openai: <model>@<base_url>`; для `local` — имя ONNX-модели)
 **Проверка embedder:** <OK | FAIL (конфигурация)> (<detail>, <ISO-время>)
 **Активный key:** <effective key из отчёта>
+
+**Ключ:**
+  - **namespace:** <значение memory.namespace>
+  - **Домен** (последний префикс): <last domain prefix>
+  - **Related-цели:** <список memory.related, или «не заданы»>
+  - **Проекты в бакете:** <по origin_remote, диагностика коллизий>
 
 **Записи:** всего <N>
   По авторам: <author1>: <count>, <author2>: <count>, …
