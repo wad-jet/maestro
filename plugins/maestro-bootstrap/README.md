@@ -265,12 +265,22 @@ untrusted, access-policy не enforced, дефолтные sanitizer-прави�
   `url` + `api_key_env`) | `pgvector` (`connection_string_env`). Централизованные
   требуют резолвнутую identity (`identity` → `identity_env` → git `user.name`).
   Решение «локально vs удалённо» — только `storage.type`.
-- **Branch-aware (v3):** идентичность записи — по коммиту (`head`), имя ветки —
-  только display; recall по умолчанию commit-scoped (`scope: "branch"`), тиры
+- **Branch-aware (v3):** идентичность записи (критерий матчинга/промоции) — по
+  коммиту (`head`); ключ хранения — `session_id`; имя ветки — только display;
+  recall по умолчанию commit-scoped (`scope: "branch"`), тиры
   general/experience/не в контексте/unattributed; промоция на init по
   `is-ancestor(head, mainline)` (key-scoped); mainline авто-детект
   (`memory.mainline` override → remote HEAD → `init.defaultBranch` → резерв
   `main`/`master`/`develop`); `branch_context: false` → flat project recall.
+- **Branch-governed lifecycle (v5):** жизненный цикл записей — по git-якорю
+  (head/ветка), а не opencode-сессии. `session.deleted` **сохраняет** запись по
+  умолчанию (флаг `delete_on_session_delete`, default `false`; рекомендуется
+  только для sqlite — на централизованных бэкендах удаляет командное знание).
+  Write-gate по `head`: сессии без git-якоря не суммаризируются (non-git проекты
+  не получают память; warn при init; существующие записи читаемы). Новое поле
+  записи `host` (hostname — «где лежит полный контекст»). HITL-команда
+  `/maestro-memory-prune` (листинг категорий надёжности git-якоря →
+  подтверждение → удаление; host-guard на централизованных бэкендах).
 - **`retention_days`:** `null` (default) — выключено; число — TTL записей
   (prune при старте, лог количества удалённых).
 - **`similarity_threshold`:** порог cosine для кластеров/графа в
@@ -285,7 +295,8 @@ untrusted, access-policy не enforced, дефолтные sanitizer-прави�
 - **`report.include_text`:** `false` (default) — HTML-отчёт только агрегаты
   (SEC-4b); `true` — осознанный opt-in на маскированные тексты.
 - **Хуки:** `tool` (`memory_search`, `memory_forget`, `memory_export`,
-  `memory_import`, `memory_recall_preview`, `memory_stats_detail`), `chat.message`,
+  `memory_import`, `memory_recall_preview`, `memory_stats_detail`,
+  `memory_prune`), `chat.message`,
   `experimental.chat.system.transform`, `event` (`session.idle`/`session.deleted`),
   расширенный `dispose`. Инвариант: `experimental.chat.messages.transform` НЕ
   присваивается. **Адаптер `index.js` (default export) обязан пробрасывать ВСЕ
@@ -302,8 +313,9 @@ untrusted, access-policy не enforced, дефолтные sanitizer-прави�
   `project` (кросс-проектный opt-in, **все бэкенды**; sqlite — read-only соседняя
   БД с fail-soft, qdrant/pg — key-filter).
 - **Permission (обязательное правило):** `memory_forget`/`memory_export`/
-  `memory_import` — write/boundary-tools; в merge-config пишется
-  `permission: { memory_forget: "ask", memory_export: "ask", memory_import: "ask" }`.
+  `memory_import`/`memory_prune` — write/boundary-tools; в merge-config пишется
+  `permission: { memory_forget: "ask", memory_export: "ask", memory_import: "ask",
+  memory_prune: "ask" }`.
 - **Self-provisioning:** при `enabled: true` плагин создаёт `module_dir`
   (`<data-dir>/maestro/memory/module/`), пишет `package.json` (single-writer,
   `"type": "module"`) и копирует исходники модуля; пользователь выполняет

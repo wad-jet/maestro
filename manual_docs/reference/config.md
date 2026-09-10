@@ -392,6 +392,7 @@ deny. Trust не наследуется вложенными субагента�
     "min_score": 0.35,
     "similarity_threshold": 0.7,
     "retention_days": null,
+    "delete_on_session_delete": false,
     "summarize_timeout_ms": 120000,
     "report": { "include_text": false },
     "embedding": {
@@ -439,6 +440,7 @@ deny. Trust не наследуется вложенными субагента�
 | `summarize_timeout_ms` | `number` | `120000` | Таймаут цепочки «саммаризация → эмбеддинг → запись» |
 | `report.include_text` | `boolean` | `false` | Разрешает вставку замаскированных заголовков/summary в HTML-отчёт `@maestro-memory-report`; `false` — только агрегаты (SEC-4b) |
 | `branch_context` | `boolean` | `true` | Branch-scoped recall (default-on): членство записей по git-истории (тиры general/experience); `false` → flat project recall (дефолтный scope = `project`) |
+| `delete_on_session_delete` | `boolean` | `false` | Удалять запись при `session.deleted` (v1-приватность; рекомендуется только для sqlite — на централизованных бэкендах удаляет командное знание) |
 | `mainline` | `string` \| `null` | `null` | Основная ветка для промоции; `null` → авто-детект из git (remote HEAD → `init.defaultBranch` → резерв `main`/`master`/`develop`); явный override авторитетен (несуществующее имя → `mainline_unresolved`) |
 | `storage.type` | `string` | `sqlite` | Бэкенд: `sqlite` \| `qdrant` \| `pgvector` |
 | `storage.qdrant.url` | `string` | — | URL Qdrant (обязателен для `type: qdrant`) |
@@ -460,7 +462,8 @@ identity для централизованного бэкенда / некорр
 `pgvector_config_invalid`, `pgvector_text_search_config_invalid`,
 `retention_days_invalid`, `similarity_threshold_invalid`,
 `branch_context_invalid`, `mainline_invalid`, `embedding_invalid`,
-`probe_cooldown_min_invalid`), сессии работают (fail-soft).
+`probe_cooldown_min_invalid`, `delete_on_session_delete_invalid`), сессии
+работают (fail-soft).
 Централизованные бэкенды требуют identity (`identity` → `identity_env` → git
 `user.name`). Для `embedding.provider: openai` отсутствие
 `process.env[embedding.api_key_env]` → память off
@@ -469,17 +472,18 @@ identity для централизованного бэкенда / некорр
 
 #### Permission-правило для write/boundary-tools (обязательное)
 
-`memory_forget` / `memory_export` / `memory_import` — операции, пересекающие
-границу (удаление, запись файла, запись в память). OpenCode по умолчанию
-разрешает новые тулы, поэтому в merge-config (`.opencode/opencode.json` или
-global `~/.config/opencode/opencode.json`) **обязательно** правило:
+`memory_forget` / `memory_export` / `memory_import` / `memory_prune` — операции,
+пересекающие границу (удаление, запись файла, запись в память). OpenCode по
+умолчанию разрешает новые тулы, поэтому в merge-config (`.opencode/opencode.json`
+или global `~/.config/opencode/opencode.json`) **обязательно** правило:
 
 ```json
 {
   "permission": {
     "memory_forget": "ask",
     "memory_export": "ask",
-    "memory_import": "ask"
+    "memory_import": "ask",
+    "memory_prune": "ask"
   }
 }
 ```

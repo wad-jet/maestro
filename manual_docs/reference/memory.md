@@ -216,9 +216,13 @@
 
 ## 🌿 Branch-aware memory (v3)
 
+> **Изменение жизненного цикла (3.2.0):** запись выживает при удалении сессии;
+> жизненный цикл — по git-якорю; см. changelog.
+
 Память привязана к git-истории: каждая запись несёт git-метаданные
-(`branch`/`head`/`merged`), **идентичность записи — по коммиту (`head`)**, имя
-ветки — только display/stats. Recall по умолчанию **commit-scoped**: общий
+(`branch`/`head`/`merged`), **идентичность записи (критерий матчинга/промоции) —
+по коммиту (`head`); ключ хранения — `session_id`; жизненный цикл — по ветке/HEAD**,
+имя ветки — только display/stats. Recall по умолчанию **commit-scoped**: общий
 (mainline) контекст + собственный «опыт» (неслитые коммиты, достижимые из
 checkout); чужие unmerged-коммиты не попадают в контекст. Слияние работы в
 mainline промоутирует её записи в общий контекст.
@@ -391,6 +395,28 @@ memory_forget({session_id?, author?, before?}) → «Удалено N запис
   метаданные, не access-control.
 - **Permission:** `memory_forget: "ask"` в merge-config (обязательное правило).
 
+### `memory_prune` (v5)
+
+```
+memory_prune({action: "list" | "delete", session_ids?, heads?, category?}) → листинг/удаление
+```
+
+- **HITL-утилизация** брошенных/unknown записей: `action: "list"` показывает
+  категории надёжности git-якоря, `action: "delete"` удаляет строго по явным
+  `session_ids`/`heads` (или по `category: dead|unknown`).
+- Категории: **remote-merged** (слито в mainline), **remote-alive** (живая
+  remote-ветка), **local-only** (только локальная ветка), **dead** (ветка/коммит
+  недостижимы), **unknown** (нет git-якоря). Листинг — по категориям, удаление —
+  по явным идентификаторам.
+- **Host-guard на централизованных бэкендах:** foreign-host записи исключены из
+  batch-all/категорийных удалений (нельзя снести чужое знание с другой машины).
+- **Squash/rebase-предупреждение:** после переписывания истории категории могут
+  быть неточными — перед массовым удалением сверяйте листинг.
+- Удаление — строго по явным `session_ids`/`heads`; «все» резолвится tool-слоем
+  в явный набор после host-guard.
+- **Permission:** `memory_prune: "ask"` в merge-config (обязательное правило —
+  без него новый tool получает ungated-доступ по дефолту OpenCode).
+
 ### `memory_export`
 
 ```
@@ -459,9 +485,9 @@ memory_stats_detail() → агрегаты (без summary-текста)
 
 ### Permission-правило (write/boundary-tools)
 
-`memory_forget`/`memory_export`/`memory_import` — операции, пересекающие границу
-(удаление, запись файла, запись в память). OpenCode по умолчанию разрешает новые
-тулы, поэтому **обязательное правило** в merge-config
+`memory_forget`/`memory_export`/`memory_import`/`memory_prune` — операции,
+пересекающие границу (удаление, запись файла, запись в память). OpenCode по
+умолчанию разрешает новые тулы, поэтому **обязательное правило** в merge-config
 (`.opencode/opencode.json` или global):
 
 ```json
@@ -469,7 +495,8 @@ memory_stats_detail() → агрегаты (без summary-текста)
   "permission": {
     "memory_forget": "ask",
     "memory_export": "ask",
-    "memory_import": "ask"
+    "memory_import": "ask",
+    "memory_prune": "ask"
   }
 }
 ```
@@ -575,8 +602,13 @@ opt-in на вставку замаскированных заголовков/s
 `retry_interval_min`; после 3 неудач — помечается «skip» (state-файл), повторно
 не трогается.
 
-**Удаление сессии:** событие `session.deleted` → `storage.delete(session_id)`
-(best-effort) + сброс debounce-таймера.
+**Удаление сессии (жизненный цикл — по git-якорю, v5):** по умолчанию запись
+**выживает** — знание привязано к `head`, а не к сессии; runtime-очистка (таймер,
+очередь, sticky branch/head, state-строка) выполняется всегда. Флаг
+`delete_on_session_delete: true` возвращает v1-поведение (удаление записи при
+`session.deleted`; рекомендуется только для sqlite). Событие `memory:session_closed`
+— запись сохранена; `memory:session_deleted` — удалена (только при успехе);
+`memory:session_delete_failed` — ошибка удаления.
 
 ## 📁 Расположение данных
 
@@ -695,6 +727,11 @@ opt-in на вставку замаскированных заголовков/s
 | `memory:index_retryable` (debug) | sessionID |
 | `memory:index_error` (error) | sessionID, error_class |
 | `memory:session_deleted` | sessionID |
+| `memory:session_closed` | sessionID (запись сохранена при закрытии сессии) |
+| `memory:session_delete_failed` (error) | sessionID, error_class |
+| `memory:index_unattributed` (warn) | sessionID (нет git-якоря — запись не индексируется) |
+| `memory:pruned` | count, category (enum: `dead`/`unknown`/`remote-merged`/`remote-alive`/`local-only`) |
+| `memory:delete_on_session_delete_centralized` (warn) | — (флаг `delete_on_session_delete` на централизованном бэкенде) |
 | `memory:forgotten` | count, filters (массив enum: `session_id`/`author`/`before`, без значений) |
 | `memory:backfill` | considered, indexed, skipped |
 | `memory:backfill.done` | duration_ms |

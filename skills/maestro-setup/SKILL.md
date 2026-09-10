@@ -172,7 +172,8 @@ silent opt-in).
 При включении памяти в merge-конфиг (`.opencode/opencode.json` или global)
 добавить нативные permission для write/boundary-tools (обязательное правило,
 канон `maestro-assistant`):
-`permission: { memory_forget: "ask", memory_export: "ask", memory_import: "ask" }`
+`permission: { memory_forget: "ask", memory_export: "ask", memory_import: "ask",
+memory_prune: "ask" }`
 (opencode default для новых тулов — allow, поэтому правило обязательно).
 
 Последовательность включения (канон, см. `manual_docs/how-to/enable-memory.md`):

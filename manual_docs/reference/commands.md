@@ -107,6 +107,14 @@ primary-сессия при чтении того же файла получае
 `.maestro/memory-report-<YYYYMMDD-HHMMSS>.html`. Подробнее —
 [Память](../reference/memory.md).
 
+### `@maestro-memory-prune`
+
+HITL-утилизация брошенных/unknown записей памяти: листинг по категориям
+надёжности git-якоря (remote-merged/remote-alive/local-only/dead/unknown) →
+подтверждение → удаление строго по явным `session_ids`/`heads` (host-guard на
+централизованных бэкендах). Permission `ask`. Подробнее —
+[Память](../reference/memory.md).
+
 ## 💡 Примечания
 
 - Все HITL-вопросы и сообщения пользователю — только на русском.

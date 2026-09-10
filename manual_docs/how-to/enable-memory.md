@@ -98,8 +98,8 @@
    модели, `retention_days`, `report`) — только по явному запросу HITL.
 4. При включении памяти ассистент **автоматически** добавит в merge-config
    нативное правило `permission: { memory_forget: "ask", memory_export: "ask",
-   memory_import: "ask" }` (opencode default для новых инструментов — allow,
-   поэтому правило обязательно).
+   memory_import: "ask", memory_prune: "ask" }` (opencode default для новых
+   инструментов — allow, поэтому правило обязательно).
 5. После правки — напоминание про **онбординг**: рестарт opencode (OP-1) →
    self-provision `module_dir` → `npm install` в `module_dir` → рестарт №2 →
    верификация (`@maestro-memory`, блок «Контекст из памяти maestro»).
@@ -249,10 +249,14 @@ timeline-гистограмма по датам, кластеры тем, авт
 
 ### Branch-aware память (тиры и диагностика)
 
-С v3 память привязана к git-истории: идентичность записи — по коммиту (`head`),
-имя ветки — только display. Recall по умолчанию **commit-scoped** (`scope:
-"branch"`): общий (mainline) контекст + собственный «опыт» (неслитые коммиты,
-достижимые из checkout). Тиры:
+С v3 память привязана к git-истории: идентичность записи (критерий
+матчинга/промоции) — по коммиту (`head`); ключ хранения — `session_id`;
+жизненный цикл — по ветке/HEAD; имя ветки — только display. Recall по умолчанию
+**commit-scoped** (`scope: "branch"`): общий (mainline) контекст + собственный
+«опыт» (неслитые коммиты, достижимые из checkout). Тиры:
+
+> **Память требует git-якоря (write-gate по `head`):** non-git проекты не получают
+> новые записи (warn при init); существующие записи остаются читаемыми.
 
 - **general** — запись вошла в mainline (`merged = 1` или `head` достижим из
   mainline);

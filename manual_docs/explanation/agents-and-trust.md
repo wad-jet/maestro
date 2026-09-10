@@ -307,9 +307,9 @@ untrusted работают по очищенным артефактам, а до
   индексаторе) + **permission `ask`** (защита от poison-JSONL в shared-бэкенд:
   injection-текст в summary не попадает в system-prompt сокомандников).
 - **Write/boundary-tools → permission `ask` (канон).** `memory_forget`,
-  `memory_export`, `memory_import` требуют нативного правила `"ask"` в
-  merge-config (обязательный шаг включения памяти v2). Правило для будущих
-  тулов: **новые write/boundary-tools → permission `ask`**.
+  `memory_export`, `memory_import`, `memory_prune` требуют нативного правила
+  `"ask"` в merge-config (обязательный шаг включения памяти v2). Правило для
+  будущих тулов: **новые write/boundary-tools → permission `ask`**.
 - **Отчёт — только агрегаты (SEC-4b).** `@maestro-memory-report` пишет
   HTML-артефакт без текстов записей: при `report.include_text: false` (default)
   в файл не попадают ни title, ни summary, ни decisions — только числа, имена
