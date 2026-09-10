@@ -75,6 +75,14 @@
 
 > Ручная проверка в реальном opencode-сессии с включённой памятью. Все шаги — в sandbox-проекте. Отметьте результат: ✅ прошёл · ❌ не прошёл · ⚠️ риск-контроль (не assert).
 
+> **Подготовка qdrant-проекта:** пересоздайте песочницу с флагом qdrant:
+> `./maestro-sandbox.sh --reset --qdrant` (создаст `.sandbox/docker-compose.yml`,
+> настроит `memory.storage.type: "qdrant"` + `namespace`/`identity` в sandbox
+> `maestro.json`, ключ `MAESTRO_MEMORY_QDRANT_KEY` в `.env`). Затем поднимите
+> бэкенд: `cd .sandbox && docker compose up -d`; в `module_dir` памяти выполните
+> `npm install` (добавляет `@qdrant/js-client-rest`) и перезапустите opencode (OP-1).
+> Остановка: `docker compose down` (данные сохранены в volume `qdrant_data`).
+
 | # | Сценарий | Тип | Проверка | Результат |
 |---|---|---|---|---|
 | F1 | `maestro.json` → `memory.enabled: true` | ✅ | в sandbox `maestro.json` есть `memory.enabled: true`; `memory.storage.type: "sqlite"` (или задан qdrant/pgvector); `module_dir` указан или резолвится | |
@@ -86,7 +94,7 @@
 | F7 | `memory_forget` триггерит ask-подтверждение | ✅ | вызов `memory_forget` вызывает ask-gate (в TUI появляется запрос подтверждения); permission `ask` запрашивается через merge-config | |
 | F8 | `@maestro-memory-report` генерирует HTML-агрегаты | ✅ | вызов отчёта памяти возвращает агрегированный HTML/текст с кластерами, статистикой, графом; без crash | |
 | F9 | pgvector hybrid | ✅ | pgvector-проект в sandbox; `memory_search` с текстовым `query` возвращает лексические совпадения (ts_rank); без crash | |
-| F10 | qdrant hybrid | ✅ | qdrant-проект в sandbox; `memory_search` с `query` возвращает full-text совпадения через RRF; без crash | |
+| F10 | qdrant hybrid | ✅ | qdrant-проект в sandbox (`--reset --qdrant` + `docker compose up -d`); `memory_search` с `query` возвращает full-text совпадения через RRF; без crash | |
 | F11 | sqlite cross-project | ✅ | sqlite-проект; `memory_search { project: <сосед> }` возвращает записи соседа read-only; `origin_project_hash` в выдаче (провенанс); без crash | |
 | F12 | commit-scoped recall | ✅ | стек веток видит базу; переиспользование имени ветки НЕ контаминирует контекст; без crash | |
 | F13 | промоция после мержа | ✅ | ветка влита в mainline + `git pull` → записи становятся general (merged=1) на следующем init | |

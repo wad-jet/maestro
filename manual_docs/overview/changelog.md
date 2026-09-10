@@ -37,6 +37,17 @@
   6. Поля записей `origin_remote`/`prefixes`.
 - **Версия дистрибутива 3.2.0** (package.json; memory layer — v5, beta).
 
+### Добавлено
+
+- **Sandbox: флаг `--qdrant`** в `maestro-sandbox.sh` — поднятие локального qdrant
+  для memory layer (docker-compose, `memory.storage.type: qdrant` с
+  `namespace`/`identity`, ключ в `.env`). Обновлён чеклист
+  `docs/testing/maestro-sandbox-checklist.md` (F10 + блок подготовки).
+
+### Версия
+
+- **3.2.1** (патч): sandbox qdrant backend; без изменений контракта плагина.
+
 ## [2026-09-09]
 
 ### Изменено

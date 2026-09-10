@@ -20,10 +20,16 @@
 #   create        создать/пересоздать песочницу (по умолчанию)
 #   --reset       полный сброс (пересоздать с нуля)
 #   --clean       удалить .sandbox/ (фиктивные данные)
+#   --qdrant      настроить qdrant backend (docker-compose + maestro.json + .env)
 #   --help        краткая справка
 #
 # Идемпотентен: повторный `create` не ломает существующую песочницу
 # (файлы перезаписываются, лишние не удаляются без --reset).
+#
+# Qdrant: `--qdrant` включает memory.storage.type=qdrant в sandbox maestro.json,
+# генерирует .sandbox/docker-compose.yml и добавляет ключ в .sandbox/.env.
+# Поднятие/остановка — вручную (docker compose), см. инструкцию в выводе.
+# Может комбинироваться с --reset (--reset --qdrant).
 #
 # Совместимость: bash 3.2+ (macOS/Linux).
 
@@ -35,11 +41,14 @@ CHECKLIST_REL="docs/testing/maestro-sandbox-checklist.md"
 
 usage() {
   cat <<EOF
-Использование: $0 [create|--reset|--clean|--help]
+Использование: $0 [create|--reset|--clean|--help] [--qdrant]
 
   create        создать/пересоздать песочницу .sandbox/ (по умолчанию)
   --reset       полный сброс: удалить .sandbox/ и создать заново
   --clean       удалить .sandbox/ (фиктивные данные) и выйти
+  --qdrant      настроить qdrant backend для memory layer:
+                docker-compose.yml + memory.storage.type=qdrant в maestro.json
+                + ключ в .env (поднятие/остановка — docker compose, см. вывод)
   --help        показать эту справку
 
 QA: после create/--reset печатается путь к чеклисту
@@ -177,8 +186,28 @@ gen_maestro_json() {
     ],
     "extra_fields": []
   }
-}
 EOF
+
+  # Закрытие корневого объекта: с qdrant — через запятую добавляем секцию memory.
+  if [ "$QDRANT" = "1" ]; then
+    cat >>"$SANDBOX/maestro.json" <<'EOF'
+  ,
+  "memory": {
+    "enabled": true,
+    "namespace": "sandbox",
+    "identity": "sandbox",
+    "storage": {
+      "type": "qdrant",
+      "qdrant": {
+        "url": "http://localhost:6333",
+        "api_key_env": "MAESTRO_MEMORY_QDRANT_KEY",
+        "collection": "maestro_memory"
+      }
+    }
+  }
+EOF
+  fi
+  printf '%s\n' '}' >>"$SANDBOX/maestro.json"
 }
 
 gen_env() {
@@ -188,6 +217,38 @@ gen_env() {
 SANDBOX_DUMMY_PASSWORD=sandbox-dummy-password
 SANDBOX_FAKE_API_KEY=sandbox-fake-api-key-value
 SANDBOX_FAKE_CARD=4111-1111-1111-1111
+EOF
+
+  if [ "$QDRANT" = "1" ]; then
+    # Ключ qdrant для memory layer. Плагин читает его из process.env (имя —
+    # memory.storage.qdrant.api_key_env), не через файловые тулы — защита не задета.
+    cat >>"$SANDBOX/.env" <<'EOF'
+MAESTRO_MEMORY_QDRANT_KEY=sandbox-qdrant-key
+EOF
+  fi
+}
+
+gen_docker_compose() {
+  cat >"$SANDBOX/docker-compose.yml" <<'EOF'
+# Qdrant для memory layer песочницы. Поднятие/остановка:
+#   docker compose up -d
+#   docker compose down
+# Порт 6333 (REST) — как в memory.storage.qdrant.url sandbox maestro.json.
+services:
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: maestro-sandbox-qdrant
+    restart: unless-stopped
+    ports:
+      - "6333:6333"   # HTTP REST (maestro)
+      - "6334:6334"   # gRPC (опционально)
+    volumes:
+      - qdrant_data:/qdrant/storage
+    environment:
+      QDRANT__SERVICE__API_KEY: ${MAESTRO_MEMORY_QDRANT_KEY}
+
+volumes:
+  qdrant_data:
 EOF
 }
 
@@ -265,6 +326,10 @@ do_create() {
   gen_src
   gen_tests
 
+  if [ "$QDRANT" = "1" ]; then
+    gen_docker_compose
+  fi
+
   # Каталоги для spec/plan (maestro на них опирается).
   mkdir -p "$SANDBOX/docs/superpowers/specs"
   mkdir -p "$SANDBOX/docs/superpowers/plans"
@@ -284,30 +349,42 @@ do_create() {
   say ""
   say "✅ Песочница готова. Чеклист: $CHECKLIST_REL"
   say "   Запускайте сценарии maestro с workdir = корень .sandbox/ ($SANDBOX)."
+  if [ "$QDRANT" = "1" ]; then
+    say ""
+    say "🐳 Qdrant backend настроен. Поднимите и настройте память:"
+    say "   cd $SANDBOX"
+    say "   docker compose up -d"
+    say "   # затем в module_dir памяти: npm install (добавляет @qdrant/js-client-rest)"
+    say "   # и перезапустите opencode (OP-1). URL http://localhost:6333, ключ в .env."
+    say "   # Остановка: docker compose down (данные сохранены в volume qdrant_data)."
+  fi
 }
 
 # ---------- main ----------
 
 ACTION="create"
+QDRANT="0"
 
-case "${1:-create}" in
-  create)
-    ACTION="create"
-    ;;
-  --reset)
-    ACTION="reset"
-    ;;
-  --clean)
-    ACTION="clean"
-    ;;
-  --help|-h)
+for arg in "$@"; do
+  case "$arg" in
+    --qdrant)
+      QDRANT="1"
+      ;;
+    create|--reset|--clean|--help|-h)
+      ACTION="${arg#--}"
+      ;;
+    *)
+      say "Неизвестный аргумент: $arg"
+      usage
+      exit 1
+      ;;
+  esac
+done
+
+case "$ACTION" in
+  help|-h)
     usage
     exit 0
-    ;;
-  *)
-    say "Неизвестный аргумент: $1"
-    usage
-    exit 1
     ;;
 esac
 
