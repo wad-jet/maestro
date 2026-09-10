@@ -228,7 +228,7 @@ untrusted, access-policy не enforced, дефолтные sanitizer-прави�
     "summarizer_model": null,
     "identity": null,
     "identity_env": null,
-    "namespace": null,
+    "namespace": "microservices.sales.pay",
     "module_dir": null,
     "idle_debounce_min": 10,
     "min_new_messages": 3,
@@ -281,6 +281,14 @@ untrusted, access-policy не enforced, дефолтные sanitizer-прави�
   записи `host` (hostname — «где лежит полный контекст»). HITL-команда
   `/maestro-memory-prune` (листинг категорий надёжности git-якоря →
   подтверждение → удаление; host-guard на централизованных бэкендах).
+- **Namespace-identity (v5.1):** `memory.namespace` **обязателен** (формат
+  `microservices.sales.pay`, 1–3 сегмента, lowercase; нормализация trim+lowercase;
+  отсутствует → disabled `namespace_missing`). Домены: авто-related родитель +
+  братья namespace (merged-only; off-switch `memory.domain_recall: false`).
+  `related` — кросс-доменные namespace-префиксы (merged-only, ≤16, 1:1 leaf
+  предпочтение). `memory_migrate` — пере-keying (from: auto|namespace|hash,
+  max-version-wins на sqlite, `delete_source`). Поля записей
+  `origin_remote`/`prefixes`. Адресация — namespace-only (URL/hash убраны).
 - **`retention_days`:** `null` (default) — выключено; число — TTL записей
   (prune при старте, лог количества удалённых).
 - **`similarity_threshold`:** порог cosine для кластеров/графа в
@@ -313,9 +321,10 @@ untrusted, access-policy не enforced, дефолтные sanitizer-прави�
   `project` (кросс-проектный opt-in, **все бэкенды**; sqlite — read-only соседняя
   БД с fail-soft, qdrant/pg — key-filter).
 - **Permission (обязательное правило):** `memory_forget`/`memory_export`/
-  `memory_import`/`memory_prune` — write/boundary-tools; в merge-config пишется
+  `memory_import`/`memory_prune`/`memory_migrate` — write/boundary-tools; в
+  merge-config пишется
   `permission: { memory_forget: "ask", memory_export: "ask", memory_import: "ask",
-  memory_prune: "ask" }`.
+  memory_prune: "ask", memory_migrate: "ask" }`.
 - **Self-provisioning:** при `enabled: true` плагин создаёт `module_dir`
   (`<data-dir>/maestro/memory/module/`), пишет `package.json` (single-writer,
   `"type": "module"`) и копирует исходники модуля; пользователь выполняет

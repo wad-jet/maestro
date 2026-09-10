@@ -41,7 +41,7 @@
     "summarizer_model": null,
     "identity": null,
     "identity_env": null,
-    "namespace": null,
+    "namespace": "microservices.sales.pay",
     "module_dir": null,
     "idle_debounce_min": 10,
     "min_new_messages": 3,
@@ -87,7 +87,7 @@
 | `summarizer_model` | `string` \| `null` | `null` | Модель фонового саммаризатора; `null` → модель саммаризируемой сессии |
 | `identity` | `string` \| `null` | `null` | Явный override identity (напр. сервисный аккаунт). Обычно identity берётся из `identity_env` → git `user.name` |
 | `identity_env` | `string` \| `null` | `null` | Имя env-переменной с identity (per-machine, не в общем `maestro.json`) |
-| `namespace` | `string` \| `null` | `null` | Переопределяет ключ памяти `key` (monorepo-сплит / группировка связанных репозиториев) |
+| `namespace` | `string` | — | **Обязателен** (v5.1). Ключ изоляции памяти; формат `microservices.sales.pay` (1–3 сегмента, lowercase, разделитель `.`); нормализация trim+lowercase. Отсутствует/невалиден → память disabled (`namespace_missing`/`namespace_invalid`) |
 | `module_dir` | `string` \| `null` | `null` | Каталог кода модуля; `null` → `<data-dir>/maestro/memory/module` |
 | `idle_debounce_min` | `number` | `10` | Debounce индексации после события `session.idle` (минуты) |
 | `min_new_messages` | `number` | `3` | Мин. новых сообщений с последнего саммари для повторной индексации |
@@ -192,27 +192,51 @@
     в data-dir; митигация — framing).
   - pg fallback на `russian` fail-loud на кастомных PG без `russian`-конфига.
 
-## 🔑 Изоляция: key, project_hash, namespace, identity
+## 🔑 Изоляция: namespace, key, identity
 
-- **`key`** — эффективный ключ изоляции памяти. Все запросы фильтруются по `key`.
-  `key = namespace ?? project_hash`.
+- **`namespace`** — **обязательный** ключ изоляции памяти (v5.1). Формат
+  `microservices.sales.pay` — 1–3 сегмента, lowercase, разделитель `.`;
+  нормализация — trim + lowercase. **Отсутствует / невалиден → память disabled**
+  (`namespace_missing` / `namespace_invalid`); восстановление — задать namespace
+  + `memory_migrate from:auto` (легаси hash-бакет переносится). `key = namespace`.
 - **`project_hash`** — стабильный идентификатор проекта: sha256 от канонической
   формы git remote `origin` (strip scheme/credentials, lowercase host, strip
   `.git`; `git@github.com:org/repo.git` и `https://github.com/org/repo.git` →
-  одинаковый `github.com/org/repo`). Нет remote → hash абсолютного пути директории
-  (кросс-машинная стабильность для no-remote недостижима; для командной памяти
-  нужен remote или явный `namespace`).
-- **`namespace`** — переопределяет `key`: monorepo (общий key для подпроектов)
-  или связанные репозитории команды (одинаковый `namespace` в каждом → общая
-  память). **Смена namespace = потеря доступа к старым записям** (миграции нет).
+  одинаковый `github.com/org/repo`). Нет remote → hash абсолютного пути директории.
+  Используется как **провенанс** (`origin_project_hash` / `origin_remote`), не как
+  ключ изоляции.
+- **Домены (иерархия namespace).** Сегменты namespace образуют доменную
+  иерархию: `microservices.sales.orders` и `microservices.sales.web` — домен
+  `sales`. **Авто-related:** родитель и братья домена попадают в recall
+  **merged-only** (общее знание домена). Off-switch — `memory.domain_recall:
+  false`.
+- **`related`** — кросс-доменные связи (массив namespace-префиксов, ≤16):
+  точечная merged-связь с записями другого домена (напр. сервис
+  `microservices.checkout.notifications` с `related: ["microservices.sales.orders"]`).
+  Предпочтение — 1:1 leaf (точечный target); поддерево — opt-in.
+- **`memory_migrate`** — пере-keying при смене namespace: `from: auto |
+  namespace | hash`, max-version-wins на sqlite, `delete_source` — удалить
+  исходный бакет после переноса. **Смена namespace больше не = потеря доступа** —
+  используйте `memory_migrate`.
+- **Коллизии.** Детекция при записи: warn-on-new (новый namespace, уже
+  существующий в хранилище → warn, не перезапись). «Проекты в ключе» — по
+  `origin_remote` (провенанс, отображается в поиске).
+- **Адресация — namespace-only.** URL/hash-формы адресации убраны: `related` и
+  `project:` принимают только namespace-префиксы.
 - **`identity`** — подпись записи (`author`), атрибуция в поиске. Источник:
   `identity_env` → git `user.name` → OS username; `identity` в `maestro.json` —
   только явный override (напр. сервисный аккаунт). **Identity ≠ access-control**:
   клиентский плагин не имеет границы учётных записей — любой член команды с
   ключом читает всю память проекта. Per-account RBAC — server-side задача, вне
   scope плагина.
-- Запись хранит и `key` (фильтр), и `origin_project_hash` (провенанс —
-  отображается в поиске).
+- Запись хранит `key` (фильтр), `origin_project_hash`/`origin_remote` (провенанс)
+  и `prefixes` (доменные префиксы).
+
+**Сценарий (домен + related):** API `microservices.sales.orders` и frontend
+`microservices.sales.web` — общий домен `sales`: братья merged-видимы друг другу
+(авто-related). Сервис `microservices.checkout.notifications` с
+`related: ["microservices.sales.orders"]` — точечная merged-связь с записями
+`orders` (без общего домена).
 
 ## 🌿 Branch-aware memory (v3)
 
@@ -353,8 +377,8 @@ memory_search(query: string, {limit?, date_from?, date_to?, author?, project?, s
   - `date_from` / `date_to` — диапазон `time_last` (epoch ms).
   - `author` — фильтр по атрибуции (identity).
   - `project` — **кросс-проектный opt-in** (не default): поиск по записям другого
-    проекта. Принимает `namespace` | git-remote/URL (канонизация → hash) |
-    готовый `project_hash`. Работает на **всех бэкендах** (v3a): централизованные
+    проекта. Принимает **namespace-префикс** (адресация namespace-only;
+    URL/hash-формы убраны). Работает на **всех бэкендах** (v3a): централизованные
     (qdrant/pgvector) — единая коллекция/таблица с key-фильтром; sqlite — чтение
     соседней БД **read-only** (fail-soft: при недоступности/несовпадении
     `model_id`/dim — пропуск + лог). Данные маскированы; в выдаче показывается

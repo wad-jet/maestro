@@ -133,7 +133,10 @@
   init-warn `unmasked_branch_metadata` при централизованном бэкенде + непустых
   `confidential.paths`; warn дублируется в выдаче `@maestro-memory` (диагностика
   без логов). `memory.mainline` — только локальные git-команды, машину не
-  покидает.
+  покидает. **Тот же класс git-метаданных (v5.1):** читаемые `key` (namespace)
+  и `origin_remote` на централизованном бэкенде видны серверу — структурные
+  идентификаторы (key-фильтрация, провенанс), не контент; маскированию не
+  подлежат, документируются как класс git-метаданных.
 - **Identity ≠ access-control.** `identity`/`identity_env`/git `user.name` —
   только подпись записей (`author`, атрибуция). Клиентский плагин не имеет
   границы учётных записей: любой член команды с ключом читает всю память
@@ -161,7 +164,8 @@
   контент записей замаскирован (raw-confidential не покидает машину), но путь
   наружу остаётся осознанным выбором пользователя.
 - **Write/boundary-tools → permission `ask` (канон, v2).** `memory_forget`,
-  `memory_export`, `memory_import`, `memory_prune` требуют нативного правила
+  `memory_export`, `memory_import`, `memory_prune`, `memory_migrate` (v5.1:
+  пере-keying записей между namespace-бакетами) требуют нативного правила
   `"ask"` в merge-config (обязательный шаг включения памяти v2). Правило для
   будущих тулов: **новые write/boundary-tools → permission `ask`**.
 - **Отчёт — только агрегаты (SEC-4b, v2).** `@maestro-memory-report` пишет

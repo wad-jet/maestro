@@ -381,7 +381,7 @@ deny. Trust не наследуется вложенными субагента�
     "summarizer_model": null,
     "identity": null,
     "identity_env": null,
-    "namespace": null,
+    "namespace": "microservices.sales.pay",
     "module_dir": null,
     "idle_debounce_min": 10,
     "min_new_messages": 3,
@@ -426,7 +426,9 @@ deny. Trust не наследуется вложенными субагента�
 | `summarizer_model` | `string` \| `null` | `null` | Модель фонового саммаризатора; `null` → модель саммаризируемой сессии |
 | `identity` | `string` \| `null` | `null` | Явный override identity (напр. сервисный аккаунт) |
 | `identity_env` | `string` \| `null` | `null` | Имя env-переменной с identity (per-machine, не в общем `maestro.json`) |
-| `namespace` | `string` \| `null` | `null` | Переопределяет ключ памяти `key` (monorepo / связанные репозитории) |
+| `namespace` | `string` | — | **Обязателен** (v5.1). Ключ изоляции памяти; формат `microservices.sales.pay` (1–3 сегмента, lowercase, разделитель `.`); нормализация trim+lowercase. Отсутствует/невалиден → память disabled (`namespace_missing`/`namespace_invalid`) |
+| `related` | `string[]` | `[]` | Кросс-доменные связи: массив namespace-префиксов (≤16), merged-only точечная связь с записями другого домена. Невалиден (не массив / >16 / не namespace-префикс) → память disabled (`related_invalid`) |
+| `domain_recall` | `boolean` | `true` | Авто-related по домену (родитель + братья namespace, merged-only) в recall. `false` — off-switch. Невалиден (не boolean) → память disabled (`domain_recall_invalid`) |
 | `module_dir` | `string` \| `null` | `null` | Каталог кода модуля; `null` → `<data-dir>/maestro/memory/module` |
 | `idle_debounce_min` | `number` | `10` | Debounce индексации после `session.idle` (минуты) |
 | `min_new_messages` | `number` | `3` | Мин. новых сообщений с последнего саммари для повторной индексации |
@@ -462,8 +464,14 @@ identity для централизованного бэкенда / некорр
 `pgvector_config_invalid`, `pgvector_text_search_config_invalid`,
 `retention_days_invalid`, `similarity_threshold_invalid`,
 `branch_context_invalid`, `mainline_invalid`, `embedding_invalid`,
-`probe_cooldown_min_invalid`, `delete_on_session_delete_invalid`), сессии
+`probe_cooldown_min_invalid`, `delete_on_session_delete_invalid`,
+`namespace_missing`, `namespace_invalid`, `related_invalid`,
+`domain_recall_invalid`), сессии
 работают (fail-soft).
+Приоритет disabled-причин: `namespace_missing`/`namespace_invalid` — первичны
+(без валидного namespace память не включается независимо от остального
+конфига); `related_invalid`/`domain_recall_invalid` — вторичны (проверяются
+после валидного namespace).
 Централизованные бэкенды требуют identity (`identity` → `identity_env` → git
 `user.name`). Для `embedding.provider: openai` отсутствие
 `process.env[embedding.api_key_env]` → память off
