@@ -729,8 +729,8 @@ opt-in на вставку замаскированных заголовков/s
 | `memory:session_deleted` | sessionID |
 | `memory:session_closed` | sessionID (запись сохранена при закрытии сессии) |
 | `memory:session_delete_failed` (error) | sessionID, error_class |
-| `memory:index_unattributed` (warn) | sessionID (нет git-якоря — запись не индексируется) |
-| `memory:pruned` | count, category (enum: `dead`/`unknown`/`remote-merged`/`remote-alive`/`local-only`) |
+| `memory:index_unattributed` (debug) | sessionID (нет git-якоря — запись не индексируется) |
+| `memory:pruned` | count, records (число удалённых записей и session_id) |
 | `memory:delete_on_session_delete_centralized` (warn) | — (флаг `delete_on_session_delete` на централизованном бэкенде) |
 | `memory:forgotten` | count, filters (массив enum: `session_id`/`author`/`before`, без значений) |
 | `memory:backfill` | considered, indexed, skipped |
