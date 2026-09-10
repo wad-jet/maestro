@@ -117,7 +117,7 @@ function makeNodeSqliteDatabase() {
 const SCAN_FIELDS = [
   "session_id", "key", "origin_project_hash", "title", "summary", "decisions",
   "author", "time_first", "time_last", "version", "model_id", "embedding",
-  "branch", "head", "merged",
+  "branch", "head", "merged", "host",
 ];
 const DEFAULT_SCAN_FIELDS = SCAN_FIELDS.filter((f) => f !== "embedding");
 
@@ -182,7 +182,8 @@ export class SqliteStorage {
         version INTEGER NOT NULL,
         branch TEXT NOT NULL DEFAULT '',
         head TEXT NOT NULL DEFAULT '',
-        merged INTEGER NOT NULL DEFAULT 0
+        merged INTEGER NOT NULL DEFAULT 0,
+        host TEXT NOT NULL DEFAULT ''
       )`);
       // Dev-гигиена: существующие in-repo dev-БД (v2-схема без branch/head/merged)
       // получают колонки идемпотентно (ALTER ADD COLUMN, НЕ миграция данных).
@@ -190,6 +191,7 @@ export class SqliteStorage {
       if (!cols.includes("branch")) db.exec("ALTER TABLE memory ADD COLUMN branch TEXT NOT NULL DEFAULT ''");
       if (!cols.includes("head")) db.exec("ALTER TABLE memory ADD COLUMN head TEXT NOT NULL DEFAULT ''");
       if (!cols.includes("merged")) db.exec("ALTER TABLE memory ADD COLUMN merged INTEGER NOT NULL DEFAULT 0");
+      if (!cols.includes("host")) db.exec("ALTER TABLE memory ADD COLUMN host TEXT NOT NULL DEFAULT ''");
       db.exec(`CREATE TABLE IF NOT EXISTS meta (name TEXT PRIMARY KEY, value TEXT NOT NULL)`);
       db.exec(`CREATE INDEX IF NOT EXISTS memory_key ON memory (key)`);
       db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
@@ -255,8 +257,8 @@ export class SqliteStorage {
 
   async _upsert(entries) {
     const ins = this.db.prepare(`INSERT OR REPLACE INTO memory
-      (session_id, key, origin_project_hash, title, summary, decisions, embedding, model_id, author, time_first, time_last, version, branch, head, merged)
-      VALUES (@session_id, @key, @origin_project_hash, @title, @summary, @decisions, @embedding, @model_id, @author, @time_first, @time_last, @version, @branch, @head, @merged)`);
+      (session_id, key, origin_project_hash, title, summary, decisions, embedding, model_id, author, time_first, time_last, version, branch, head, merged, host)
+      VALUES (@session_id, @key, @origin_project_hash, @title, @summary, @decisions, @embedding, @model_id, @author, @time_first, @time_last, @version, @branch, @head, @merged, @host)`);
     const ftsDel = this.db.prepare("DELETE FROM memory_fts WHERE session_id = ?");
     const ftsIns = this.db.prepare(
       "INSERT INTO memory_fts (session_id, key, title, summary, decisions) VALUES (?, ?, ?, ?, ?)",
@@ -285,6 +287,7 @@ export class SqliteStorage {
           branch: e.branch ?? "",
           head: e.head ?? "",
           merged: e.merged ?? 0,
+          host: e.host ?? "",
         });
         // Sync FTS: delete-then-insert keeps exactly one row per session_id.
         ftsDel.run(e.session_id);
@@ -542,7 +545,7 @@ export class SqliteStorage {
     // merge line-fetch for FTS-only hits).
     let parsed;
     try { parsed = JSON.parse(r.decisions); } catch { parsed = []; }
-    return { ...r, embedding: undefined, decisions: parsed };
+    return { ...r, embedding: undefined, decisions: parsed, host: r.host ?? "" };
   }
 
   // Кандидаты для recall (Task 6): записи ключа, которые либо уже влиты в

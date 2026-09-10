@@ -646,6 +646,44 @@ test("qdrant upsert payload always carries branch/head/merged (detached → '')"
   assert.equal(capturedPoints[0].payload.merged, 0);
 });
 
+test("qdrant upsert payload carries host (detached → '')", async () => {
+  const c = fakeClient();
+  let capturedPoints = null;
+  c.upsert = async (name, { points }) => {
+    c.calls.push(["upsert", name, points.length]);
+    capturedPoints = points;
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  await st.upsert([{
+    session_id: "s1", key: "k1", origin_project_hash: "h1", title: "T",
+    summary: "S", decisions: [], embedding: new Float32Array([0.1, 0.2, 0.3]),
+    model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1,
+    host: "host-a",
+  }]);
+  assert.equal(capturedPoints[0].payload.host, "host-a");
+  // detached/unknown → '' default.
+  await st.upsert([{
+    session_id: "s2", key: "k1", origin_project_hash: "h1", title: "T2",
+    summary: "S2", decisions: [], embedding: new Float32Array([0.1, 0.2, 0.3]),
+    model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1,
+  }]);
+  assert.equal(capturedPoints[0].payload.host, "");
+});
+
+test("qdrant get maps host into entry", async () => {
+  const c = fakeClient();
+  c.query = async (name, q) => {
+    c.calls.push(["query", name, q]);
+    return { points: [{ id: "s1", payload: { session_id: "s1", title: "t1", summary: "s1", decisions: '["d1"]', key: "k1", host: "host-a" } }] };
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  const found = await st.get("s1");
+  assert.ok(found);
+  assert.equal(found.host, "host-a");
+});
+
 test("qdrant candidates(key) scrolls key points + JS-filters merged=1 OR head != ''", async () => {
   const c = fakeClient();
   c.scroll = async (name, opts) => {

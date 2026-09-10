@@ -900,6 +900,30 @@ test("sqlite schema: branch/head/merged stored + returned by get/scan", async ()
   }
 });
 
+test("sqlite host provenance field round-trips (default '')", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
+  try {
+    await st.init();
+    // entry WITH host → round-trips via get.
+    await st.upsert([mkEntry("s1", "k1", "t1", { host: "host-a" })]);
+    const found = await st.get("s1");
+    assert.equal(found.host, "host-a");
+    // legacy entry WITHOUT host → default ''.
+    await st.upsert([mkEntry("s2", "k1", "t2")]);
+    const legacy = await st.get("s2");
+    assert.equal(legacy.host, "");
+    // scan возвращает host (легитимные метаданные).
+    const rows = await st.scan({ key: "k1", fields: ["session_id", "host"] });
+    assert.equal(rows.length, 2);
+    assert.equal(rows.find((r) => r.session_id === "s1").host, "host-a");
+    assert.equal(rows.find((r) => r.session_id === "s2").host, "");
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("sqlite ALTER dev-hygiene: old v2-schema table gains columns idempotently", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mem-"));
   const dbPath = join(dir, "memory.db");
@@ -929,6 +953,7 @@ test("sqlite ALTER dev-hygiene: old v2-schema table gains columns idempotently",
     assert.ok(cols.includes("branch"), "branch column added");
     assert.ok(cols.includes("head"), "head column added");
     assert.ok(cols.includes("merged"), "merged column added");
+    assert.ok(cols.includes("host"), "host column added");
     // Повторный init не падает (guard).
     await st.dispose();
     const st2 = createStorage({ type: "sqlite", options: { dbPath }, modelId: "m", dim: 3 });

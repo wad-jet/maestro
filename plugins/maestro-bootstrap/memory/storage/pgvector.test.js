@@ -570,6 +570,30 @@ test("pgvector init: ADD COLUMN IF NOT EXISTS branch/head/merged", async () => {
   assert.ok(addSql.includes("branch TEXT NOT NULL DEFAULT ''"), addSql);
   assert.ok(addSql.includes("head TEXT NOT NULL DEFAULT ''"), addSql);
   assert.ok(addSql.includes("merged INT NOT NULL DEFAULT 0"), addSql);
+  assert.ok(addSql.includes("host TEXT NOT NULL DEFAULT ''"), addSql);
+});
+
+test("pgvector upsert/get/scan carry host", async () => {
+  const p = fakePoolHybrid();
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, modelId: "m1" });
+  await st.init();
+  await st.upsert([{
+    session_id: "s1", key: "k1", origin_project_hash: "h1", title: "t1", summary: "s1",
+    decisions: [], embedding: new Float32Array([0.1, 0.2, 0.3]),
+    model_id: "m1", author: "a1", time_first: 1, time_last: 2, version: 1,
+    branch: "feature/x", head: "abc123", merged: 0, host: "host-a",
+  }]);
+  const ins = p.calls.find(([sql]) => sql.includes("INSERT INTO"));
+  assert.ok(ins[0].includes("host"), "INSERT must include host");
+  assert.ok(ins[0].includes("host=$16"), "INSERT SET must include host=$16");
+  // get: явный список колонок включает host.
+  await st.get("s1");
+  const getCall = p.calls.find(([sql]) => sql.includes("WHERE session_id = $1"));
+  assert.ok(getCall[0].includes("host"), "get must select host");
+  // scan: whitelist включает host.
+  await st.scan({ key: "k1", fields: ["session_id", "host"] });
+  const scanCall = p.calls.find(([sql]) => sql.includes("WHERE key=$1"));
+  assert.ok(scanCall[0].includes("host"), "scan must select host");
 });
 
 test("pgvector upsert/get/scan carry branch/head/merged", async () => {
@@ -610,6 +634,7 @@ test("pgvector M-4: vector-leg SELECT carries branch/head/merged (entry contract
   assert.ok(sel[0].includes("branch"), "vector-leg SELECT must include branch");
   assert.ok(sel[0].includes("head"), "vector-leg SELECT must include head");
   assert.ok(sel[0].includes("merged"), "vector-leg SELECT must include merged");
+  assert.ok(sel[0].includes("host"), "vector-leg SELECT must include host");
 });
 
 test("pgvector candidates(key) filters merged=1 OR head != ''", async () => {

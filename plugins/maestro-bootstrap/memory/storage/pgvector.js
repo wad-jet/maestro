@@ -7,7 +7,7 @@ import { timed } from "../storage.js";
 const SCAN_FIELDS = [
   "session_id", "key", "origin_project_hash", "title", "summary", "decisions",
   "author", "time_first", "time_last", "version", "model_id", "embedding",
-  "branch", "head", "merged",
+  "branch", "head", "merged", "host",
 ];
 const DEFAULT_SCAN_FIELDS = SCAN_FIELDS.filter((f) => f !== "embedding");
 
@@ -47,13 +47,15 @@ export class PgVectorStorage {
       version INT NOT NULL,
       branch TEXT NOT NULL DEFAULT '',
       head TEXT NOT NULL DEFAULT '',
-      merged INT NOT NULL DEFAULT 0
+      merged INT NOT NULL DEFAULT 0,
+      host TEXT NOT NULL DEFAULT ''
     )`);
     // Dev-гигиена: существующие dev-БД без branch/head/merged получают колонки
     // идемпотентно (ADD COLUMN IF NOT EXISTS, НЕ миграция данных).
     await this.pool.query(`ALTER TABLE ${this.table} ADD COLUMN IF NOT EXISTS branch TEXT NOT NULL DEFAULT ''`);
     await this.pool.query(`ALTER TABLE ${this.table} ADD COLUMN IF NOT EXISTS head TEXT NOT NULL DEFAULT ''`);
     await this.pool.query(`ALTER TABLE ${this.table} ADD COLUMN IF NOT EXISTS merged INT NOT NULL DEFAULT 0`);
+    await this.pool.query(`ALTER TABLE ${this.table} ADD COLUMN IF NOT EXISTS host TEXT NOT NULL DEFAULT ''`);
     // I2: проверяем, что конфиг существует в pg_ts_config ДО того, как запечём
     // его в DDL. Если отсутствует (и отличается от "russian") — fallback на
     // "russian" для этого init И последующих поисков.
@@ -125,10 +127,10 @@ export class PgVectorStorage {
           throw new Error(`model_id mismatch: expected=${this.modelId} got=${e.model_id} — переиндексируйте (см. how-to)`);
         }
         await client.query(
-          `INSERT INTO ${this.table} (session_id, key, origin_project_hash, title, summary, decisions, embedding, model_id, author, time_first, time_last, version, branch, head, merged)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)
-           ON CONFLICT (session_id) DO UPDATE SET title=$4, summary=$5, decisions=$6, embedding=$7, time_last=$11, version=$12, branch=$13, head=$14, merged=$15`,
-          [e.session_id, e.key, e.origin_project_hash, e.title, e.summary, JSON.stringify(e.decisions), `[${Array.from(e.embedding)}]`, e.model_id, e.author, e.time_first, e.time_last, e.version, e.branch ?? "", e.head ?? "", e.merged ?? 0]
+          `INSERT INTO ${this.table} (session_id, key, origin_project_hash, title, summary, decisions, embedding, model_id, author, time_first, time_last, version, branch, head, merged, host)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
+           ON CONFLICT (session_id) DO UPDATE SET title=$4, summary=$5, decisions=$6, embedding=$7, time_last=$11, version=$12, branch=$13, head=$14, merged=$15, host=$16`,
+          [e.session_id, e.key, e.origin_project_hash, e.title, e.summary, JSON.stringify(e.decisions), `[${Array.from(e.embedding)}]`, e.model_id, e.author, e.time_first, e.time_last, e.version, e.branch ?? "", e.head ?? "", e.merged ?? 0, e.host ?? ""]
         );
       }
       await client.query("COMMIT");
@@ -199,7 +201,7 @@ export class PgVectorStorage {
     conds.push(`1 - (embedding <=> $1) >= $${i++}`);
     params.push(min_score);
     const vectorRes = await this.pool.query(
-      `SELECT session_id, key, origin_project_hash, title, summary, decisions, model_id, author, time_first, time_last, version, branch, head, merged,
+      `SELECT session_id, key, origin_project_hash, title, summary, decisions, model_id, author, time_first, time_last, version, branch, head, merged, host,
                1 - (embedding <=> $1) AS score
        FROM ${this.table}
        WHERE ${conds.join(" AND ")}
@@ -207,7 +209,7 @@ export class PgVectorStorage {
        LIMIT $${i}`,
       [...params, top_k]
     );
-    vectorHits.push(...vectorRes.rows.map((r) => ({ entry: { ...r, embedding: undefined, decisions: JSON.parse(r.decisions) }, score: Number(r.score) })));
+    vectorHits.push(...vectorRes.rows.map((r) => ({ entry: { ...r, embedding: undefined, decisions: JSON.parse(r.decisions), host: r.host ?? "" }, score: Number(r.score) })));
 
     // Текстовая ветка: только lex (ts_rank), фузия через RRF. Зеркалит
     // key-set/date/author фильтры векторной ветки.
@@ -294,11 +296,11 @@ export class PgVectorStorage {
   async _get(session_id) {
     // Явный список колонок (без SELECT *, без fts).
     const r = await this.pool.query(
-      `SELECT session_id, key, origin_project_hash, title, summary, decisions, model_id, author, time_first, time_last, version, branch, head, merged
+      `SELECT session_id, key, origin_project_hash, title, summary, decisions, model_id, author, time_first, time_last, version, branch, head, merged, host
        FROM ${this.table} WHERE session_id = $1`,
       [session_id]);
     if (!r.rows[0]) return null;
-    return { ...r.rows[0], embedding: undefined, decisions: JSON.parse(r.rows[0].decisions) };
+    return { ...r.rows[0], embedding: undefined, decisions: JSON.parse(r.rows[0].decisions), host: r.rows[0].host ?? "" };
   }
 
   // Кандидаты для recall (Task 6): записи ключа, которые либо влиты в mainline
@@ -310,13 +312,13 @@ export class PgVectorStorage {
   async _candidates(key) {
     if (typeof key !== "string" || !key) throw new Error("candidates: key required");
     const res = await this.pool.query(
-      `SELECT session_id, key, origin_project_hash, title, summary, decisions, model_id, author, time_first, time_last, version, branch, head, merged
+      `SELECT session_id, key, origin_project_hash, title, summary, decisions, model_id, author, time_first, time_last, version, branch, head, merged, host
        FROM ${this.table} WHERE key = $1 AND (merged = 1 OR head != '')`,
       [key]);
     return res.rows.map((r) => {
       let parsed;
       try { parsed = JSON.parse(r.decisions); } catch { parsed = []; }
-      return { ...r, embedding: undefined, decisions: parsed };
+      return { ...r, embedding: undefined, decisions: parsed, host: r.host ?? "" };
     });
   }
 

@@ -8,7 +8,7 @@ import { timed } from "../storage.js";
 const SCAN_FIELDS = [
   "session_id", "key", "origin_project_hash", "title", "summary", "decisions",
   "author", "time_first", "time_last", "version", "model_id", "embedding",
-  "branch", "head", "merged",
+  "branch", "head", "merged", "host",
 ];
 const DEFAULT_SCAN_FIELDS = SCAN_FIELDS.filter((f) => f !== "embedding");
 
@@ -128,6 +128,7 @@ export class QdrantStorage {
         branch: e.branch ?? "",
         head: e.head ?? "",
         merged: e.merged ?? 0,
+        host: e.host ?? "",
       },
     }));
     await this.client.upsert(this.collection, { points });
@@ -197,7 +198,7 @@ export class QdrantStorage {
       // M3: производное поле `text` (для full-text индекса) не должно протекать
       // в entry векторной ветки (как в get()) — выкидываем через деструктуризацию.
       const { text, ...rest } = r.payload;
-      return { entry: { ...rest, embedding: undefined, decisions: JSON.parse(rest.decisions) }, score: r.score };
+      return { entry: { ...rest, embedding: undefined, decisions: JSON.parse(rest.decisions), host: r.payload.host ?? "" }, score: r.score };
     }));
 
     // Текстовая ветка: только full-text (full_text_match), фузия через RRF.
@@ -314,7 +315,7 @@ export class QdrantStorage {
     // Производное поле `text` (для full-text индекса) не должно протекать
     // в entry — выкидываем через деструктуризацию (spec §3.6).
     const { text, ...rest } = p.payload;
-    return { ...rest, embedding: undefined, decisions: JSON.parse(rest.decisions) };
+    return { ...rest, embedding: undefined, decisions: JSON.parse(rest.decisions), host: p.payload.host ?? "" };
   }
 
   // Кандидаты для recall (Task 6): записи ключа, которые либо влиты в mainline
@@ -342,7 +343,7 @@ export class QdrantStorage {
           const { text, ...rest } = p.payload;
           let parsed;
           try { parsed = JSON.parse(rest.decisions); } catch { parsed = []; }
-          out.push({ ...rest, embedding: undefined, decisions: parsed });
+          out.push({ ...rest, embedding: undefined, decisions: parsed, host: p.payload.host ?? "" });
         }
       }
       offset = res.next_page_offset;
