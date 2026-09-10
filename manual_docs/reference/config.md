@@ -480,9 +480,10 @@ identity для централизованного бэкенда / некорр
 
 #### Permission-правило для write/boundary-tools (обязательное)
 
-`memory_forget` / `memory_export` / `memory_import` / `memory_prune` — операции,
-пересекающие границу (удаление, запись файла, запись в память). OpenCode по
-умолчанию разрешает новые тулы, поэтому в merge-config (`.opencode/opencode.json`
+`memory_forget` / `memory_export` / `memory_import` / `memory_migrate` /
+`memory_prune` — операции, пересекающие границу (удаление, запись файла, запись
+в память, пере-keying). OpenCode по умолчанию разрешает новые тулы, поэтому в
+merge-config (`.opencode/opencode.json`
 или global `~/.config/opencode/opencode.json`) **обязательно** правило:
 
 ```json
@@ -491,6 +492,7 @@ identity для централизованного бэкенда / некорр
     "memory_forget": "ask",
     "memory_export": "ask",
     "memory_import": "ask",
+    "memory_migrate": "ask",
     "memory_prune": "ask"
   }
 }

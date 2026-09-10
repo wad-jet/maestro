@@ -402,8 +402,9 @@ memory_search(query: string, {limit?, date_from?, date_to?, author?, project?, s
 
 Все инструменты — хуки `tool`, доступны агентам в сессиях; **недоступны
 plugin-созданным сессиям `[maestro-memory]`** (как `memory_search`).
-`memory_forget`/`memory_export`/`memory_import` — **write/boundary-tools**:
-требуют нативного permission-правила `"ask"` в merge-config (см. ниже).
+`memory_forget`/`memory_export`/`memory_import`/`memory_migrate` —
+**write/boundary-tools**: требуют нативного permission-правила `"ask"` в
+merge-config (см. ниже).
 
 ### `memory_forget`
 
@@ -482,6 +483,24 @@ memory_import({path, replace?}) → «Импортировано N записе�
   после успешной валидации всех строк).
 - **Permission:** `memory_import: "ask"` в merge-config (обязательное правило).
 
+### `memory_migrate`
+
+```
+memory_migrate({from: "auto" | "namespace" | "hash", delete_source?}) → «Перенесено N записей из <fromKey>.»
+```
+
+- **Пере-keying при смене namespace:** перенос записей из бакета-источника в
+  текущий `namespace` (смена namespace больше не = потеря доступа).
+- `from: "auto"` — легаси hash-бакет по git remote (репо без remote → ошибка,
+  укажите `from: <hash>` или `from: <namespace>`); `from: <namespace>` /
+  `from: <hash>` — явный источник (namespace валидируется, hash — passthrough).
+- `from`, совпадающий с текущим ключом → no-op.
+- **Max-version-wins на sqlite:** при конфликте версий записей выигрывает
+  запись с большей версией (источник/приёмник — по `version`).
+- `delete_source: true` — удалить исходный бакет после переноса (default
+  `false`).
+- **Permission:** `memory_migrate: "ask"` в merge-config (обязательное правило).
+
 ### `memory_recall_preview`
 
 ```
@@ -509,9 +528,10 @@ memory_stats_detail() → агрегаты (без summary-текста)
 
 ### Permission-правило (write/boundary-tools)
 
-`memory_forget`/`memory_export`/`memory_import`/`memory_prune` — операции,
-пересекающие границу (удаление, запись файла, запись в память). OpenCode по
-умолчанию разрешает новые тулы, поэтому **обязательное правило** в merge-config
+`memory_forget`/`memory_export`/`memory_import`/`memory_migrate`/`memory_prune` —
+операции, пересекающие границу (удаление, запись файла, запись в память,
+пере-keying). OpenCode по умолчанию разрешает новые тулы, поэтому
+**обязательное правило** в merge-config
 (`.opencode/opencode.json` или global):
 
 ```json
@@ -520,6 +540,7 @@ memory_stats_detail() → агрегаты (без summary-текста)
     "memory_forget": "ask",
     "memory_export": "ask",
     "memory_import": "ask",
+    "memory_migrate": "ask",
     "memory_prune": "ask"
   }
 }

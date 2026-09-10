@@ -727,7 +727,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
           date_to: tool.schema.number().optional().describe("фильтр: конец диапазона time_last (epoch ms)"),
           author: tool.schema.string().optional().describe("фильтр по автору записи"),
           project: tool.schema.string().optional().describe(
-            "кросс-проектный поиск (opt-in): namespace | git-remote/URL | project_hash — доступен на всех бэкендах (sqlite — read-only соседняя БД с fail-soft; qdrant/pg — key-filter)",
+            "кросс-проектный поиск (opt-in): namespace-префикс (поддерево) — доступен на всех бэкендах (sqlite — read-only соседняя БД с fail-soft; qdrant/pg — key-filter)",
           ),
           scope: tool.schema.string().optional().describe(
             "scope поиска: branch (членство по коммитам — general/experience/⚠️ не в main) | project (все записи проекта, flat). По умолчанию branch; при memory.branch_context=false — project",
