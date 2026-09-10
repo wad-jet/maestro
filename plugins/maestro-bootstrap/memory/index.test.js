@@ -784,10 +784,114 @@ test("memory_prune delete category dead excludes foreign-host records on central
       root: dir,
       deps: { storage, embeddings: mkMockEmbeddings(), git },
     });
+    // delete по категории резолвится по снапшоту листинга — сначала list.
+    await hooks.tool.memory_prune.execute({ action: "list" }, { sessionID: "s1" });
     const res = await hooks.tool.memory_prune.execute({ action: "delete", category: "dead" }, { sessionID: "s1" });
     assert.equal(seen.length, 1, "only local dead record deleted");
     assert.equal(seen[0].session_id, "local", "foreign-host record excluded from batch-all");
     assert.match(res, /Удалено 1 записей \(1 session_id\)/, "must report count");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_prune delete category dead without prior list → 'сначала list' message", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-prune-nolist-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.scan = async () => [
+      { session_id: "s1", head: "hd", branch: "f", host: hostname(), author: "a", time_last: 1 },
+    ];
+    const seen = [];
+    storage.deleteByFilter = async function (args) { seen.push(args); return 1; };
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      revList: () => new Set(),
+      revListAll: () => ({ local: new Set(), remote: new Set() }),
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+    const res = await hooks.tool.memory_prune.execute({ action: "delete", category: "dead" }, { sessionID: "s1" });
+    assert.match(res, /сначала выполните list/, "delete by category without prior list must demand list first");
+    assert.equal(seen.length, 0, "no deleteByFilter without a snapshot");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_prune delete by heads resolves against listing snapshot", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-prune-heads-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.scan = async () => [
+      { session_id: "s1", head: "hd1", branch: "f", host: hostname(), author: "a", time_last: 1 },
+      { session_id: "s2", head: "hd2", branch: "f", host: hostname(), author: "b", time_last: 2 },
+    ];
+    const seen = [];
+    storage.deleteByFilter = async function (args) { seen.push(args); return 1; };
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      revList: () => new Set(),
+      revListAll: () => ({ local: new Set(), remote: new Set() }),
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+    await hooks.tool.memory_prune.execute({ action: "list" }, { sessionID: "s1" });
+    const res = await hooks.tool.memory_prune.execute({ action: "delete", heads: "hd1" }, { sessionID: "s1" });
+    assert.equal(seen.length, 1, "only matching head deleted");
+    assert.equal(seen[0].session_id, "s1");
+    assert.match(res, /Удалено 1 записей \(1 session_id\)/, "must report count");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_prune list: origin/mainline head → remote-merged", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-prune-om-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.scan = async () => [
+      { session_id: "s1", head: "hom", branch: "main", host: hostname(), author: "alice", time_last: 1 },
+    ];
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      revList: (root, ref) => (ref === "origin/main" ? new Set(["hom"]) : new Set()),
+      revListAll: () => ({ local: new Set(["hl"]), remote: new Set(["hm"]) }),
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+    const res = await hooks.tool.memory_prune.execute({ action: "list" }, { sessionID: "s1" });
+    assert.match(res, /## remote-merged \(1\)/, "head in origin/mainline → remote-merged");
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
@@ -847,6 +951,39 @@ test("init-warn delete_on_session_delete_centralized when flag + centralized bac
     assert.ok(
       warned.some((m) => m === "memory:delete_on_session_delete_centralized"),
       "must warn delete_on_session_delete_centralized",
+    );
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("init-warn git_anchor_unavailable when resolveHead returns '' (non-git project)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-anchor-warn-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const warned = [];
+    const log = { debug() {}, info() {}, warn: (m) => warned.push(m), error() {} };
+    const storage = mkMockStorage();
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      revList: () => new Set(),
+      revListAll: () => ({ local: new Set(), remote: new Set() }),
+      resolveHead: async () => "",
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+    assert.ok(
+      warned.some((m) => m === "memory:git_anchor_unavailable"),
+      "must warn git_anchor_unavailable when no git anchor",
     );
     await hooks.dispose?.();
   } finally {

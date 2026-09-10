@@ -15,7 +15,7 @@ import { Recall } from "./recall.js";
 import { createState } from "./state.js";
 import { summarizeSession, SESSIONS } from "./summarize.js";
 import { deriveProjectKey, resolveProjectKey } from "./project.js";
-import { resolveBranch, resolveHead, detectMainline as detectMainlineReal, isAncestor as isAncestorReal, revList as revListReal, revListAll as revListAllReal } from "./git.js";
+import { resolveBranch, resolveHead as resolveHeadReal, detectMainline as detectMainlineReal, isAncestor as isAncestorReal, revList as revListReal, revListAll as revListAllReal } from "./git.js";
 import { applyBranchScope, computeBranchSets } from "./membership.js";
 
 // `@opencode-ai/plugin` не установлен в node_modules этого репо (zero-dep
@@ -544,7 +544,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     // (key-scoped markMerged). Heal-путь: транковые записи окна unresolved
     // (merged=0, head=предок mainline) промоутятся на первом резолвнутом init.
     // Fail-soft: ошибка промоции не роняет init (лог + continue).
-    const { detectMainline = detectMainlineReal, isAncestor = isAncestorReal, revList = revListReal, revListAll = revListAllReal } = deps.git ?? {};
+    const { detectMainline = detectMainlineReal, isAncestor = isAncestorReal, revList = revListReal, revListAll = revListAllReal, resolveHead = resolveHeadReal } = deps.git ?? {};
     try {
       const mainline = detectMainline(root, { override: config.mainline ?? null });
       if (!mainline) {
@@ -585,6 +585,16 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     } catch (err) {
       // Task 7: enum-only (SEC-4b) — тело ошибки в лог не попадает.
       logError("memory:promotion_failed", { error_class: "storage_error" });
+    }
+
+    // Spec §3.4: структурный git-якорь (нет .git / нет git-бинарника) — warn
+    // при init, индексер off. Fail-soft: ошибка резолва → "" → warn, не throw.
+    try {
+      if (!(await resolveHead(root))) {
+        logWarn("memory:git_anchor_unavailable", {});
+      }
+    } catch {
+      logWarn("memory:git_anchor_unavailable", {});
     }
 
     const confidentialPaths = maestroConfig?.confidential?.paths ?? [];
@@ -654,6 +664,10 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       // Task 6: паттерны confidential-путей — запрос маскируется перед embed.
       confidentialPatterns: confidentialPaths,
     });
+
+    // Spec §3.6: снапшот листинга memory_prune — delete резолвится строго по
+    // нему (не пере-сканирует storage). Заполняется в list, читается в delete.
+    let pruneSnapshot = null;
 
     const toolHooks = {
       memory_probe: makeMemoryProbeTool({ embeddings, state, log, apiKeyEnv }),
@@ -808,18 +822,30 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             const sets = revListAll(root, { local: true, remote: true });
             const mainline = detectMainline(root, { override: config.mainline ?? null });
             const mainlineSet = mainline ? (revList(root, mainline.name) ?? new Set()) : new Set();
-            const candidates = await storage.scan({ key: effectiveKey, fields: ["session_id", "branch", "head", "host", "author", "time_last"] });
-            const classify = (c) => {
-              const head = c.head ?? "";
-              if (!head) return "unknown";
-              if (sets.remote && mainlineSet.has(head)) return "remote-merged";
-              if (sets.remote?.has(head)) return "remote-alive";
-              if (sets.local?.has(head)) return "local-only";
-              return "dead";
-            };
+            // Spec §3.6: merged также по origin/<mainline> (head ∈ mainline local
+            // или origin/mainline). Fail-soft: revList null → пустое множество.
+            const mainlineRemoteSet = mainline ? (revList(root, `origin/${mainline.name}`) ?? new Set()) : new Set();
             const central = config.storage?.type === "qdrant" || config.storage?.type === "pgvector";
             if (args.action === "list") {
-              const lines = [`Git-якорь по состоянию refs на ${host} (mainline: ${mainline?.name ?? "не определён"})`];
+              // Spec §3.6: снапшот листинга — delete резолвится строго по нему.
+              // storage.scan выполняется только здесь (delete не пере-сканирует).
+              const candidates = await storage.scan({ key: effectiveKey, fields: ["session_id", "branch", "head", "host", "author", "time_last"] });
+              const classify = (c) => {
+                const head = c.head ?? "";
+                if (!head) return "unknown";
+                if (sets.remote && (mainlineSet.has(head) || mainlineRemoteSet.has(head))) return "remote-merged";
+                if (sets.remote?.has(head)) return "remote-alive";
+                if (sets.local?.has(head)) return "local-only";
+                return "dead";
+              };
+              pruneSnapshot = {
+                ts: Date.now(),
+                byId: new Map(candidates.map((c) => [c.session_id, { head: c.head ?? "", branch: c.branch ?? "", host: c.host ?? "", category: classify(c) }])),
+              };
+              const lines = [`Git-якорь по состоянию refs на ${host} (mainline: ${mainline?.name ?? "не определён"}; fetch: ${pruneSnapshot.ts})`];
+              if (sets.local === null || sets.remote === null) {
+                lines.push("Внимание: множества достижимости недоступны (не-repo/сбой git) — классификация неполная, dead может содержать живые записи.");
+              }
               const grouped = {};
               for (const c of candidates) { const cat = classify(c); (grouped[cat] ??= []).push(c); }
               for (const cat of ["remote-merged", "remote-alive", "local-only", "dead", "unknown"]) {
@@ -835,17 +861,27 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
               lines.push("dead/unknown — кандидаты; foreign-host записи исключены из batch-all (выбор по явным session_ids/heads).");
               return lines.join("\n");
             }
-            // delete — только явный набор после host-guard (spec §3.6 шаг 4)
+            // delete — только явный набор после host-guard (spec §3.6 шаг 4).
+            // Резолв по снапшоту листинга, НЕ пере-сканирование storage.
             let ids = args.session_ids ? args.session_ids.split(",").map((s) => s.trim()).filter(Boolean) : [];
-            if (args.heads) {
-              for (const h of args.heads.split(",").map((s) => s.trim()).filter(Boolean)) {
-                ids.push(...candidates.filter((c) => c.head === h).map((c) => c.session_id));
+            if (args.heads || args.category) {
+              if (pruneSnapshot === null) {
+                return "memory_prune: сначала выполните list (action: \"list\"), затем delete с категорией/heads — удаление по снапшоту листинга";
               }
-            }
-            if (args.category) {
-              const cand = candidates.filter((c) => classify(c) === args.category);
-              const allowed = central ? cand.filter((c) => !c.host || c.host === host) : cand;
-              ids.push(...allowed.map((c) => c.session_id));
+              const byId = pruneSnapshot.byId;
+              if (args.heads) {
+                const heads = new Set(args.heads.split(",").map((s) => s.trim()).filter(Boolean));
+                for (const [sid, rec] of byId) {
+                  if (heads.has(rec.head)) ids.push(sid);
+                }
+              }
+              if (args.category) {
+                for (const [sid, rec] of byId) {
+                  if (rec.category !== args.category) continue;
+                  if (central && rec.host && rec.host !== host) continue; // host-guard
+                  ids.push(sid);
+                }
+              }
             }
             const snapshot = [...new Set(ids)];
             if (!snapshot.length) return "memory_prune: ничего не выбрано для удаления.";
