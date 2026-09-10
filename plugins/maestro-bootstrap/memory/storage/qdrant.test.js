@@ -2,6 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { createHash } from "node:crypto";
 import { QdrantStorage } from "./qdrant.js";
+import { prefixesOf } from "../project.js";
 
 // Mirror of qdrant.js uuidFrom (sha256 → deterministic UUID v5-like).
 function uuidFrom(s) {
@@ -817,4 +818,169 @@ test("qdrant search: vector-leg entry excludes derived text field", async () => 
   assert.equal(res.length, 1);
   assert.equal(res[0].entry.session_id, "s1");
   assert.equal(res[0].entry.text, undefined, "vector-leg entry must not leak derived text field");
+});
+
+// ── Task 3 (namespace-related): origin_remote + prefixes поля, subtree-ноги, migrateKey ──
+
+test("qdrant upsert payload carries origin_remote + prefixes (detached → '' / [])", async () => {
+  const c = fakeClient();
+  let capturedPoints = null;
+  c.upsert = async (name, { points }) => {
+    c.calls.push(["upsert", name, points.length]);
+    capturedPoints = points;
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  await st.upsert([{
+    session_id: "s1", key: "a.b.c", origin_project_hash: "h1", title: "T",
+    summary: "S", decisions: [], embedding: new Float32Array([0.1, 0.2, 0.3]),
+    model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1,
+    origin_remote: "github.com/org/api", prefixes: ["a", "a.b"],
+  }]);
+  assert.equal(capturedPoints[0].payload.origin_remote, "github.com/org/api");
+  assert.deepEqual(capturedPoints[0].payload.prefixes, ["a", "a.b"]);
+  // detached/unknown → '' / [] defaults.
+  await st.upsert([{
+    session_id: "s2", key: "a.b.c", origin_project_hash: "h1", title: "T2",
+    summary: "S2", decisions: [], embedding: new Float32Array([0.1, 0.2, 0.3]),
+    model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1,
+  }]);
+  assert.equal(capturedPoints[0].payload.origin_remote, "");
+  assert.deepEqual(capturedPoints[0].payload.prefixes, []);
+});
+
+test("qdrant init creates keyword payload index on prefixes (idempotent)", async () => {
+  const c = fakeClient();
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  const idx = c.calls.find(([k, , opts]) => k === "createPayloadIndex" && opts?.field_name === "prefixes");
+  assert.ok(idx, "must create prefixes payload index");
+  assert.equal(idx[2].field_schema.type, "keyword");
+});
+
+test("qdrant get maps origin_remote + prefixes (legacy → defaults)", async () => {
+  const c = fakeClient();
+  c.query = async (name, q) => {
+    c.calls.push(["query", name, q]);
+    const sid = q.filter?.must?.[0]?.match?.value;
+    if (sid === "s1") {
+      return { points: [{ id: "s1", payload: { session_id: "s1", title: "t1", summary: "s1", decisions: '["d1"]', key: "a.b.c", origin_remote: "github.com/org/api", prefixes: ["a", "a.b"] } }] };
+    }
+    // legacy point without the fields.
+    return { points: [{ id: "s2", payload: { session_id: "s2", title: "t2", summary: "s2", decisions: "[]", key: "a.b.c" } }] };
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  const found = await st.get("s1");
+  assert.equal(found.origin_remote, "github.com/org/api");
+  assert.deepEqual(found.prefixes, ["a", "a.b"]);
+  const legacy = await st.get("s2");
+  assert.equal(legacy.origin_remote, "");
+  assert.deepEqual(legacy.prefixes, []);
+});
+
+test("qdrant subtree leg: key = T OR prefixes match any [T] + merged=1", async () => {
+  const c = fakeClient();
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "a.b.c", subtree: ["a.b"] });
+  const queries = c.calls.filter(([k]) => k === "query");
+  // Активная нога: key match value (own key), без merged-фильтра.
+  const active = queries.find(([, , q]) => q.filter.must[0]?.key === "key" && q.filter.must[0]?.match?.value === "a.b.c");
+  assert.ok(active, "active leg with key match value a.b.c");
+  assert.ok(!active[2].filter.must.some((m) => m.key === "merged"), "active leg must NOT be merged-only");
+  // Subtree-нога: should = [key match T, prefixes match any [T]] + merged=1 (§3.3 subtreeLeg).
+  const subtree = queries.find(([, , q]) => q.filter.should?.some((m) => m.key === "prefixes"));
+  assert.ok(subtree, "subtree leg with prefixes should-filter");
+  assert.deepEqual(subtree[2].filter.should, [
+    { key: "key", match: { value: "a.b" } },
+    { key: "prefixes", match: { any: ["a.b"] } },
+  ]);
+  assert.ok(subtree[2].filter.must.some((m) => m.key === "merged" && m.match.value === 1), "subtree leg must be merged-only");
+  assert.ok(!subtree[2].filter.must.some((m) => m.key === "session_id"), "own-key filterSessionIds must NOT leak into subtree leg");
+});
+
+test("qdrant migrateKey max-version-wins", async () => {
+  const c = fakeClient();
+  // Имитация коллекции: source-точки (key=old.ns) + target-точка (key=new.ns).
+  const sourcePoints = [
+    { id: uuidFrom("s1"), payload: { session_id: "s1", key: "old.ns", version: 2, decisions: "[]" } },
+    { id: uuidFrom("s2"), payload: { session_id: "s2", key: "old.ns", version: 7, decisions: "[]" } },
+  ];
+  const target = [
+    { id: uuidFrom("s1"), payload: { session_id: "s1", key: "new.ns", version: 5, decisions: "[]" } },
+  ];
+  const setPayloadCalls = [];
+  c.scroll = async (name, opts) => {
+    c.calls.push(["scroll", name, opts]);
+    const keyCond = opts.filter.must.find((m) => m.key === "key");
+    if (!keyCond) return { points: [], next_page_offset: null };
+    return { points: sourcePoints.filter((p) => p.payload.key === keyCond.match.value), next_page_offset: null };
+  };
+  c.query = async (name, q) => {
+    c.calls.push(["query", name, q]);
+    const sid = q.filter?.must?.[0]?.match?.value;
+    const t = target.find((p) => p.payload.session_id === sid);
+    return { points: t ? [t] : [] };
+  };
+  c.setPayload = async (name, opts) => {
+    c.calls.push(["setPayload", name, opts]);
+    setPayloadCalls.push(opts);
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  const n = await st.migrateKey("old.ns", "new.ns");
+  // s1: source v2 <= target v5 → skip (max-version-wins). s2: no target → migrate.
+  assert.equal(n, 1, "only s2 migrated (s1 max-version-wins)");
+  assert.equal(setPayloadCalls.length, 1);
+  assert.deepEqual(setPayloadCalls[0], { payload: { key: "new.ns", prefixes: prefixesOf("new.ns") }, points: [uuidFrom("s2")] });
+});
+
+test("qdrant migrateKey delete_source: ids collected pre-setPayload, delete by ids after", async () => {
+  const c = fakeClient();
+  const sourcePoints = [
+    { id: uuidFrom("s1"), payload: { session_id: "s1", key: "old.ns", version: 7, decisions: "[]" } },
+    { id: uuidFrom("s2"), payload: { session_id: "s2", key: "old.ns", version: 2, decisions: "[]" } },
+  ];
+  const target = [
+    { id: uuidFrom("s2"), payload: { session_id: "s2", key: "new.ns", version: 5, decisions: "[]" } },
+  ];
+  const setPayloadCalls = [];
+  const deleteCalls = [];
+  c.scroll = async (name, opts) => {
+    c.calls.push(["scroll", name, opts]);
+    const keyCond = opts.filter.must.find((m) => m.key === "key");
+    if (!keyCond) return { points: [], next_page_offset: null };
+    return { points: sourcePoints.filter((p) => p.payload.key === keyCond.match.value), next_page_offset: null };
+  };
+  c.query = async (name, q) => {
+    c.calls.push(["query", name, q]);
+    const sid = q.filter?.must?.[0]?.match?.value;
+    const t = target.find((p) => p.payload.session_id === sid);
+    return { points: t ? [t] : [] };
+  };
+  c.setPayload = async (name, opts) => {
+    c.calls.push(["setPayload", name, opts]);
+    setPayloadCalls.push(opts);
+  };
+  c.delete = async (name, opts) => {
+    c.calls.push(["delete", name, opts]);
+    deleteCalls.push(opts);
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  const n = await st.migrateKey("old.ns", "new.ns", { deleteSource: true });
+  // s1: v7 > no target → migrated. s2: v2 <= target v5 → skipped → deleted (source remnant).
+  assert.equal(n, 1);
+  assert.equal(setPayloadCalls.length, 1);
+  assert.deepEqual(setPayloadCalls[0].points, [uuidFrom("s1")]);
+  assert.equal(deleteCalls.length, 1);
+  assert.deepEqual(deleteCalls[0], { points: [uuidFrom("s2")] }, "skipped source point deleted by id");
+  // Порядок: scroll (ids собраны ДО setPayload) → setPayload → delete.
+  const keyScrollIdx = c.calls.findIndex(([k, , opts]) => k === "scroll" && opts?.filter?.must?.some((m) => m.key === "key"));
+  const setPayloadIdx = c.calls.findIndex(([k]) => k === "setPayload");
+  const deleteIdx = c.calls.findIndex(([k]) => k === "delete");
+  assert.ok(keyScrollIdx !== -1 && setPayloadIdx !== -1 && deleteIdx !== -1, "scroll/setPayload/delete all present");
+  assert.ok(keyScrollIdx < setPayloadIdx, "ids collected (scroll) before setPayload");
+  assert.ok(setPayloadIdx < deleteIdx, "delete after setPayload");
 });

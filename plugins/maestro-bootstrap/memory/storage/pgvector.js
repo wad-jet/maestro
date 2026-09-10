@@ -1,4 +1,4 @@
-import { resolveSearchKeys } from "../project.js";
+import { resolveSearchKeys, prefixesOf } from "../project.js";
 import { fuseRrf } from "./rrf.js";
 import { timed } from "../storage.js";
 
@@ -7,9 +7,32 @@ import { timed } from "../storage.js";
 const SCAN_FIELDS = [
   "session_id", "key", "origin_project_hash", "title", "summary", "decisions",
   "author", "time_first", "time_last", "version", "model_id", "embedding",
-  "branch", "head", "merged", "host",
+  "branch", "head", "merged", "host", "origin_remote", "prefixes",
 ];
 const DEFAULT_SCAN_FIELDS = SCAN_FIELDS.filter((f) => f !== "embedding");
+
+// JSON-массив из строки колонки (prefixes); битый/пустой → [] (guard).
+function parseJsonArray(v) {
+  if (v == null || v === "") return [];
+  try {
+    const a = JSON.parse(v);
+    return Array.isArray(a) ? a : [];
+  } catch {
+    return [];
+  }
+}
+
+// Subtree-цели (spec §3.3): нормализация + дедуп + исключение own key.
+function subtreeTargets(subtree, ownKey) {
+  if (!Array.isArray(subtree)) return [];
+  const out = [];
+  for (const t of subtree) {
+    const tt = String(t ?? "").trim().toLowerCase();
+    if (!tt || tt === ownKey) continue;
+    if (!out.includes(tt)) out.push(tt);
+  }
+  return out;
+}
 
 export class PgVectorStorage {
   constructor({ pool, table, dim, modelId, textSearchConfig, log }) {
@@ -48,7 +71,9 @@ export class PgVectorStorage {
       branch TEXT NOT NULL DEFAULT '',
       head TEXT NOT NULL DEFAULT '',
       merged INT NOT NULL DEFAULT 0,
-      host TEXT NOT NULL DEFAULT ''
+      host TEXT NOT NULL DEFAULT '',
+      origin_remote TEXT NOT NULL DEFAULT '',
+      prefixes TEXT NOT NULL DEFAULT ''
     )`);
     // Dev-гигиена: существующие dev-БД без branch/head/merged получают колонки
     // идемпотентно (ADD COLUMN IF NOT EXISTS, НЕ миграция данных).
@@ -56,6 +81,8 @@ export class PgVectorStorage {
     await this.pool.query(`ALTER TABLE ${this.table} ADD COLUMN IF NOT EXISTS head TEXT NOT NULL DEFAULT ''`);
     await this.pool.query(`ALTER TABLE ${this.table} ADD COLUMN IF NOT EXISTS merged INT NOT NULL DEFAULT 0`);
     await this.pool.query(`ALTER TABLE ${this.table} ADD COLUMN IF NOT EXISTS host TEXT NOT NULL DEFAULT ''`);
+    await this.pool.query(`ALTER TABLE ${this.table} ADD COLUMN IF NOT EXISTS origin_remote TEXT NOT NULL DEFAULT ''`);
+    await this.pool.query(`ALTER TABLE ${this.table} ADD COLUMN IF NOT EXISTS prefixes TEXT NOT NULL DEFAULT ''`);
     // I2: проверяем, что конфиг существует в pg_ts_config ДО того, как запечём
     // его в DDL. Если отсутствует (и отличается от "russian") — fallback на
     // "russian" для этого init И последующих поисков.
@@ -127,10 +154,10 @@ export class PgVectorStorage {
           throw new Error(`model_id mismatch: expected=${this.modelId} got=${e.model_id} — переиндексируйте (см. how-to)`);
         }
         await client.query(
-          `INSERT INTO ${this.table} (session_id, key, origin_project_hash, title, summary, decisions, embedding, model_id, author, time_first, time_last, version, branch, head, merged, host)
-           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16)
-           ON CONFLICT (session_id) DO UPDATE SET title=$4, summary=$5, decisions=$6, embedding=$7, time_last=$11, version=$12, branch=$13, head=$14, merged=$15, host=$16`,
-          [e.session_id, e.key, e.origin_project_hash, e.title, e.summary, JSON.stringify(e.decisions), `[${Array.from(e.embedding)}]`, e.model_id, e.author, e.time_first, e.time_last, e.version, e.branch ?? "", e.head ?? "", e.merged ?? 0, e.host ?? ""]
+          `INSERT INTO ${this.table} (session_id, key, origin_project_hash, title, summary, decisions, embedding, model_id, author, time_first, time_last, version, branch, head, merged, host, origin_remote, prefixes)
+           VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18)
+           ON CONFLICT (session_id) DO UPDATE SET title=$4, summary=$5, decisions=$6, embedding=$7, time_last=$11, version=$12, branch=$13, head=$14, merged=$15, host=$16, origin_remote=$17, prefixes=$18`,
+          [e.session_id, e.key, e.origin_project_hash, e.title, e.summary, JSON.stringify(e.decisions), `[${Array.from(e.embedding)}]`, e.model_id, e.author, e.time_first, e.time_last, e.version, e.branch ?? "", e.head ?? "", e.merged ?? 0, e.host ?? "", e.origin_remote ?? "", JSON.stringify(e.prefixes ?? [])]
         );
       }
       await client.query("COMMIT");
@@ -141,14 +168,14 @@ export class PgVectorStorage {
       client.release();
     }
   }
-  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds }) {
-    return timed(this.log, "search", () => this._search(embedding, { top_k, min_score, key, date_from, date_to, author, project, query, filterSessionIds }));
+  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds, related, subtree }) {
+    return timed(this.log, "search", () => this._search(embedding, { top_k, min_score, key, date_from, date_to, author, project, query, filterSessionIds, related, subtree }));
   }
-  async _search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds }) {
+  async _search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds, related, subtree }) {
     // B2: cross-project opt-in — key IN (current + project key). Активная нога
     // (own key) и sibling-ноги разделяются: sibling строго general (merged=1,
     // §6.2) и НЕ получает own-key filterSessionIds (иначе sibling пуст).
-    const keys = resolveSearchKeys({ key, project });
+    const keys = resolveSearchKeys({ key, project, related });
     const activeKey = keys[0];
     const siblingKeys = keys.slice(1);
     const vectorHits = [];
@@ -157,6 +184,12 @@ export class PgVectorStorage {
     await this._collectLeg(activeKey, { filterSessionIds, merged: false }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists);
     if (siblingKeys.length) {
       await this._collectLeg(siblingKeys, { merged: true }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists);
+    }
+    // Subtree-ноги (spec §3.3): префикс-цели → (key = T OR key LIKE T || '.%')
+    // + merged=1 (sibling). LIKE безопасен: алфавит namespace без %/_.
+    const targets = subtreeTargets(subtree, activeKey);
+    if (targets.length) {
+      await this._collectLeg([], { merged: true, subtreeTargets: targets }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists);
     }
 
     vectorHits.sort((a, b) => b.score - a.score);
@@ -167,21 +200,31 @@ export class PgVectorStorage {
   }
 
   /**
-   * Одна нога поиска (активная или sibling-набор ключей): векторная + текстовая
-   * ветки с общими фильтрами. Хиты накапливаются в переданные массивы.
+   * Одна нога поиска (активная, sibling-набор ключей или subtree-префиксы):
+   * векторная + текстовая ветки с общими фильтрами. Хиты накапливаются в
+   * переданные массивы.
    * @param {string|string[]} keys  Ключ(и) ноги.
-   * @param {{ filterSessionIds?: string[], merged?: boolean }} legOpts
+   * @param {{ filterSessionIds?: string[], merged?: boolean, subtreeTargets?: string[] }} legOpts
    * @param {Float32Array} embedding
    * @param {{ top_k: number, min_score: number, date_from?: number, date_to?: number, author?: string, query?: string }} opts
    * @param {Array} vectorHits  Накопитель векторных хитов (мутируется).
    * @param {Array} textLists  Накопитель текстовых списков (мутируется).
    */
-  async _collectLeg(keys, { filterSessionIds, merged }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists) {
+  async _collectLeg(keys, { filterSessionIds, merged, subtreeTargets }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists) {
     const ks = Array.isArray(keys) ? keys : [keys];
     const conds = [];
     const params = [`[${Array.from(embedding)}]`];
     let i = 2;
-    if (ks.length === 1) {
+    if (subtreeTargets && subtreeTargets.length) {
+      // Subtree: (key = $i OR key LIKE $i || '.%') для каждой цели.
+      const ors = [];
+      for (const t of subtreeTargets) {
+        ors.push(`(key = $${i} OR key LIKE $${i} || '.%')`);
+        params.push(t);
+        i++;
+      }
+      conds.push(`(${ors.join(" OR ")})`);
+    } else if (ks.length === 1) {
       conds.push(`key = $${i++}`);
       params.push(ks[0]);
     } else {
@@ -201,7 +244,7 @@ export class PgVectorStorage {
     conds.push(`1 - (embedding <=> $1) >= $${i++}`);
     params.push(min_score);
     const vectorRes = await this.pool.query(
-      `SELECT session_id, key, origin_project_hash, title, summary, decisions, model_id, author, time_first, time_last, version, branch, head, merged, host,
+      `SELECT session_id, key, origin_project_hash, title, summary, decisions, model_id, author, time_first, time_last, version, branch, head, merged, host, origin_remote, prefixes,
                1 - (embedding <=> $1) AS score
        FROM ${this.table}
        WHERE ${conds.join(" AND ")}
@@ -209,7 +252,7 @@ export class PgVectorStorage {
        LIMIT $${i}`,
       [...params, top_k]
     );
-    vectorHits.push(...vectorRes.rows.map((r) => ({ entry: { ...r, embedding: undefined, decisions: JSON.parse(r.decisions), host: r.host ?? "" }, score: Number(r.score) })));
+    vectorHits.push(...vectorRes.rows.map((r) => ({ entry: { ...r, embedding: undefined, decisions: JSON.parse(r.decisions), host: r.host ?? "", origin_remote: r.origin_remote ?? "", prefixes: parseJsonArray(r.prefixes) }, score: Number(r.score) })));
 
     // Текстовая ветка: только lex (ts_rank), фузия через RRF. Зеркалит
     // key-set/date/author фильтры векторной ветки.
@@ -219,7 +262,15 @@ export class PgVectorStorage {
         // $1 = cfg, $2 = query → первый key-фильтр начинается с $3.
         let j = 3;
         const tconds = [`fts @@ plainto_tsquery($1, $2)`];
-        if (ks.length === 1) {
+        if (subtreeTargets && subtreeTargets.length) {
+          const ors = [];
+          for (const t of subtreeTargets) {
+            ors.push(`(key = $${j} OR key LIKE $${j} || '.%')`);
+            tparams.push(t);
+            j++;
+          }
+          tconds.push(`(${ors.join(" OR ")})`);
+        } else if (ks.length === 1) {
           tconds.push(`key = $${j++}`);
           tparams.push(ks[0]);
         } else {
@@ -283,6 +334,7 @@ export class PgVectorStorage {
     const res = await this.pool.query(`SELECT ${cols.join(", ")} FROM ${this.table} WHERE key=$1`, [key]);
     return res.rows.map((r) => {
       if ("decisions" in r) r.decisions = JSON.parse(r.decisions);
+      if ("prefixes" in r) r.prefixes = parseJsonArray(r.prefixes);
       // C-1: pgvector returns embedding as a string "[0.1,0.2,0.3]"; normalize to Float32Array.
       if ("embedding" in r && typeof r.embedding === "string") {
         r.embedding = new Float32Array(JSON.parse(r.embedding));
@@ -296,11 +348,11 @@ export class PgVectorStorage {
   async _get(session_id) {
     // Явный список колонок (без SELECT *, без fts).
     const r = await this.pool.query(
-      `SELECT session_id, key, origin_project_hash, title, summary, decisions, model_id, author, time_first, time_last, version, branch, head, merged, host
+      `SELECT session_id, key, origin_project_hash, title, summary, decisions, model_id, author, time_first, time_last, version, branch, head, merged, host, origin_remote, prefixes
        FROM ${this.table} WHERE session_id = $1`,
       [session_id]);
     if (!r.rows[0]) return null;
-    return { ...r.rows[0], embedding: undefined, decisions: JSON.parse(r.rows[0].decisions), host: r.rows[0].host ?? "" };
+    return { ...r.rows[0], embedding: undefined, decisions: JSON.parse(r.rows[0].decisions), host: r.rows[0].host ?? "", origin_remote: r.rows[0].origin_remote ?? "", prefixes: parseJsonArray(r.rows[0].prefixes) };
   }
 
   // Кандидаты для recall (Task 6): записи ключа, которые либо влиты в mainline
@@ -312,13 +364,13 @@ export class PgVectorStorage {
   async _candidates(key) {
     if (typeof key !== "string" || !key) throw new Error("candidates: key required");
     const res = await this.pool.query(
-      `SELECT session_id, key, origin_project_hash, title, summary, decisions, model_id, author, time_first, time_last, version, branch, head, merged, host
+      `SELECT session_id, key, origin_project_hash, title, summary, decisions, model_id, author, time_first, time_last, version, branch, head, merged, host, origin_remote, prefixes
        FROM ${this.table} WHERE key = $1 AND (merged = 1 OR head != '')`,
       [key]);
     return res.rows.map((r) => {
       let parsed;
       try { parsed = JSON.parse(r.decisions); } catch { parsed = []; }
-      return { ...r, embedding: undefined, decisions: parsed, host: r.host ?? "" };
+      return { ...r, embedding: undefined, decisions: parsed, host: r.host ?? "", origin_remote: r.origin_remote ?? "", prefixes: parseJsonArray(r.prefixes) };
     });
   }
 
@@ -329,6 +381,37 @@ export class PgVectorStorage {
     const res = await this.pool.query(
       `UPDATE ${this.table} SET merged = 1 WHERE key = $1 AND head = $2`,
       [key, head]);
+    return res.rowCount ?? 0;
+  }
+
+  /**
+   * Миграция namespace (spec §3.6): перенести записи key=fromKey в key=toKey.
+   * max-version-wins через NOT EXISTS-подзапрос: строка-источник обновляется
+   * только если в цели нет записи с тем же session_id и version >= источника.
+   * prefixes пересчитываются от toKey; origin_remote сохраняется (provenance).
+   * @param {string} fromKey  Ключ источника.
+   * @param {string} toKey  Ключ цели.
+   * @param {{ deleteSource?: boolean }} [opts]  deleteSource → no-op (после
+   *   UPDATE источник уже пуст).
+   * @returns {Promise<number>}  Число обновлённых строк (rowsAffected).
+   */
+  async migrateKey(fromKey, toKey, { deleteSource = false } = {}) {
+    if (typeof fromKey !== "string" || !fromKey) throw new Error("migrateKey: fromKey required");
+    if (typeof toKey !== "string" || !toKey) throw new Error("migrateKey: toKey required");
+    if (fromKey === toKey) return 0; // edge: no-op
+    const newPrefixes = JSON.stringify(prefixesOf(toKey));
+    const res = await this.pool.query(
+      `UPDATE ${this.table} SET key = $1, prefixes = $2
+       WHERE key = $3
+         AND NOT EXISTS (
+           SELECT 1 FROM ${this.table} t
+           WHERE t.session_id = ${this.table}.session_id
+             AND t.key = $1
+             AND t.version >= ${this.table}.version
+         )`,
+      [toKey, newPrefixes, fromKey]
+    );
+    // deleteSource → no-op: после UPDATE источник (key=from) уже пуст.
     return res.rowCount ?? 0;
   }
 }

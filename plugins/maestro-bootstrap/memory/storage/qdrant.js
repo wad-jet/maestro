@@ -1,5 +1,5 @@
 import { createHash } from "node:crypto";
-import { resolveSearchKeys } from "../project.js";
+import { resolveSearchKeys, prefixesOf } from "../project.js";
 import { fuseRrf } from "./rrf.js";
 import { timed } from "../storage.js";
 
@@ -8,9 +8,21 @@ import { timed } from "../storage.js";
 const SCAN_FIELDS = [
   "session_id", "key", "origin_project_hash", "title", "summary", "decisions",
   "author", "time_first", "time_last", "version", "model_id", "embedding",
-  "branch", "head", "merged", "host",
+  "branch", "head", "merged", "host", "origin_remote", "prefixes",
 ];
 const DEFAULT_SCAN_FIELDS = SCAN_FIELDS.filter((f) => f !== "embedding");
+
+// Subtree-цели (spec §3.3): нормализация + дедуп + исключение own key.
+function subtreeTargets(subtree, ownKey) {
+  if (!Array.isArray(subtree)) return [];
+  const out = [];
+  for (const t of subtree) {
+    const tt = String(t ?? "").trim().toLowerCase();
+    if (!tt || tt === ownKey) continue;
+    if (!out.includes(tt)) out.push(tt);
+  }
+  return out;
+}
 
 function uuidFrom(s) {
   const h = createHash("sha256").update(s).digest("hex");
@@ -55,6 +67,16 @@ export class QdrantStorage {
       });
     } catch (err) {
       console.error(`[memory] qdrant payload text index failed (scan-mode fallback): ${err.message}`);
+    }
+    // Task 3: keyword-индекс на `prefixes` (subtree-нога, §3.3). Идемпотентно:
+    // существующие коллекции получают индекс без падения (try/catch, как text).
+    try {
+      await this.client.createPayloadIndex(this.collection, {
+        field_name: "prefixes",
+        field_schema: { type: "keyword" },
+      });
+    } catch (err) {
+      console.error(`[memory] qdrant payload prefixes index failed: ${err.message}`);
     }
     // Backfill: существующие точки без `text` (добавлены до этой версии) получают
     // производное поле. Пагинация через next_page_offset.
@@ -129,20 +151,22 @@ export class QdrantStorage {
         head: e.head ?? "",
         merged: e.merged ?? 0,
         host: e.host ?? "",
+        origin_remote: e.origin_remote ?? "",
+        prefixes: e.prefixes ?? [],
       },
     }));
     await this.client.upsert(this.collection, { points });
   }
 
-  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds }) {
-    return timed(this.log, "search", () => this._search(embedding, { top_k, min_score, key, date_from, date_to, author, project, query, filterSessionIds }));
+  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds, related, subtree }) {
+    return timed(this.log, "search", () => this._search(embedding, { top_k, min_score, key, date_from, date_to, author, project, query, filterSessionIds, related, subtree }));
   }
 
-  async _search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds }) {
+  async _search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds, related, subtree }) {
     // B2: cross-project opt-in — key-set filter (current + project key). Активная
     // нога (own key) и sibling-ноги разделяются: sibling строго general (merged=1,
     // §6.2) и НЕ получает own-key filterSessionIds (иначе sibling пуст).
-    const keys = resolveSearchKeys({ key, project });
+    const keys = resolveSearchKeys({ key, project, related });
     const activeKey = keys[0];
     const siblingKeys = keys.slice(1);
     const vectorHits = [];
@@ -151,6 +175,12 @@ export class QdrantStorage {
     await this._collectLeg(activeKey, { filterSessionIds, merged: false }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists);
     if (siblingKeys.length) {
       await this._collectLeg(siblingKeys, { merged: true }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists);
+    }
+    // Subtree-ноги (spec §3.3): префикс-цели → key = T OR prefixes: match any [T]
+    // + merged=1 (sibling). prefixes keyword-индексируются (init).
+    const targets = subtreeTargets(subtree, activeKey);
+    if (targets.length) {
+      await this._collectLeg([], { merged: true, subtreeTargets: targets }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists);
     }
 
     vectorHits.sort((a, b) => b.score - a.score);
@@ -163,20 +193,31 @@ export class QdrantStorage {
   }
 
   /**
-   * Одна нога поиска (активная или sibling-набор ключей): векторная + текстовая
-   * ветки с общими фильтрами. Хиты накапливаются в переданные массивы.
+   * Одна нога поиска (активная, sibling-набор ключей или subtree-префиксы):
+   * векторная + текстовая ветки с общими фильтрами. Хиты накапливаются в
+   * переданные массивы.
    * @param {string|string[]} keys  Ключ(и) ноги.
-   * @param {{ filterSessionIds?: string[], merged?: boolean }} legOpts
+   * @param {{ filterSessionIds?: string[], merged?: boolean, subtreeTargets?: string[] }} legOpts
    * @param {Float32Array} embedding
    * @param {{ top_k: number, min_score: number, date_from?: number, date_to?: number, author?: string, query?: string }} opts
    * @param {Array} vectorHits  Накопитель векторных хитов (мутируется).
    * @param {Array} textLists  Накопитель текстовых списков (мутируется).
    */
-  async _collectLeg(keys, { filterSessionIds, merged }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists) {
+  async _collectLeg(keys, { filterSessionIds, merged, subtreeTargets }, embedding, { top_k, min_score, date_from, date_to, author, query }, vectorHits, textLists) {
     const ks = Array.isArray(keys) ? keys : [keys];
-    const must = ks.length === 1
-      ? [{ key: "key", match: { value: ks[0] } }]
-      : [{ key: "key", match: { any: ks } }];
+    const must = [];
+    const should = [];
+    if (subtreeTargets && subtreeTargets.length) {
+      // Subtree: key = T OR prefixes: match any [T] (покрывает любую глубину).
+      for (const t of subtreeTargets) {
+        should.push({ key: "key", match: { value: t } });
+        should.push({ key: "prefixes", match: { any: [t] } });
+      }
+    } else if (ks.length === 1) {
+      must.push({ key: "key", match: { value: ks[0] } });
+    } else {
+      must.push({ key: "key", match: { any: ks } });
+    }
     if (date_from !== undefined) must.push({ key: "time_last", range: { gte: date_from } });
     if (date_to !== undefined) must.push({ key: "time_last", range: { lte: date_to } });
     if (author !== undefined) must.push({ key: "author", match: { value: author } });
@@ -186,19 +227,21 @@ export class QdrantStorage {
     }
     // I-1 (§6.2): sibling-нога — строго general (merged=1).
     if (merged) must.push({ key: "merged", match: { value: 1 } });
+    const filter = { must };
+    if (should.length) filter.should = should;
 
     const res = await this.client.query(this.collection, {
       query: { nearest: Array.from(embedding) },
       limit: top_k,
       score_threshold: min_score,
-      filter: { must },
+      filter,
       with_payload: true,
     });
     vectorHits.push(...(res.points ?? []).map((r) => {
       // M3: производное поле `text` (для full-text индекса) не должно протекать
       // в entry векторной ветки (как в get()) — выкидываем через деструктуризацию.
       const { text, ...rest } = r.payload;
-      return { entry: { ...rest, embedding: undefined, decisions: JSON.parse(rest.decisions), host: r.payload.host ?? "" }, score: r.score };
+      return { entry: { ...rest, embedding: undefined, decisions: JSON.parse(rest.decisions), host: r.payload.host ?? "", origin_remote: r.payload.origin_remote ?? "", prefixes: r.payload.prefixes ?? [] }, score: r.score };
     }));
 
     // Текстовая ветка: только full-text (full_text_match), фузия через RRF.
@@ -207,11 +250,13 @@ export class QdrantStorage {
       try {
         const tmust = [...must];
         tmust.push({ key: "text", full_text_match: { text: query } });
+        const tfilter = { must: tmust };
+        if (should.length) tfilter.should = should;
         // Filter-only leg — top-level `filter` БЕЗ `query` (у Query enum нет
         // FilterQuery-варианта; сервер вернул бы 400). Не должен быть
         // векторно-упорядочен (нет `nearest`).
         const tr = await this.client.query(this.collection, {
-          filter: { must: tmust },
+          filter: tfilter,
           limit: top_k,
           with_payload: true,
         });
@@ -287,6 +332,9 @@ export class QdrantStorage {
           if (f in p.payload) o[f] = p.payload[f];
         }
         if ("decisions" in o) o.decisions = JSON.parse(o.decisions);
+        // Легаси-точки без полей → дефолты (паритет с sqlite/pg).
+        if (cols.includes("origin_remote") && o.origin_remote === undefined) o.origin_remote = "";
+        if (cols.includes("prefixes") && o.prefixes === undefined) o.prefixes = [];
         // C-1: embedding lives in the vector (not payload); normalize to Float32Array.
         if (wantEmbedding) {
           const vec = p.vector ?? p.payload?.embedding;
@@ -315,7 +363,7 @@ export class QdrantStorage {
     // Производное поле `text` (для full-text индекса) не должно протекать
     // в entry — выкидываем через деструктуризацию (spec §3.6).
     const { text, ...rest } = p.payload;
-    return { ...rest, embedding: undefined, decisions: JSON.parse(rest.decisions), host: p.payload.host ?? "" };
+    return { ...rest, embedding: undefined, decisions: JSON.parse(rest.decisions), host: p.payload.host ?? "", origin_remote: p.payload.origin_remote ?? "", prefixes: p.payload.prefixes ?? [] };
   }
 
   // Кандидаты для recall (Task 6): записи ключа, которые либо влиты в mainline
@@ -343,7 +391,7 @@ export class QdrantStorage {
           const { text, ...rest } = p.payload;
           let parsed;
           try { parsed = JSON.parse(rest.decisions); } catch { parsed = []; }
-          out.push({ ...rest, embedding: undefined, decisions: parsed, host: p.payload.host ?? "" });
+          out.push({ ...rest, embedding: undefined, decisions: parsed, host: p.payload.host ?? "", origin_remote: p.payload.origin_remote ?? "", prefixes: p.payload.prefixes ?? [] });
         }
       }
       offset = res.next_page_offset;
@@ -378,5 +426,59 @@ export class QdrantStorage {
       await this.client.setPayload(this.collection, { payload: { merged: 1 }, points: ids });
     }
     return ids.length;
+  }
+
+  /**
+   * Миграция namespace (spec §3.6): перенести точки key=fromKey в key=toKey.
+   * max-version-wins: существующая точка (детерминированный id
+   * uuidFrom(session_id)) с version >= источника → skip. prefixes
+   * пересчитываются от toKey; origin_remote сохраняется (provenance).
+   * @param {string} fromKey  Ключ источника.
+   * @param {string} toKey  Ключ цели.
+   * @param {{ deleteSource?: boolean }} [opts]  deleteSource → собрать ids ДО
+   *   setPayload (после — фильтр key=from пуст), удалить по ids после.
+   * @returns {Promise<number>}  Число перенесённых точек.
+   */
+  async migrateKey(fromKey, toKey, { deleteSource = false } = {}) {
+    if (typeof fromKey !== "string" || !fromKey) throw new Error("migrateKey: fromKey required");
+    if (typeof toKey !== "string" || !toKey) throw new Error("migrateKey: toKey required");
+    if (fromKey === toKey) return 0; // edge: no-op
+    // Scroll всех точек источника (ids собираются ДО setPayload — после
+    // обновления фильтр key=from пуст, delete по фильтру невозможен).
+    const sourcePoints = [];
+    let offset = undefined;
+    do {
+      const res = await this.client.scroll(this.collection, {
+        filter: { must: [{ key: "key", match: { value: fromKey } }] },
+        limit: 1000,
+        offset,
+        with_payload: true,
+        with_vector: false,
+      });
+      sourcePoints.push(...(res.points ?? []));
+      offset = res.next_page_offset;
+    } while (offset != null);
+
+    const newPrefixes = prefixesOf(toKey);
+    const skippedIds = [];
+    let processed = 0;
+    for (const p of sourcePoints) {
+      const existing = await this._get(p.payload.session_id);
+      if (existing && existing.version >= p.payload.version) {
+        skippedIds.push(p.id); // max-version-wins: источник остаётся в бакете
+        continue;
+      }
+      await this.client.setPayload(this.collection, {
+        payload: { key: toKey, prefixes: newPrefixes },
+        points: [p.id],
+      });
+      processed++;
+    }
+    // deleteSource: удалить остатки источника (пропущенные точки), НЕ
+    // перенесённые (они уже живут в цели под key=to).
+    if (deleteSource && skippedIds.length) {
+      await this.client.delete(this.collection, { points: skippedIds });
+    }
+    return processed;
   }
 }

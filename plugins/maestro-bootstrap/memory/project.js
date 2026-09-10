@@ -62,6 +62,20 @@ export function legacyKey(v) {
 }
 
 /**
+ * Все префиксы namespace-ключа (spec §3.3): для `a.b.c` → `["a","a.b"]`;
+ * для односегментного ключа → `[]`. Используется при upsert (штамп prefixes)
+ * и при migrateKey (пересчёт от нового ключа).
+ * @param {string} key
+ * @returns {string[]}
+ */
+export function prefixesOf(key) {
+  const parts = String(key ?? "").split(".").filter(Boolean);
+  const out = [];
+  for (let i = 1; i < parts.length; i++) out.push(parts.slice(0, i).join("."));
+  return out;
+}
+
+/**
  * Build the key-set for a search. Own namespace always included; `related` and
  * `project` add namespace-only targets (own excluded). Deduped, normalized.
  * `key` required — missing key throws (guard preserved).

@@ -4,7 +4,8 @@ import { createRequire } from "node:module";
 import { createStorage } from "./storage.js";
 import { SqliteStorage } from "./storage/sqlite.js";
 import { sanitizeDirName } from "./config.js";
-import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { prefixesOf } from "./project.js";
+import { mkdtempSync, rmSync, mkdirSync, writeFileSync, readFileSync, existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
 
@@ -1114,6 +1115,211 @@ test("storage logs cross_project_miss when sibling DB unavailable", async () => 
     assert.ok(calls.some(([m, e]) => m === "memory:cross_project_miss" && e.reason === "unavailable" && e.projectKey === "nonexistent"), "cross_project_miss logged with unavailable + projectKey");
   } finally {
     await active.dispose();
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// ── Task 3 (namespace-related): origin_remote + prefixes поля, subtree-ноги, migrateKey ──
+
+test("sqlite origin_remote + prefixes round-trip (defaults '' / [])", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
+  try {
+    await st.init();
+    // entry WITH fields → round-trips via get.
+    await st.upsert([mkEntry("s1", "a.b.c", "t1", { origin_remote: "github.com/org/api", prefixes: ["a", "a.b"] })]);
+    const found = await st.get("s1");
+    assert.equal(found.origin_remote, "github.com/org/api");
+    assert.deepEqual(found.prefixes, ["a", "a.b"]);
+    // legacy entry WITHOUT fields → defaults '' / [].
+    await st.upsert([mkEntry("s2", "a.b.c", "t2")]);
+    const legacy = await st.get("s2");
+    assert.equal(legacy.origin_remote, "");
+    assert.deepEqual(legacy.prefixes, []);
+    // scan возвращает поля (легитимные метаданные).
+    const rows = await st.scan({ key: "a.b.c", fields: ["session_id", "origin_remote", "prefixes"] });
+    assert.equal(rows.length, 2);
+    assert.equal(rows.find((r) => r.session_id === "s1").origin_remote, "github.com/org/api");
+    assert.deepEqual(rows.find((r) => r.session_id === "s1").prefixes, ["a", "a.b"]);
+    assert.equal(rows.find((r) => r.session_id === "s2").origin_remote, "");
+    assert.deepEqual(rows.find((r) => r.session_id === "s2").prefixes, []);
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("sqlite ALTER dev-hygiene: old v2-schema table gains origin_remote/prefixes idempotently", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const dbPath = join(dir, "memory.db");
+  // Вручную создаём таблицу v2 (без branch/head/merged/host/origin_remote/prefixes) + meta.
+  const Database = require("better-sqlite3");
+  const db = new Database(dbPath);
+  db.exec(`CREATE TABLE memory (
+    session_id TEXT PRIMARY KEY,
+    key TEXT NOT NULL,
+    origin_project_hash TEXT NOT NULL,
+    title TEXT NOT NULL,
+    summary TEXT NOT NULL,
+    decisions TEXT NOT NULL,
+    embedding BLOB NOT NULL,
+    model_id TEXT NOT NULL,
+    author TEXT NOT NULL,
+    time_first INTEGER NOT NULL,
+    time_last INTEGER NOT NULL,
+    version INTEGER NOT NULL
+  )`);
+  db.exec(`CREATE TABLE meta (name TEXT PRIMARY KEY, value TEXT NOT NULL)`);
+  db.close();
+  const st = createStorage({ type: "sqlite", options: { dbPath }, modelId: "m", dim: 3 });
+  try {
+    await st.init(); // должен ALTER ADD COLUMN × 6
+    const cols = st.db.prepare("PRAGMA table_info(memory)").all().map((c) => c.name);
+    assert.ok(cols.includes("origin_remote"), "origin_remote column added");
+    assert.ok(cols.includes("prefixes"), "prefixes column added");
+    // Повторный init не падает (guard).
+    await st.dispose();
+    const st2 = createStorage({ type: "sqlite", options: { dbPath }, modelId: "m", dim: 3 });
+    await st2.init();
+    await st2.dispose();
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("sqlite subtree leg via meta.key enumeration: sibling bucket prefix (merged-only)", async () => {
+  const base = mkdtempSync(join(tmpdir(), "mm-sqlite-subtree-"));
+  const dir = (key) => join(base, "maestro", "memory", sanitizeDirName(key));
+  const ownKey = "a.b.c"; const siblingKey = "a.b.d";
+  mkdirSync(dir(ownKey), { recursive: true });
+  mkdirSync(dir(siblingKey), { recursive: true });
+  const mk = (key) => new SqliteStorage({ dbPath: join(dir(key), "memory.db"), modelId: "m", dim: 3, moduleDir: null, key });
+  const active = mk(ownKey); const sibling = mk(siblingKey);
+  try {
+    await sibling.init();
+    await sibling.upsert([
+      { session_id: "s1", key: siblingKey, origin_project_hash: "h1", title: "Sibling merged", summary: "sum", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([1, 0, 0]), merged: 1 },
+      { session_id: "s2", key: siblingKey, origin_project_hash: "h1", title: "Sibling unmerged", summary: "sum", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([0.9, 0.1, 0]), merged: 0 },
+    ]);
+    await sibling.dispose();
+    await active.init();
+    await active.upsert([{ session_id: "a1", key: ownKey, origin_project_hash: "h2", title: "Active", summary: "sum", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([0, 1, 0]) }]);
+    const res = await active.search(new Float32Array([1, 0, 0]), { key: ownKey, subtree: ["a.b"], top_k: 10, min_score: 0 });
+    const ids = res.map((h) => h.entry.session_id);
+    assert.ok(ids.includes("s1"), "merged sibling hit present");
+    assert.ok(!ids.includes("s2"), "unmerged sibling excluded (merged-only)");
+    assert.ok(ids.includes("a1"), "active hit present");
+    // Провенанс: subtree-хит помечен _source_key.
+    const s1 = res.find((h) => h.entry.session_id === "s1");
+    assert.equal(s1.entry._source_key, siblingKey, "subtree sibling hit carries _source_key");
+  } finally {
+    await active.dispose();
+    await sibling.dispose();
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("sqlite subtree leg: own bucket not double-collected (active leg covers it)", async () => {
+  const base = mkdtempSync(join(tmpdir(), "mm-sqlite-subtree-"));
+  const dir = (key) => join(base, "maestro", "memory", sanitizeDirName(key));
+  const ownKey = "a.b.c";
+  mkdirSync(dir(ownKey), { recursive: true });
+  const active = new SqliteStorage({ dbPath: join(dir(ownKey), "memory.db"), modelId: "m", dim: 3, moduleDir: null, key: ownKey });
+  try {
+    await active.init();
+    await active.upsert([{ session_id: "a1", key: ownKey, origin_project_hash: "h2", title: "Active", summary: "sum", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([1, 0, 0]), merged: 1 }]);
+    // subtree target = own key → target deduped (own key is the active leg).
+    const res = await active.search(new Float32Array([1, 0, 0]), { key: ownKey, subtree: ["a.b.c"], top_k: 10, min_score: 0 });
+    const ids = res.map((h) => h.entry.session_id);
+    assert.ok(ids.includes("a1"), "active hit present");
+    assert.equal(ids.filter((x) => x === "a1").length, 1, "own bucket not double-collected");
+  } finally {
+    await active.dispose();
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("sqlite migrateKey max-version-wins", async () => {
+  const base = mkdtempSync(join(tmpdir(), "mm-sqlite-migrate-"));
+  const dir = (key) => join(base, "maestro", "memory", sanitizeDirName(key));
+  const fromKey = "old.ns"; const toKey = "new.ns";
+  mkdirSync(dir(fromKey), { recursive: true });
+  mkdirSync(dir(toKey), { recursive: true });
+  const mk = (key) => new SqliteStorage({ dbPath: join(dir(key), "memory.db"), modelId: "m", dim: 3, moduleDir: null, key });
+  const from = mk(fromKey); const to = mk(toKey);
+  try {
+    await from.init();
+    await to.init();
+    // target v5, source v2 → stays 5.
+    await to.upsert([{ session_id: "s1", key: toKey, origin_project_hash: "h", title: "Target v5", summary: "s", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 5, embedding: new Float32Array([0.1, 0.2, 0.3]) }]);
+    await from.upsert([{ session_id: "s1", key: fromKey, origin_project_hash: "h", title: "Source v2", summary: "s", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 2, embedding: new Float32Array([0.1, 0.2, 0.3]) }]);
+    let n = await to.migrateKey(fromKey, toKey);
+    assert.equal(n, 0, "source v2 <= target v5 → skipped");
+    assert.equal((await to.get("s1")).version, 5, "target stays 5");
+    assert.equal((await to.get("s1")).title, "Target v5");
+    // source v7 → becomes 7.
+    await from.upsert([{ session_id: "s1", key: fromKey, origin_project_hash: "h", title: "Source v7", summary: "s", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 7, embedding: new Float32Array([0.1, 0.2, 0.3]) }]);
+    n = await to.migrateKey(fromKey, toKey);
+    assert.equal(n, 1, "source v7 > target v5 → migrated");
+    const migrated = await to.get("s1");
+    assert.equal(migrated.version, 7);
+    assert.equal(migrated.title, "Source v7");
+    assert.equal(migrated.key, toKey, "key rewritten to toKey");
+    assert.deepEqual(migrated.prefixes, prefixesOf(toKey), "prefixes recomputed from toKey");
+    assert.equal(migrated.origin_project_hash, "h", "provenance preserved");
+  } finally {
+    await from.dispose();
+    await to.dispose();
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("sqlite migrateKey delete_source removes source file (+ -wal/-shm)", async () => {
+  const base = mkdtempSync(join(tmpdir(), "mm-sqlite-migrate-"));
+  const dir = (key) => join(base, "maestro", "memory", sanitizeDirName(key));
+  const fromKey = "old.ns"; const toKey = "new.ns";
+  mkdirSync(dir(fromKey), { recursive: true });
+  mkdirSync(dir(toKey), { recursive: true });
+  const mk = (key) => new SqliteStorage({ dbPath: join(dir(key), "memory.db"), modelId: "m", dim: 3, moduleDir: null, key });
+  const from = mk(fromKey); const to = mk(toKey);
+  try {
+    await from.init();
+    await to.init();
+    await from.upsert([{ session_id: "s1", key: fromKey, origin_project_hash: "h", title: "Source", summary: "s", decisions: [], model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([0.1, 0.2, 0.3]) }]);
+    await from.dispose();
+    const n = await to.migrateKey(fromKey, toKey, { deleteSource: true });
+    assert.equal(n, 1);
+    assert.equal((await to.get("s1")).key, toKey, "record migrated to target");
+    assert.equal(existsSync(join(dir(fromKey), "memory.db")), false, "source db removed");
+    assert.equal(existsSync(join(dir(fromKey), "memory.db-wal")), false, "source -wal removed");
+    assert.equal(existsSync(join(dir(fromKey), "memory.db-shm")), false, "source -shm removed");
+  } finally {
+    await to.dispose();
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("sqlite migrateKey model mismatch throws descriptive error", async () => {
+  const base = mkdtempSync(join(tmpdir(), "mm-sqlite-migrate-"));
+  const dir = (key) => join(base, "maestro", "memory", sanitizeDirName(key));
+  const fromKey = "old.ns"; const toKey = "new.ns";
+  mkdirSync(dir(fromKey), { recursive: true });
+  mkdirSync(dir(toKey), { recursive: true });
+  const from = new SqliteStorage({ dbPath: join(dir(fromKey), "memory.db"), modelId: "other-model", dim: 3, moduleDir: null, key: fromKey });
+  const to = new SqliteStorage({ dbPath: join(dir(toKey), "memory.db"), modelId: "m", dim: 3, moduleDir: null, key: toKey });
+  try {
+    await from.init();
+    await to.init();
+    await from.upsert([{ session_id: "s1", key: fromKey, origin_project_hash: "h", title: "Source", summary: "s", decisions: [], model_id: "other-model", author: "a", time_first: 1, time_last: 2, version: 1, embedding: new Float32Array([0.1, 0.2, 0.3]) }]);
+    await from.dispose();
+    await assert.rejects(
+      () => to.migrateKey(fromKey, toKey),
+      /переиндексируйте \(model\/dim mismatch\)/,
+      "model mismatch must throw with reindex instruction",
+    );
+  } finally {
+    await to.dispose();
     rmSync(base, { recursive: true, force: true });
   }
 });

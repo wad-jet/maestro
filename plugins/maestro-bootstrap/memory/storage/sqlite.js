@@ -1,8 +1,10 @@
 import { join, dirname } from "node:path";
 import { pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
+import { readdir } from "node:fs/promises";
+import { rmSync } from "node:fs";
 import { fuseRrf } from "./rrf.js";
-import { resolveSearchKeys } from "../project.js";
+import { resolveSearchKeys, prefixesOf } from "../project.js";
 import { sanitizeDirName } from "../config.js";
 import { timed } from "../storage.js";
 
@@ -117,9 +119,33 @@ function makeNodeSqliteDatabase() {
 const SCAN_FIELDS = [
   "session_id", "key", "origin_project_hash", "title", "summary", "decisions",
   "author", "time_first", "time_last", "version", "model_id", "embedding",
-  "branch", "head", "merged", "host",
+  "branch", "head", "merged", "host", "origin_remote", "prefixes",
 ];
 const DEFAULT_SCAN_FIELDS = SCAN_FIELDS.filter((f) => f !== "embedding");
+
+// JSON-массив из строки колонки (prefixes); битый/пустой → [] (guard).
+function parseJsonArray(v) {
+  if (v == null || v === "") return [];
+  try {
+    const a = JSON.parse(v);
+    return Array.isArray(a) ? a : [];
+  } catch {
+    return [];
+  }
+}
+
+// Subtree-цели (spec §3.3): нормализация + дедуп + исключение own key
+// (активная нога уже покрывает собственный бакет).
+function subtreeTargets(subtree, ownKey) {
+  if (!Array.isArray(subtree)) return [];
+  const out = [];
+  for (const t of subtree) {
+    const tt = String(t ?? "").trim().toLowerCase();
+    if (!tt || tt === ownKey) continue;
+    if (!out.includes(tt)) out.push(tt);
+  }
+  return out;
+}
 
 /**
  * Lazy-load better-sqlite3, resolving from `moduleDir/node_modules`
@@ -146,7 +172,7 @@ async function loadBetterSqlite3(moduleDir) {
 }
 
 export class SqliteStorage {
-  constructor({ dbPath, modelId, dim, moduleDir, log, forceDriver = null }) {
+  constructor({ dbPath, modelId, dim, moduleDir, log, forceDriver = null, key = null }) {
     this.dbPath = dbPath;
     this.modelId = modelId;
     this.dim = dim;
@@ -154,7 +180,14 @@ export class SqliteStorage {
     this.forceDriver = forceDriver; // тесты: "node:sqlite" | "better-sqlite3"
     // Task 6: аудит-лог (spec §4.3) — debug/error-события операций; default null (noop).
     this.log = log ?? null;
+    // Task 3: ключ (namespace), который держит этот бакет; пишется в meta.key
+    // при init (нужен для subtree-перебора соседей). Если не передан — выводится
+    // из первой записи бакета.
+    this.key = key ?? null;
     this.db = null;
+    // Кэш перечня соседних бакетов {dirName → meta.key} (subtree-ноги, §3.3);
+    // re-enumerate при промахе ноги.
+    this._siblingKeys = null;
   }
 
   async init() {
@@ -183,7 +216,9 @@ export class SqliteStorage {
         branch TEXT NOT NULL DEFAULT '',
         head TEXT NOT NULL DEFAULT '',
         merged INTEGER NOT NULL DEFAULT 0,
-        host TEXT NOT NULL DEFAULT ''
+        host TEXT NOT NULL DEFAULT '',
+        origin_remote TEXT NOT NULL DEFAULT '',
+        prefixes TEXT NOT NULL DEFAULT ''
       )`);
       // Dev-гигиена: существующие in-repo dev-БД (v2-схема без branch/head/merged)
       // получают колонки идемпотентно (ALTER ADD COLUMN, НЕ миграция данных).
@@ -192,6 +227,8 @@ export class SqliteStorage {
       if (!cols.includes("head")) db.exec("ALTER TABLE memory ADD COLUMN head TEXT NOT NULL DEFAULT ''");
       if (!cols.includes("merged")) db.exec("ALTER TABLE memory ADD COLUMN merged INTEGER NOT NULL DEFAULT 0");
       if (!cols.includes("host")) db.exec("ALTER TABLE memory ADD COLUMN host TEXT NOT NULL DEFAULT ''");
+      if (!cols.includes("origin_remote")) db.exec("ALTER TABLE memory ADD COLUMN origin_remote TEXT NOT NULL DEFAULT ''");
+      if (!cols.includes("prefixes")) db.exec("ALTER TABLE memory ADD COLUMN prefixes TEXT NOT NULL DEFAULT ''");
       db.exec(`CREATE TABLE IF NOT EXISTS meta (name TEXT PRIMARY KEY, value TEXT NOT NULL)`);
       db.exec(`CREATE INDEX IF NOT EXISTS memory_key ON memory (key)`);
       db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
@@ -239,6 +276,12 @@ export class SqliteStorage {
         throw new Error(`dimension mismatch: stored=${dimRow.value} expected=${this.dim} — переиндексируйте (см. how-to/enable-memory)`);
       }
       db.prepare("INSERT OR IGNORE INTO meta (name, value) VALUES ('dim', ?)").run(this.dim);
+      // Task 3: штамп ключа бакета в meta.key (subtree-перебор соседей, §3.3).
+      // Явный key конструктора приоритетнее; иначе выводим из первой записи
+      // (легаси-бакет, открытый новой версией). Пустой бакет без key → штамп
+      // появится при первом upsert.
+      const effKey = this.key ?? db.prepare("SELECT key FROM memory LIMIT 1").get()?.key;
+      if (effKey) db.prepare("INSERT OR REPLACE INTO meta (name, value) VALUES ('key', ?)").run(effKey);
       this.db = db;
     } catch (err) {
       if (!db?.closed) db.close();
@@ -257,8 +300,8 @@ export class SqliteStorage {
 
   async _upsert(entries) {
     const ins = this.db.prepare(`INSERT OR REPLACE INTO memory
-      (session_id, key, origin_project_hash, title, summary, decisions, embedding, model_id, author, time_first, time_last, version, branch, head, merged, host)
-      VALUES (@session_id, @key, @origin_project_hash, @title, @summary, @decisions, @embedding, @model_id, @author, @time_first, @time_last, @version, @branch, @head, @merged, @host)`);
+      (session_id, key, origin_project_hash, title, summary, decisions, embedding, model_id, author, time_first, time_last, version, branch, head, merged, host, origin_remote, prefixes)
+      VALUES (@session_id, @key, @origin_project_hash, @title, @summary, @decisions, @embedding, @model_id, @author, @time_first, @time_last, @version, @branch, @head, @merged, @host, @origin_remote, @prefixes)`);
     const ftsDel = this.db.prepare("DELETE FROM memory_fts WHERE session_id = ?");
     const ftsIns = this.db.prepare(
       "INSERT INTO memory_fts (session_id, key, title, summary, decisions) VALUES (?, ?, ?, ?, ?)",
@@ -288,6 +331,8 @@ export class SqliteStorage {
           head: e.head ?? "",
           merged: e.merged ?? 0,
           host: e.host ?? "",
+          origin_remote: e.origin_remote ?? "",
+          prefixes: JSON.stringify(e.prefixes ?? []),
         });
         // Sync FTS: delete-then-insert keeps exactly one row per session_id.
         ftsDel.run(e.session_id);
@@ -295,19 +340,23 @@ export class SqliteStorage {
       }
     });
     tx(entries);
+    // Штамп meta.key от первой записи (бакет без явного key конструктора).
+    if (!this.key && entries.length) {
+      this.db.prepare("INSERT OR REPLACE INTO meta (name, value) VALUES ('key', ?)").run(entries[0].key);
+    }
   }
 
-  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds }) {
-    return timed(this.log, "search", () => this._search(embedding, { top_k, min_score, key, date_from, date_to, author, project, query, filterSessionIds }));
+  async search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds, related, subtree }) {
+    return timed(this.log, "search", () => this._search(embedding, { top_k, min_score, key, date_from, date_to, author, project, query, filterSessionIds, related, subtree }));
   }
 
-  async _search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds }) {
+  async _search(embedding, { top_k = 3, min_score = 0, key, date_from, date_to, author, project, query, filterSessionIds, related, subtree }) {
     if (embedding.length !== this.dim) {
       throw new Error(`embedding length ${embedding.length} does not match expected dimension ${this.dim}`);
     }
-    // Ключевой набор: активный key + (опционально) соседний project-ключ.
-    // Без `project` — ровно один ключ, поведение идентично прежнему.
-    const keys = resolveSearchKeys({ key, project });
+    // Ключевой набор: активный key + (опционально) соседние project/related-ключи.
+    // Без `project`/`related` — ровно один ключ, поведение идентично прежнему.
+    const keys = resolveSearchKeys({ key, project, related });
     const opts = { date_from, date_to, author, query, top_k, min_score, filterSessionIds };
     const textLists = [];
     const allVector = [];
@@ -317,10 +366,84 @@ export class SqliteStorage {
       // own-key filterSessionIds в sibling не протекает (иначе sibling пуст).
       await this._collectKey(k, false, embedding, { ...opts, mergedOnly: true, filterSessionIds: undefined }, allVector, textLists);
     }
+    // Subtree-ноги (spec §3.3): префикс-цели → merged-only sibling-бакеты по
+    // meta.key (=== T или LIKE 'T.%'). Собственный бакет — активная нога.
+    const targets = subtreeTargets(subtree, keys[0]);
+    if (targets.length) {
+      const seen = new Set();
+      for (const t of targets) {
+        const buckets = await this._siblingBucketsFor(t);
+        for (const b of buckets) {
+          if (b.key === keys[0] || seen.has(b.key)) continue;
+          seen.add(b.key);
+          await this._collectKey(b.key, false, embedding, { ...opts, mergedOnly: true, filterSessionIds: undefined }, allVector, textLists);
+        }
+      }
+    }
     allVector.sort((a, b) => b.score - a.score);
     // Единый RRF-фьюжн по всем ключам (модель сверена → скоры сравнимы).
     const fused = await fuseRrf(allVector, textLists, { fetchEntry: (sid) => this._get(sid) });
     return fused.slice(0, top_k);
+  }
+
+  /**
+   * Бакеты-соседи, попадающие под subtree-цель T: meta.key === T или
+   * meta.key LIKE 'T.%'. Кэш `this._siblingKeys` (dirName → key); при промахе
+   * ноги — re-enumerate (новый бакет мог появиться после кэширования).
+   * @param {string} target  Нормализованный namespace-префикс.
+   * @returns {Promise<Array<{dirName: string, key: string}>>}
+   */
+  async _siblingBucketsFor(target) {
+    if (!this._siblingKeys) await this._enumerateSiblingKeys();
+    let buckets = this._matchSiblingBuckets(target);
+    if (!buckets.length) {
+      await this._enumerateSiblingKeys();
+      buckets = this._matchSiblingBuckets(target);
+    }
+    return buckets;
+  }
+
+  _matchSiblingBuckets(target) {
+    const out = [];
+    for (const [dirName, key] of this._siblingKeys) {
+      if (key === target || key.startsWith(target + ".")) out.push({ dirName, key });
+    }
+    return out;
+  }
+
+  /**
+   * Перечислить соседние бакеты: readdir(<dataDir>/maestro/memory), для каждого
+   * каталога открыть memory.db read-only и прочитать meta.key. Fail-soft:
+   * непрочитаемый бакет пропускается. Легаси-БД без meta.key невидимы до
+   * открытия новой версией (задокументировано, §3.3).
+   */
+  async _enumerateSiblingKeys() {
+    const dataDir = join(dirname(this.dbPath), "..", "..");
+    const memoryDir = join(dataDir, "memory");
+    const map = new Map();
+    let entries = [];
+    try {
+      entries = await readdir(memoryDir, { withFileTypes: true });
+    } catch {
+      entries = [];
+    }
+    for (const e of entries) {
+      if (!e.isDirectory()) continue;
+      const p = join(memoryDir, e.name, "memory.db");
+      try {
+        const Database = await loadSqliteDriver(this.moduleDir, { force: this.forceDriver });
+        const sib = new Database(p, { readonly: true, fileMustExist: false });
+        try {
+          const row = sib.prepare("SELECT value FROM meta WHERE name = 'key'").get();
+          if (row?.value) map.set(e.name, row.value);
+        } finally {
+          sib.close();
+        }
+      } catch {
+        // Fail-soft: непрочитаемый/несуществующий бакет пропускаем.
+      }
+    }
+    this._siblingKeys = map;
   }
 
   /**
@@ -427,7 +550,7 @@ export class SqliteStorage {
     const vectorHits = rows.map((r) => {
       const vec = new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4);
       const score = cosine(embedding, vec);
-      return { entry: { ...r, embedding: undefined, decisions: JSON.parse(r.decisions) }, score };
+      return { entry: { ...r, embedding: undefined, decisions: JSON.parse(r.decisions), origin_remote: r.origin_remote ?? "", prefixes: parseJsonArray(r.prefixes) }, score };
     }).filter((h) => h.score >= min_score).sort((a, b) => b.score - a.score).slice(0, top_k);
 
     // Нет текстового запроса или FTS недоступен → vector-only.
@@ -472,7 +595,7 @@ export class SqliteStorage {
           if (!full) return null;
           let parsed;
           try { parsed = JSON.parse(full.decisions); } catch { parsed = []; }
-          return { session_id: r.session_id, entry: { ...full, embedding: undefined, decisions: parsed } };
+          return { session_id: r.session_id, entry: { ...full, embedding: undefined, decisions: parsed, origin_remote: full.origin_remote ?? "", prefixes: parseJsonArray(full.prefixes) } };
         }).filter(Boolean);
       } catch (err) {
         console.error(`[memory] FTS MATCH failed, falling back to vector-only: ${err.message}`);
@@ -530,6 +653,7 @@ export class SqliteStorage {
     const rows = this.db.prepare(`SELECT ${cols.join(", ")} FROM memory WHERE key = ?`).all(key);
     return rows.map((r) => {
       if ("decisions" in r) r.decisions = JSON.parse(r.decisions);
+      if ("prefixes" in r) r.prefixes = parseJsonArray(r.prefixes);
       return r;
     });
   }
@@ -545,7 +669,7 @@ export class SqliteStorage {
     // merge line-fetch for FTS-only hits).
     let parsed;
     try { parsed = JSON.parse(r.decisions); } catch { parsed = []; }
-    return { ...r, embedding: undefined, decisions: parsed, host: r.host ?? "" };
+    return { ...r, embedding: undefined, decisions: parsed, host: r.host ?? "", origin_remote: r.origin_remote ?? "", prefixes: parseJsonArray(r.prefixes) };
   }
 
   // Кандидаты для recall (Task 6): записи ключа, которые либо уже влиты в
@@ -562,7 +686,7 @@ export class SqliteStorage {
     return rows.map((r) => {
       let parsed;
       try { parsed = JSON.parse(r.decisions); } catch { parsed = []; }
-      return { ...r, embedding: undefined, decisions: parsed };
+      return { ...r, embedding: undefined, decisions: parsed, origin_remote: r.origin_remote ?? "", prefixes: parseJsonArray(r.prefixes) };
     });
   }
 
@@ -572,6 +696,81 @@ export class SqliteStorage {
     if (typeof head !== "string" || !head) throw new Error("markMerged: head required");
     const info = this.db.prepare("UPDATE memory SET merged = 1 WHERE key = ? AND head = ?").run(key, head);
     return info.changes;
+  }
+
+  /**
+   * Миграция namespace (spec §3.6): перенести записи бакета fromKey в активный
+   * бакет (toKey). max-version-wins: запись-источник НЕ затирает более новую
+   * запись цели (existing.version >= source.version → skip). prefixes
+   * пересчитываются от toKey; origin_project_hash/origin_remote сохраняются.
+   * @param {string} fromKey  Ключ источника (namespace или hash).
+   * @param {string} toKey  Ключ цели (активный бакет).
+   * @param {{ deleteSource?: boolean }} [opts]  deleteSource → удалить файл
+   *   источника (+ -wal/-shm) после переноса.
+   * @returns {Promise<number>}  Число перенесённых записей.
+   */
+  async migrateKey(fromKey, toKey, { deleteSource = false } = {}) {
+    if (typeof fromKey !== "string" || !fromKey) throw new Error("migrateKey: fromKey required");
+    if (typeof toKey !== "string" || !toKey) throw new Error("migrateKey: toKey required");
+    if (fromKey === toKey) return 0; // edge: no-op
+    const dataDir = join(dirname(this.dbPath), "..", "..");
+    const srcPath = join(dataDir, "memory", sanitizeDirName(fromKey), "memory.db");
+    const Database = await loadSqliteDriver(this.moduleDir, { force: this.forceDriver });
+    let sib;
+    try {
+      sib = new Database(srcPath, { readonly: true, fileMustExist: false });
+    } catch (err) {
+      throw new Error(`migrateKey: source bucket ${fromKey} unavailable: ${err.message}`);
+    }
+    try {
+      // Сверка модели/размерности: несовпадение → косинусы несравнимы → ошибка
+      // с инструкцией переиндексации (как init).
+      const model = sib.prepare("SELECT value FROM meta WHERE name = 'model_id'").get();
+      if (model && model.value !== this.modelId) {
+        throw new Error(`migrateKey: model mismatch (stored=${model.value} expected=${this.modelId}) — переиндексируйте (model/dim mismatch)`);
+      }
+      const dim = sib.prepare("SELECT value FROM meta WHERE name = 'dim'").get();
+      if (dim && parseInt(dim.value, 10) !== this.dim) {
+        throw new Error(`migrateKey: dimension mismatch (stored=${dim.value} expected=${this.dim}) — переиндексируйте (model/dim mismatch)`);
+      }
+      const rows = sib.prepare("SELECT * FROM memory").all();
+      const toUpsert = [];
+      for (const r of rows) {
+        const existing = await this._get(r.session_id);
+        if (existing && r.version <= existing.version) continue; // max-version-wins
+        let decisions;
+        try { decisions = JSON.parse(r.decisions); } catch { decisions = []; }
+        toUpsert.push({
+          session_id: r.session_id,
+          key: toKey,
+          origin_project_hash: r.origin_project_hash,
+          title: r.title,
+          summary: r.summary,
+          decisions,
+          embedding: new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4),
+          model_id: r.model_id,
+          author: r.author,
+          time_first: r.time_first,
+          time_last: r.time_last,
+          version: r.version,
+          branch: r.branch ?? "",
+          head: r.head ?? "",
+          merged: r.merged ?? 0,
+          host: r.host ?? "",
+          origin_remote: r.origin_remote ?? "",
+          prefixes: prefixesOf(toKey),
+        });
+      }
+      if (toUpsert.length) await this._upsert(toUpsert);
+      if (deleteSource) {
+        for (const suffix of ["", "-wal", "-shm"]) {
+          try { rmSync(srcPath + suffix, { force: true }); } catch { /* fail-soft */ }
+        }
+      }
+      return toUpsert.length;
+    } finally {
+      sib.close();
+    }
   }
 }
 
