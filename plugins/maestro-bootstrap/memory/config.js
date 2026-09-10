@@ -18,6 +18,7 @@ export const DEFAULTS = {
   min_score: 0.35,
   similarity_threshold: 0.7,
   retention_days: null,
+  delete_on_session_delete: false,
   summarize_timeout_ms: 120000,
   branch_context: true,
   mainline: null,
@@ -135,6 +136,11 @@ function branchContextValid(m) {
   return typeof m.branch_context === "boolean";
 }
 
+function deleteOnSessionDeleteValid(m) {
+  if (m?.delete_on_session_delete == null) return true;
+  return typeof m.delete_on_session_delete === "boolean";
+}
+
 // Идентификаторы провайдеров эмбеддингов, поддерживаемых в конфиге.
 const EMBEDDING_PROVIDERS = new Set(["local", "openai"]);
 
@@ -192,6 +198,7 @@ export function classifyMemoryConfig(maestroJson, { gitName = null } = {}) {
   if (!STORAGE_TYPES.has(type)) return { enabled: false, disabled_reason: "storage_type_invalid" };
   if (!pgvectorTextSearchConfigValid(m)) return { enabled: false, disabled_reason: "pgvector_text_search_config_invalid" };
   if (!branchContextValid(m)) return { enabled: false, disabled_reason: "branch_context_invalid" };
+  if (!deleteOnSessionDeleteValid(m)) return { enabled: false, disabled_reason: "delete_on_session_delete_invalid" };
   if (!embeddingValid(m)) return { enabled: false, disabled_reason: "embedding_invalid" };
   if (!probeCooldownValid(m)) return { enabled: false, disabled_reason: "probe_cooldown_min_invalid" };
   if (!mainlineValid(m)) return { enabled: false, disabled_reason: "mainline_invalid" };

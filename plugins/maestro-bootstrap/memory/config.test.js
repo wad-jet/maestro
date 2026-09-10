@@ -201,3 +201,17 @@ test("dim ignored for local; probe_cooldown_min validation", () => {
   assert.equal(classifyMemoryConfig({ memory: { enabled: true, probe_cooldown_min: 0 } }).disabled_reason, "probe_cooldown_min_invalid");
   assert.equal(classifyMemoryConfig({ memory: { enabled: true, probe_cooldown_min: 5 } }).disabled_reason, null);
 });
+
+// ── delete_on_session_delete ──
+
+test("delete_on_session_delete default false", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true } });
+  assert.equal(cfg.delete_on_session_delete, false);
+});
+test("delete_on_session_delete from config", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, delete_on_session_delete: true } });
+  assert.equal(cfg.delete_on_session_delete, true);
+});
+test("delete_on_session_delete invalid disables", () => {
+  assert.equal(classifyMemoryConfig({ memory: { enabled: true, delete_on_session_delete: "yes" } }).disabled_reason, "delete_on_session_delete_invalid");
+});
