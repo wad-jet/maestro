@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { namespaceValid } from "./config.js";
 
 export function canonicalizeRemote(rawUrl) {
   const s = String(rawUrl).trim();
@@ -33,33 +34,50 @@ export function deriveProjectKey({ gitRemote, absPath }) {
 }
 
 /**
- * Resolve a `project` search parameter to a storage key (spec §2.2 B2).
- * Semantics: namespace | git-remote/URL (canonicalize+hash) | project_hash.
+ * Namespace-only resolver (spec §3.4): принимает только валидный namespace,
+ * бросает на URL/scp/project_hash. Normalize → trim + lowercase.
  * @param {string} project
- * @returns {string} storage key — namespace as-is, URL/scp → sha256 hash,
- *   64-hex project_hash as-is.
+ * @returns {string} normalized namespace
  */
 export function resolveProjectKey(project) {
-  const s = String(project).trim();
-  if (!s) throw new Error("search: project required");
-  if (s.includes("://") || s.startsWith("git@")) return projectHashFromRemote(s);
-  if (/^[0-9a-f]{64}$/i.test(s)) return s;
-  return s; // namespace — used directly as key
+  const s = String(project ?? "").trim().toLowerCase();
+  if (!s) throw new Error(`project: невалидный namespace "${project}"`);
+  if (/^[0-9a-f]{8,}$/i.test(s)) throw new Error(`project: невалидный namespace "${project}"`);
+  if (!namespaceValid(s)) throw new Error(`project: невалидный namespace "${project}"`);
+  return s;
 }
 
 /**
- * Build the key-set for a search. Single key by default; when `project` is
- * given (cross-project opt-in, centralized backends only) → [key, projectKey]
- * deduped. Key required when project absent.
- * @param {{ key?: string, project?: string }} opts
+ * Legacy key resolver for migration (spec §3.6): URL/scp → hash, 64-hex → as-is,
+ * namespace → passthrough. Used by migrate to convert old-format keys to
+ * namespace-only form.
+ * @param {string} v
+ * @returns {string} resolved legacy key
+ */
+export function legacyKey(v) {
+  const s = String(v).trim();
+  if (s.includes("://") || s.startsWith("git@")) return projectHashFromRemote(s);
+  if (/^[0-9a-f]{64}$/i.test(s)) return s;
+  return s;
+}
+
+/**
+ * Build the key-set for a search. Own namespace always included; `related` and
+ * `project` add namespace-only targets (own excluded). Deduped, normalized.
+ * `key` required — missing key throws (guard preserved).
+ * @param {{ key: string, related?: string[], project?: string }} opts
  * @returns {string[]}
  */
-export function resolveSearchKeys({ key, project }) {
-  if (project !== undefined && project !== null && project !== "") {
-    const projectKey = resolveProjectKey(project);
-    const keys = [key, projectKey].filter((k) => typeof k === "string" && k.length > 0);
-    return [...new Set(keys)];
-  }
+export function resolveSearchKeys({ key, project, related }) {
   if (typeof key !== "string" || !key) throw new Error("search: key required");
-  return [key];
+  const keys = [key.trim().toLowerCase()];
+  for (const r of related ?? []) {
+    const rr = resolveProjectKey(r);
+    if (rr !== keys[0]) keys.push(rr);
+  }
+  if (project !== undefined && project !== null && project !== "") {
+    const p = resolveProjectKey(project);
+    if (p !== keys[0]) keys.push(p);
+  }
+  return [...new Set(keys.filter((k) => typeof k === "string" && k.length > 0))];
 }

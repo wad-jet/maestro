@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { canonicalizeRemote, projectHashFromRemote, projectHashFromDir, deriveProjectKey, resolveProjectKey, resolveSearchKeys } from "./project.js";
+import { canonicalizeRemote, projectHashFromRemote, projectHashFromDir, deriveProjectKey, resolveProjectKey, legacyKey, resolveSearchKeys } from "./project.js";
 
 test("ssh and https remotes canonicalize to same", () => {
   const a = canonicalizeRemote("git@github.com:Org/Repo.git");
@@ -38,33 +38,35 @@ test("dir hash differs for same basename different parent", () => {
   assert.notEqual(projectHashFromDir("/home/u/a"), projectHashFromDir("/other/u/a"));
 });
 
-// ── resolveProjectKey / resolveSearchKeys (Task 4) ─────────────────────
+// ── resolveProjectKey (namespace-only) / legacyKey / resolveSearchKeys ──
 
-test("resolveProjectKey: URL → canonicalized hash", () => {
-  assert.equal(resolveProjectKey("https://github.com/org/repo.git"), projectHashFromRemote("https://github.com/org/repo.git"));
-  assert.equal(resolveProjectKey("git@github.com:org/repo.git"), projectHashFromRemote("git@github.com:org/repo.git"));
+test("resolveProjectKey validates namespace (no URL/hash)", () => {
+  assert.equal(resolveProjectKey("microservices.sales.pay"), "microservices.sales.pay");
+  assert.equal(resolveProjectKey("MyApp"), "myapp"); // normalized
+  assert.throws(() => resolveProjectKey("git@github.com:org/api.git"));
+  assert.throws(() => resolveProjectKey("8f3a2e91"));
+  assert.throws(() => resolveProjectKey("bad!"));
 });
-test("resolveProjectKey: 64-hex project_hash as-is", () => {
+
+test("legacyKey resolves URL→hash, hash as-is, namespace passthrough", () => {
+  assert.equal(legacyKey("git@github.com:org/api.git"), projectHashFromRemote("git@github.com:org/api.git"));
   const h = "a".repeat(64);
-  assert.equal(resolveProjectKey(h), h);
+  assert.equal(legacyKey(h), h);
+  assert.equal(legacyKey("microservices.sales"), "microservices.sales");
 });
-test("resolveProjectKey: namespace used directly as key", () => {
-  assert.equal(resolveProjectKey("my-namespace"), "my-namespace");
+
+test("resolveSearchKeys: own + related (own excluded, dedup, normalized)", () => {
+  const keys = resolveSearchKeys({ key: "a.b.c", related: ["a.b", "a.b.c", "MyApp", "a.b"] });
+  assert.deepEqual(keys, ["a.b.c", "a.b", "myapp"]);
 });
-test("resolveProjectKey: empty throws", () => {
-  assert.throws(() => resolveProjectKey("  "), /project required/);
+
+test("resolveSearchKeys: explicit project adds namespace, own excluded", () => {
+  const keys = resolveSearchKeys({ key: "a.b", project: "a.b" });
+  assert.deepEqual(keys, ["a.b"]);
+  assert.deepEqual(resolveSearchKeys({ key: "a.b", project: "x.y" }), ["a.b", "x.y"]);
 });
-test("resolveSearchKeys: single key when no project", () => {
-  assert.deepEqual(resolveSearchKeys({ key: "k1" }), ["k1"]);
-});
-test("resolveSearchKeys: key required when project absent", () => {
-  assert.throws(() => resolveSearchKeys({}), /key required/);
-});
-test("resolveSearchKeys: project → [key, projectKey] deduped", () => {
-  assert.deepEqual(resolveSearchKeys({ key: "k1", project: "other" }), ["k1", "other"]);
-  assert.deepEqual(resolveSearchKeys({ key: "k1", project: "k1" }), ["k1"]);
-  assert.deepEqual(resolveSearchKeys({ key: "k1", project: "https://github.com/org/repo.git" }), ["k1", projectHashFromRemote("https://github.com/org/repo.git")]);
-});
-test("resolveSearchKeys: project without key → project key only", () => {
-  assert.deepEqual(resolveSearchKeys({ project: "other" }), ["other"]);
+
+test("resolveSearchKeys: no related/project → own only; missing key throws", () => {
+  assert.deepEqual(resolveSearchKeys({ key: "a.b" }), ["a.b"]);
+  assert.throws(() => resolveSearchKeys({ related: ["x"] }));
 });
