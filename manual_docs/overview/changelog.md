@@ -32,7 +32,7 @@
 
 - **3.3.0** (minor): commit-node graph в memory layer; additive-формат вывода
   `memory_stats_detail`, без breaking-изменений контракта.
-- **3.3.1** (патч): branch=mainline для merged-commit-узлов; восстановлен авто-preview
+- **3.3.1** (патч): branch=mainline для merged-commit-узлов; введён авто-preview
   `@maestro-memory-report`; docs `memory.report.preview`.
 
 ## [2026-09-10]
