@@ -65,6 +65,10 @@ export class Recall {
         .split("\n")
         .filter((l) => l.trim() !== "[confidential]")
         .join("\n")
+        // follow-up (финальное ревью): инлайн-плейсхолдер <redacted> (sanitize,
+        // key=value/whole-fragment) тоже становится OR-термом, матчащим все
+        // записи с такой редакцией — тот же класс шума, что и [confidential]-строки.
+        .replace(/<redacted>/g, " ")
         .trim();
       // Task 4: замер embed+search (effectiveness-события, spec §4.2).
       const started = Date.now();

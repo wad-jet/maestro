@@ -332,6 +332,23 @@ test("recall hybrid: placeholder lines stripped from FTS query; embed keeps full
   assert.equal(seen[0].query, "what is the date", "FTS-нога: плейсхолдер-строки вырезаны");
 });
 
+test("recall hybrid: inline <redacted> placeholder stripped from FTS query (final-review follow-up)", async () => {
+  const embedCalls = [];
+  const embedder = { embed: async (t) => { embedCalls.push(t); return new Float32Array([0.1, 0.2, 0.3]); }, dim: 3, modelId: "m" };
+  const seen = [];
+  const storage = { search: async (emb, o) => { seen.push(o); return []; } };
+  const r = new Recall({
+    embeddings: embedder, storage, topK: 3, minScore: 0.35, key: "project-key",
+    getUserMessageCount: async () => 1, branchContext: false,
+  });
+  // sanitize() (внутри maskTranscript) маскирует key=value инлайн: → <redacted>.
+  await r.onChatMessage({ sessionID: "s1", text: "какой хост у POSTGRES_PASSWORD=secret123" });
+  assert.equal(embedCalls.length, 1);
+  assert.ok(embedCalls[0].includes("<redacted>"), "embed: полный masked (инлайн-плейсхолдер сохранён)");
+  assert.ok(!seen[0].query.includes("<redacted>"), "FTS-нога: <redacted>-токен вырезан");
+  assert.ok(seen[0].query.includes("POSTGRES_PASSWORD"), "ключ остаётся в FTS-тексте");
+});
+
 test("recall hybrid: all-masked multi-line query → vector-only (ftsQuery empty)", async () => {
   const embedCalls = [];
   const embedder = { embed: async (t) => { embedCalls.push(t); return new Float32Array([0.1, 0.2, 0.3]); }, dim: 3, modelId: "m" };
