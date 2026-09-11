@@ -85,7 +85,7 @@ description: Use when the user asks for help configuring maestro, organizing pro
     "similarity_threshold": 0.7,
     "retention_days": null,
     "summarize_timeout_ms": 120000,
-    "report": { "include_text": false },
+    "report": { "include_text": false, "preview": true },
     "embedding": {
       "provider": "local",
       "model": null,
@@ -218,6 +218,8 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
 - **`report.include_text`** — `false` (default): HTML-отчёт `@maestro-memory-report`
   содержит **только агрегаты** (SEC-4b); `true` — осознанный opt-in на вставку
   замаскированных заголовков/summary (документированное понижение).
+- **`report.preview`** — `true` (default): `@maestro-memory-report` сам запускает
+  локальный preview-сервер (bind `127.0.0.1`, TTL 60 мин); `false` — только HTML-файл.
 - **`namespace`** — обязателен при `enabled: true`; формат `a.b.c` (1–3 сегмента,
   lowercase, точка-разделитель); нормализация: trim + lowercase; absent/невалидный →
   память off (`namespace_missing` / `namespace_invalid`).
