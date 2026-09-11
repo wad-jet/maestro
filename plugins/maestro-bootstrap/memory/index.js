@@ -238,18 +238,96 @@ function clusterEntries(entries, threshold) {
  * @param {number} cap
  * @returns {Array<[string, string, number]>}
  */
-function buildGraph(entries, threshold, cap = 500) {
+function buildGraph(entries, threshold, cap = 500, idFn = (e) => e.session_id) {
   const edges = [];
   for (let i = 0; i < entries.length; i++) {
     for (let j = i + 1; j < entries.length; j++) {
       const score = cosine(entries[i].embedding, entries[j].embedding);
       if (score > threshold) {
-        edges.push([entries[i].session_id, entries[j].session_id, score]);
+        edges.push([idFn(entries[i]), idFn(entries[j]), score]);
         if (edges.length >= cap) return edges;
       }
     }
   }
   return edges;
+}
+
+/**
+ * Unit-norm centroid of a set of normalized vectors (mean, renormalized).
+ * @param {Float32Array[]} vectors
+ * @returns {Float32Array|null}  null when vectors is empty.
+ */
+function centroid(vectors) {
+  if (!vectors.length) return null;
+  const dim = vectors[0].length;
+  const sum = new Float32Array(dim);
+  for (const v of vectors) for (let i = 0; i < dim; i++) sum[i] += v[i];
+  let norm = 0;
+  for (let i = 0; i < dim; i++) norm += sum[i] * sum[i];
+  norm = Math.sqrt(norm) || 1;
+  for (let i = 0; i < dim; i++) sum[i] /= norm;
+  return sum;
+}
+
+/**
+ * Node tier priority: dead > unknown > experience > merged (most restrictive wins).
+ */
+const TIER_PRIORITY = { dead: 3, unknown: 2, experience: 1, merged: 0 };
+
+/**
+ * Commit-graph nodes from scan rows: sessions grouped by head (record identity
+ * in memory v3+); head='' → unattributed node per session (key ses:<sid>).
+ * Node embedding = centroid of member embeddings (subset with valid embedding);
+ * node without any embedding is isolated (present, but no edges).
+ * @param {Array<object>} rows  scan rows (session_id, head, branch, merged,
+ *   time_last, embedding)
+ * @returns {Array<object>} nodes
+ */
+function buildCommitNodes(rows) {
+  const groups = new Map();
+  for (const r of rows) {
+    const head = r.head ?? "";
+    const key = head ? `head:${head}` : `ses:${r.session_id}`;
+    let node = groups.get(key);
+    if (!node) {
+      node = { key, head, ses: head ? "" : r.session_id, branch: "", sessions: 0, session_ids: [], vectors: [], lastTime: -Infinity };
+      groups.set(key, node);
+    }
+    node.sessions++;
+    node.session_ids.push(r.session_id);
+    const ts = r.time_last ?? 0;
+    if (ts >= node.lastTime) {
+      node.lastTime = ts;
+      node.branch = r.branch ?? "";
+    }
+    if (r.embedding) node.vectors.push(r.embedding);
+  }
+  const nodes = [];
+  for (const node of groups.values()) {
+    node.compact = node.head ? `h:${node.head.slice(0, 12)}` : `s:${node.ses.slice(0, 12)}`;
+    node.embedding = centroid(node.vectors);
+    delete node.vectors;
+    nodes.push(node);
+  }
+  return nodes;
+}
+
+/**
+ * Node tier = most restrictive member tier (dead > unknown > experience > merged).
+ * Missing per-session tier → unknown.
+ * @param {{session_ids: string[]}} node
+ * @param {Map<string,string>} tierBySession
+ * @returns {string}
+ */
+function nodeTier(node, tierBySession) {
+  let prio = -1;
+  let tier = "merged";
+  for (const sid of node.session_ids) {
+    const t = tierBySession.get(sid) ?? "unknown";
+    const p = TIER_PRIORITY[t] ?? 1;
+    if (p > prio) { prio = p; tier = t; }
+  }
+  return tier;
 }
 
 /**
