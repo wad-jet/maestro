@@ -232,16 +232,19 @@ function clusterEntries(entries, threshold) {
 
 /**
  * Pairwise cosine graph edges (unordered pairs, deduped) above threshold,
- * capped at `cap` edges (report scale guard).
- * @param {Array<{session_id: string, embedding: Float32Array}>} entries
+ * capped at `cap` edges (report scale guard). Entries without a valid
+ * embedding (isolated nodes) are skipped — they produce no edges.
+ * @param {Array<{session_id: string, embedding: Float32Array|null}>} entries
  * @param {number} threshold
  * @param {number} cap
+ * @param {Function} idFn  Edge endpoint id extractor; default `(e) => e.session_id`.
  * @returns {Array<[string, string, number]>}
  */
 function buildGraph(entries, threshold, cap = 500, idFn = (e) => e.session_id) {
   const edges = [];
   for (let i = 0; i < entries.length; i++) {
     for (let j = i + 1; j < entries.length; j++) {
+      if (!entries[i].embedding || !entries[j].embedding) continue;
       const score = cosine(entries[i].embedding, entries[j].embedding);
       if (score > threshold) {
         edges.push([idFn(entries[i]), idFn(entries[j]), score]);
@@ -277,8 +280,10 @@ const TIER_PRIORITY = { dead: 3, unknown: 2, experience: 1, merged: 0 };
 /**
  * Commit-graph nodes from scan rows: sessions grouped by head (record identity
  * in memory v3+); head='' → unattributed node per session (key ses:<sid>).
- * Node embedding = centroid of member embeddings (subset with valid embedding);
- * node without any embedding is isolated (present, but no edges).
+ * Node embedding = centroid of member embeddings (members with a
+ * Float32Array embedding); node without any embedding is isolated (present,
+ * but no edges). Branch = branch of the member with the latest time_last;
+ * on equal time_last the later row in scan order wins.
  * @param {Array<object>} rows  scan rows (session_id, head, branch, merged,
  *   time_last, embedding)
  * @returns {Array<object>} nodes
@@ -300,7 +305,7 @@ function buildCommitNodes(rows) {
       node.lastTime = ts;
       node.branch = r.branch ?? "";
     }
-    if (r.embedding) node.vectors.push(r.embedding);
+    if (r.embedding instanceof Float32Array) node.vectors.push(r.embedding);
   }
   const nodes = [];
   for (const node of groups.values()) {
@@ -323,8 +328,9 @@ function nodeTier(node, tierBySession) {
   let prio = -1;
   let tier = "merged";
   for (const sid of node.session_ids) {
-    const t = tierBySession.get(sid) ?? "unknown";
-    const p = TIER_PRIORITY[t] ?? 1;
+    const raw = tierBySession.get(sid);
+    const t = raw && TIER_PRIORITY[raw] !== undefined ? raw : "unknown";
+    const p = TIER_PRIORITY[t];
     if (p > prio) { prio = p; tier = t; }
   }
   return tier;
