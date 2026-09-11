@@ -1,5 +1,5 @@
 ---
-version: 3
+version: 4
 feature: memory-report-commit-nodes
 added: 2026-09-11
 status: active
@@ -34,3 +34,4 @@ commit-рёбер. Верифицировать:
 - `@maestro-memory-report` поднимает preview-сервер (127.0.0.1, state
   `.maestro/preview-server.json`); остановка `--stop <state-файл>`;
   `memory.report.preview: false` — без сервера, только HTML.
+- В отчёте присутствует блок «Легенда» с определениями терминов (кластер/размер/узел/тир/head/session_id) — без текста записей.
