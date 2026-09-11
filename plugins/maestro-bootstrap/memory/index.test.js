@@ -1721,8 +1721,8 @@ test("memory_stats_detail: commit-node grouping by head (centroid edge + metadat
     });
     const res = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "s1" });
     assert.match(res, /Узлы графа \(2\):/, "two unique heads → two nodes");
-    assert.match(res, /head=aaaa0000aaaa \| branch=main \| sessions=2 \| tier=merged \| session_ids=s1, s2/, "grouped node — merged: branch = mainline (main)");
-    assert.match(res, /head=bbbb0000bbbb \| branch=main \| sessions=1 \| tier=merged \| session_ids=s3/, "singleton node — merged: branch = mainline (main)");
+    assert.match(res, /head=aaaa0000aaaa \| branch=main \| sessions=2 \| tier=merged \| first=.* \| last=.* \| clusters=.* \| session_ids=s1, s2/, "grouped node — merged: branch = mainline (main)");
+    assert.match(res, /head=bbbb0000bbbb \| branch=main \| sessions=1 \| tier=merged \| first=.* \| last=.* \| clusters=.* \| session_ids=s3/, "singleton node — merged: branch = mainline (main)");
     // рёбро между commit-узлами существует ТОЛЬКО через центроид:
     // по отдельности cos(s1,s3)=0.5 и cos(s2,s3)=0.5 (не > 0.7),
     // центроид A = [0,1,0] → cos(центроидA, s3) = 1.00 (> 0.7)
@@ -1761,8 +1761,8 @@ test("memory_stats_detail: unattributed (head='') node per session", async () =>
     });
     const res = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "s1" });
     assert.match(res, /Узлы графа \(2\):/, "two headless sessions → two unattributed nodes");
-    assert.match(res, /ses=u1 \| branch= \| sessions=1 \| tier=unknown \| session_ids=u1/, "unattributed node u1");
-    assert.match(res, /ses=u2 \| branch= \| sessions=1 \| tier=unknown \| session_ids=u2/, "unattributed node u2");
+    assert.match(res, /ses=u1 \| branch= \| sessions=1 \| tier=unknown \| first=.* \| last=.* \| clusters=.* \| session_ids=u1/, "unattributed node u1");
+    assert.match(res, /ses=u2 \| branch= \| sessions=1 \| tier=unknown \| first=.* \| last=.* \| clusters=.* \| session_ids=u2/, "unattributed node u2");
     assert.match(res, /s:u1 <-> s:u2/, "edge between unattributed nodes by ses key");
     await hooks.dispose?.();
   } finally {
@@ -1837,7 +1837,7 @@ test("memory_stats_detail: node tier = most restrictive member (merged vs experi
       deps: { storage, embeddings: mkMockEmbeddings(), git },
     });
     const res = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "s1" });
-    assert.match(res, /head=hp \| branch=feature\/p \| sessions=2 \| tier=experience \| session_ids=s1, s2/, "node tier = experience (priority over merged)");
+    assert.match(res, /head=hp \| branch=feature\/p \| sessions=2 \| tier=experience \| first=.* \| last=.* \| clusters=.* \| session_ids=s1, s2/, "node tier = experience (priority over merged)");
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
@@ -1873,7 +1873,48 @@ test("memory_stats_detail: node tier = dead wins over merged (dead > merged prio
       deps: { storage, embeddings: mkMockEmbeddings(), git },
     });
     const res = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "s1" });
-    assert.match(res, /head=hd \| branch=feature\/d \| sessions=2 \| tier=dead \| session_ids=s1, s2/, "node tier = dead (priority over merged)");
+    assert.match(res, /head=hd \| branch=feature\/d \| sessions=2 \| tier=dead \| first=.* \| last=.* \| clusters=.* \| session_ids=s1, s2/, "node tier = dead (priority over merged)");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_stats_detail: node first/last dates and cluster ids", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-cn-dates-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.stats = async () => ({ entries: 3 });
+    // s1+s2 — один head h1 (merged, mainline) → один узел; s3 — другой head
+    // (h2) с ортогональным эмбеддингом → отдельный кластер.
+    storage.scan = async () => [
+      { session_id: "s1", title: "T1", author: "a", time_first: 1700000000000, time_last: 1700000100000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]), merged: 1, head: "h1", branch: "main" },
+      { session_id: "s2", title: "T2", author: "a", time_first: 1700000200000, time_last: 1700000300000, origin_project_hash: "h", embedding: new Float32Array([0.9, 0.1, 0]), merged: 1, head: "h1", branch: "main" },
+      { session_id: "s3", title: "T3", author: "b", time_first: 1700000400000, time_last: 1700000500000, origin_project_hash: "h", embedding: new Float32Array([0, 1, 0]), merged: 1, head: "h2", branch: "main" },
+    ];
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      revList: () => new Set(),
+      isAncestor: () => "no",
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+    const res = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "s1" });
+    // first = min(time_first) = 1700000000000 → 2023-11-14; last = max(time_last)
+    // = 1700000300000 → 2023-11-14. cos(s1,s2)=0.99 > 0.7 → обе сессии в одном
+    // кластере (cluster-1, size 2 — первый в сортировке по size desc).
+    assert.match(res, /head=h1 \| branch=main \| sessions=2 \| tier=merged \| first=2023-11-14 \| last=2023-11-14 \| clusters=cluster-1 \| session_ids=s1, s2/, "node h1: first/last dates + cluster-1");
+    // s3 ортогонален (cos(s3,s1)=0, cos(s3,s2)=0) → отдельный кластер cluster-2.
+    assert.match(res, /head=h2 \| branch=main \| sessions=1 \| tier=merged \| first=2023-11-14 \| last=2023-11-14 \| clusters=cluster-2 \| session_ids=s3/, "node h2: own cluster-2");
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
