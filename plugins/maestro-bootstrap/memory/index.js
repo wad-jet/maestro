@@ -295,11 +295,18 @@ function buildCommitNodes(rows) {
     const key = head ? `head:${head}` : `ses:${r.session_id}`;
     let node = groups.get(key);
     if (!node) {
-      node = { key, head, ses: head ? "" : r.session_id, branch: "", sessions: 0, session_ids: [], vectors: [], lastTime: -Infinity };
+      node = { key, head, ses: head ? "" : r.session_id, branch: "", sessions: 0, session_ids: [], vectors: [], lastTime: -Infinity, first: Infinity, last: 0 };
       groups.set(key, node);
     }
     node.sessions++;
     node.session_ids.push(r.session_id);
+    // Диапазон дат узла: min(time_first) / max(time_last) по сессиям
+    // (sentinel: first=Infinity → первая строка всегда инициализирует;
+    // time — ms epoch, всегда > 0).
+    const tf = r.time_first ?? 0;
+    const tl = r.time_last ?? 0;
+    node.first = Math.min(node.first, tf);
+    node.last = Math.max(node.last, tl);
     const ts = r.time_last ?? 0;
     if (ts >= node.lastTime) {
       node.lastTime = ts;
@@ -1242,7 +1249,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             const { entries } = await storage.stats({ key: effectiveKey });
             const rows = await storage.scan({
               key: effectiveKey,
-              fields: ["session_id", "title", "embedding", "author", "time_last", "origin_project_hash", "branch", "head", "merged"],
+              fields: ["session_id", "title", "embedding", "author", "time_first", "time_last", "origin_project_hash", "branch", "head", "merged"],
             });
             // C-1: нормализуем embedding из любого бэкенда (sqlite Buffer /
             // qdrant Float32Array / pgvector string) в Float32Array.
@@ -1262,6 +1269,13 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
 
             const threshold = config.similarity_threshold ?? 0.7;
             const clusters = clusterEntries(usable, threshold);
+            // Кластеры узла: один проход сортировки (size desc) + карта
+            // session_id → cluster-id (cluster-1..N по порядку вывода).
+            const sortedClusters = [...clusters].sort((a, b) => b.size - a.size);
+            const clusterBySession = new Map();
+            for (let i = 0; i < sortedClusters.length; i++) {
+              for (const [sid] of sortedClusters[i].members) clusterBySession.set(sid, `cluster-${i + 1}`);
+            }
 
             // commit-nodes: группировка по head (по всем строкам scan).
             // Тиры/ветки — единый membership-проход (tierBySession) для счётчиков
@@ -1303,6 +1317,16 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             // для merged-узлов (уже в mainline) — имя mainline (где изменение
             // сейчас), чтобы не показывать удалённые feature-ветки.
             for (const n of nodes) if (n.tier === "merged") n.branch = sets.mainline?.name ?? "";
+            // Кластеры узла: уникальные cluster-id сессий узла (по порядку).
+            for (const n of nodes) {
+              const seen = new Set();
+              const cs = [];
+              for (const sid of n.session_ids) {
+                const cid = clusterBySession.get(sid);
+                if (cid && !seen.has(cid)) { seen.add(cid); cs.push(cid); }
+              }
+              n.clusters = cs;
+            }
             const nodeGraph = buildGraph(nodes, threshold, 500, (n) => n.compact);
 
             // I-4: prepend active key / backend / model so `@maestro-memory`
@@ -1322,14 +1346,16 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             out.push("По датам:");
             for (const [d, n] of [...byDate.entries()].sort()) out.push(`  ${d}: ${n}`);
             out.push("Кластеры:");
-            for (const c of clusters.sort((x, y) => y.size - x.size)) {
+            for (const c of sortedClusters) {
               out.push(`  размер ${c.size}: ${c.members.map(([sid]) => sid).join(", ")} (тема: ${c.theme})`);
             }
             const sortedNodes = [...nodes].sort((a, b) => b.sessions - a.sessions).slice(0, 500);
             const extraNodes = nodes.length - sortedNodes.length;
             out.push(`Узлы графа (${nodes.length}):`);
             for (const n of sortedNodes) {
-              out.push(`  ${n.head ? `head=${n.head}` : `ses=${n.ses}`} | branch=${n.branch} | sessions=${n.sessions} | tier=${n.tier} | session_ids=${n.session_ids.join(", ")}`);
+              const firstDate = n.first && n.first > 0 ? new Date(n.first).toISOString().slice(0, 10) : "";
+              const lastDate = n.last && n.last > 0 ? new Date(n.last).toISOString().slice(0, 10) : "";
+              out.push(`  ${n.head ? `head=${n.head}` : `ses=${n.ses}`} | branch=${n.branch} | sessions=${n.sessions} | tier=${n.tier} | first=${firstDate} | last=${lastDate} | clusters=${n.clusters.join(",")} | session_ids=${n.session_ids.join(", ")}`);
             }
             if (extraNodes > 0) out.push(`  …(+${extraNodes} узлов ещё)`);
             out.push(`Граф (рёбер: ${nodeGraph.length}):`);

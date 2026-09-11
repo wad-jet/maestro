@@ -1,5 +1,5 @@
 ---
-version: 2
+version: 3
 feature: memory-report-commit-nodes
 added: 2026-09-11
 status: active
@@ -28,6 +28,8 @@ commit-рёбер. Верифицировать:
   секции 3.1–3.4 не изменились.
 - `memory_stats_detail`: записи одного `head` — один узел (sessions=N); head=''
   — unattributed-узлы по сессии; узел без эмбеддингов — изолированный (без рёбер).
+  Строка узла: `first=`/`last=` (даты) и `clusters=` (cluster-id) между `tier=`
+  и `session_ids=`; темы кластеров сопоставляются по `cluster-N` из секции «Кластеры:».
 - При `include_text: false` в HTML нет titles/summary/decisions (только агрегаты).
 - `@maestro-memory-report` поднимает preview-сервер (127.0.0.1, state
   `.maestro/preview-server.json`); остановка `--stop <state-файл>`;
