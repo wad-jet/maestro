@@ -55,15 +55,29 @@ description: Сгенерировать статический HTML-отчёт �
 
 Список авторов и количество записей: `author_name: N`. Только имена — без привязки к текстовому контенту.
 
-### 3.5 Similarity graph (session pairs above threshold)
+### 3.5 Similarity graph (commit nodes)
 
-Простая визуализация: список узлов (session_id) и рёбер (пары выше threshold). Можно в виде простого SVG с узлами-кружками или plain-text списка пар.
+- Секции для парсинга: `Узлы графа (M):` и `Граф (рёбер: N):` из вывода `memory_stats_detail`.
+- **Узел — commit (`head`)**; сессии одного `head` — один узел. Записи без `head`
+  (ключ `ses:`) — unattributed-узлы (по сессии).
+- Рендер SVG-графа:
+  - узел-круг; подпись — компактный ключ (`h:<12 hex>` / `s:<12 символов session_id>`);
+  - под узлом — ветка (если есть) и бейдж `×N` (число сессий);
+  - цвет по тиру: merged `#22c55e`, experience `#3b82f6`, unknown `#f59e0b`,
+    dead `#ef4444`; unattributed — серый контур;
+  - ребро — линия, opacity пропорциональна весу.
+- Легенда тиров + таблица узлов: полный `head` (или `ses:<session_id>`), ветка,
+  sessions, tier, session_ids.
+- Только агрегаты (SEC-4b): хеши commit, имена веток, счётчики, тиры, session_id
+  — разрешены; titles/summary/decisions — запрещены.
 
 ### 3.6 SEC-4b enforcement
 
 **При `include_text: false`** (по умолчанию):
 - **НЕ вставлять** заголовки (titles), summary, решения (decisions) **нигде** в HTML.
-- Разрешено: count, author names, dates, cluster sizes, theme aggregate-labels, session_id (node IDs в графе).
+- Разрешено: count, author names, dates, cluster sizes, theme aggregate-labels,
+  session_id (node IDs в графе), **head-хеши commit, имена веток, тиры** (git-метаданные,
+  уже присутствующие в tool-выводе, — не текст записей).
 
 **При `include_text: true`:**
 - Допускается вставка замаскированных titles и summaries (понижение уровня защиты, задокументированное в секции).
