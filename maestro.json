@@ -57,6 +57,7 @@
     "extra_uri_schemes": []
   },
   "memory": {
-    "enabled": true
+    "enabled": true,
+    "namespace": "ai.opencode.maestro"
   }
 }

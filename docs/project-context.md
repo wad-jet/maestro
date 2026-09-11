@@ -35,7 +35,7 @@
 - **Инструменты:** git, `agpack` (доставка скиллов/команд/агентов в `.opencode/`),
   bash (скрипты `maestro-install.sh`, `maestro-sandbox.sh`).
 - **Менеджер:** npm (только для плагина, `package.json`).
-- **Текущая версия дистрибутива:** `3.2.0` (корневой `package.json → version`; единая
+- **Текущая версия дистрибутива:** `3.2.1` (корневой `package.json → version`; единая
   для скиллов и плагина, см. `manual_docs/how-to/update-maestro.md`).
 - **Memory layer:** опциональный модуль плагина (векторная память сессий); НЕ часть
   стандартной установки, включается по запросу (секция `memory` в `maestro.json`;
@@ -150,7 +150,7 @@
 ## 10. Тестирование
 
 - **Unit (плагин):** встроенный Node test runner — `node --test
-  plugins/maestro-bootstrap/index.test.js` (174 теста).
+  plugins/maestro-bootstrap/index.test.js` (176 тестов).
 - **QA-чеклист (e2e-смоук):** `./maestro-sandbox.sh` создаёт `.sandbox/` (фиктивное
   целевое приложение), чеклист `docs/testing/maestro-sandbox-checklist.md`.
 - Команды тестирования зафиксированы в §14.
