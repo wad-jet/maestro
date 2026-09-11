@@ -59,3 +59,41 @@ test("sqlite (node:sqlite driver) hybrid: text-only FTS hit dropped when min_sco
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+test("sqlite FTS: OR matching — partial multi-token match is found (I1)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-ns-or-"));
+  const st = new SqliteStorage({ dbPath: join(dir, "memory.db"), modelId: "m", dim: 3, forceDriver: "node:sqlite" });
+  try {
+    await st.init();
+    // Векторы ортогональны запросу [0,0,1] (cos 0 < min_score 0.5) —
+    // записи доступны только через FTS-ногу.
+    await st.upsert([
+      mkEntry("s1", "k1", "alpha world", { embedding: new Float32Array([1, 0, 0]) }),
+      mkEntry("s3", "k1", "beta memory", { embedding: new Float32Array([0, 1, 0]) }),
+    ]);
+    const hits = await st.search(new Float32Array([0, 0, 1]), { top_k: 5, min_score: 0.5, key: "k1", query: "alpha beta" });
+    assert.ok(hits.some((h) => h.entry.session_id === "s1"), "частичное совпадение (alpha*) находится через OR");
+    assert.ok(hits.some((h) => h.entry.session_id === "s3"), "частичное совпадение (beta*) находится через OR");
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("sqlite FTS: full match ranks above partial (bm25)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-ns-or2-"));
+  const st = new SqliteStorage({ dbPath: join(dir, "memory.db"), modelId: "m", dim: 3, forceDriver: "node:sqlite" });
+  try {
+    await st.init();
+    await st.upsert([
+      mkEntry("s1", "k1", "alpha world", { embedding: new Float32Array([1, 0, 0]) }),
+      mkEntry("s4", "k1", "alpha beta report", { embedding: new Float32Array([0, 1, 0]) }),
+    ]);
+    const hits = await st.search(new Float32Array([0, 0, 1]), { top_k: 5, min_score: 0.5, key: "k1", query: "alpha beta" });
+    assert.equal(hits.length, 2);
+    assert.equal(hits[0].entry.session_id, "s4", "полное совпадение (оба терма) ранжируется выше");
+  } finally {
+    await st.dispose();
+    rmSync(dir, { recursive: true, force: true });
+  }
+});

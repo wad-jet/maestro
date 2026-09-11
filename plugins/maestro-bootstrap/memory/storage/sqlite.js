@@ -565,7 +565,10 @@ export class SqliteStorage {
     const tokens = query.split(/\s+/).filter(Boolean);
     let ftsHits = [];
     if (tokens.length) {
-      const match = tokens.map((t) => `"${t.replace(/"/g, '""')}"*`).join(" ");
+      // OR-матчинг: bm25 ранжирует многословные совпадения выше;
+      // префиксы покрывают русскую морфологию («отчёт*» → «отчёта»),
+      // суффиксные формы («памяти») ловит семантическая нога.
+      const match = tokens.map((t) => `"${t.replace(/"/g, '""')}"*`).join(" OR ");
       const ftsConds = ["memory_fts MATCH ?", "memory.key = ?"];
       const ftsParams = [match, k];
       if (date_from !== undefined) { ftsConds.push("memory.time_last >= ?"); ftsParams.push(date_from); }
