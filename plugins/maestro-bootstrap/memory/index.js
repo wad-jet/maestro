@@ -1299,6 +1299,9 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
               }
             }
             for (const n of nodes) n.tier = nodeTier(n, tierBySession);
+            // Ветка показывается только для изменений, не влитых в mainline:
+            // для merged-узлов (уже в mainline) ветка нерелевантна → пустая.
+            for (const n of nodes) if (n.tier === "merged") n.branch = "";
             const nodeGraph = buildGraph(nodes, threshold, 500, (n) => n.compact);
 
             // I-4: prepend active key / backend / model so `@maestro-memory`
