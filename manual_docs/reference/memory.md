@@ -100,6 +100,7 @@
 | `retention_days` | `number` \| `null` | `null` | TTL записей: при старте плагина удаляются записи с `time_last` старше N дней (`storage.prune`). `null` (default) — выключено, данные не удаляются молча |
 | `summarize_timeout_ms` | `number` | `120000` | Таймаут цепочки «саммаризация → эмбеддинг → запись» (защита от зависшего LLM-вызова) |
 | `report.include_text` | `boolean` | `false` | Разрешает вставку замаскированных заголовков/summary в HTML-отчёт `@maestro-memory-report`. `false` (default) — только агрегаты (SEC-4b); `true` — осознанное понижение уровня безопасности |
+| `report.preview` | `boolean` | `true` | Авто-запуск локального preview-сервера командой `@maestro-memory-report` (bind `127.0.0.1`, свободный порт, TTL 60 мин, state-файл `.maestro/preview-server.json`); `false` — только генерация HTML |
 | `branch_context` | `boolean` | `true` | Branch-scoped recall (default-on): членство записей по git-истории (тиры general/experience, см. [Branch-aware memory](#branch-aware-memory-v3)); `false` → flat project recall (дефолтный scope = `project`) |
 | `mainline` | `string` \| `null` | `null` | Основная ветка для промоции; `null` → авто-детект из git (remote HEAD → `init.defaultBranch` → резерв `main`/`master`/`develop`); явный override авторитетен (несуществующее имя → `mainline_unresolved`, §5) |
 | `storage.type` | `string` | `sqlite` | Бэкенд: `sqlite` \| `qdrant` \| `pgvector` |
@@ -591,6 +592,12 @@ aggregate-label тем, session_id в графе, **head-хеши commit, име
 (git-метаданные, не текст записей). `include_text: true` — осознанный
 opt-in на вставку замаскированных заголовков/summary (документированное
 понижение уровня безопасности).
+
+Команда автоматически поднимает локальный preview-сервер для просмотра
+отчёта в браузере: `node skills/maestro/preview-http-server.cjs <html>`
+(bind `127.0.0.1`, свободный порт, TTL 60 мин; state-файл
+`.maestro/preview-server.json`; остановка — `--stop <state-файл>`).
+Отключение — `memory.report.preview: false` (тогда генерируется только HTML).
 
 > **Отклонение от спецификации (имя файла):** спецификация
 > (`docs/superpowers/specs/2026-09-07-maestro-memory-v2-design.md`) предполагала

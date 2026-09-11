@@ -441,6 +441,7 @@ deny. Trust не наследуется вложенными субагента�
 | `retention_days` | `number` \| `null` | `null` | TTL записей: prune при старте (записи старше N дней по `time_last`). `null` — выключено |
 | `summarize_timeout_ms` | `number` | `120000` | Таймаут цепочки «саммаризация → эмбеддинг → запись» |
 | `report.include_text` | `boolean` | `false` | Разрешает вставку замаскированных заголовков/summary в HTML-отчёт `@maestro-memory-report`; `false` — только агрегаты (SEC-4b) |
+| `report.preview` | `boolean` | `true` | Авто-запуск локального preview-сервера командой `@maestro-memory-report` (bind `127.0.0.1`, свободный порт, TTL 60 мин, state-файл `.maestro/preview-server.json`); `false` — только генерация HTML |
 | `branch_context` | `boolean` | `true` | Branch-scoped recall (default-on): членство записей по git-истории (тиры general/experience); `false` → flat project recall (дефолтный scope = `project`) |
 | `delete_on_session_delete` | `boolean` | `false` | Удалять запись при `session.deleted` (v1-приватность; рекомендуется только для sqlite — на централизованных бэкендах удаляет командное знание) |
 | `mainline` | `string` \| `null` | `null` | Основная ветка для промоции; `null` → авто-детект из git (remote HEAD → `init.defaultBranch` → резерв `main`/`master`/`develop`); явный override авторитетен (несуществующее имя → `mainline_unresolved`) |

@@ -1,5 +1,5 @@
 ---
-version: 1
+version: 2
 feature: memory-report-commit-nodes
 added: 2026-09-11
 status: active
@@ -23,7 +23,12 @@ commit-рёбер. Верифицировать:
 - `@maestro-memory` продолжает показывать «Кластеры / граф: <кол-во кластеров>,
   <кол-во связей>» (счётчики из заголовков `Кластеры:` / `Граф (рёбер: N):`).
 - `@maestro-memory-report` рендерит commit-граф: узлы `h:<12 hex>`/`s:<prefix>`,
-  ветки, бейджи ×N, цвета тиров, легенда + таблица узлов; секции 3.1–3.4 не изменились.
+  ветки (merged-узлы → имя mainline; невлитые → своя рабочая ветка; удалённые
+  feature-ветки не показываются), бейджи ×N, цвета тиров, легенда + таблица узлов;
+  секции 3.1–3.4 не изменились.
 - `memory_stats_detail`: записи одного `head` — один узел (sessions=N); head=''
   — unattributed-узлы по сессии; узел без эмбеддингов — изолированный (без рёбер).
 - При `include_text: false` в HTML нет titles/summary/decisions (только агрегаты).
+- `@maestro-memory-report` поднимает preview-сервер (127.0.0.1, state
+  `.maestro/preview-server.json`); остановка `--stop <state-файл>`;
+  `memory.report.preview: false` — без сервера, только HTML.

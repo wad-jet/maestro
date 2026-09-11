@@ -240,7 +240,7 @@ untrusted, access-policy не enforced, дефолтные sanitizer-прави�
     "similarity_threshold": 0.7,
     "retention_days": null,
     "summarize_timeout_ms": 120000,
-    "report": { "include_text": false },
+    "report": { "include_text": false, "preview": true },
     "branch_context": true,
     "mainline": null,
     "embedding": {
@@ -302,6 +302,8 @@ untrusted, access-policy не enforced, дефолтные sanitizer-прави�
   soft-fail → fail-soft; on-demand — `memory_probe`.
 - **`report.include_text`:** `false` (default) — HTML-отчёт только агрегаты
   (SEC-4b); `true` — осознанный opt-in на маскированные тексты.
+- **`report.preview`:** `true` (default) — `@maestro-memory-report` сам запускает
+  локальный preview-сервер (bind `127.0.0.1`, TTL 60 мин); `false` — только HTML-файл.
 - **Хуки:** `tool` (`memory_search`, `memory_forget`, `memory_export`,
   `memory_import`, `memory_recall_preview`, `memory_stats_detail`,
   `memory_prune`), `chat.message`,
