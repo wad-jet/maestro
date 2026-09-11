@@ -640,7 +640,7 @@ test("summarize attaches branch/head (sticky) and merged fast-path", async () =>
   e = client.upserts[1][0];
   assert.equal(e.branch, "feature/x", "sticky branch preserved");
   assert.equal(e.head, "sha1", "sticky head preserved");
-  assert.equal(e.merged, 0, "merged preserved (not reset)");
+  assert.equal(e.merged, 0, "merged=0: sticky branch feature/x (fast-path, head не mainline)");
   assert.equal(e.version, 2);
   idx.dispose();
 });

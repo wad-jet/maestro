@@ -11,6 +11,9 @@ scenarios:
   - path: plugins/maestro-bootstrap/memory/recall.js
     run: node --test plugins/maestro-bootstrap/memory/recall.test.js
     workdir: .
+  - path: plugins/maestro-bootstrap/memory/indexer.js
+    run: node --test plugins/maestro-bootstrap/memory/indexer.test.js
+    workdir: .
   - path: plugins/maestro-bootstrap/memory/index.js
     run: node --test plugins/maestro-bootstrap/memory/index.test.js
     workdir: .
@@ -38,3 +41,6 @@ auto-recall (FTS-нога с masked-запросом без плейсхолде
 - Auto-recall на первом сообщении сессии может инжектить FTS-only хит
   (блок `## Контекст из памяти maestro`); полностью замаскированный запрос —
   short-circuit (блока нет).
+- `merged` у записей feature-ветки — 0 (после ресаммаризации head не в mainline);
+  в отчёте такие узлы показываются как `experience`/своя ветка, не «в main».
+- Инлайн `<redacted>` (key=value) не попадает в FTS-запрос auto-recall.
