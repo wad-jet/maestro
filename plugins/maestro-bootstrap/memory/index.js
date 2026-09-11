@@ -1262,7 +1262,44 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
 
             const threshold = config.similarity_threshold ?? 0.7;
             const clusters = clusterEntries(usable, threshold);
-            const graph = buildGraph(usable, threshold, 500);
+
+            // commit-nodes: группировка по head (по всем строкам scan).
+            // Тиры/ветки — единый membership-проход (tierBySession) для счётчиков
+            // и узлов; fail-soft — merged-флаг.
+            const nodes = buildCommitNodes(rows);
+            const tierBySession = new Map();
+            const tierCounts = { merged: 0, experience: 0, unknown: 0, dead: 0 };
+            const branchCounts = new Map();
+            let failSoft = false;
+            // M-b: computeBranchSets уже вызывает detectMainline — берём mainline
+            // из него (без повторного git-вызова) для mainline_unresolved.
+            const sets = computeBranchSets({ revList, detectMainline, root, mainlineOverride: config.mainline ?? null });
+            failSoft = sets.failSoft;
+            if (rows.length) {
+              if (failSoft) {
+                for (const row of rows) {
+                  if (row.merged === 1) tierCounts.merged++;
+                  tierBySession.set(row.session_id, row.merged === 1 ? "merged" : "unknown");
+                }
+              } else {
+                const r = applyBranchScope(rows, sets);
+                for (const row of rows) {
+                  const sid = row.session_id;
+                  let tier;
+                  if (r.experience.has(sid)) { tierCounts.experience++; tier = "experience"; }
+                  else if (r.inContext.has(sid)) { tierCounts.merged++; tier = "merged"; }
+                  else if (r.unknown.has(sid)) { tierCounts.unknown++; tier = "unknown"; }
+                  else { tierCounts.dead++; tier = "dead"; }
+                  tierBySession.set(sid, tier);
+                }
+              }
+              for (const row of rows) {
+                const b = row.branch ?? "";
+                branchCounts.set(b, (branchCounts.get(b) ?? 0) + 1);
+              }
+            }
+            for (const n of nodes) n.tier = nodeTier(n, tierBySession);
+            const nodeGraph = buildGraph(nodes, threshold, 500, (n) => n.compact);
 
             // I-4: prepend active key / backend / model so `@maestro-memory`
             // can report them without guessing (command template requires them).
@@ -1284,39 +1321,16 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             for (const c of clusters.sort((x, y) => y.size - x.size)) {
               out.push(`  размер ${c.size}: ${c.members.map(([sid]) => sid).join(", ")} (тема: ${c.theme})`);
             }
-            out.push(`Граф (рёбер: ${graph.length}):`);
-            for (const [a, b, s] of graph) out.push(`  ${a} <-> ${b}: ${s.toFixed(2)}`);
-
-            // Task 7: разбивка по тирам (членство Task 6 для текущего checkout)
-            // и по веткам (display, не матчинг). Fail-soft (revList null) →
-            // только merged-счётчики (членство недоступно). M-1: классификация
-            // по ПОЛНОМУ scan (не candidates — тот исключает merged=0 head=''
-            // и unknown-тир всегда был бы 0 в проде).
-            const tierCounts = { merged: 0, experience: 0, unknown: 0, dead: 0 };
-            const branchCounts = new Map();
-            let failSoft = false;
-            // M-b: computeBranchSets уже вызывает detectMainline — берём mainline
-            // из него (без повторного git-вызова) для mainline_unresolved.
-            const sets = computeBranchSets({ revList, detectMainline, root, mainlineOverride: config.mainline ?? null });
-            failSoft = sets.failSoft;
-            if (rows.length) {
-              if (failSoft) {
-                for (const r of rows) if (r.merged === 1) tierCounts.merged++;
-              } else {
-                const r = applyBranchScope(rows, sets);
-                for (const row of rows) {
-                  const sid = row.session_id;
-                  if (r.experience.has(sid)) tierCounts.experience++;
-                  else if (r.inContext.has(sid)) tierCounts.merged++;
-                  else if (r.unknown.has(sid)) tierCounts.unknown++;
-                  else tierCounts.dead++;
-                }
-              }
-              for (const row of rows) {
-                const b = row.branch ?? "";
-                branchCounts.set(b, (branchCounts.get(b) ?? 0) + 1);
-              }
+            const sortedNodes = [...nodes].sort((a, b) => b.sessions - a.sessions).slice(0, 500);
+            const extraNodes = nodes.length - sortedNodes.length;
+            out.push(`Узлы графа (${nodes.length}):`);
+            for (const n of sortedNodes) {
+              out.push(`  ${n.head ? `head=${n.head}` : `ses=${n.ses}`} | branch=${n.branch} | sessions=${n.sessions} | tier=${n.tier} | session_ids=${n.session_ids.join(", ")}`);
             }
+            if (extraNodes > 0) out.push(`  …(+${extraNodes} узлов ещё)`);
+            out.push(`Граф (рёбер: ${nodeGraph.length}):`);
+            for (const [a, b, s] of nodeGraph) out.push(`  ${a} <-> ${b}: ${s.toFixed(2)}`);
+
             out.push("Тиры:");
             if (failSoft) {
               out.push(`  merged: ${tierCounts.merged} (branch-context недоступен — revList failed)`);
