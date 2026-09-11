@@ -93,7 +93,7 @@ export class Recall {
         if (!sets.mainline) {
           noHitsReason = "mainline_unresolved";
           this.log?.debug?.("memory: recall mainline unresolved — flat project search");
-hits = await this.storage.search(vec, this._searchOpts({ query: ftsQuery }));
+          hits = await this.storage.search(vec, this._searchOpts({ query: ftsQuery }));
         } else {
           const candidates = await this.storage.candidates(this.key);
           const candidateIds = candidates.map((c) => c.session_id);
