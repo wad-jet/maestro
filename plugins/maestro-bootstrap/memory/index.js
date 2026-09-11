@@ -850,9 +850,16 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
               // бэкендах вне scope).
               query: args.query,
             };
-            if (args.date_from !== undefined) searchOpts.date_from = args.date_from;
-            if (args.date_to !== undefined) searchOpts.date_to = args.date_to;
-            if (args.author !== undefined) searchOpts.author = args.author;
+            // Guard (spec §3.3): пустые/нулевые фильтры не отсекают выдачу.
+            // author — только непустая после trim строка; в SQL уходит НЕИЗМЕНЁННОЕ
+            // значение (trim — только проверка на пустоту). Даты — только
+            // конечные числа > 0 (epoch 0/отрицательные/NaN — «не заданы»).
+            const numericFilter = (v) => (typeof v === "number" && Number.isFinite(v) && v > 0) ? v : undefined;
+            const dateFrom = numericFilter(args.date_from);
+            const dateTo = numericFilter(args.date_to);
+            if (dateFrom !== undefined) searchOpts.date_from = dateFrom;
+            if (dateTo !== undefined) searchOpts.date_to = dateTo;
+            if (typeof args.author === "string" && args.author.trim() !== "") searchOpts.author = args.author;
             // Task 6: subtree-ноги — domain (родительский префикс, если
             // domain_recall не off) + related-ключи. Явный project → namespace-only
             // (resolveProjectKey бросает на URL/hash — «только namespace»).

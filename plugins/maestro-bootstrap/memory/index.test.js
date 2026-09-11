@@ -570,6 +570,37 @@ test("memory_search passes filters and project (namespace-only → subtree)", as
   }
 });
 
+test("memory_search: empty/zero filters ignored (guard, spec §3.3)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-hooks-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    const seen = [];
+    storage.search = async function (vec, opts) { this.searches++; seen.push(opts); return []; };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    await hooks.tool.memory_search.execute(
+      { query: "x", date_from: 0, date_to: -5, author: "   " },
+      { sessionID: "s1" },
+    );
+    assert.equal(seen.length, 1, "storage.search must be called once");
+    assert.equal(seen[0].date_from, undefined, "date_from=0 → фильтр не применяется");
+    assert.equal(seen[0].date_to, undefined, "отрицательный date_to → фильтр не применяется");
+    assert.equal(seen[0].author, undefined, "пробельный author → фильтр не применяется");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ── memory_forget (Task 6) ─────────────────────────────────────────────
 
 test("memory_forget deletes by author and returns count", async () => {
