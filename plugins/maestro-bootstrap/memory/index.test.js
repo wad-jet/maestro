@@ -1721,8 +1721,8 @@ test("memory_stats_detail: commit-node grouping by head (centroid edge + metadat
     });
     const res = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "s1" });
     assert.match(res, /Узлы графа \(2\):/, "two unique heads → two nodes");
-    assert.match(res, /head=aaaa0000aaaa \| branch= \| sessions=2 \| tier=merged \| session_ids=s1, s2/, "grouped node — merged: branch скрыта");
-    assert.match(res, /head=bbbb0000bbbb \| branch= \| sessions=1 \| tier=merged \| session_ids=s3/, "singleton node — merged: branch скрыта");
+    assert.match(res, /head=aaaa0000aaaa \| branch=main \| sessions=2 \| tier=merged \| session_ids=s1, s2/, "grouped node — merged: branch = mainline (main)");
+    assert.match(res, /head=bbbb0000bbbb \| branch=main \| sessions=1 \| tier=merged \| session_ids=s3/, "singleton node — merged: branch = mainline (main)");
     // рёбро между commit-узлами существует ТОЛЬКО через центроид:
     // по отдельности cos(s1,s3)=0.5 и cos(s2,s3)=0.5 (не > 0.7),
     // центроид A = [0,1,0] → cos(центроидA, s3) = 1.00 (> 0.7)
@@ -1797,7 +1797,7 @@ test("memory_stats_detail: isolated node when no member has embedding", async ()
     });
     const res = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "s1" });
     assert.match(res, /Узлы графа \(2\):/, "two nodes: null-embedding node + embedding node");
-    assert.match(res, /head=eeee0000eeee \| branch= \| sessions=2/, "node counts sessions without embedding (merged → branch hidden)");
+    assert.match(res, /head=eeee0000eeee \| branch=main \| sessions=2/, "node counts sessions without embedding (merged → branch = mainline)");
     assert.match(res, /Граф \(рёбер: 0\):/, "null×embedding pair skipped by guard → no edges");
     await hooks.dispose?.();
   } finally {
