@@ -194,7 +194,8 @@ export class PgVectorStorage {
 
     vectorHits.sort((a, b) => b.score - a.score);
     if (textLists.length) {
-      return (await fuseRrf(vectorHits, textLists, { fetchEntry: (sid) => this._get(sid) })).slice(0, top_k);
+      // I2 (§3.1): единый пост-фильтр min_score после фьюжна (в т.ч. text-only).
+      return (await fuseRrf(vectorHits, textLists, { fetchEntry: (sid) => this._get(sid), minScore: min_score })).slice(0, top_k);
     }
     return vectorHits.slice(0, top_k);
   }

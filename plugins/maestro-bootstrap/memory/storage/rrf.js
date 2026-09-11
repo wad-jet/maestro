@@ -14,10 +14,12 @@
  * @param {number} [opts.K=60] — константа сглаживания RRF.
  * @param {Function} [opts.fetchEntry] — async (session_id) => entry; вызывается
  *   только для text-only хитов (нет entry в vectorHits).
+ * @param {number} [opts.minScore=0] — единый пост-фильтр: хиты с display score
+ *   ниже порога отбрасываются после фьюжна (в т.ч. text-only со score 0.5).
  * @returns {Promise<Array<{entry, score, rrf}>>} — сортировка по rrf desc;
  *   text-only хит получает score: 0.5.
  */
-export async function fuseRrf(vectorHits, textHitLists, { K = 60, fetchEntry } = {}) {
+export async function fuseRrf(vectorHits, textHitLists, { K = 60, fetchEntry, minScore = 0 } = {}) {
   const merged = new Map(); // session_id -> { rrf, entry, score }
   vectorHits.forEach((h, i) => {
     const cur = merged.get(h.entry.session_id) || { rrf: 0, entry: h.entry, score: h.score };
@@ -39,7 +41,7 @@ export async function fuseRrf(vectorHits, textHitLists, { K = 60, fetchEntry } =
     }
   }
   return [...merged.values()]
-    .filter((m) => m.entry)
+    .filter((m) => m.entry && m.score >= minScore)
     .sort((a, b) => b.rrf - a.rrf)
     .map(({ entry, score, rrf }) => ({ entry, score, rrf }));
 }

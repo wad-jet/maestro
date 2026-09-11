@@ -186,7 +186,8 @@ export class QdrantStorage {
     vectorHits.sort((a, b) => b.score - a.score);
     if (textLists.length) {
       // C2: кап результата фузии до top_k (паритет с sqlite/pgvector).
-      const fused = await fuseRrf(vectorHits, textLists, { fetchEntry: (sid) => this._get(sid) });
+      // I2 (§3.1): единый пост-фильтр min_score после фьюжна (в т.ч. text-only).
+      const fused = await fuseRrf(vectorHits, textLists, { fetchEntry: (sid) => this._get(sid), minScore: min_score });
       return fused.slice(0, top_k);
     }
     return vectorHits.slice(0, top_k);

@@ -382,7 +382,8 @@ export class SqliteStorage {
     }
     allVector.sort((a, b) => b.score - a.score);
     // Единый RRF-фьюжн по всем ключам (модель сверена → скоры сравнимы).
-    const fused = await fuseRrf(allVector, textLists, { fetchEntry: (sid) => this._get(sid) });
+    // I2 (§3.1): единый пост-фильтр min_score после фьюжна (в т.ч. text-only).
+    const fused = await fuseRrf(allVector, textLists, { fetchEntry: (sid) => this._get(sid), minScore: min_score });
     return fused.slice(0, top_k);
   }
 
