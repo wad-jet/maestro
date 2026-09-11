@@ -49,6 +49,11 @@ test("sqlite (node:sqlite driver) hybrid: text-only FTS hit dropped when min_sco
     await st.upsert([mkEntry("s1", "k1", "OAuth token refresh", { embedding: new Float32Array([1, 0, 0]) })]);
     const hits = await st.search(new Float32Array([0, 1, 0]), { top_k: 5, min_score: 0.7, key: "k1", query: "OAuth" });
     assert.equal(hits.length, 0, "text-only hit below min_score must be dropped");
+    // Positive control: тот же FTS-only хит (score 0.5) проходит при min_score ≤ 0.5.
+    // Защищает тест от vacuous-pass — если FTS-ветка сломается, упадёт здесь.
+    const hitsLow = await st.search(new Float32Array([0, 1, 0]), { top_k: 5, min_score: 0.3, key: "k1", query: "OAuth" });
+    assert.equal(hitsLow.length, 1, "text-only hit must pass at min_score ≤ 0.5");
+    assert.equal(hitsLow[0].entry.session_id, "s1");
   } finally {
     await st.dispose();
     rmSync(dir, { recursive: true, force: true });
