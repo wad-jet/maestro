@@ -1,5 +1,5 @@
 ---
-description: Сгенерировать статический HTML-отчёт по memory layer (агрегаты, гистограмма, кластеры, граф, SEC-4b)
+description: Сгенерировать статический HTML-отчёт по memory layer (агрегаты, гистограмма, кластеры, commit-граф, SEC-4b)
 ---
 
 # @maestro-memory-report

@@ -1727,6 +1727,12 @@ test("memory_stats_detail: commit-node grouping by head (centroid edge + metadat
     // по отдельности cos(s1,s3)=0.5 и cos(s2,s3)=0.5 (не > 0.7),
     // центроид A = [0,1,0] → cos(центроидA, s3) = 1.00 (> 0.7)
     assert.match(res, /h:aaaa0000aaaa <-> h:bbbb0000bbbb: 1\.00/, "edge exists ONLY via centroid");
+    // Инвариант счётчика рёбер (spec §6.4): заголовок «Граф (рёбер: N):»
+    // должен совпадать с фактическим числом строк рёбер (h:/s:).
+    const graphBlock = res.match(/Граф \(рёбер: (\d+)\):([\s\S]*?)(?=\nТиры:|\nУзлы|\n$)/)?.[0] ?? "";
+    const declared = Number(res.match(/Граф \(рёбер: (\d+)\):/)?.[1] ?? -1);
+    const edgeLines = graphBlock.split("\n").filter((l) => l.trim().startsWith("h:") || l.trim().startsWith("s:")).length;
+    assert.equal(declared, edgeLines, "edge count in header matches number of edge lines");
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
@@ -1810,6 +1816,10 @@ test("memory_stats_detail: node tier = most restrictive member (merged vs experi
     storage.stats = async () => ({ entries: 2 });
     // hp: s1 merged=1 → merged; s2 merged=0, head∈ancestorSet(HEAD) но ∉ mainline
     // → experience. Один head → тир узла = experience (приоритет).
+    // Тир в группе классифицируется по head (applyBranchScope) — в одной группе
+    // достижимы только пары «merged vs X»; unknown покрывается
+    // fail-soft/unattributed-тестом, полная цепочка dead>unknown>experience>merged
+    // задана порядком TIER_PRIORITY (проверяется парами dead>merged, experience>merged).
     storage.scan = async () => [
       { session_id: "s1", title: "T1", author: "a", time_last: 1000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]), merged: 1, head: "hp", branch: "feature/p" },
       { session_id: "s2", title: "T2", author: "a", time_last: 2000, origin_project_hash: "h", embedding: new Float32Array([0.9, 0.1, 0]), merged: 0, head: "hp", branch: "feature/p" },
