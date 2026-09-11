@@ -88,7 +88,8 @@
 - `plugins/maestro-bootstrap/` — логика плагина (core.js, index.js, тесты).
 - `plugins/maestro-bootstrap/memory/` — **опциональный** модуль памяти сессий
   (векторное хранилище sqlite/qdrant/pgvector, эмбеддинги, саммаризатор, recall,
-  гибридный FTS5-поиск, инструменты `memory_search`/`memory_forget`/
+  гибридный FTS5-поиск (включая auto-recall; единый пост-фильтр min_score после RRF-фьюжн),
+  инструменты `memory_search`/`memory_forget`/
   `memory_export`/`memory_import`/`memory_recall_preview`/`memory_stats_detail`/
   `memory_probe`);
   **branch-aware (v3):** идентичность записи по коммиту (`head`), commit-scoped

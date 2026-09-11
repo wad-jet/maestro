@@ -640,7 +640,7 @@ test("summarize attaches branch/head (sticky) and merged fast-path", async () =>
   e = client.upserts[1][0];
   assert.equal(e.branch, "feature/x", "sticky branch preserved");
   assert.equal(e.head, "sha1", "sticky head preserved");
-  assert.equal(e.merged, 0, "merged preserved (not reset)");
+  assert.equal(e.merged, 0, "merged=0: sticky branch feature/x (fast-path, head не mainline)");
   assert.equal(e.version, 2);
   idx.dispose();
 });
@@ -710,6 +710,71 @@ test("branch==mainline → merged=1 fast-path; mainline unresolved → merged=0"
   assert.equal(client2.upserts[0][0].merged, 0, "mainline unresolved → merged=0");
   idx.dispose();
   idx2.dispose();
+});
+
+// ── follow-up 2026-09-11: merged пересчитывается по head-ancestry (не липкий) ──
+
+test("merged recomputed by head ancestry — existing merged=1 with head NOT in mainline → 0", async () => {
+  const client = mkClient();
+  // existing.merged=1 (запись была в main), но текущий head — feature-ветка.
+  // Липкое правило оставило бы 1 (баг); новое — пересчитывает по isAncestor → 0.
+  const storage = mkStorage(client, async () => ({ merged: 1 }));
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: {
+      resolveBranch: async () => "feature/x",
+      resolveHead: async () => "feat-head",
+      isAncestor: async () => "no",
+    },
+    mainline: "main",
+  });
+  await idx._run("s1");
+  assert.equal(client.upserts[0][0].merged, 0, "head вне mainline → merged=0 (не липкий)");
+  idx.dispose();
+});
+
+test("merged=1 when head is ancestor of mainline (isAncestor yes)", async () => {
+  const client = mkClient();
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client), state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: {
+      resolveBranch: async () => "feature/x",
+      resolveHead: async () => "main-head",
+      isAncestor: async () => "yes",
+    },
+    mainline: "main",
+  });
+  await idx._run("s1");
+  assert.equal(client.upserts[0][0].merged, 1, "head ∈ mainline → merged=1");
+  idx.dispose();
+});
+
+test("merged fast-path fallback when isAncestor errors", async () => {
+  const client = mkClient();
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client), state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: {
+      resolveBranch: async () => "main",
+      resolveHead: async () => "sha1",
+      isAncestor: async () => "error",
+    },
+    mainline: "main",
+  });
+  await idx._run("s1");
+  assert.equal(client.upserts[0][0].merged, 1, "isAncestor error → fast-path branch===mainline");
+  idx.dispose();
 });
 
 test("detached → branch='' but head recorded", async () => {

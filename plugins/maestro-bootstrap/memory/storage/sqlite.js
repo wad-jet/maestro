@@ -382,7 +382,8 @@ export class SqliteStorage {
     }
     allVector.sort((a, b) => b.score - a.score);
     // Единый RRF-фьюжн по всем ключам (модель сверена → скоры сравнимы).
-    const fused = await fuseRrf(allVector, textLists, { fetchEntry: (sid) => this._get(sid) });
+    // I2 (§3.1): единый пост-фильтр min_score после фьюжна (в т.ч. text-only).
+    const fused = await fuseRrf(allVector, textLists, { fetchEntry: (sid) => this._get(sid), minScore: min_score });
     return fused.slice(0, top_k);
   }
 
@@ -564,7 +565,10 @@ export class SqliteStorage {
     const tokens = query.split(/\s+/).filter(Boolean);
     let ftsHits = [];
     if (tokens.length) {
-      const match = tokens.map((t) => `"${t.replace(/"/g, '""')}"*`).join(" ");
+      // OR-матчинг: bm25 ранжирует многословные совпадения выше;
+      // префиксы покрывают русскую морфологию («отчёт*» → «отчёта»),
+      // суффиксные формы («памяти») ловит семантическая нога.
+      const match = tokens.map((t) => `"${t.replace(/"/g, '""')}"*`).join(" OR ");
       const ftsConds = ["memory_fts MATCH ?", "memory.key = ?"];
       const ftsParams = [match, k];
       if (date_from !== undefined) { ftsConds.push("memory.time_last >= ?"); ftsParams.push(date_from); }

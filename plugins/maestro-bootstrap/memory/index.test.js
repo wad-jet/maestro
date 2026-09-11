@@ -570,6 +570,37 @@ test("memory_search passes filters and project (namespace-only → subtree)", as
   }
 });
 
+test("memory_search: empty/zero filters ignored (guard, spec §3.3)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-hooks-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    const seen = [];
+    storage.search = async function (vec, opts) { this.searches++; seen.push(opts); return []; };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    await hooks.tool.memory_search.execute(
+      { query: "x", date_from: 0, date_to: -5, author: "   " },
+      { sessionID: "s1" },
+    );
+    assert.equal(seen.length, 1, "storage.search must be called once");
+    assert.equal(seen[0].date_from, undefined, "date_from=0 → фильтр не применяется");
+    assert.equal(seen[0].date_to, undefined, "отрицательный date_to → фильтр не применяется");
+    assert.equal(seen[0].author, undefined, "пробельный author → фильтр не применяется");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 // ── memory_forget (Task 6) ─────────────────────────────────────────────
 
 test("memory_forget deletes by author and returns count", async () => {
@@ -1612,7 +1643,7 @@ test("memory_recall_preview empty returns message", async () => {
       deps: { storage, embeddings: mkMockEmbeddings() },
     });
     const res = await hooks.tool.memory_recall_preview.execute({ query: "x" }, { sessionID: "s1" });
-    assert.equal(res, "Ничего не найдено.");
+    assert.equal(res, "Ничего не найдено (порог min_score 0.35, scope project).");
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
@@ -4102,6 +4133,91 @@ test("I2: memory_migrate from:auto resolves scp-remote without user (gitlab.exam
     );
     assert.match(seen[0].from, /^[0-9a-f]{64}$/);
     assert.equal(seen[0].to, "test.ns");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── Шапка результата (spec §3.4) ────────────────────────────────────────
+
+test("memory_search: result header with min_score and effective scope", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-hooks-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.search = async () => [
+      { entry: { session_id: "a", title: "A", summary: "SA", decisions: [], author: "alice", time_last: 1, origin_project_hash: "h", merged: 1 }, score: 0.9 },
+    ];
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    const res = await hooks.tool.memory_search.execute({ query: "x", scope: "project" }, { sessionID: "s1" });
+    const lines = res.split("\n");
+    assert.match(lines[0], /Исторический справочный контекст/, "disclaimer остаётся первой строкой");
+    assert.equal(lines[1], "Найдено: 1 (порог min_score 0.35, scope project)");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_search: empty result carries threshold and effective scope", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-hooks-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.search = async () => [];
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    const res = await hooks.tool.memory_search.execute({ query: "x", scope: "project" }, { sessionID: "s1" });
+    assert.equal(res, "Ничего не найдено в памяти (порог min_score 0.35, scope project).");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_recall_preview: header and effective scope (flat → project)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-hooks-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.search = async () => [
+      { entry: { session_id: "a", title: "A", summary: "SA", decisions: [], author: "alice", time_last: 1700000000000, origin_project_hash: "h", merged: 1 }, score: 0.9 },
+    ];
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    const res = await hooks.tool.memory_recall_preview.execute({ query: "x" }, { sessionID: "s1" });
+    const lines = res.split("\n");
+    assert.match(lines[0], /Исторический справочный контекст/, "disclaimer первая строка");
+    assert.equal(lines[1], "Найдено: 1 (порог min_score 0.35, scope project)", "git не подключён → flat → project");
+    storage.search = async () => [];
+    const res2 = await hooks.tool.memory_recall_preview.execute({ query: "x" }, { sessionID: "s1" });
+    assert.equal(res2, "Ничего не найдено (порог min_score 0.35, scope project).");
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
