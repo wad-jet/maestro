@@ -103,7 +103,7 @@ primary-сессия при чтении того же файла получае
 ### `@maestro-memory-report`
 
 Генерация самодостаточного статического HTML-отчёта по memory layer
-(агрегаты, timeline-гистограмма, кластеры, граф; SEC-4b) в
+(агрегаты, timeline-гистограмма, кластеры, commit-граф по head с тирами; SEC-4b) в
 `.maestro/memory-report-<YYYYMMDD-HHMMSS>.html`. Подробнее —
 [Память](../reference/memory.md).
 
