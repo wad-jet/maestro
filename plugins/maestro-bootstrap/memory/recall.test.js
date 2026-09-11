@@ -299,3 +299,79 @@ test("systemBlock header mentions related domains", async () => {
   const block = await r.systemBlock({ sessionID: "s1" });
   assert.ok(block.includes("этого проекта и связанных доменов"), "header must mention related domains");
 });
+
+// ── Hybrid auto-recall: FTS-нога (spec §3.2) ─────────────────────────────
+
+test("recall hybrid: passes masked query as FTS leg (query capture)", async () => {
+  const { embedder } = mkDeps();
+  const seen = [];
+  const storage = { search: async (emb, o) => { seen.push(o); return []; } };
+  const r = new Recall({
+    embeddings: embedder, storage, topK: 3, minScore: 0.35, key: "project-key",
+    getUserMessageCount: async () => 1, branchContext: false,
+  });
+  await r.onChatMessage({ sessionID: "s1", text: "hello feature" });
+  assert.equal(seen.length, 1);
+  assert.equal(seen[0].query, "hello feature", "FTS-нога получает masked query");
+});
+
+test("recall hybrid: placeholder lines stripped from FTS query; embed keeps full masked (I1)", async () => {
+  const embedCalls = [];
+  const embedder = { embed: async (t) => { embedCalls.push(t); return new Float32Array([0.1, 0.2, 0.3]); }, dim: 3, modelId: "m" };
+  const seen = [];
+  const storage = { search: async (emb, o) => { seen.push(o); return []; } };
+  const r = new Recall({
+    embeddings: embedder, storage, topK: 3, minScore: 0.35, key: "project-key",
+    getUserMessageCount: async () => 1, branchContext: false,
+    confidentialPatterns: ["docs/confidential/**"],
+  });
+  await r.onChatMessage({ sessionID: "s1", text: "docs/confidential/roadmap.md\nwhat is the date" });
+  assert.equal(embedCalls.length, 1);
+  assert.ok(!embedCalls[0].includes("docs/confidential/roadmap.md"), "embed: raw-путь замаскирован");
+  assert.ok(embedCalls[0].includes("[confidential]"), "embed: полный masked (плейсхолдер сохранён)");
+  assert.equal(seen[0].query, "what is the date", "FTS-нога: плейсхолдер-строки вырезаны");
+});
+
+test("recall hybrid: all-masked multi-line query → vector-only (ftsQuery empty)", async () => {
+  const embedCalls = [];
+  const embedder = { embed: async (t) => { embedCalls.push(t); return new Float32Array([0.1, 0.2, 0.3]); }, dim: 3, modelId: "m" };
+  const seen = [];
+  const storage = { search: async (emb, o) => { seen.push(o); return []; } };
+  const r = new Recall({
+    embeddings: embedder, storage, topK: 3, minScore: 0.35, key: "project-key",
+    getUserMessageCount: async () => 1, branchContext: false,
+    confidentialPatterns: ["docs/confidential/**"],
+  });
+  await r.onChatMessage({ sessionID: "s1", text: "docs/confidential/a.md\ndocs/confidential/b.md" });
+  assert.equal(seen.length, 1, "поиск выполняется (векторный fallback)");
+  assert.equal(seen[0].query, "", "FTS-текст пуст → FTS-нога не выполняется");
+});
+
+test("recall hybrid: branch scope × FTS — out-of-context FTS-only hit dropped, merged kept (spec §4)", async () => {
+  const storage = {
+    candidates: async () => [
+      { session_id: "a", merged: 1, head: "" },
+      { session_id: "d", merged: 0, head: "hd" },
+    ],
+    search: async (emb, o) => {
+      assert.equal(o.query, "hello feature", "FTS-нога передана и в branch-scope пути");
+      return [
+        { entry: { session_id: "a", title: "A", summary: "SA", decisions: [], author: "a", time_last: 1, origin_project_hash: "k", merged: 1 }, score: 0.5 },
+        { entry: { session_id: "d", title: "D", summary: "SD", decisions: [], author: "a", time_last: 2, origin_project_hash: "k", merged: 0 }, score: 0.5 },
+      ];
+    },
+  };
+  const r = new Recall({
+    embeddings: mkDeps().embedder, storage, topK: 3, minScore: 0.35, key: "project-key",
+    getUserMessageCount: async () => 1, branchContext: true,
+    git: {
+      revList: (root, ref) => (ref === "HEAD" ? new Set(["hb"]) : new Set()),
+      detectMainline: () => ({ name: "main" }),
+    },
+    root: "/tmp/x",
+  });
+  await r.onChatMessage({ sessionID: "s1", text: "hello feature" });
+  const block = await r.systemBlock({ sessionID: "s1" });
+  assert.ok(block.includes("A"), "merged sibling (в членстве) FTS-only хит сохранён");
+  assert.ok(!block.includes("D"), "FTS-only хит вне branch-context отброшен");
+});

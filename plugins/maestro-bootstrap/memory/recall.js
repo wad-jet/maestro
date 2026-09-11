@@ -57,6 +57,15 @@ export class Recall {
       // всего поиска: ни embed, ни FTS (follow-up 3).
       const masked = maskTranscript(text, { confidentialPatterns: this.confidentialPatterns });
       if (!masked || masked.trim() === "[confidential]") { this.buffer.set(sessionID, []); return; }
+      // Hybrid (spec §3.2): FTS-нога получает masked-запрос без строк-плейсхолдеров —
+      // токен плейсхолдера (OR-терм после AND→OR) матчаил бы все замаскированные
+      // записи. Вход эмбеддера не меняется (полный masked). Пустой FTS-текст →
+      // векторный fallback (storage сам пропускает пустой query).
+      const ftsQuery = masked
+        .split("\n")
+        .filter((l) => l.trim() !== "[confidential]")
+        .join("\n")
+        .trim();
       // Task 4: замер embed+search (effectiveness-события, spec §4.2).
       const started = Date.now();
       const vec = await this.embeddings.embed(masked);
@@ -84,13 +93,13 @@ export class Recall {
         if (!sets.mainline) {
           noHitsReason = "mainline_unresolved";
           this.log?.debug?.("memory: recall mainline unresolved — flat project search");
-          hits = await this.storage.search(vec, this._searchOpts());
+hits = await this.storage.search(vec, this._searchOpts({ query: ftsQuery }));
         } else {
           const candidates = await this.storage.candidates(this.key);
           const candidateIds = candidates.map((c) => c.session_id);
           if (candidateIds.length === 0) noHitsReason = "no_candidates";
           const { inContext } = applyBranchScope(candidates, sets);
-          hits = (await this.storage.search(vec, this._searchOpts({ filterSessionIds: candidateIds })))
+          hits = (await this.storage.search(vec, this._searchOpts({ filterSessionIds: candidateIds, query: ftsQuery })))
             .filter((h) => h.entry.merged === 1 || inContext.has(h.entry.session_id));
         }
       } else {
@@ -98,7 +107,7 @@ export class Recall {
         if (scope === "branch") {
           this.log?.debug?.("memory: recall branch scope requested but git not wired — flat project search");
         }
-        hits = await this.storage.search(vec, this._searchOpts());
+        hits = await this.storage.search(vec, this._searchOpts({ query: ftsQuery }));
       }
       // Task 4: effectiveness-события (spec §4.2/§4.4). Поля — только
       // счётчики/тайминги/scope (field whitelist §3: без текста запроса).
