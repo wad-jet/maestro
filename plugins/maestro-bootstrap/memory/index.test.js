@@ -1681,8 +1681,199 @@ test("memory_stats_detail graph edges above threshold", async () => {
     });
     const res = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "s1" });
     assert.match(res, /Граф/, "must include graph section");
-    assert.match(res, /s1.*s2/, "similar pair must be an edge");
+    assert.match(res, /s:s1 <-> s:s2/, "similar pair must be an edge (ses compact keys)");
     assert.doesNotMatch(res, /s1.*s3/, "orthogonal pair must NOT be an edge");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_stats_detail: commit-node grouping by head (centroid edge + metadata)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-cn-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.stats = async () => ({ entries: 3 });
+    // s1+s2 — один head (группа A); s3 — другой head (B). Центроид A
+    // преодолевает порог к B, хотя ни s1, ни s2 по отдельности не преодолевают:
+    // cos(s1,s3)=0.5, cos(s2,s3)=0.5 (< 0.7), а центроид A = normalize([0,1,0])
+    // = [0,1,0] → cos(центроидA, s3) = 1.00 (> 0.7). Эффект центроида изолирован.
+    storage.scan = async () => [
+      { session_id: "s1", title: "T1", author: "a", time_last: 1000, origin_project_hash: "h", embedding: new Float32Array([0.866, 0.5, 0]), merged: 1, head: "aaaa0000aaaa", branch: "main" },
+      { session_id: "s2", title: "T2", author: "a", time_last: 2000, origin_project_hash: "h", embedding: new Float32Array([-0.866, 0.5, 0]), merged: 1, head: "aaaa0000aaaa", branch: "main" },
+      { session_id: "s3", title: "T3", author: "b", time_last: 3000, origin_project_hash: "h", embedding: new Float32Array([0, 1, 0]), merged: 1, head: "bbbb0000bbbb", branch: "feature/x" },
+    ];
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      revList: () => new Set(),
+      isAncestor: () => "no",
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+    const res = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "s1" });
+    assert.match(res, /Узлы графа \(2\):/, "two unique heads → two nodes");
+    assert.match(res, /head=aaaa0000aaaa \| branch=main \| sessions=2 \| tier=merged \| session_ids=s1, s2/, "grouped node metadata");
+    assert.match(res, /head=bbbb0000bbbb \| branch=feature\/x \| sessions=1 \| tier=merged \| session_ids=s3/, "singleton node");
+    // рёбро между commit-узлами существует ТОЛЬКО через центроид:
+    // по отдельности cos(s1,s3)=0.5 и cos(s2,s3)=0.5 (не > 0.7),
+    // центроид A = [0,1,0] → cos(центроидA, s3) = 1.00 (> 0.7)
+    assert.match(res, /h:aaaa0000aaaa <-> h:bbbb0000bbbb: 1\.00/, "edge exists ONLY via centroid");
+    // Инвариант счётчика рёбер (spec §6.4): заголовок «Граф (рёбер: N):»
+    // должен совпадать с фактическим числом строк рёбер (h:/s:).
+    const graphBlock = res.match(/Граф \(рёбер: (\d+)\):([\s\S]*?)(?=\nТиры:|\nУзлы|\n$)/)?.[0] ?? "";
+    const declared = Number(res.match(/Граф \(рёбер: (\d+)\):/)?.[1] ?? -1);
+    const edgeLines = graphBlock.split("\n").filter((l) => l.trim().startsWith("h:") || l.trim().startsWith("s:")).length;
+    assert.equal(declared, edgeLines, "edge count in header matches number of edge lines");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_stats_detail: unattributed (head='') node per session", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-cn-unatt-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.stats = async () => ({ entries: 2 });
+    storage.scan = async () => [
+      { session_id: "u1", title: "T1", author: "a", time_last: 1000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]), merged: 0, head: "", branch: "" },
+      { session_id: "u2", title: "T2", author: "a", time_last: 2000, origin_project_hash: "h", embedding: new Float32Array([0.9, 0.1, 0]), merged: 0, head: "", branch: "" },
+    ];
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    const res = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "s1" });
+    assert.match(res, /Узлы графа \(2\):/, "two headless sessions → two unattributed nodes");
+    assert.match(res, /ses=u1 \| branch= \| sessions=1 \| tier=unknown \| session_ids=u1/, "unattributed node u1");
+    assert.match(res, /ses=u2 \| branch= \| sessions=1 \| tier=unknown \| session_ids=u2/, "unattributed node u2");
+    assert.match(res, /s:u1 <-> s:u2/, "edge between unattributed nodes by ses key");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_stats_detail: isolated node when no member has embedding", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-cn-iso-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.stats = async () => ({ entries: 3 });
+    // Узел eeee — БЕЗ embedding у ВСЕХ сессий (e1, e2: embedding=null) →
+    // centroid = null → изолирован. Узел ffff — с embedding. Пара
+    // «null-узел × узел с embedding» пропускается null-гардом buildGraph.
+    storage.scan = async () => [
+      { session_id: "e1", title: "T1", author: "a", time_last: 1000, origin_project_hash: "h", embedding: null, merged: 1, head: "eeee0000eeee", branch: "main" },
+      { session_id: "e2", title: "T2", author: "a", time_last: 2000, origin_project_hash: "h", embedding: null, merged: 1, head: "eeee0000eeee", branch: "main" },
+      { session_id: "e3", title: "T3", author: "b", time_last: 3000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]), merged: 1, head: "ffff0000ffff", branch: "main" },
+    ];
+    const git = { detectMainline: () => ({ name: "main" }), revList: () => new Set(), isAncestor: () => "no" };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+    const res = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "s1" });
+    assert.match(res, /Узлы графа \(2\):/, "two nodes: null-embedding node + embedding node");
+    assert.match(res, /head=eeee0000eeee \| branch=main \| sessions=2/, "node counts sessions without embedding");
+    assert.match(res, /Граф \(рёбер: 0\):/, "null×embedding pair skipped by guard → no edges");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_stats_detail: node tier = most restrictive member (merged vs experience)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-cn-tier-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.stats = async () => ({ entries: 2 });
+    // hp: s1 merged=1 → merged; s2 merged=0, head∈ancestorSet(HEAD) но ∉ mainline
+    // → experience. Один head → тир узла = experience (приоритет).
+    // Тир в группе классифицируется по head (applyBranchScope) — в одной группе
+    // достижимы только пары «merged vs X»; unknown покрывается
+    // fail-soft/unattributed-тестом, полная цепочка dead>unknown>experience>merged
+    // задана порядком TIER_PRIORITY (проверяется парами dead>merged, experience>merged).
+    storage.scan = async () => [
+      { session_id: "s1", title: "T1", author: "a", time_last: 1000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]), merged: 1, head: "hp", branch: "feature/p" },
+      { session_id: "s2", title: "T2", author: "a", time_last: 2000, origin_project_hash: "h", embedding: new Float32Array([0.9, 0.1, 0]), merged: 0, head: "hp", branch: "feature/p" },
+    ];
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      revList: (root, ref) => (ref === "HEAD" ? new Set(["hp"]) : new Set()),
+      isAncestor: () => "no",
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+    const res = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "s1" });
+    assert.match(res, /head=hp \| branch=feature\/p \| sessions=2 \| tier=experience \| session_ids=s1, s2/, "node tier = experience (priority over merged)");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_stats_detail: node tier = dead wins over merged (dead > merged priority)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-cn-tier-dead-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.stats = async () => ({ entries: 2 });
+    // hd: s1 merged=1 → merged; s2 merged=0, head ∉ ancestorSet/mainlineSet
+    // (revList HEAD и main пустые) → dead. Один head → тир узла = dead
+    // (приоритет dead > merged).
+    storage.scan = async () => [
+      { session_id: "s1", title: "T1", author: "a", time_last: 1000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]), merged: 1, head: "hd", branch: "feature/d" },
+      { session_id: "s2", title: "T2", author: "a", time_last: 2000, origin_project_hash: "h", embedding: new Float32Array([0.9, 0.1, 0]), merged: 0, head: "hd", branch: "feature/d" },
+    ];
+    const git = {
+      detectMainline: () => ({ name: "main" }),
+      revList: () => new Set(),
+      isAncestor: () => "no",
+    };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git },
+    });
+    const res = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "s1" });
+    assert.match(res, /head=hd \| branch=feature\/d \| sessions=2 \| tier=dead \| session_ids=s1, s2/, "node tier = dead (priority over merged)");
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;

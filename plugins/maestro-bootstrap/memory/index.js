@@ -232,24 +232,108 @@ function clusterEntries(entries, threshold) {
 
 /**
  * Pairwise cosine graph edges (unordered pairs, deduped) above threshold,
- * capped at `cap` edges (report scale guard).
- * @param {Array<{session_id: string, embedding: Float32Array}>} entries
+ * capped at `cap` edges (report scale guard). Entries without a valid
+ * embedding (isolated nodes) are skipped — they produce no edges.
+ * @param {Array<{session_id: string, embedding: Float32Array|null}>} entries
  * @param {number} threshold
  * @param {number} cap
+ * @param {Function} idFn  Edge endpoint id extractor; default `(e) => e.session_id`.
  * @returns {Array<[string, string, number]>}
  */
-function buildGraph(entries, threshold, cap = 500) {
+function buildGraph(entries, threshold, cap = 500, idFn = (e) => e.session_id) {
   const edges = [];
   for (let i = 0; i < entries.length; i++) {
     for (let j = i + 1; j < entries.length; j++) {
+      if (!entries[i].embedding || !entries[j].embedding) continue;
       const score = cosine(entries[i].embedding, entries[j].embedding);
       if (score > threshold) {
-        edges.push([entries[i].session_id, entries[j].session_id, score]);
+        edges.push([idFn(entries[i]), idFn(entries[j]), score]);
         if (edges.length >= cap) return edges;
       }
     }
   }
   return edges;
+}
+
+/**
+ * Unit-norm centroid of a set of normalized vectors (mean, renormalized).
+ * @param {Float32Array[]} vectors
+ * @returns {Float32Array|null}  null when vectors is empty.
+ */
+function centroid(vectors) {
+  if (!vectors.length) return null;
+  const dim = vectors[0].length;
+  const sum = new Float32Array(dim);
+  for (const v of vectors) for (let i = 0; i < dim; i++) sum[i] += v[i];
+  let norm = 0;
+  for (let i = 0; i < dim; i++) norm += sum[i] * sum[i];
+  norm = Math.sqrt(norm) || 1;
+  for (let i = 0; i < dim; i++) sum[i] /= norm;
+  return sum;
+}
+
+/**
+ * Node tier priority: dead > unknown > experience > merged (most restrictive wins).
+ */
+const TIER_PRIORITY = { dead: 3, unknown: 2, experience: 1, merged: 0 };
+
+/**
+ * Commit-graph nodes from scan rows: sessions grouped by head (record identity
+ * in memory v3+); head='' → unattributed node per session (key ses:<sid>).
+ * Node embedding = centroid of member embeddings (members with a
+ * Float32Array embedding); node without any embedding is isolated (present,
+ * but no edges). Branch = branch of the member with the latest time_last;
+ * on equal time_last the later row in scan order wins.
+ * @param {Array<object>} rows  scan rows (session_id, head, branch, merged,
+ *   time_last, embedding)
+ * @returns {Array<object>} nodes
+ */
+function buildCommitNodes(rows) {
+  const groups = new Map();
+  for (const r of rows) {
+    const head = r.head ?? "";
+    const key = head ? `head:${head}` : `ses:${r.session_id}`;
+    let node = groups.get(key);
+    if (!node) {
+      node = { key, head, ses: head ? "" : r.session_id, branch: "", sessions: 0, session_ids: [], vectors: [], lastTime: -Infinity };
+      groups.set(key, node);
+    }
+    node.sessions++;
+    node.session_ids.push(r.session_id);
+    const ts = r.time_last ?? 0;
+    if (ts >= node.lastTime) {
+      node.lastTime = ts;
+      node.branch = r.branch ?? "";
+    }
+    if (r.embedding instanceof Float32Array) node.vectors.push(r.embedding);
+  }
+  const nodes = [];
+  for (const node of groups.values()) {
+    node.compact = node.head ? `h:${node.head.slice(0, 12)}` : `s:${node.ses.slice(0, 12)}`;
+    node.embedding = centroid(node.vectors);
+    delete node.vectors;
+    nodes.push(node);
+  }
+  return nodes;
+}
+
+/**
+ * Node tier = most restrictive member tier (dead > unknown > experience > merged).
+ * Missing per-session tier → unknown.
+ * @param {{session_ids: string[]}} node
+ * @param {Map<string,string>} tierBySession
+ * @returns {string}
+ */
+function nodeTier(node, tierBySession) {
+  let prio = -1;
+  let tier = "merged";
+  for (const sid of node.session_ids) {
+    const raw = tierBySession.get(sid);
+    const t = raw && TIER_PRIORITY[raw] !== undefined ? raw : "unknown";
+    const p = TIER_PRIORITY[t];
+    if (p > prio) { prio = p; tier = t; }
+  }
+  return tier;
 }
 
 /**
@@ -1178,7 +1262,44 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
 
             const threshold = config.similarity_threshold ?? 0.7;
             const clusters = clusterEntries(usable, threshold);
-            const graph = buildGraph(usable, threshold, 500);
+
+            // commit-nodes: группировка по head (по всем строкам scan).
+            // Тиры/ветки — единый membership-проход (tierBySession) для счётчиков
+            // и узлов; fail-soft — merged-флаг.
+            const nodes = buildCommitNodes(rows);
+            const tierBySession = new Map();
+            const tierCounts = { merged: 0, experience: 0, unknown: 0, dead: 0 };
+            const branchCounts = new Map();
+            let failSoft = false;
+            // M-b: computeBranchSets уже вызывает detectMainline — берём mainline
+            // из него (без повторного git-вызова) для mainline_unresolved.
+            const sets = computeBranchSets({ revList, detectMainline, root, mainlineOverride: config.mainline ?? null });
+            failSoft = sets.failSoft;
+            if (rows.length) {
+              if (failSoft) {
+                for (const row of rows) {
+                  if (row.merged === 1) tierCounts.merged++;
+                  tierBySession.set(row.session_id, row.merged === 1 ? "merged" : "unknown");
+                }
+              } else {
+                const r = applyBranchScope(rows, sets);
+                for (const row of rows) {
+                  const sid = row.session_id;
+                  let tier;
+                  if (r.experience.has(sid)) { tierCounts.experience++; tier = "experience"; }
+                  else if (r.inContext.has(sid)) { tierCounts.merged++; tier = "merged"; }
+                  else if (r.unknown.has(sid)) { tierCounts.unknown++; tier = "unknown"; }
+                  else { tierCounts.dead++; tier = "dead"; }
+                  tierBySession.set(sid, tier);
+                }
+              }
+              for (const row of rows) {
+                const b = row.branch ?? "";
+                branchCounts.set(b, (branchCounts.get(b) ?? 0) + 1);
+              }
+            }
+            for (const n of nodes) n.tier = nodeTier(n, tierBySession);
+            const nodeGraph = buildGraph(nodes, threshold, 500, (n) => n.compact);
 
             // I-4: prepend active key / backend / model so `@maestro-memory`
             // can report them without guessing (command template requires them).
@@ -1200,39 +1321,16 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             for (const c of clusters.sort((x, y) => y.size - x.size)) {
               out.push(`  размер ${c.size}: ${c.members.map(([sid]) => sid).join(", ")} (тема: ${c.theme})`);
             }
-            out.push(`Граф (рёбер: ${graph.length}):`);
-            for (const [a, b, s] of graph) out.push(`  ${a} <-> ${b}: ${s.toFixed(2)}`);
-
-            // Task 7: разбивка по тирам (членство Task 6 для текущего checkout)
-            // и по веткам (display, не матчинг). Fail-soft (revList null) →
-            // только merged-счётчики (членство недоступно). M-1: классификация
-            // по ПОЛНОМУ scan (не candidates — тот исключает merged=0 head=''
-            // и unknown-тир всегда был бы 0 в проде).
-            const tierCounts = { merged: 0, experience: 0, unknown: 0, dead: 0 };
-            const branchCounts = new Map();
-            let failSoft = false;
-            // M-b: computeBranchSets уже вызывает detectMainline — берём mainline
-            // из него (без повторного git-вызова) для mainline_unresolved.
-            const sets = computeBranchSets({ revList, detectMainline, root, mainlineOverride: config.mainline ?? null });
-            failSoft = sets.failSoft;
-            if (rows.length) {
-              if (failSoft) {
-                for (const r of rows) if (r.merged === 1) tierCounts.merged++;
-              } else {
-                const r = applyBranchScope(rows, sets);
-                for (const row of rows) {
-                  const sid = row.session_id;
-                  if (r.experience.has(sid)) tierCounts.experience++;
-                  else if (r.inContext.has(sid)) tierCounts.merged++;
-                  else if (r.unknown.has(sid)) tierCounts.unknown++;
-                  else tierCounts.dead++;
-                }
-              }
-              for (const row of rows) {
-                const b = row.branch ?? "";
-                branchCounts.set(b, (branchCounts.get(b) ?? 0) + 1);
-              }
+            const sortedNodes = [...nodes].sort((a, b) => b.sessions - a.sessions).slice(0, 500);
+            const extraNodes = nodes.length - sortedNodes.length;
+            out.push(`Узлы графа (${nodes.length}):`);
+            for (const n of sortedNodes) {
+              out.push(`  ${n.head ? `head=${n.head}` : `ses=${n.ses}`} | branch=${n.branch} | sessions=${n.sessions} | tier=${n.tier} | session_ids=${n.session_ids.join(", ")}`);
             }
+            if (extraNodes > 0) out.push(`  …(+${extraNodes} узлов ещё)`);
+            out.push(`Граф (рёбер: ${nodeGraph.length}):`);
+            for (const [a, b, s] of nodeGraph) out.push(`  ${a} <-> ${b}: ${s.toFixed(2)}`);
+
             out.push("Тиры:");
             if (failSoft) {
               out.push(`  merged: ${tierCounts.merged} (branch-context недоступен — revList failed)`);

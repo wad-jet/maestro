@@ -171,7 +171,8 @@
 - **Отчёт — только агрегаты (SEC-4b, v2).** `@maestro-memory-report` пишет
   HTML-артефакт без текстов записей: при `report.include_text: false` (default)
   в файл не попадают ни title, ни summary, ни decisions — только числа, имена
-  авторов, даты, размеры кластеров, aggregate-label тем, session_id в графе.
+  авторов, даты, размеры кластеров, aggregate-label тем, session_id в графе,
+  head-хеши commit, имена веток, тиры (git-метаданные, не текст записей).
   `include_text: true` — явный opt-in, документируется как понижение.
 - **Кросс-проектный поиск — opt-in (v2, паритет v3a).** `memory_search` с
   `project` ищет по записям других проектов **только когда задан явно** (не

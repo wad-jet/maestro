@@ -326,7 +326,8 @@ untrusted работают по очищенным артефактам, а до
 - **Отчёт — только агрегаты (SEC-4b).** `@maestro-memory-report` пишет
   HTML-артефакт без текстов записей: при `report.include_text: false` (default)
   в файл не попадают ни title, ни summary, ни decisions — только числа, имена
-  авторов, даты, размеры кластеров, aggregate-label тем, session_id в графе.
+  авторов, даты, размеры кластеров, aggregate-label тем, session_id в графе,
+  head-хеши commit, имена веток, тиры (git-метаданные, не текст записей).
   `include_text: true` — осознанный opt-in (документированное понижение).
 - **Аудит-лог memory layer — aggregates-only (SEC-4b+, v4).** Операции
   memory-модуля пишутся в отдельный файл `.maestro/logs/maestro-memory-<дата>.log`

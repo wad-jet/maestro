@@ -211,7 +211,8 @@
 Команда `@maestro-memory-report` генерирует **самодостаточный статический
 HTML-отчёт** (inline CSS/JS, без внешних зависимостей) в
 `.maestro/memory-report-<YYYYMMDD-HHMMSS>.html`: summary (бэкенд/модель/записей),
-timeline-гистограмма по датам, кластеры тем, авторы, граф похожести.
+timeline-гистограмма по датам, кластеры тем, авторы, граф похожести по
+commit-узлам (head-хеши, ветки, тиры).
 
 - **Только агрегаты (SEC-4b):** при `memory.report.include_text: false` (default)
   в HTML не попадают никакие тексты записей (title/summary/decisions) — только
