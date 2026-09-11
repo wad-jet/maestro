@@ -764,8 +764,10 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       // индексатора уходят в maestro-memory-*.log (spec §2.2).
       logInfo, logDebug, logWarn, logError,
       author,
-      // Task 4: write-time branch/head resolution (sticky) + merged fast-path.
-      git: { resolveBranch, resolveHead },
+      // Task 4: write-time branch/head resolution (sticky) + merged.
+      // follow-up (2026-09-11): isAncestor — merged пересчитывается по предку
+      // head (не липкий), чтобы записи feature-ветки не считались general.
+      git: { resolveBranch, resolveHead, isAncestor },
       mainline: config.mainline ?? null,
       root,
     });

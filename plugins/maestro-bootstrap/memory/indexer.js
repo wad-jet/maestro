@@ -290,14 +290,19 @@ export class Indexer {
         // G5: version increment — reuse `existing` fetched by the write-gate.
         maskedEntry.version = (existing?.version ?? 0) + 1;
 
-        // Task 4: merged fast-path — branch === mainline → 1; branch='' or
-        // mainline unresolved → 0. Re-summarize does NOT reset merged: an
-        // already-promoted entry (merged=1) keeps 1.
-        if (existing?.merged === 1) {
-          maskedEntry.merged = 1;
-        } else {
-          maskedEntry.merged = effBranch && this.mainline && effBranch === this.mainline ? 1 : 0;
+        // Task 4 + follow-up (2026-09-11): merged — head ∈ mainline (v5: identity
+        // по head). Прежнее липкое правило (existing.merged===1 → keep) оставляло
+        // merged=1 записям, чей head после ресаммаризации на feature-ветке НЕ
+        // в mainline → такие записи ошибочно считались general (всегда в контексте
+        // recall) и показывались в отчёте как «в main». Теперь merged
+        // пересчитывается по предку head; при недоступности git/head — прежний
+        // fast-path по имени ветки (branch === mainline → 1).
+        let merged = effBranch && this.mainline && effBranch === this.mainline ? 1 : 0;
+        if (this.git?.isAncestor && effHead && this.mainline) {
+          const anc = await this.git.isAncestor(this.root, effHead, this.mainline);
+          if (anc === "yes" || anc === "no") merged = anc === "yes" ? 1 : 0;
         }
+        maskedEntry.merged = merged;
 
         // Task 5: tombstone race-guard (spec §5) — pre-check перед upsert:
         // если сессия удалена во время summarize, не пишем запись вовсе.
