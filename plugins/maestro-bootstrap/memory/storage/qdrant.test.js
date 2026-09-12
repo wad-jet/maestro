@@ -1001,3 +1001,103 @@ test("qdrant migrateKey no-op when fromKey === toKey", async () => {
   assert.equal(c.calls.some(([k]) => k === "scroll"), false, "no scroll on no-op");
   assert.equal(c.calls.some(([k]) => k === "setPayload"), false, "no setPayload on no-op");
 });
+
+// ── Task 4 (v5.2): artifacts поле ──
+
+test("qdrant upsert payload carries artifacts (JSON string, detached → '[]')", async () => {
+  const c = fakeClient();
+  let capturedPoints = null;
+  c.upsert = async (name, { points }) => {
+    c.calls.push(["upsert", name, points.length]);
+    capturedPoints = points;
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  await st.upsert([{
+    session_id: "s1", key: "k1", origin_project_hash: "h1", title: "T",
+    summary: "S", decisions: [], embedding: new Float32Array([0.1, 0.2, 0.3]),
+    model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1,
+    artifacts: ["docs/spec.md", "src/index.js"],
+  }]);
+  assert.equal(capturedPoints[0].payload.artifacts, JSON.stringify(["docs/spec.md", "src/index.js"]));
+  // detached/unknown → '[]' default.
+  await st.upsert([{
+    session_id: "s2", key: "k1", origin_project_hash: "h1", title: "T2",
+    summary: "S2", decisions: [], embedding: new Float32Array([0.1, 0.2, 0.3]),
+    model_id: "m", author: "a", time_first: 1, time_last: 2, version: 1,
+  }]);
+  assert.equal(capturedPoints[0].payload.artifacts, "[]");
+});
+
+test("qdrant get/search/scan/candidates parse artifacts (round-trip)", async () => {
+  const c = fakeClient();
+  c.query = async (name, q) => {
+    c.calls.push(["query", name, q]);
+    return { points: [{ id: "s1", score: 0.9, payload: { session_id: "s1", title: "t1", summary: "s1", decisions: "[]", key: "k1", artifacts: '["docs/spec.md"]' } }] };
+  };
+  c.scroll = async (name, opts) => {
+    c.calls.push(["scroll", name, opts]);
+    const keyCond = opts.filter.must.find((m) => m.key === "key");
+    if (!keyCond) return { points: [], next_page_offset: null };
+    return { points: [{ id: "s1", payload: { session_id: "s1", key: "k1", decisions: "[]", artifacts: '["docs/spec.md"]', merged: 1, head: "" } }], next_page_offset: null };
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  // get
+  const got = await st.get("s1");
+  assert.deepEqual(got.artifacts, ["docs/spec.md"]);
+  // search (vector leg)
+  const res = await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "k1" });
+  assert.equal(res.length, 1);
+  assert.deepEqual(res[0].entry.artifacts, ["docs/spec.md"]);
+  // scan
+  const rows = await st.scan({ key: "k1", fields: ["session_id", "artifacts"] });
+  assert.equal(rows.length, 1);
+  assert.deepEqual(rows[0].artifacts, ["docs/spec.md"]);
+  // candidates
+  const cands = await st.candidates("k1");
+  assert.equal(cands.length, 1);
+  assert.deepEqual(cands[0].artifacts, ["docs/spec.md"]);
+});
+
+test("qdrant artifacts: malformed JSON → [] (guard on get/search/scan/candidates)", async () => {
+  const c = fakeClient();
+  c.query = async (name, q) => {
+    c.calls.push(["query", name, q]);
+    return { points: [{ id: "s1", score: 0.9, payload: { session_id: "s1", title: "t1", summary: "s1", decisions: "[]", key: "k1", artifacts: "not-json" } }] };
+  };
+  c.scroll = async (name, opts) => {
+    c.calls.push(["scroll", name, opts]);
+    const keyCond = opts.filter.must.find((m) => m.key === "key");
+    if (!keyCond) return { points: [], next_page_offset: null };
+    return { points: [{ id: "s1", payload: { session_id: "s1", key: "k1", decisions: "[]", artifacts: "not-json", merged: 1, head: "" } }], next_page_offset: null };
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  assert.deepEqual((await st.get("s1")).artifacts, []);
+  const res = await st.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 3, min_score: 0, key: "k1" });
+  assert.deepEqual(res[0].entry.artifacts, []);
+  const rows = await st.scan({ key: "k1", fields: ["session_id", "artifacts"] });
+  assert.deepEqual(rows[0].artifacts, []);
+  const cands = await st.candidates("k1");
+  assert.deepEqual(cands[0].artifacts, []);
+});
+
+test("qdrant get/scan: legacy point without artifacts → []", async () => {
+  const c = fakeClient();
+  c.query = async (name, q) => {
+    c.calls.push(["query", name, q]);
+    return { points: [{ id: "s1", payload: { session_id: "s1", title: "t1", summary: "s1", decisions: "[]", key: "k1" } }] };
+  };
+  c.scroll = async (name, opts) => {
+    c.calls.push(["scroll", name, opts]);
+    const keyCond = opts.filter.must.find((m) => m.key === "key");
+    if (!keyCond) return { points: [], next_page_offset: null };
+    return { points: [{ id: "s1", payload: { session_id: "s1", key: "k1", decisions: "[]", merged: 1, head: "" } }], next_page_offset: null };
+  };
+  const st = new QdrantStorage({ client: c, collection: "maestro_memory", modelId: "m", dim: 3 });
+  await st.init();
+  assert.deepEqual((await st.get("s1")).artifacts, []);
+  const rows = await st.scan({ key: "k1", fields: ["session_id", "artifacts"] });
+  assert.deepEqual(rows[0].artifacts, []);
+});
