@@ -3,7 +3,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
-import { makeBoundedMap, readPluginVersion, getGitConfig } from "../core.js";
+import { makeBoundedMap, readPluginVersion, getGitConfig, loadConfidentialConfig, confGlobMatch } from "../core.js";
 import { loadMemoryConfig, resolveEffectiveKey, resolveIdentity, resolveEffectiveTextConfig, sanitizeDirName } from "./config.js";
 import { maskEntry, maskTranscript } from "./mask.js";
 import { ensureModule } from "./provision.js";
@@ -350,15 +350,45 @@ function nodeTier(node, tierBySession) {
  * @param {{ modelId: string, dim: number }} storage  Storage model identity
  *   (set in constructors on all backends; what upsert enforces).
  * @param {string} effectiveKey  Active project key (I-4 fail-closed on mismatch).
+ * @param {string[]} artifactConfidentialPatterns  Resolved confidential set for
+ *   artifacts (paths + builtin). CR-3: matching artifact elements are DROPPED
+ *   (запись импортируется, элемент отбрасывается).
  * @returns {string|null}
  */
-function validateImportEntry(e, storage, effectiveKey) {
+function validateImportEntry(e, storage, effectiveKey, artifactConfidentialPatterns = []) {
   if (!e || typeof e !== "object") return "не объект";
   for (const f of IMPORT_REQUIRED) {
     if (e[f] === undefined || e[f] === null) return `отсутствует поле ${f}`;
   }
   if (!Array.isArray(e.decisions)) return "decisions не массив";
   if (!Array.isArray(e.embedding)) return "embedding не массив";
+  // Task 7 (v5.2): опциональное `artifacts` — массив repo-relative строк.
+  // Отсутствует → [] (старые записи). Не-массив/нарушения → reject записи.
+  if (e.artifacts === undefined) {
+    e.artifacts = [];
+  } else if (!Array.isArray(e.artifacts)) {
+    return "artifacts не массив";
+  } else if (e.artifacts.length > 8) {
+    return "artifacts: больше 8 элементов";
+  } else {
+    for (const a of e.artifacts) {
+      if (typeof a !== "string") return "artifacts: элемент не строка";
+      if (a.length > 512) return "artifacts: элемент длиннее 512 символов";
+      if (/[\u0000-\u001f\u007f]/.test(a)) return "artifacts: элемент содержит control chars";
+      // repo-relative форма: ведущий `/`, `..`-сегмент, backslash, drive-letter.
+      if (a.startsWith("/")) return "artifacts: ведущий /";
+      if (a.split(/[\\/]+/).includes("..")) return "artifacts: ..-сегмент";
+      if (a.includes("\\")) return "artifacts: backslash";
+      if (/^[a-zA-Z]:/.test(a)) return "artifacts: drive-letter";
+    }
+    // CR-3: после валидации — drop элементов, матчащих resolved confidential-набор.
+    const lowerConf = artifactConfidentialPatterns
+      .filter((p) => typeof p === "string" && p)
+      .map((p) => p.toLowerCase());
+    if (lowerConf.length) {
+      e.artifacts = e.artifacts.filter((a) => !lowerConf.some((pat) => confGlobMatch(pat, a.toLowerCase())));
+    }
+  }
   // M-10: numeric time/version fields + finite embedding values.
   if (typeof e.time_first !== "number") return "time_first не число";
   if (typeof e.time_last !== "number") return "time_last не число";
@@ -697,6 +727,12 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     }
 
     const confidentialPaths = maestroConfig?.confidential?.paths ?? [];
+    // Task 7 (v5.2, I2): resolved confidential-набор ДЛЯ АРТЕФАКТОВ —
+    // paths (с дефолтом docs/confidential/**) + builtin (применяется всегда).
+    // НЕ переиспользуем raw confidentialPaths — он для маскирования текста
+    // (title/summary/decisions); артефакты фильтруются полным набором.
+    const conf = loadConfidentialConfig(maestroConfig);
+    const artifactConfidentialPatterns = [...conf.paths, ...conf.builtin];
     // M-2: init-warn — централизованный бэкенд + непустые confidential.paths
     // (имена веток, минующие sanitize, уходят на сервер). Дублируется в выдаче
     // memory_stats_detail / @maestro-memory (диагностика без логов).
@@ -760,6 +796,10 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       key: effectiveKey,
       originRemote: gitRemote ? canonicalizeRemote(gitRemote) : "",
       confidentialPatterns: confidentialPaths,
+      // Task 7 (v5.2): artifact-links — globs из конфига + resolved
+      // confidential-набор для artifact-фильтра (I2, Z4).
+      artifactGlobs: config.artifact_globs,
+      artifactConfidentialPatterns,
       // Task 3: аудит-лог-хелперы (memoryLog ?? log) — lifecycle-события
       // индексатора уходят в maestro-memory-*.log (spec §2.2).
       logInfo, logDebug, logWarn, logError,
@@ -808,6 +848,9 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       relatedKeys,
       domainTarget,
       domainRecall: config.domain_recall !== false,
+      // Task 7 (v5.2): own origin hash — артефакты рендерятся только для
+      // записей этого проекта (D4).
+      projectHash: ownHash,
     });
 
     // Spec §3.6: снапшот листинга memory_prune — delete резолвится строго по
@@ -928,9 +971,14 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
               // M-4 (§7): вывод показывает branch и merged-флаг.
               const exp = experienceIds.has(h.entry.session_id) ? " ⚠️ не в main" : (h.entry.merged === 1 ? " (в main)" : "");
               const branch = h.entry.branch ? ` | ветка: ${h.entry.branch}` : "";
+              // Task 7 (v5.2): артефакты — raw (без fs-фильтра), origin-фильтр
+              // (D4): только записи этого проекта.
+              const artifacts = (h.entry.artifacts ?? []).filter((p) => h.entry.origin_project_hash === ownHash);
+              const artifactsLine = artifacts.length ? `Артефакты: ${artifacts.join("; ")}\n` : "";
               lines.push(
                 `# ${h.entry.title} (${h.entry.time_last}, ${h.entry.author}, score ${h.score.toFixed(2)})${exp}\n` +
                   `${h.entry.summary}\nРешения: ${h.entry.decisions.join("; ")}\n` +
+                  `${artifactsLine}` +
                   `Проект: ${h.entry.origin_project_hash} | session_id: ${h.entry.session_id}${branch}`,
               );
             }
@@ -1109,6 +1157,11 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
               // I-3: branch/head/merged — легитимные метаданные v3, в экспорте.
               // Task 7: host — provenance (откуда записана запись), в экспорте.
               "branch", "head", "merged", "host",
+              // Task 7 (v5.2, F1): artifacts — v5.2 поле, в экспорте (SCAN_FIELDS
+              // уже включает его, но export использует ЯВНЫЙ field-list).
+              // F3: origin_remote/prefixes — v5.1 поля, терялись при экспорте
+              // (тот же класс data-loss, что и F1) — добавляем в том же изменении.
+              "artifacts", "origin_remote", "prefixes",
             ];
             const entries = await storage.scan({ key: effectiveKey, fields });
             // M-8: пустой экспорт — понятная ошибка, файл не пишем.
@@ -1162,12 +1215,16 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
                 return `memory_import: строка ${i + 1} невалидна: не JSON`;
               }
               // I-2: валидируем против storage.dim/modelId (не embeddings — null до первого embed).
-              const reason = validateImportEntry(parsed, storage, effectiveKey);
+              // Task 7 (v5.2): artifacts-валидация + CR-3 drop (resolved confidential-набор).
+              const reason = validateImportEntry(parsed, storage, effectiveKey, artifactConfidentialPatterns);
               if (reason) return `memory_import: строка ${i + 1} невалидна: ${reason}`;
               entries.push(parsed);
             }
             // Атомарность: все строки валидны → применяем. Сначала re-mask.
-            const masked = entries.map((e) => maskEntry(e, { confidentialPatterns: maestroConfig?.confidential?.paths ?? [] }));
+            // Task 7 (v5.2, F2): maskEntry фильтрует artifacts через resolved
+            // confidential-набор (artifactConfidentialPatterns); маскирование
+            // текста остаётся на raw confidentialPaths (I2).
+            const masked = entries.map((e) => maskEntry(e, { confidentialPatterns: maestroConfig?.confidential?.paths ?? [], artifactConfidentialPatterns }));
             // I-4: replace выполняется только после успешной валидации всех строк.
             if (args.replace === true) {
               await storage.deleteByFilter({ key: effectiveKey });
@@ -1242,9 +1299,14 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             for (const h of filtered) {
               const date = new Date(h.entry.time_last).toISOString().slice(0, 10);
               const exp = experienceIds.has(h.entry.session_id) ? " ⚠️ не в main" : "";
+              // Task 7 (v5.2): артефакты — raw (без fs-фильтра), origin-фильтр
+              // (D4): только записи этого проекта (parity с memory_search).
+              const artifacts = (h.entry.artifacts ?? []).filter((p) => h.entry.origin_project_hash === ownHash);
+              const artifactsLine = artifacts.length ? `Артефакты: ${artifacts.join("; ")}\n` : "";
               lines.push(
                 `# ${h.entry.title} (${h.entry.author}, ${date}, score ${h.score.toFixed(2)})${exp}\n` +
                   `${h.entry.summary}\n` +
+                  `${artifactsLine}` +
                   `Проект: ${h.entry.origin_project_hash} | session_id: ${h.entry.session_id}`,
               );
             }

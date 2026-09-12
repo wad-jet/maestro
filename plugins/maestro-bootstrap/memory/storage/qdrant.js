@@ -7,7 +7,7 @@ import { timed } from "../storage.js";
 // embedding (large); embedding is opt-in.
 const SCAN_FIELDS = [
   "session_id", "key", "origin_project_hash", "title", "summary", "decisions",
-  "author", "time_first", "time_last", "version", "model_id", "embedding",
+  "artifacts", "author", "time_first", "time_last", "version", "model_id", "embedding",
   "branch", "head", "merged", "host", "origin_remote", "prefixes",
 ];
 const DEFAULT_SCAN_FIELDS = SCAN_FIELDS.filter((f) => f !== "embedding");
@@ -22,6 +22,17 @@ function subtreeTargets(subtree, ownKey) {
     if (!out.includes(tt)) out.push(tt);
   }
   return out;
+}
+
+// JSON-массив из payload-строки (artifacts); битый/пустой/отсутствующий → [] (guard).
+function parseArtifacts(v) {
+  if (v == null || v === "") return [];
+  try {
+    const a = JSON.parse(v);
+    return Array.isArray(a) ? a : [];
+  } catch {
+    return [];
+  }
 }
 
 function uuidFrom(s) {
@@ -138,6 +149,7 @@ export class QdrantStorage {
         title: e.title,
         summary: e.summary,
         decisions: JSON.stringify(e.decisions),
+        artifacts: JSON.stringify(e.artifacts ?? []),
         // Производное текстовое поле для full-text поиска; пересчитывается на
         // КАЖДОМ upsert (включая re-mask через memory_import).
         text: [e.title, e.summary, e.decisions.join(" ")].join(" "),
@@ -250,7 +262,7 @@ export class QdrantStorage {
       // M3: производное поле `text` (для full-text индекса) не должно протекать
       // в entry векторной ветки (как в get()) — выкидываем через деструктуризацию.
       const { text, ...rest } = r.payload;
-      return { entry: { ...rest, embedding: undefined, decisions: JSON.parse(rest.decisions), host: r.payload.host ?? "", origin_remote: r.payload.origin_remote ?? "", prefixes: r.payload.prefixes ?? [] }, score: r.score };
+      return { entry: { ...rest, embedding: undefined, decisions: JSON.parse(rest.decisions), artifacts: parseArtifacts(rest.artifacts), host: r.payload.host ?? "", origin_remote: r.payload.origin_remote ?? "", prefixes: r.payload.prefixes ?? [] }, score: r.score };
     }));
 
     // Текстовая ветка: только full-text (full_text_match), фузия через RRF.
@@ -342,9 +354,11 @@ export class QdrantStorage {
           if (f in p.payload) o[f] = p.payload[f];
         }
         if ("decisions" in o) o.decisions = JSON.parse(o.decisions);
+        if ("artifacts" in o) o.artifacts = parseArtifacts(o.artifacts);
         // Легаси-точки без полей → дефолты (паритет с sqlite/pg).
         if (cols.includes("origin_remote") && o.origin_remote === undefined) o.origin_remote = "";
         if (cols.includes("prefixes") && o.prefixes === undefined) o.prefixes = [];
+        if (cols.includes("artifacts") && o.artifacts === undefined) o.artifacts = [];
         // C-1: embedding lives in the vector (not payload); normalize to Float32Array.
         if (wantEmbedding) {
           const vec = p.vector ?? p.payload?.embedding;
@@ -373,7 +387,7 @@ export class QdrantStorage {
     // Производное поле `text` (для full-text индекса) не должно протекать
     // в entry — выкидываем через деструктуризацию (spec §3.6).
     const { text, ...rest } = p.payload;
-    return { ...rest, embedding: undefined, decisions: JSON.parse(rest.decisions), host: p.payload.host ?? "", origin_remote: p.payload.origin_remote ?? "", prefixes: p.payload.prefixes ?? [] };
+    return { ...rest, embedding: undefined, decisions: JSON.parse(rest.decisions), artifacts: parseArtifacts(rest.artifacts), host: p.payload.host ?? "", origin_remote: p.payload.origin_remote ?? "", prefixes: p.payload.prefixes ?? [] };
   }
 
   // Кандидаты для recall (Task 6): записи ключа, которые либо влиты в mainline
@@ -401,7 +415,7 @@ export class QdrantStorage {
           const { text, ...rest } = p.payload;
           let parsed;
           try { parsed = JSON.parse(rest.decisions); } catch { parsed = []; }
-          out.push({ ...rest, embedding: undefined, decisions: parsed, host: p.payload.host ?? "", origin_remote: p.payload.origin_remote ?? "", prefixes: p.payload.prefixes ?? [] });
+          out.push({ ...rest, embedding: undefined, decisions: parsed, artifacts: parseArtifacts(rest.artifacts), host: p.payload.host ?? "", origin_remote: p.payload.origin_remote ?? "", prefixes: p.payload.prefixes ?? [] });
         }
       }
       offset = res.next_page_offset;

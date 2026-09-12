@@ -3,6 +3,7 @@ import { maskTranscript, maskEntry } from "./mask.js";
 import { resolveEffectiveKey } from "./config.js";
 import { SESSIONS } from "./summarize.js";
 import { prefixesOf } from "./project.js";
+import { extractArtifacts } from "./artifacts.js";
 
 function withTimeout(p, ms) {
   return Promise.race([
@@ -18,6 +19,11 @@ export class Indexer {
     client, config, embeddings, storage, state, summarize,
     projectKey, key, originRemote = "", confidentialPatterns = [], log = console, author = null,
     git = null, mainline = null, root = null, branchContextCap = 1000,
+    // Task 3: artifact-links (spec §4.2) — извлечение путей записанных файлов.
+    // artifactGlobs: default [] → off-поведение (без извлечения).
+    // artifactConfidentialPatterns: resolved-набор для artifact-фильтра (Z4);
+    // НЕ переиспользуем confidentialPatterns маскирования (I2) — отдельный набор.
+    artifactGlobs = [], artifactConfidentialPatterns = [],
     // Task 3: аудит-лог-хелперы (spec §2.2) — пишут в memoryLog ?? log;
     // default — заглушки (backward compat: без хелперов события не пишутся).
     logInfo = () => {}, logDebug = () => {}, logWarn = () => {}, logError = () => {},
@@ -41,6 +47,8 @@ export class Indexer {
     this.git = git;
     this.mainline = mainline;
     this.root = root;
+    this.artifactGlobs = artifactGlobs;
+    this.artifactConfidentialPatterns = artifactConfidentialPatterns;
     // Task 4: sticky branch/head per session (resolved once, reused on version++).
     // M-7: bounded Map — FIFO-эвикция старейшего при превышении cap.
     this._branchContext = new Map();
@@ -280,8 +288,34 @@ export class Indexer {
           prefixes: prefixesOf(this.key ?? ""),
         };
 
+        // Task 3: artifact-links (spec §4.2) — извлечение путей записанных
+        // файлов из tool-частей. Инварианты: tool-части НЕ попадают в
+        // транскрипт саммаризатора (text-only, см. выше) и artifacts НЕ входят
+        // в embed-вход (title+summary+decisions, см. ниже). Union с
+        // existing.artifacts (D6, Z1), cap 8. Off-поведение: artifactGlobs=[]
+        // → extractArtifacts возвращает [] (без извлечения).
+        // Task 7 (deferred minor): union-дедуп case-insensitive (как в
+        // extractArtifacts) — dedup-ключ String(p).toLowerCase(), extracted-first.
+        const extracted = extractArtifacts(messages, {
+          root: this.root,
+          globs: this.artifactGlobs,
+          confidentialPatterns: this.artifactConfidentialPatterns,
+        });
+        const unionSeen = new Set();
+        const union = [];
+        for (const p of [...extracted, ...(existing?.artifacts ?? [])]) {
+          const k = String(p).toLowerCase();
+          if (unionSeen.has(k)) continue;
+          unionSeen.add(k);
+          union.push(p);
+        }
+        entry.artifacts = union.slice(0, 8);
+
         // G2: re-mask entry before write (defense-in-depth)
-        const maskedEntry = maskEntry(entry, { confidentialPatterns: this.confidentialPatterns });
+        const maskedEntry = maskEntry(entry, {
+          confidentialPatterns: this.confidentialPatterns,
+          artifactConfidentialPatterns: this.artifactConfidentialPatterns,
+        });
 
         // I1: embed AFTER mask
         const vec = await this.embeddings.embed(`${maskedEntry.title}\n${maskedEntry.summary}\n${maskedEntry.decisions.join("\n")}`);

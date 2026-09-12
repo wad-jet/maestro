@@ -94,6 +94,7 @@ description: Use when the user asks for help configuring maestro, organizing pro
       "dim": null
     },
     "probe_cooldown_min": 30,
+    "artifact_globs": ["docs/superpowers/specs/**", "docs/superpowers/plans/**"],
     "storage": {
       "type": "sqlite",
       "qdrant": { "url": "https://qdrant.internal:6333", "api_key_env": "MAESTRO_MEMORY_QDRANT_KEY", "collection": "maestro_memory" },
@@ -173,6 +174,12 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
 - **`probe_cooldown_min`** — интервал в минутах между live-probe модели на
   старте (кэш результата в `state.json`), default `30`. Валидация: число > 0;
   иначе → `probe_cooldown_min_invalid` (память off).
+- **`artifact_globs`** — allowlist-глобы артефактов (спеки/планы): пути из
+  `write`/`edit` сессии, матчащие глобы, попадают в поле записи `artifacts[]`
+  (v5.2, artifact-links). Default — маэстро-набор
+  `["docs/superpowers/specs/**", "docs/superpowers/plans/**"]`; `[]` — явный
+  off. Валидация: массив ≤16 непустых строк; иначе → `artifact_globs_invalid`
+  (память off). После правки — OP-1 (перезапуск opencode).
 - **`summarizer_model`** — модель фонового саммаризатора; `null` → модель
   саммаризируемой сессии.
 - **`identity` / `identity_env`** — подпись записей (`author`), **не

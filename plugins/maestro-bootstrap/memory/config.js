@@ -54,6 +54,7 @@ export const DEFAULTS = {
     dim: null,
   },
   probe_cooldown_min: 30,
+  artifact_globs: ["docs/superpowers/specs/**", "docs/superpowers/plans/**"],
 };
 
 const STORAGE_TYPES = new Set(["sqlite", "qdrant", "pgvector"]);
@@ -90,6 +91,7 @@ function mergedConfig(m) {
         text_search_config: m.storage?.pgvector?.text_search_config ?? "russian",
       },
     },
+    artifact_globs: [...new Set((m.artifact_globs ?? DEFAULTS.artifact_globs).map((s) => s.trim()).filter(Boolean))],
   };
 }
 
@@ -132,6 +134,22 @@ function similarityThresholdValid(m) {
   return typeof m.similarity_threshold === "number"
     && m.similarity_threshold >= 0
     && m.similarity_threshold <= 1;
+}
+
+/**
+ * artifact_globs: absent/null → default (see DEFAULTS); `[]` = off;
+ * array of non-empty strings (≤ 16 items) → used; anything else → invalid
+ * (memory disabled). Shared by classifyMemoryConfig
+ * (zero-dep gate) and loadMemoryConfig.
+ * @param {object} m  The `memory` config section.
+ * @returns {boolean}  True when artifact_globs is valid (or absent).
+ */
+function artifactGlobsValid(m) {
+  const g = m?.artifact_globs;
+  if (g == null) return true;
+  return Array.isArray(g)
+    && g.length <= 16
+    && g.every((x) => typeof x === "string" && x.length > 0);
 }
 
 // Имя mainline-ветки: допустимы буквы/цифры/`_`/`/`/`.`/`-`, длина ≤ 100.
@@ -223,6 +241,7 @@ export function classifyMemoryConfig(maestroJson, { gitName = null } = {}) {
   if (!domainRecallValid(m)) return { enabled: false, disabled_reason: "domain_recall_invalid" };
   if (!retentionDaysValid(m)) return { enabled: false, disabled_reason: "retention_days_invalid" };
   if (!similarityThresholdValid(m)) return { enabled: false, disabled_reason: "similarity_threshold_invalid" };
+  if (!artifactGlobsValid(m)) return { enabled: false, disabled_reason: "artifact_globs_invalid" };
   const type = m.storage?.type ?? "sqlite";
   if (!STORAGE_TYPES.has(type)) return { enabled: false, disabled_reason: "storage_type_invalid" };
   if (!pgvectorTextSearchConfigValid(m)) return { enabled: false, disabled_reason: "pgvector_text_search_config_invalid" };

@@ -118,7 +118,7 @@ function makeNodeSqliteDatabase() {
 // scan returns everything EXCEPT embedding (large); embedding is opt-in.
 const SCAN_FIELDS = [
   "session_id", "key", "origin_project_hash", "title", "summary", "decisions",
-  "author", "time_first", "time_last", "version", "model_id", "embedding",
+  "artifacts", "author", "time_first", "time_last", "version", "model_id", "embedding",
   "branch", "head", "merged", "host", "origin_remote", "prefixes",
 ];
 const DEFAULT_SCAN_FIELDS = SCAN_FIELDS.filter((f) => f !== "embedding");
@@ -207,6 +207,7 @@ export class SqliteStorage {
         title TEXT NOT NULL,
         summary TEXT NOT NULL,
         decisions TEXT NOT NULL,
+        artifacts TEXT NOT NULL DEFAULT '[]',
         embedding BLOB NOT NULL,
         model_id TEXT NOT NULL,
         author TEXT NOT NULL,
@@ -229,6 +230,7 @@ export class SqliteStorage {
       if (!cols.includes("host")) db.exec("ALTER TABLE memory ADD COLUMN host TEXT NOT NULL DEFAULT ''");
       if (!cols.includes("origin_remote")) db.exec("ALTER TABLE memory ADD COLUMN origin_remote TEXT NOT NULL DEFAULT ''");
       if (!cols.includes("prefixes")) db.exec("ALTER TABLE memory ADD COLUMN prefixes TEXT NOT NULL DEFAULT ''");
+      if (!cols.includes("artifacts")) db.exec("ALTER TABLE memory ADD COLUMN artifacts TEXT NOT NULL DEFAULT '[]'");
       db.exec(`CREATE TABLE IF NOT EXISTS meta (name TEXT PRIMARY KEY, value TEXT NOT NULL)`);
       db.exec(`CREATE INDEX IF NOT EXISTS memory_key ON memory (key)`);
       db.exec(`CREATE VIRTUAL TABLE IF NOT EXISTS memory_fts USING fts5(
@@ -300,8 +302,8 @@ export class SqliteStorage {
 
   async _upsert(entries) {
     const ins = this.db.prepare(`INSERT OR REPLACE INTO memory
-      (session_id, key, origin_project_hash, title, summary, decisions, embedding, model_id, author, time_first, time_last, version, branch, head, merged, host, origin_remote, prefixes)
-      VALUES (@session_id, @key, @origin_project_hash, @title, @summary, @decisions, @embedding, @model_id, @author, @time_first, @time_last, @version, @branch, @head, @merged, @host, @origin_remote, @prefixes)`);
+      (session_id, key, origin_project_hash, title, summary, decisions, artifacts, embedding, model_id, author, time_first, time_last, version, branch, head, merged, host, origin_remote, prefixes)
+      VALUES (@session_id, @key, @origin_project_hash, @title, @summary, @decisions, @artifacts, @embedding, @model_id, @author, @time_first, @time_last, @version, @branch, @head, @merged, @host, @origin_remote, @prefixes)`);
     const ftsDel = this.db.prepare("DELETE FROM memory_fts WHERE session_id = ?");
     const ftsIns = this.db.prepare(
       "INSERT INTO memory_fts (session_id, key, title, summary, decisions) VALUES (?, ?, ?, ?, ?)",
@@ -321,6 +323,7 @@ export class SqliteStorage {
           title: e.title,
           summary: e.summary,
           decisions: JSON.stringify(e.decisions),
+          artifacts: JSON.stringify(e.artifacts ?? []),
           embedding: Buffer.from(e.embedding.buffer, e.embedding.byteOffset, e.embedding.byteLength),
           model_id: e.model_id,
           author: e.author,
@@ -551,7 +554,7 @@ export class SqliteStorage {
     const vectorHits = rows.map((r) => {
       const vec = new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4);
       const score = cosine(embedding, vec);
-      return { entry: { ...r, embedding: undefined, decisions: JSON.parse(r.decisions), origin_remote: r.origin_remote ?? "", prefixes: parseJsonArray(r.prefixes) }, score };
+      return { entry: { ...r, embedding: undefined, decisions: JSON.parse(r.decisions), artifacts: parseJsonArray(r.artifacts), origin_remote: r.origin_remote ?? "", prefixes: parseJsonArray(r.prefixes) }, score };
     }).filter((h) => h.score >= min_score).sort((a, b) => b.score - a.score).slice(0, top_k);
 
     // Нет текстового запроса или FTS недоступен → vector-only.
@@ -599,7 +602,7 @@ export class SqliteStorage {
           if (!full) return null;
           let parsed;
           try { parsed = JSON.parse(full.decisions); } catch { parsed = []; }
-          return { session_id: r.session_id, entry: { ...full, embedding: undefined, decisions: parsed, origin_remote: full.origin_remote ?? "", prefixes: parseJsonArray(full.prefixes) } };
+          return { session_id: r.session_id, entry: { ...full, embedding: undefined, decisions: parsed, artifacts: parseJsonArray(full.artifacts), origin_remote: full.origin_remote ?? "", prefixes: parseJsonArray(full.prefixes) } };
         }).filter(Boolean);
       } catch (err) {
         console.error(`[memory] FTS MATCH failed, falling back to vector-only: ${err.message}`);
@@ -657,6 +660,7 @@ export class SqliteStorage {
     const rows = this.db.prepare(`SELECT ${cols.join(", ")} FROM memory WHERE key = ?`).all(key);
     return rows.map((r) => {
       if ("decisions" in r) r.decisions = JSON.parse(r.decisions);
+      if ("artifacts" in r) r.artifacts = parseJsonArray(r.artifacts);
       if ("prefixes" in r) r.prefixes = parseJsonArray(r.prefixes);
       return r;
     });
@@ -673,7 +677,7 @@ export class SqliteStorage {
     // merge line-fetch for FTS-only hits).
     let parsed;
     try { parsed = JSON.parse(r.decisions); } catch { parsed = []; }
-    return { ...r, embedding: undefined, decisions: parsed, host: r.host ?? "", origin_remote: r.origin_remote ?? "", prefixes: parseJsonArray(r.prefixes) };
+    return { ...r, embedding: undefined, decisions: parsed, artifacts: parseJsonArray(r.artifacts), host: r.host ?? "", origin_remote: r.origin_remote ?? "", prefixes: parseJsonArray(r.prefixes) };
   }
 
   // Кандидаты для recall (Task 6): записи ключа, которые либо уже влиты в
@@ -690,7 +694,7 @@ export class SqliteStorage {
     return rows.map((r) => {
       let parsed;
       try { parsed = JSON.parse(r.decisions); } catch { parsed = []; }
-      return { ...r, embedding: undefined, decisions: parsed, origin_remote: r.origin_remote ?? "", prefixes: parseJsonArray(r.prefixes) };
+      return { ...r, embedding: undefined, decisions: parsed, artifacts: parseJsonArray(r.artifacts), origin_remote: r.origin_remote ?? "", prefixes: parseJsonArray(r.prefixes) };
     });
   }
 
@@ -751,6 +755,7 @@ export class SqliteStorage {
           title: r.title,
           summary: r.summary,
           decisions,
+          artifacts: parseJsonArray(r.artifacts),
           embedding: new Float32Array(r.embedding.buffer, r.embedding.byteOffset, r.embedding.byteLength / 4),
           model_id: r.model_id,
           author: r.author,

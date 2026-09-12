@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync } from "node:fs";
 import { tmpdir, hostname } from "node:os";
 import { dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
@@ -4219,6 +4219,217 @@ test("memory_recall_preview: header and effective scope (flat → project)", asy
     const res2 = await hooks.tool.memory_recall_preview.execute({ query: "x" }, { sessionID: "s1" });
     assert.equal(res2, "Ничего не найдено (порог min_score 0.35, scope project).");
     await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── Task 7 (v5.2): artifacts в tools + export/import ───────────────────
+
+test("memory_search renders Артефакты for own-origin hits (origin filter, no fs filter)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-art-search-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const ownHash = projectHashFromDir(dir);
+    const storage = mkMockStorage();
+    storage.search = async () => [
+      { entry: { session_id: "a", title: "A", summary: "SA", decisions: [], author: "alice", time_last: 1, origin_project_hash: ownHash, artifacts: ["docs/spec.md"], merged: 1 }, score: 0.9 },
+      { entry: { session_id: "b", title: "B", summary: "SB", decisions: [], author: "bob", time_last: 2, origin_project_hash: "foreignhash", artifacts: ["docs/spec.md"], merged: 1 }, score: 0.8 },
+    ];
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    const res = await hooks.tool.memory_search.execute({ query: "x", scope: "project" }, { sessionID: "s1" });
+    const bIdx = res.indexOf("# B");
+    assert.ok(bIdx > 0, "foreign hit present in output");
+    assert.ok(res.slice(0, bIdx).includes("Артефакты: docs/spec.md"), "own-origin hit renders artifacts (no fs filter)");
+    assert.ok(!res.slice(bIdx).includes("Артефакты"), "foreign-origin hit must NOT render artifacts");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_recall_preview renders Артефакты for own-origin hits (origin filter, no fs filter)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-art-prev-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const ownHash = projectHashFromDir(dir);
+    const storage = mkMockStorage();
+    storage.search = async () => [
+      { entry: { session_id: "a", title: "A", summary: "SA", decisions: [], author: "alice", time_last: 1700000000000, origin_project_hash: ownHash, artifacts: ["docs/spec.md"], merged: 1 }, score: 0.9 },
+      { entry: { session_id: "b", title: "B", summary: "SB", decisions: [], author: "bob", time_last: 1700000000000, origin_project_hash: "foreignhash", artifacts: ["docs/spec.md"], merged: 1 }, score: 0.8 },
+    ];
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    const res = await hooks.tool.memory_recall_preview.execute({ query: "x" }, { sessionID: "s1" });
+    const bIdx = res.indexOf("# B");
+    assert.ok(bIdx > 0, "foreign hit present in output");
+    assert.ok(res.slice(0, bIdx).includes("Артефакты: docs/spec.md"), "own-origin hit renders artifacts (no fs filter)");
+    assert.ok(!res.slice(bIdx).includes("Артефакты"), "foreign-origin hit must NOT render artifacts");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("export→import round-trip carries artifacts (F1); old records without artifacts → []", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-art-exp-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = await mkSqliteStorage(dir);
+    // F3: origin_remote/prefixes (v5.1) — тот же класс data-loss, что и F1:
+    // экспортный field-list их терял. Проверяем в том же round-trip.
+    await storage.upsert([mkFullEntry({ artifacts: ["docs/spec.md", "src/index.js"], origin_remote: "github.com/org/api", prefixes: ["a", "a.b"] })]);
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir, { namespace: "k" }),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    const exportPath = join(dir, "export.jsonl");
+    await hooks.tool.memory_export.execute({ path: exportPath }, { sessionID: "s1" });
+    const exported = JSON.parse(readFileSync(exportPath, "utf8").trim().split("\n")[0]);
+    assert.deepEqual(exported.artifacts, ["docs/spec.md", "src/index.js"], "export must include artifacts");
+    assert.equal(exported.origin_remote, "github.com/org/api", "export must include origin_remote (F3)");
+    assert.deepEqual(exported.prefixes, ["a", "a.b"], "export must include prefixes (F3)");
+
+    // Fresh storage → import → artifacts survive round-trip.
+    const storage2 = await mkSqliteStorage(join(dir, "fresh"));
+    const hooks2 = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir, { namespace: "k" }),
+      log: silentLog,
+      root: dir,
+      deps: { storage: storage2, embeddings: mkMockEmbeddings() },
+    });
+    const impRes = await hooks2.tool.memory_import.execute({ path: exportPath }, { sessionID: "s1" });
+    assert.match(impRes, /Импортировано 1 запис/);
+    const hits = await storage2.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 5, min_score: 0, key: "k" });
+    assert.deepEqual(hits[0].entry.artifacts, ["docs/spec.md", "src/index.js"], "artifacts survive round-trip");
+    assert.equal(hits[0].entry.origin_remote, "github.com/org/api", "origin_remote survives round-trip (F3)");
+    assert.deepEqual(hits[0].entry.prefixes, ["a", "a.b"], "prefixes survive round-trip (F3)");
+
+    // Old record without artifacts field → import → [].
+    const oldPath = join(dir, "old.jsonl");
+    const { artifacts, embedding, ...noArtifacts } = mkFullEntry();
+    writeFileSync(oldPath, JSON.stringify({ ...noArtifacts, embedding: Array.from(embedding) }) + "\n");
+    const storage3 = await mkSqliteStorage(join(dir, "fresh2"));
+    const hooks3 = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir, { namespace: "k" }),
+      log: silentLog,
+      root: dir,
+      deps: { storage: storage3, embeddings: mkMockEmbeddings() },
+    });
+    const impRes2 = await hooks3.tool.memory_import.execute({ path: oldPath }, { sessionID: "s1" });
+    assert.match(impRes2, /Импортировано 1 запис/);
+    const hits2 = await storage3.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 5, min_score: 0, key: "k" });
+    assert.deepEqual(hits2[0].entry.artifacts, [], "old record without artifacts → []");
+
+    await hooks.dispose?.();
+    await hooks2.dispose?.();
+    await hooks3.dispose?.();
+    await storage.dispose?.();
+    await storage2.dispose?.();
+    await storage3.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("import rejects invalid artifacts (non-array, >512, control chars, >8, non-repo-relative)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-art-invalid-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const cases = [
+      { artifacts: "not-array" },
+      { artifacts: ["x".repeat(513)] },
+      { artifacts: ["a\u0000b"] },
+      { artifacts: Array.from({ length: 9 }, (_, i) => `f${i}.md`) },
+      { artifacts: ["/abs/path.md"] },
+      { artifacts: ["a/../b.md"] },
+      { artifacts: ["a\\b.md"] },
+      { artifacts: ["C:/x.md"] },
+    ];
+    for (const [i, c] of cases.entries()) {
+      const p = join(dir, `bad-${i}.jsonl`);
+      const entry = mkFullEntry({ ...c });
+      writeFileSync(p, JSON.stringify({ ...entry, embedding: Array.from(entry.embedding) }) + "\n");
+      const storage = await mkSqliteStorage(dir);
+      const hooks = await registerMemoryHooks({
+        client: mkClient(),
+        config: mkConfig(dir, { namespace: "k" }),
+        log: silentLog,
+        root: dir,
+        deps: { storage, embeddings: mkMockEmbeddings() },
+      });
+      const res = await hooks.tool.memory_import.execute({ path: p }, { sessionID: "s1" });
+      assert.match(res, /невалидна|artifacts/i, `must reject case ${i}: ${JSON.stringify(c.artifacts).slice(0, 40)}`);
+      const stats = await storage.stats({ key: "k" });
+      assert.equal(stats.entries, 0, `nothing imported for case ${i}`);
+      await hooks.dispose?.();
+      await storage.dispose?.();
+    }
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("CR-3: import drops artifacts matching resolved confidential set (own-origin entry)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-art-cr3-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const ownHash = projectHashFromDir(dir);
+    const exportPath = join(dir, "export.jsonl");
+    const entry = mkFullEntry({
+      key: "k",
+      origin_project_hash: ownHash,
+      artifacts: ["docs/confidential/roadmap.md", "docs/spec.md"],
+    });
+    writeFileSync(exportPath, JSON.stringify({ ...entry, embedding: Array.from(entry.embedding) }) + "\n");
+
+    const storage = await mkSqliteStorage(dir);
+    const config = mkConfig(dir, { namespace: "k" });
+    config.confidential = { paths: ["docs/confidential/**"] };
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config,
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    const impRes = await hooks.tool.memory_import.execute({ path: exportPath }, { sessionID: "s1" });
+    assert.match(impRes, /Импортировано 1 запис/, "entry must import (drop, not reject)");
+    const hits = await storage.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 5, min_score: 0, key: "k" });
+    assert.deepEqual(hits[0].entry.artifacts, ["docs/spec.md"], "confidential artifact dropped, non-confidential kept");
+    await hooks.dispose?.();
+    await storage.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = saved;

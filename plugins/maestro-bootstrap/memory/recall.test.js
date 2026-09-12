@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { Recall } from "./recall.js";
 
 function mkDeps() {
@@ -391,4 +394,76 @@ test("recall hybrid: branch scope × FTS — out-of-context FTS-only hit dropped
   const block = await r.systemBlock({ sessionID: "s1" });
   assert.ok(block.includes("A"), "merged sibling (в членстве) FTS-only хит сохранён");
   assert.ok(!block.includes("D"), "FTS-only хит вне branch-context отброшен");
+});
+
+// ── Task 7 (v5.2): artifacts в systemBlock ─────────────────────────────
+
+function mkArtifactHit({ origin = "own", artifacts = ["docs/spec.md"], decisions = [] } = {}) {
+  return [{
+    entry: { title: "t", summary: "s", decisions, author: "a", time_last: 100, origin_project_hash: origin, artifacts },
+    score: 0.9,
+  }];
+}
+
+test("recall systemBlock renders Артефакты for own-origin existing files", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "recall-art-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, "docs"), { recursive: true });
+  writeFileSync(join(root, "docs", "spec.md"), "x");
+  const storage = { search: async () => mkArtifactHit() };
+  const r = new Recall({
+    embeddings: mkDeps().embedder, storage, topK: 3, minScore: 0.35, key: "k",
+    getUserMessageCount: async () => 1, root, projectHash: "own",
+  });
+  await r.onChatMessage({ sessionID: "s1", text: "hello" });
+  const block = await r.systemBlock({ sessionID: "s1" });
+  assert.ok(block.includes("Артефакты: docs/spec.md"), "own-origin existing file must render artifacts line");
+});
+
+test("recall: empty decisions → Артефакты right after summary (no Решения)", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "recall-art-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, "docs"), { recursive: true });
+  writeFileSync(join(root, "docs", "spec.md"), "x");
+  const storage = { search: async () => mkArtifactHit({ decisions: [] }) };
+  const r = new Recall({
+    embeddings: mkDeps().embedder, storage, topK: 3, minScore: 0.35, key: "k",
+    getUserMessageCount: async () => 1, root, projectHash: "own",
+  });
+  await r.onChatMessage({ sessionID: "s1", text: "hello" });
+  const block = await r.systemBlock({ sessionID: "s1" });
+  assert.ok(block.includes(": s | Артефакты: docs/spec.md"), "Артефакты immediately after summary");
+  assert.ok(!block.includes("Решения"), "no Решения segment when decisions empty");
+});
+
+test("recall: deleted artifact file → no Артефакты line (existsSync filter)", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "recall-art-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, "docs"), { recursive: true });
+  const file = join(root, "docs", "gone.md");
+  writeFileSync(file, "x");
+  rmSync(file); // deleted before recall
+  const storage = { search: async () => mkArtifactHit({ artifacts: ["docs/gone.md"] }) };
+  const r = new Recall({
+    embeddings: mkDeps().embedder, storage, topK: 3, minScore: 0.35, key: "k",
+    getUserMessageCount: async () => 1, root, projectHash: "own",
+  });
+  await r.onChatMessage({ sessionID: "s1", text: "hello" });
+  const block = await r.systemBlock({ sessionID: "s1" });
+  assert.ok(!block.includes("Артефакты"), "deleted file must not render artifacts line");
+});
+
+test("recall: foreign origin → no Артефакты line even when path exists (collision)", async (t) => {
+  const root = mkdtempSync(join(tmpdir(), "recall-art-"));
+  t.after(() => rmSync(root, { recursive: true, force: true }));
+  mkdirSync(join(root, "docs"), { recursive: true });
+  writeFileSync(join(root, "docs", "spec.md"), "x"); // path exists in current repo
+  const storage = { search: async () => mkArtifactHit({ origin: "foreign" }) };
+  const r = new Recall({
+    embeddings: mkDeps().embedder, storage, topK: 3, minScore: 0.35, key: "k",
+    getUserMessageCount: async () => 1, root, projectHash: "own",
+  });
+  await r.onChatMessage({ sessionID: "s1", text: "hello" });
+  const block = await r.systemBlock({ sessionID: "s1" });
+  assert.ok(!block.includes("Артефакты"), "foreign-origin record must not render artifacts (D4)");
 });

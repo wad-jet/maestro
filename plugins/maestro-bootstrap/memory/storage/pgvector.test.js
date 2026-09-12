@@ -832,3 +832,73 @@ test("pgvector migrateKey delete_source is no-op (source empty after UPDATE)", a
   // deleteSource → no-op: только UPDATE, без DELETE.
   assert.ok(!p.calls.some(([sql]) => sql.startsWith("DELETE")), "deleteSource must not issue DELETE");
 });
+
+// ── Task 4 (v5.2): artifacts поле ──
+
+test("pgvector init: ADD COLUMN IF NOT EXISTS artifacts (idempotent, default '[]')", async () => {
+  const p = fakePoolHybrid();
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, modelId: "m1" });
+  await st.init();
+  const adds = p.calls.filter(([sql]) => sql.includes("ADD COLUMN IF NOT EXISTS"));
+  const addSql = adds.map(([sql]) => sql).join("\n");
+  assert.ok(addSql.includes("artifacts TEXT NOT NULL DEFAULT '[]'"), addSql);
+});
+
+test("pgvector artifacts round-trip: upsert → get/scan carry parsed artifacts", async () => {
+  const p = fakePoolHybrid();
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, modelId: "m1" });
+  await st.init();
+  await st.upsert([{
+    session_id: "s1", key: "k1", origin_project_hash: "h1", title: "t1", summary: "s1",
+    decisions: [], embedding: new Float32Array([0.1, 0.2, 0.3]),
+    model_id: "m1", author: "a1", time_first: 1, time_last: 2, version: 1,
+    artifacts: ["docs/spec.md", "src/index.js"],
+  }]);
+  const ins = p.calls.find(([sql]) => sql.includes("INSERT INTO"));
+  assert.ok(ins[0].includes("artifacts"), "INSERT must include artifacts");
+  assert.ok(ins[0].includes("artifacts=$19"), "INSERT SET must include artifacts=$19");
+  assert.equal(ins[1][18], JSON.stringify(["docs/spec.md", "src/index.js"]));
+  // entry WITHOUT artifacts → default [].
+  await st.upsert([{
+    session_id: "s2", key: "k1", origin_project_hash: "h1", title: "t2", summary: "s2",
+    decisions: [], embedding: new Float32Array([0.1, 0.2, 0.3]),
+    model_id: "m1", author: "a1", time_first: 1, time_last: 2, version: 1,
+  }]);
+  const ins2 = p.calls.filter(([sql]) => sql.includes("INSERT INTO")).pop();
+  assert.equal(ins2[1][18], "[]", "entry without artifacts → default []");
+  // get: явный список колонок включает artifacts + парсинг.
+  const origQuery = p.query;
+  p.query = async (sql, params) => {
+    p.calls.push([sql, params]);
+    if (sql.includes("FROM maestro_memory WHERE session_id")) {
+      return { rows: [{ session_id: "s1", key: "k1", decisions: "[]", artifacts: '["docs/spec.md","src/index.js"]' }] };
+    }
+    if (sql.includes("FROM maestro_memory")) {
+      return { rows: [{ session_id: "s1", key: "k1", decisions: "[]", artifacts: '["docs/spec.md","src/index.js"]' }] };
+    }
+    return origQuery(sql, params);
+  };
+  const got = await st.get("s1");
+  assert.deepEqual(got.artifacts, ["docs/spec.md", "src/index.js"]);
+  // scan: whitelist включает artifacts + парсинг.
+  const rows = await st.scan({ key: "k1", fields: ["session_id", "artifacts"] });
+  assert.deepEqual(rows[0].artifacts, ["docs/spec.md", "src/index.js"]);
+});
+
+test("pgvector artifacts: malformed JSON → [] (guard)", async () => {
+  const p = fakePoolHybrid();
+  const st = new PgVectorStorage({ pool: p, table: "maestro_memory", dim: 3, modelId: "m1" });
+  await st.init();
+  const origQuery = p.query;
+  p.query = async (sql, params) => {
+    p.calls.push([sql, params]);
+    if (sql.includes("FROM maestro_memory")) {
+      return { rows: [{ session_id: "s1", key: "k1", decisions: "[]", artifacts: "not-json" }] };
+    }
+    return origQuery(sql, params);
+  };
+  const got = await st.get("s1");
+  assert.deepEqual(got.artifacts, []);
+  const rows = await st.scan({ key: "k1", fields: ["session_id", "artifacts"] });
+  assert.deepEqual(rows[0].artifacts, []);
+});
