@@ -252,3 +252,49 @@ test("disabled_reason priority: namespace_missing > namespace_invalid > related_
   assert.equal(classifyMemoryConfig({ memory: { enabled: true, namespace: "x", related: ["bad!"] } }).disabled_reason, "related_invalid");
   assert.equal(classifyMemoryConfig({ memory: { enabled: true } }).disabled_reason, "namespace_missing");
 });
+
+// ── Task 1: artifact_globs ──
+
+test("artifact_globs default when key absent", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, namespace: "x" } });
+  assert.deepEqual(cfg.artifact_globs, ["docs/superpowers/specs/**", "docs/superpowers/plans/**"]);
+});
+
+test("artifact_globs default in DEFAULTS", () => {
+  assert.deepEqual(DEFAULTS.artifact_globs, ["docs/superpowers/specs/**", "docs/superpowers/plans/**"]);
+});
+
+test("artifact_globs valid list passes", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, namespace: "x", artifact_globs: ["foo/**", "bar/**"] } });
+  assert.equal(cfg.enabled, true);
+  assert.deepEqual(cfg.artifact_globs, ["foo/**", "bar/**"]);
+});
+
+test("artifact_globs empty array (off) is valid", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, namespace: "x", artifact_globs: [] } });
+  assert.equal(cfg.enabled, true);
+  assert.deepEqual(cfg.artifact_globs, []);
+});
+
+test("artifact_globs non-array → disabled_reason artifact_globs_invalid", () => {
+  const c = classifyMemoryConfig({ memory: { enabled: true, namespace: "x", artifact_globs: "not-array" } });
+  assert.equal(c.enabled, false);
+  assert.equal(c.disabled_reason, "artifact_globs_invalid");
+});
+
+test("artifact_globs element non-string → disabled_reason artifact_globs_invalid", () => {
+  const c = classifyMemoryConfig({ memory: { enabled: true, namespace: "x", artifact_globs: [123] } });
+  assert.equal(c.enabled, false);
+  assert.equal(c.disabled_reason, "artifact_globs_invalid");
+});
+
+test("artifact_globs empty string element → disabled_reason artifact_globs_invalid", () => {
+  const c = classifyMemoryConfig({ memory: { enabled: true, namespace: "x", artifact_globs: [""] } });
+  assert.equal(c.enabled, false);
+  assert.equal(c.disabled_reason, "artifact_globs_invalid");
+});
+
+test("mergedConfig trims artifact_globs elements and deduplicates", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, namespace: "x", artifact_globs: ["  foo/**  ", "  bar/**  ", "foo/**"] } });
+  assert.deepEqual(cfg.artifact_globs, ["foo/**", "bar/**"]);
+});
