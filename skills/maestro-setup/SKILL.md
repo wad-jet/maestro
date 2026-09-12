@@ -171,6 +171,10 @@ silent opt-in).
 - **Related (опционально):** список namespace-prefix целей для кросс-доменной
   интеграции (merged-only, предпочтение 1:1, ≤16 записей).
 - **Domain recall (опционально):** `true` по умолчанию. `false` = off-switch домен-ног.
+- **Артефакты (опционально):** `artifact_globs` — allowlist-глобы спек/планов
+  для поля `artifacts[]` записей (v5.2). Default — маэстро-набор
+  `["docs/superpowers/specs/**", "docs/superpowers/plans/**"]`; явный `[]` —
+  отключение. По умолчанию не задаётся (действует default).
 
 Минимальный канон при добавлении: `{ "enabled": true }` (остальные ключи —
 дефолты). После записи — напомнить про `npm install` в `module_dir`

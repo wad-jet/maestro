@@ -403,6 +403,7 @@ deny. Trust не наследуется вложенными субагента�
       "dim": null
     },
     "probe_cooldown_min": 30,
+    "artifact_globs": ["docs/superpowers/specs/**", "docs/superpowers/plans/**"],
     "storage": {
       "type": "sqlite",
       "qdrant": { "url": "https://qdrant.internal:6333", "api_key_env": "MAESTRO_MEMORY_QDRANT_KEY", "collection": "maestro_memory" },
@@ -423,6 +424,7 @@ deny. Trust не наследуется вложенными субагента�
 | `embedding.api_key_env` | `string` \| `null` | `null` | **Имя env-переменной** с API-ключом (никогда plaintext); **обязателен** для `openai` |
 | `embedding.dim` | `number` \| `null` | `null` | Размерность векторов; **обязателен** для `openai` (нативная dim модели, без Matryoshka-усечения); для `local` игнорируется (остаётся 384) |
 | `probe_cooldown_min` | `number` | `30` | Интервал в минутах между live-probe модели на старте (кэш результата в `state.json`); число > 0 |
+| `artifact_globs` | `string[]` | `["docs/superpowers/specs/**", "docs/superpowers/plans/**"]` | Allowlist-глобы артефактов (спеки/планы, v5.2): repo-relative пути из `write`/`edit` сессии, матчащие глобы, попадают в поле записи `artifacts[]`. `[]` — явный off. ≤16 непустых строк; невалиден → память disabled (`artifact_globs_invalid`). Полный справочник — в [Память maestro (reference)](memory.md) |
 | `summarizer_model` | `string` \| `null` | `null` | Модель фонового саммаризатора; `null` → модель саммаризируемой сессии |
 | `identity` | `string` \| `null` | `null` | Явный override identity (напр. сервисный аккаунт) |
 | `identity_env` | `string` \| `null` | `null` | Имя env-переменной с identity (per-machine, не в общем `maestro.json`) |
@@ -465,7 +467,8 @@ identity для централизованного бэкенда / некорр
 `pgvector_config_invalid`, `pgvector_text_search_config_invalid`,
 `retention_days_invalid`, `similarity_threshold_invalid`,
 `branch_context_invalid`, `mainline_invalid`, `embedding_invalid`,
-`probe_cooldown_min_invalid`, `delete_on_session_delete_invalid`,
+`probe_cooldown_min_invalid`, `artifact_globs_invalid`,
+`delete_on_session_delete_invalid`,
 `namespace_missing`, `namespace_invalid`, `related_invalid`,
 `domain_recall_invalid`), сессии
 работают (fail-soft).

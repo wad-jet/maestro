@@ -7,6 +7,29 @@
 > Хронология составлена по истории authoring-репо `maestro-agent`. Даты
 > приблизительные (по коммитам).
 
+## [2026-09-12]
+
+> **Версия 3.4.0** — Minor-релиз: memory layer v5.2 (artifact-links).
+
+### Добавлено
+
+- **Memory layer v5.2: artifact-links.** Поле записи `artifacts[]` —
+  repo-relative пути спек/планов, с которыми сессия реально работала
+  (`write`/`edit`, status `completed`), извлекаемые детерминированно (без LLM)
+  из tool-частей top-level сессии. Рендер: recall-блок (` | Артефакты: …`),
+  `memory_search`, `memory_recall_preview`. Новый ключ `memory.artifact_globs`
+  (default `["docs/superpowers/specs/**", "docs/superpowers/plans/**"]`;
+  `[]` — явный off; ≤16 непустых строк; невалиден → память off
+  `artifact_globs_invalid`). Безопасность: origin-фильтр (кросс-доменные
+  записи — без артефактов), `existsSync`-фильтр в recall, confidential-фильтр
+  в извлечении (Z4), import-санити путей (Z5), export/import round-trip (B1),
+  prompt-injection через artifact-файл — рассмотрено, принято (Z3).
+  Спека: `docs/superpowers/specs/2026-09-11-memory-artifact-links-design.md`.
+  Документация: `SECURITY.md` (§5a), `manual_docs/reference/memory.md`,
+  `manual_docs/reference/config.md`, `manual_docs/how-to/enable-memory.md`,
+  `manual_docs/explanation/agents-and-trust.md`, канон `maestro-assistant`,
+  `skills/maestro-setup`, `commands/maestro-memory.md`, `AGENTS.md`.
+
 ## [2026-09-11]
 
 ### Изменено

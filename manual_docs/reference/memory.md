@@ -62,6 +62,7 @@
       "dim": null
     },
     "probe_cooldown_min": 30,
+    "artifact_globs": ["docs/superpowers/specs/**", "docs/superpowers/plans/**"],
     "storage": {
       "type": "sqlite",
       "qdrant": { "url": "https://qdrant.internal:6333", "api_key_env": "MAESTRO_MEMORY_QDRANT_KEY", "collection": "maestro_memory" },
@@ -84,6 +85,7 @@
 | `embedding.api_key_env` | `string` \| `null` | `null` | **Имя env-переменной** с API-ключом (никогда plaintext); **обязателен** для `openai` |
 | `embedding.dim` | `number` \| `null` | `null` | Размерность векторов; **обязателен** для `openai` (нативная dim модели, без Matryoshka-усечения); для `local` игнорируется (остаётся 384) |
 | `probe_cooldown_min` | `number` | `30` | Интервал в минутах между live-probe модели на старте (кэш результата в `state.json`); число > 0 |
+| `artifact_globs` | `string[]` | `["docs/superpowers/specs/**", "docs/superpowers/plans/**"]` | Allowlist-глобы артефактов (спеки/планы, v5.2): repo-relative пути из `write`/`edit` сессии, матчащие глобы, попадают в поле записи `artifacts[]`. `[]` — явный off. ≤16 непустых строк; невалиден → память disabled (`artifact_globs_invalid`) |
 | `summarizer_model` | `string` \| `null` | `null` | Модель фонового саммаризатора; `null` → модель саммаризируемой сессии |
 | `identity` | `string` \| `null` | `null` | Явный override identity (напр. сервисный аккаунт). Обычно identity берётся из `identity_env` → git `user.name` |
 | `identity_env` | `string` \| `null` | `null` | Имя env-переменной с identity (per-machine, не в общем `maestro.json`) |
@@ -129,6 +131,8 @@
   `model`/`api_key_env`/`dim`) → память off + лог (`embedding_invalid`).
 - Некорректный `probe_cooldown_min` (не число > 0) → память off + лог
   (`probe_cooldown_min_invalid`).
+- Некорректный `artifact_globs` (не массив / элемент не непустая строка /
+  > 16 элементов) → память off + лог (`artifact_globs_invalid`).
 - Для `embedding.provider: openai` отсутствие `process.env[embedding.api_key_env]`
   → память off + лог (`embedding_api_key_env_missing`).
 - Стартовый probe hard-fail (ключ/модель/размерность) → память off + лог
@@ -142,6 +146,30 @@
 - Некорректный `storage.pgvector.text_search_config` (не `/^[a-z][a-z0-9_]*$/`
   или > 63 символов) → память off + лог (`pgvector_text_search_config_invalid`).
 - Любая ошибка инициализации → память off + лог, сессии работают (fail-soft).
+
+### Зачем (artifact-links, v5.2)
+
+Память — lossy-индекс сессий по дизайну (`title` + `summary` ≤150 слов +
+`decisions`, замаскированные); полный контекст фичи из одной записи не
+восстановить. Спеки/планы в `docs/superpowers/{specs,plans}/` —
+долговременные артефакты дизайна (git-история, стабильные пути) и **источник
+истины** для контекста фичи. Поле `artifacts[]` связывает запись памяти с
+файлами, с которыми сессия реально работала (`write`/`edit`): из recall-хита
+LLM делает один `read` — полный контекст вместо lossy-пересказа. Это **O(1)
+из recall-хита** вместо O(N) glob-перебора по каталогу спек со слабыми
+сигналами (дата-kebab имена).
+
+**Эффект растёт с масштабом:** для больших проектов с большой историей и
+большим числом спецификаций выигрыш максимален (через год — десятки–сотни
+спек со сходными названиями); для молодых проектов минимален — фича
+долгосрочная инвестиция. Точность — путь из фактической активности сессии,
+не эвристика.
+
+> **B2 (remote-less / смена remote-URL):** origin-фильтр артефактов зависит от
+> hash-идентичности проекта. Репо без remote (hash от каталога) или смена
+> remote-URL → свои записи считаются «чужими» → артефакты молча скрыты.
+> Это graceful-деградация (скрытие, не ложь); то же свойство уже есть у
+> namespace-схемы.
 
 ## 🗄️ Бэкенды
 
