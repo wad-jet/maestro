@@ -41,7 +41,7 @@
 | D2 | Light-путь (сессии): 0 LLM — детерминированное извлечение + union |
 | D3 | Git-история: LLM-summarize спеки (1 вызов/фича, `summarizeSession` + маскирование) |
 | D4 | Селективность: `list` готовит снапшот с dry-run превью → `run` по явным ID **или** всё (только по свежему снапшоту), cap 20/вызов на источник |
-| D5 | Синтетические записи: `author: "git-backfill"` (маркер provenance), `session_id = "git-" + sha256(commitSha + "\|" + specPath).slice(0,12)` (RI-1) |
+| D5 | Синтетические записи: `author: "git-backfill"` (маркер provenance), `session_id = "git-" + sha256(key + "\|" + commitSha + "\|" + specPath).slice(0,12)` (RI-1); `key` (effectiveKey) в хэше — локализация ID по namespace на централизованных бэкендах (qdrant/pgvector, общая коллекция) — key-review T4, 2026-09-12 |
 | D6 | `memory.history_globs` — optional, default = inherit `artifact_globs`; невалидное → fallback + warn (мягко, память не отключается) |
 | D7 | Версия плагина 3.4.0 → **3.5.0** (новый инструмент = minor) |
 | D8 | Для этого репо в `maestro.json`: `history_globs: ["docs/superpowers/**", "specs/**"]` (legacy-спеки в историю) |
@@ -153,14 +153,15 @@ artifactConfidentialPatterns (resolved) }` (records — результат
 
 #### 4.2.3 `synthesizeGitEntry(deps, feature, llm)` — синтез записи
 
-deps: `{ client, storage, root, key, projectHash, originRemote, embedModelId,
+deps: `{ client, storage, root, key (= effectiveKey, нормализованный — тот же,
+что в `storage.scan`), projectHash, originRemote, embedModelId,
 embeddings, confidentialPatterns (raw), artifactConfidentialPatterns
 (resolved) }`. llm: результат summarize (см. 4.2.4) — аргумент функции, не
 зависимость.
 
-1. **Idempotency (RI-7)**: `session_id = "git-" + sha256(commitSha + "|" +
-   specPath).slice(0,12)`; `storage.get(session_id)` → существует →
-   `already_indexed` (ничего не перезаписываем).
+1. **Idempotency (RI-7)**: `session_id = "git-" + sha256(key + "|" + commitSha +
+   "|" + specPath).slice(0,12)` (`key` из deps — RI-1); `storage.get(session_id)`
+   → существует → `already_indexed` (ничего не перезаписываем).
 2. Запись (без embedding): `session_id`, `key`, `origin_project_hash:
    projectHash`, `title: feature.title`, `summary`/`decisions` из llm,
    `model_id: embedModelId`, `author: "git-backfill"` (RI-6),
@@ -280,7 +281,7 @@ HITL-шаги по паттерну `maestro-memory-prune`:
 
 | # | Инвариант |
 |---|---|
-| RI-1 | Синтетический `session_id` детерминирован (`git-<sha12(sha\|path)>`), стабилен между запусками; не коллидирует с реальными (`ses_*`) и spec/plan одного коммита |
+| RI-1 | Синтетический `session_id` детерминирован (`git-<sha12(key\|sha\|path)>`), стабилен между запусками; не коллидирует с реальными (`ses_*`) и spec/plan одного коммита; локализация по namespace: `key` (effectiveKey) в хэше — разные namespace → разные ID (централизованные бэкенды, D5) |
 | RI-2 | Coverage-guard: спека, путь которой ∈ ⋃ `record.artifacts` существующих записей, НЕ синтезируется повторно (предковость по head — НЕ сигнал, см. §4.2.2 п.3); идемпотентность на уровне записи — RI-7 |
 | RI-3 | Light-путь меняет только `artifacts` + `version`; head/branch/merged/embedding/контент — нет (identity не искажается) |
 | RI-4 | Light-путь не пишет в `state` (no `setSummarized`/`recordFail`) — natural-ре-индекс работает как раньше |
@@ -310,7 +311,9 @@ HITL-шаги по паттерну `maestro-memory-prune`:
     not_in_git; plan-ассоциация (конвенция + same-commit только plan-подобные);
     title из H1; merged по isAncestor; `%ct` → time; git-сбой → fail-soft
     (gitErrors).
-  - `synthesizeGitEntry`: детерминированный session_id (RI-1); author-маркер;
+  - `synthesizeGitEntry`: детерминированный session_id (RI-1);
+    **кросс-namespace**: разные `key` → разные ID, один `key` → стабильность;
+    author-маркер;
     форма записи; artifacts-фильтр (existsSync/resolved/cap); **re-mask
     LLM-вывода до embed (записан embedding — от маскированного контента)**;
     idempotency (already_indexed, без перезаписи).
@@ -342,6 +345,10 @@ HITL-шаги по паттерну `maestro-memory-prune`:
   полностью (RI-2).
 - **Legacy `specs/**`** — по default (`artifact_globs`) не покрывается;
   для этого репо — `history_globs` в `maestro.json` (D8), канон задокументирован.
+- **Локализация по namespace (key в хэше, D5/RI-1)** — один commit+specPath →
+  по одной записи на namespace (дублирование хранения на общих коллекциях
+  qdrant/pgvector); осознанно: recall key-scoped, кросс-namespace-дедуп
+  несовместим с namespace-identity (key-review T4, 2026-09-12).
 
 ## 8. Открытые вопросы
 
@@ -349,11 +356,11 @@ HITL-шаги по паттерну `maestro-memory-prune`:
 <!-- maestro:sanitize
 status: CLEAN
 date: 2026-09-12
-hash: 1e566a648fbcd5c88c3f1af6204817f24a647a443a8b912b70036304843caae0
+hash: 8d5d02b30489236ec6c6650ee2d30dba367bf6f7a52be856ec248f188bf23b17
 -->
 <!-- maestro:review
 reviewer: opus
 date: 2026-09-12
 verdict: approve
-hash: 1e566a648fbcd5c88c3f1af6204817f24a647a443a8b912b70036304843caae0
+hash: 8d5d02b30489236ec6c6650ee2d30dba367bf6f7a52be856ec248f188bf23b17
 -->

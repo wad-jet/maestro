@@ -17,7 +17,7 @@
 - RI-5: list и run(sessions) — 0 LLM-вызовов; run(git) — ≤N summarize + ≤N embed; cap `max` (default 20) на источник за вызов.
 - RI-6: спека маскируется до summarize (raw-набор); LLM-вывод re-mask'ится (maskEntry) ДО embed и upsert; artifacts — resolved-набор + existsSync + repo-relative; кандидат под resolved confidential → `skip_confidential`; `author: "git-backfill"`.
 - RI-7: идемпотентность — `already_indexed` / `no_change` (без upsert).
-- RI-1: `session_id = "git-" + sha256(commitSha + "|" + specPath).slice(0,12)`.
+- RI-1: `session_id = "git-" + sha256(key + "|" + commitSha + "|" + specPath).slice(0,12)` (обновлено: key-review T4, 2026-09-12 — `key` = effectiveKey, локализация по namespace).
 - Телеметрия — aggregates-only (SEC-4b); новые event-имена в whitelist.
 - Docs — русский; канон `history_globs` идентичен в 3 местах (config.js ↔ maestro-assistant ↔ manual_docs/reference/memory.md).
 - Тесты: `npm test` (плагиновый) и `npm run test:memory`; conventional commits.
