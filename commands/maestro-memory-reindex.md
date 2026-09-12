@@ -21,7 +21,7 @@ description: HITL-бэкфилл памяти — список на индекс
 
 - **Секция A (sessions):** кандидаты с пустыми `artifacts` + dry-run превью
   путей (0 LLM) — `session_id`, `head`, `branch`, `author`, `time_last`,
-  `model_id`, флаги `skip_model_mismatch` / `skip_messages_unavailable`.
+  `model_id`, флаги `model_mismatch` / `messages_unavailable`.
 - **Секция B (git):** фичи из git-истории с отсутствующей записью +
   превью spec-файлов — `spec`, `branch`, `head`, `merged`.
 
