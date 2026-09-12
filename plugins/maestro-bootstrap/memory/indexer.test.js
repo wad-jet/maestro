@@ -1335,3 +1335,31 @@ test("artifactGlobs default [] → no extraction (off by default, Task 3)", asyn
   assert.deepEqual(client.upserts[0][0].artifacts, [], "no artifactGlobs → no extraction");
   idx.dispose();
 });
+
+test("union dedup is case-insensitive, extracted-first ordering (Task 3 deferred)", async (t) => {
+  const root = mkArtifactRoot(t);
+  const file = path.join(root, "docs", "Spec.md");
+  touchFile(file);
+  const client = mkClient();
+  client.session.messages = async () => ({ data: [{ info: {}, parts: [{ type: "text", text: "work" }, writePart(file)] }] });
+  // existing.artifacts carries the case-variant of the extracted path.
+  const storage = mkStorage(client, async () => ({ artifacts: ["docs/spec.md"] }));
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+    root,
+    artifactGlobs: ["docs/**"],
+    artifactConfidentialPatterns: ["secrets/**"],
+  });
+  await idx._run("s1");
+  assert.deepEqual(
+    client.upserts[0][0].artifacts,
+    ["docs/Spec.md"],
+    "extracted-first ordering; case-variant existing deduped (case-insensitive union)",
+  );
+  idx.dispose();
+});

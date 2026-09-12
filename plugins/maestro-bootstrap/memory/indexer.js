@@ -294,12 +294,22 @@ export class Indexer {
         // в embed-вход (title+summary+decisions, см. ниже). Union с
         // existing.artifacts (D6, Z1), cap 8. Off-поведение: artifactGlobs=[]
         // → extractArtifacts возвращает [] (без извлечения).
+        // Task 7 (deferred minor): union-дедуп case-insensitive (как в
+        // extractArtifacts) — dedup-ключ String(p).toLowerCase(), extracted-first.
         const extracted = extractArtifacts(messages, {
           root: this.root,
           globs: this.artifactGlobs,
           confidentialPatterns: this.artifactConfidentialPatterns,
         });
-        entry.artifacts = [...new Set([...extracted, ...(existing?.artifacts ?? [])])].slice(0, 8);
+        const unionSeen = new Set();
+        const union = [];
+        for (const p of [...extracted, ...(existing?.artifacts ?? [])]) {
+          const k = String(p).toLowerCase();
+          if (unionSeen.has(k)) continue;
+          unionSeen.add(k);
+          union.push(p);
+        }
+        entry.artifacts = union.slice(0, 8);
 
         // G2: re-mask entry before write (defense-in-depth)
         const maskedEntry = maskEntry(entry, { confidentialPatterns: this.confidentialPatterns });
