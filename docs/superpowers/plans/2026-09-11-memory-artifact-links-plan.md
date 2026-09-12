@@ -191,7 +191,7 @@ Spec: `docs/superpowers/specs/2026-09-11-memory-artifact-links-design.md`
 
 ## Task 8: Версия плагина
 
-Файл: `plugins/maestro-bootstrap/package.json` (3.3.3 → **3.4.0**).
+Файл: корневой `package.json` — единственный источник версии (core.js `readPluginVersion` → `../../package.json`): `3.3.3` → **3.4.0**.
 Проверка: `npm test` (test на provision/version, если есть).
 
 ## Task 9: Маэстро-слой (skills/commands/docs)
