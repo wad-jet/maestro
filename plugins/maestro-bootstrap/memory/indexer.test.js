@@ -1,5 +1,8 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { Indexer } from "./indexer.js";
 import { SESSIONS } from "./summarize.js";
 
@@ -1190,5 +1193,145 @@ test("single-segment namespace → prefixes empty; no originRemote → ''", asyn
   const e = client.upserts[0][0];
   assert.deepEqual(e.prefixes, []);
   assert.equal(e.origin_remote, "");
+  idx.dispose();
+});
+
+// ── Task 3: artifact-links (spec §4.2) ───────────────────────────────
+
+function mkArtifactRoot(t) {
+  const root = fs.mkdtempSync(path.join(os.tmpdir(), "idx-artifacts-"));
+  t.after(() => fs.rmSync(root, { recursive: true, force: true }));
+  return root;
+}
+
+function touchFile(filePath) {
+  fs.mkdirSync(path.dirname(filePath), { recursive: true });
+  fs.writeFileSync(filePath, "x");
+}
+
+function writePart(filePath) {
+  return { type: "tool", tool: "write", state: { status: "completed", input: { filePath } } };
+}
+
+test("entry.artifacts extracted from completed write parts (Task 3)", async (t) => {
+  const root = mkArtifactRoot(t);
+  const file = path.join(root, "docs", "spec.md");
+  touchFile(file);
+  const client = mkClient([
+    { info: {}, parts: [{ type: "text", text: "hello" }] },
+    { info: {}, parts: [writePart(file)] },
+  ]);
+  const storage = mkStorage(client);
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+    root,
+    artifactGlobs: ["docs/**"],
+    artifactConfidentialPatterns: ["secrets/**"],
+  });
+  await idx._run("s1");
+  assert.equal(client.upserts.length, 1);
+  assert.deepEqual(client.upserts[0][0].artifacts, ["docs/spec.md"]);
+  idx.dispose();
+});
+
+test("re-summarize unions artifacts with existing (D6, Z1) and caps at 8 (Task 3)", async (t) => {
+  const root = mkArtifactRoot(t);
+  const files = Array.from({ length: 12 }, (_, i) => path.join(root, "docs", `f${i}.md`));
+  for (const f of files) touchFile(f);
+  let run = 0;
+  const client = mkClient();
+  client.session.messages = async () => {
+    run++;
+    const batch = run === 1 ? files.slice(0, 6) : files.slice(6);
+    return { data: batch.map((f) => ({ info: {}, parts: [{ type: "text", text: "work" }, writePart(f)] })) };
+  };
+  const storage = mkStorage(client);
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+    root,
+    artifactGlobs: ["docs/**"],
+    artifactConfidentialPatterns: ["secrets/**"],
+  });
+  await idx._run("s1");
+  assert.deepEqual(
+    client.upserts[0][0].artifacts,
+    ["docs/f0.md", "docs/f1.md", "docs/f2.md", "docs/f3.md", "docs/f4.md", "docs/f5.md"],
+    "first run extracts 6 artifacts",
+  );
+  await idx._run("s1");
+  const second = client.upserts[1][0];
+  assert.equal(second.version, 2, "re-summarize");
+  assert.equal(second.artifacts.length, 8, "union capped at 8");
+  assert.deepEqual(
+    second.artifacts,
+    ["docs/f6.md", "docs/f7.md", "docs/f8.md", "docs/f9.md", "docs/f10.md", "docs/f11.md", "docs/f0.md", "docs/f1.md"],
+    "union = extracted + existing.artifacts, slice(0,8)",
+  );
+  idx.dispose();
+});
+
+test("invariants: tool parts NOT in summarize transcript; artifacts NOT in embed input (Task 3)", async (t) => {
+  const root = mkArtifactRoot(t);
+  const file = path.join(root, "docs", "spec.md");
+  touchFile(file);
+  let capturedTranscript = null;
+  let capturedEmbed = null;
+  const client = mkClient([
+    { info: {}, parts: [{ type: "text", text: "hello world" }] },
+    { info: {}, parts: [writePart(file)] },
+  ]);
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: {
+      embed: async (s) => { capturedEmbed = s; return new Float32Array([0.1]); },
+      dim: 1, modelId: "m",
+    },
+    storage: mkStorage(client), state: mkState(),
+    summarize: async ({ transcript }) => { capturedTranscript = transcript; return { title: "t", summary: "s", decisions: [] }; },
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+    root,
+    artifactGlobs: ["docs/**"],
+    artifactConfidentialPatterns: ["secrets/**"],
+  });
+  await idx._run("s1");
+  assert.equal(client.upserts.length, 1);
+  assert.deepEqual(client.upserts[0][0].artifacts, ["docs/spec.md"], "artifacts extracted");
+  assert.ok(!capturedTranscript.includes("docs/spec.md"), "tool parts NOT in summarize transcript (text-only)");
+  assert.ok(!capturedEmbed.includes("docs/spec.md"), "artifacts NOT in embed input");
+  assert.ok(capturedEmbed.includes("t") && capturedEmbed.includes("s"), "embed = title+summary+decisions");
+  idx.dispose();
+});
+
+test("artifactGlobs default [] → no extraction (off by default, Task 3)", async (t) => {
+  const root = mkArtifactRoot(t);
+  const file = path.join(root, "docs", "spec.md");
+  touchFile(file);
+  const client = mkClient([
+    { info: {}, parts: [{ type: "text", text: "hello" }] },
+    { info: {}, parts: [writePart(file)] },
+  ]);
+  const storage = mkStorage(client);
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+    root,
+  });
+  await idx._run("s1");
+  assert.deepEqual(client.upserts[0][0].artifacts, [], "no artifactGlobs → no extraction");
   idx.dispose();
 });
