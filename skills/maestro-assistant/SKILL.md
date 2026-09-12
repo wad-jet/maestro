@@ -95,6 +95,7 @@ description: Use when the user asks for help configuring maestro, organizing pro
     },
     "probe_cooldown_min": 30,
     "artifact_globs": ["docs/superpowers/specs/**", "docs/superpowers/plans/**"],
+    "history_globs": null,
     "storage": {
       "type": "sqlite",
       "qdrant": { "url": "https://qdrant.internal:6333", "api_key_env": "MAESTRO_MEMORY_QDRANT_KEY", "collection": "maestro_memory" },
@@ -180,6 +181,15 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
   `["docs/superpowers/specs/**", "docs/superpowers/plans/**"]`; `[]` — явный
   off. Валидация: массив ≤16 непустых строк; иначе → `artifact_globs_invalid`
   (память off). После правки — OP-1 (перезапуск opencode).
+- **`history_globs`** — allowlist-глобы для **git-history backfill**
+  (`memory_reindex`, v3.5.0): repo-relative пути спек в git-истории —
+  кандидаты на синтез записей. **Inherit-семантика:** `null`/absent →
+  наследует `artifact_globs` (резолв на use-site, не в дефолтах); `[]` = off
+  (кандидатов нет). Валидный массив: ≤16 непустых строк (trim + unique).
+  **Невалидное** (non-array / не-строки / >16) → **soft fallback** на
+  `artifact_globs` + однократный warn `memory:config_fallback` — память НЕ
+  отключается, нового `disabled_reason` нет (в отличие от
+  `artifact_globs_invalid`). После правки — OP-1 (перезапуск opencode).
 - **`summarizer_model`** — модель фонового саммаризатора; `null` → модель
   саммаризируемой сессии.
 - **`identity` / `identity_env`** — подпись записей (`author`), **не
@@ -255,7 +265,7 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
   включении памяти в merge-config (`.opencode/opencode.json` или global)
   добавляется нативное правило `permission: { memory_forget: "ask",
   memory_export: "ask", memory_import: "ask", memory_migrate: "ask",
-  memory_prune: "ask" }` (opencode
+  memory_prune: "ask", memory_reindex: "ask" }` (opencode
   default для новых тулов — allow, поэтому правило обязательно). Канон для
   будущих тулов: **новые write/boundary-tools → permission `ask`**.
 - **Онбординг memory (явная последовательность):** после добавления секции

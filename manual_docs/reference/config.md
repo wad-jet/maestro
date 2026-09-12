@@ -404,6 +404,7 @@ deny. Trust не наследуется вложенными субагента�
     },
     "probe_cooldown_min": 30,
     "artifact_globs": ["docs/superpowers/specs/**", "docs/superpowers/plans/**"],
+    "history_globs": null,
     "storage": {
       "type": "sqlite",
       "qdrant": { "url": "https://qdrant.internal:6333", "api_key_env": "MAESTRO_MEMORY_QDRANT_KEY", "collection": "maestro_memory" },
@@ -425,6 +426,7 @@ deny. Trust не наследуется вложенными субагента�
 | `embedding.dim` | `number` \| `null` | `null` | Размерность векторов; **обязателен** для `openai` (нативная dim модели, без Matryoshka-усечения); для `local` игнорируется (остаётся 384) |
 | `probe_cooldown_min` | `number` | `30` | Интервал в минутах между live-probe модели на старте (кэш результата в `state.json`); число > 0 |
 | `artifact_globs` | `string[]` | `["docs/superpowers/specs/**", "docs/superpowers/plans/**"]` | Allowlist-глобы артефактов (спеки/планы, v5.2): repo-relative пути из `write`/`edit` сессии, матчащие глобы, попадают в поле записи `artifacts[]`. `[]` — явный off. ≤16 непустых строк; невалиден → память disabled (`artifact_globs_invalid`). Полный справочник — в [Память maestro (reference)](memory.md) |
+| `history_globs` | `string[]` \| `null` | `null` (inherit `artifact_globs`) | Allowlist-глобы для git-history backfill (`memory_reindex`, v3.5.0): repo-relative пути спек в git-истории — кандидаты на синтез записей. `null`/absent → **inherit** `artifact_globs` (резолв на use-site); `[]` — явный off. Валидный массив: ≤16 непустых строк (trim + unique). Невалидное → **soft fallback** на `artifact_globs` + warn `memory:config_fallback` — память НЕ отключается. Полный справочник — в [Память maestro (reference)](memory.md) |
 | `summarizer_model` | `string` \| `null` | `null` | Модель фонового саммаризатора; `null` → модель саммаризируемой сессии |
 | `identity` | `string` \| `null` | `null` | Явный override identity (напр. сервисный аккаунт) |
 | `identity_env` | `string` \| `null` | `null` | Имя env-переменной с identity (per-machine, не в общем `maestro.json`) |
@@ -472,6 +474,9 @@ identity для централизованного бэкенда / некорр
 `namespace_missing`, `namespace_invalid`, `related_invalid`,
 `domain_recall_invalid`), сессии
 работают (fail-soft).
+**Исключение — `history_globs`:** некорректное значение (не массив / не-строки /
+>16) → **soft fallback** на `artifact_globs` + warn `memory:config_fallback` —
+память НЕ отключается, нового `disabled_reason` нет (RI-8).
 Приоритет disabled-причин: `namespace_missing`/`namespace_invalid` — первичны
 (без валидного namespace память не включается независимо от остального
 конфига); `related_invalid`/`domain_recall_invalid` — вторичны (проверяются
@@ -485,8 +490,9 @@ identity для централизованного бэкенда / некорр
 #### Permission-правило для write/boundary-tools (обязательное)
 
 `memory_forget` / `memory_export` / `memory_import` / `memory_migrate` /
-`memory_prune` — операции, пересекающие границу (удаление, запись файла, запись
-в память, пере-keying). OpenCode по умолчанию разрешает новые тулы, поэтому в
+`memory_prune` / `memory_reindex` — операции, пересекающие границу (удаление,
+запись файла, запись в память, пере-keying, бэкфилл/синтез записей). OpenCode
+по умолчанию разрешает новые тулы, поэтому в
 merge-config (`.opencode/opencode.json`
 или global `~/.config/opencode/opencode.json`) **обязательно** правило:
 
@@ -497,7 +503,8 @@ merge-config (`.opencode/opencode.json`
     "memory_export": "ask",
     "memory_import": "ask",
     "memory_migrate": "ask",
-    "memory_prune": "ask"
+    "memory_prune": "ask",
+    "memory_reindex": "ask"
   }
 }
 ```

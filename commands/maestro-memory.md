@@ -62,6 +62,7 @@ description: Показать статус memory layer плагина maestro-b
    | `storage.type`      | `sqlite`                                                     |
    | `retention_days`    | `null` (выключено)                                           |
    | `artifact_globs`    | `["docs/superpowers/specs/**", "docs/superpowers/plans/**"]` |
+   | `history_globs`     | `null` (inherit `artifact_globs`)                          |
 
 3. Зафиксируй фактические значения (файла или дефолты).
 

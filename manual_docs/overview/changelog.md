@@ -9,6 +9,32 @@
 
 ## [2026-09-12]
 
+> **Версия 3.5.0** — Minor-релиз: memory layer reindex & history backfill.
+
+### Добавлено
+
+- **Memory layer — reindex & history backfill (v3.5.0).** Новый HITL-инструмент
+  `memory_reindex` (permission `ask`) с двумя источниками: `sessions`
+  (**light-путь**, 0 LLM — детерминированное извлечение артефактов + union,
+  меняет только `artifacts`/`version`) и `git` (**git-история** — LLM-summarize
+  спек из git-истории, 1 вызов/фича, синтетические записи с маркером
+  `author: "git-backfill"` и детерминированным `session_id`). `list` — dry-run
+  превью + снапшот (0 LLM); `run` — по явным ID или по снапшоту, cap 20/вызов.
+  Новый ключ `memory.history_globs` (default `null` → **inherit**
+  `artifact_globs`; `[]` — off; ≤16 строк; невалидное → soft fallback + warn
+  `memory:config_fallback`, память не отключается). Новая команда
+  `@maestro-memory-reindex`. Безопасность: спека маскируется до summarize,
+  LLM-вывод re-mask'ится до embed/upsert, `skip_confidential` (resolved-набор)
+  fail-closed, телеметрия aggregates-only (`memory:reindex.sessions`,
+  `memory:reindex.git`). Спека:
+  `docs/superpowers/specs/2026-09-12-memory-reindex-backfill-design.md`.
+  Документация: `SECURITY.md` (§5a), `manual_docs/reference/memory.md`,
+  `manual_docs/reference/config.md`, `manual_docs/reference/commands.md`,
+  `manual_docs/explanation/agents-and-trust.md`, канон `maestro-assistant`,
+  `commands/maestro-memory.md`, `commands/maestro-memory-reindex.md`, `AGENTS.md`.
+
+## [2026-09-12]
+
 > **Версия 3.4.0** — Minor-релиз: memory layer v5.2 (artifact-links).
 
 ### Добавлено

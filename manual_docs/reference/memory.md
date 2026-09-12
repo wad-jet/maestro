@@ -63,6 +63,7 @@
     },
     "probe_cooldown_min": 30,
     "artifact_globs": ["docs/superpowers/specs/**", "docs/superpowers/plans/**"],
+    "history_globs": null,
     "storage": {
       "type": "sqlite",
       "qdrant": { "url": "https://qdrant.internal:6333", "api_key_env": "MAESTRO_MEMORY_QDRANT_KEY", "collection": "maestro_memory" },
@@ -86,6 +87,7 @@
 | `embedding.dim` | `number` \| `null` | `null` | Размерность векторов; **обязателен** для `openai` (нативная dim модели, без Matryoshka-усечения); для `local` игнорируется (остаётся 384) |
 | `probe_cooldown_min` | `number` | `30` | Интервал в минутах между live-probe модели на старте (кэш результата в `state.json`); число > 0 |
 | `artifact_globs` | `string[]` | `["docs/superpowers/specs/**", "docs/superpowers/plans/**"]` | Allowlist-глобы артефактов (спеки/планы, v5.2): repo-relative пути из `write`/`edit` сессии, матчащие глобы, попадают в поле записи `artifacts[]`. `[]` — явный off. ≤16 непустых строк; невалиден → память disabled (`artifact_globs_invalid`) |
+| `history_globs` | `string[]` \| `null` | `null` (inherit `artifact_globs`) | Allowlist-глобы для **git-history backfill** (`memory_reindex`, v3.5.0): repo-relative пути спек в git-истории — кандидаты на синтез записей. `null`/absent → **inherit** `artifact_globs` (резолв на use-site); `[]` — явный off (кандидатов нет). Валидный массив: ≤16 непустых строк (trim + unique). Невалидное (non-array / не-строки / >16) → **soft fallback** на `artifact_globs` + warn `memory:config_fallback` — память НЕ отключается, нового `disabled_reason` нет |
 | `summarizer_model` | `string` \| `null` | `null` | Модель фонового саммаризатора; `null` → модель саммаризируемой сессии |
 | `identity` | `string` \| `null` | `null` | Явный override identity (напр. сервисный аккаунт). Обычно identity берётся из `identity_env` → git `user.name` |
 | `identity_env` | `string` \| `null` | `null` | Имя env-переменной с identity (per-machine, не в общем `maestro.json`) |
@@ -133,6 +135,10 @@
   (`probe_cooldown_min_invalid`).
 - Некорректный `artifact_globs` (не массив / элемент не непустая строка /
   > 16 элементов) → память off + лог (`artifact_globs_invalid`).
+- Некорректный `history_globs` (не массив / элемент не непустая строка /
+  > 16 элементов) → **soft fallback** на `artifact_globs` + warn
+  `memory:config_fallback` — память НЕ отключается, нового `disabled_reason`
+  нет (в отличие от `artifact_globs_invalid`).
 - Для `embedding.provider: openai` отсутствие `process.env[embedding.api_key_env]`
   → память off + лог (`embedding_api_key_env_missing`).
 - Стартовый probe hard-fail (ключ/модель/размерность) → память off + лог
@@ -444,9 +450,9 @@ memory_search(query: string, {limit?, date_from?, date_to?, author?, project?, s
 
 Все инструменты — хуки `tool`, доступны агентам в сессиях; **недоступны
 plugin-созданным сессиям `[maestro-memory]`** (как `memory_search`).
-`memory_forget`/`memory_export`/`memory_import`/`memory_migrate` —
-**write/boundary-tools**: требуют нативного permission-правила `"ask"` в
-merge-config (см. ниже).
+`memory_forget`/`memory_export`/`memory_import`/`memory_migrate`/
+`memory_prune`/`memory_reindex` — **write/boundary-tools**: требуют нативного
+permission-правила `"ask"` в merge-config (см. ниже).
 
 ### `memory_forget`
 
@@ -483,6 +489,42 @@ memory_prune({action: "list" | "delete", session_ids?, heads?, category?}) → �
   в явный набор после host-guard.
 - **Permission:** `memory_prune: "ask"` в merge-config (обязательное правило —
   без него новый tool получает ungated-доступ по дефолту OpenCode).
+
+### `memory_reindex` (v3.5.0)
+
+```
+memory_reindex({action: "list" | "run", source: "sessions" | "git", session_ids?, all_empty?, specs?, all?, max?}) → листинг/бэкфилл
+```
+
+- **HITL-бэкфилл памяти** — два источника, один инструмент:
+  - `source: "sessions"` — **light-путь**: детерминированное извлечение
+    артефактов из tool-частей сессии (0 LLM) + union с сохранёнными
+    `artifacts` (extracted-first, cap 8) → upsert (`version` +1). Меняет
+    только `artifacts` + `version`; head/branch/merged/embedding/контент —
+    не трогаются (RI-3); в `state` не пишет (RI-4).
+  - `source: "git"` — **git-история**: LLM-summarize спек из git-истории
+    (кандидаты — `history_globs`, кроме plan-путей; 1 вызов/фича) → синтез
+    записи (`author: "git-backfill"`, `session_id = "git-" + sha12(key|sha|path)`,
+    детерминированный — RI-1). Требует `memory.summarizer_model` (иначе —
+    hard guard с actionable-сообщением).
+- **`action: "list"`** — 0 LLM (RI-5): секция A (sessions) — кандидаты с
+  пустыми `artifacts` + dry-run превью путей + флаги `model_mismatch` /
+  `messages_unavailable`; секция B (git) — фичи из git-истории без покрытия
+  по `artifacts` + превью spec-путей + флаг `summarizer_model_missing`.
+  Листинг пишет **снапшот** — `run` с `all_empty`/`all` резолвится строго по
+  нему (как `pruneSnapshot` у `memory_prune`).
+- **`action: "run"`** — по явным `session_ids`/`specs` **или** по снапшоту
+  (`all_empty`/`all`); cap `max` (default **20**) на источник за вызов;
+  fail-soft по элементу (сбой одного → skip с причиной, партия продолжается,
+  RI-9). Идемпотентность (RI-7): git-run по существующему `session_id` →
+  `already_indexed`; light-run при неизменном post-mask union → `no_change`
+  (без upsert).
+- **Рекомендованный порядок:** сначала sessions (light, 0 LLM), затем git
+  (стоимость LLM-summary). Git ДО sessions → возможна пара (реальная +
+  синтетическая) для фич с записью и пустыми `artifacts` — удаление через
+  `memory_prune` (spec §7).
+- **Permission:** `memory_reindex: "ask"` в merge-config (обязательное правило —
+  HITL boundary-tool, не авто-запуск; как `memory_prune`).
 
 ### `memory_export`
 
@@ -583,9 +625,10 @@ memory_stats_detail() → агрегаты (без summary-текста)
 
 ### Permission-правило (write/boundary-tools)
 
-`memory_forget`/`memory_export`/`memory_import`/`memory_migrate`/`memory_prune` —
-операции, пересекающие границу (удаление, запись файла, запись в память,
-пере-keying). OpenCode по умолчанию разрешает новые тулы, поэтому
+`memory_forget`/`memory_export`/`memory_import`/`memory_migrate`/`memory_prune`/
+`memory_reindex` — операции, пересекающие границу (удаление, запись файла,
+запись в память, пере-keying, бэкфилл/синтез записей). OpenCode по умолчанию
+разрешает новые тулы, поэтому
 **обязательное правило** в merge-config
 (`.opencode/opencode.json` или global):
 
@@ -596,7 +639,8 @@ memory_stats_detail() → агрегаты (без summary-текста)
     "memory_export": "ask",
     "memory_import": "ask",
     "memory_migrate": "ask",
-    "memory_prune": "ask"
+    "memory_prune": "ask",
+    "memory_reindex": "ask"
   }
 }
 ```
@@ -724,6 +768,44 @@ opt-in на вставку замаскированных заголовков/s
 — запись сохранена; `memory:session_deleted` — удалена (только при успехе);
 `memory:session_delete_failed` — ошибка удаления.
 
+## 🔁 Бэкфилл (reindex & history backfill, v3.5.0)
+
+Инструмент `memory_reindex` (HITL, permission `ask`) закрывает два пробела
+индексации: **сессии с пустыми `artifacts`** (записи до v5.2) и **фичи из
+git-истории без записи** (спеки, написанные до включения памяти).
+
+**Light-путь (`source: "sessions"`, 0 LLM):** детерминированное извлечение
+артефактов из tool-частей сессии (`extractArtifacts`, resolved-набор) + union
+с сохранёнными `artifacts` (extracted-first, dedup lowercase, cap 8) → upsert
+(`version` +1). Меняет только `artifacts` + `version` (RI-3); в `state` не
+пишет — natural-ре-индекс работает как раньше (RI-4). No-op guard: при
+неизменном **post-mask** union → `no_change` без upsert; stale-пути под
+ужесточённым resolved-набором чистятся через upsert (RI-7).
+
+**Git-история (`source: "git"`, LLM):** кандидаты — файлы в текущем дереве,
+матчащие `history_globs` (inherit `artifact_globs` при `null`), **кроме
+plan-путей** (spec+plan = одна фича, 1 LLM-вызов). Спека маскируется **до**
+summarize (raw-набор); LLM-вывод **re-mask'ится** (`maskEntry`) до embed и
+upsert (SECURITY.md §5a); кандидат под `confidential.paths` (resolved-набор) →
+`skip_confidential` (fail-closed). Синтетическая запись: `author:
+"git-backfill"` (маркер provenance, виден в recall/search/export),
+`session_id = "git-" + sha256(key + "|" + commitSha + "|" + specPath).slice(0,12)`
+(детерминированный, RI-1), `head` = добавляющий коммит, `merged` — по
+`isAncestor`. Требует `memory.summarizer_model` (иначе — hard guard).
+
+**Cost-модель (RI-5):** `list` — 0 LLM (dry-run превью + снапшот);
+`run(sessions)` — 0 LLM; `run(git)` — ≤N summarize + ≤N embed (1 вызов/фича);
+cap **20**/вызов на источник. Идемпотентность (RI-7): git-run по
+существующему `session_id` → `already_indexed`; light-run при неизменном
+post-mask union → `no_change`. Fail-soft по элементу (RI-9): сбой одного →
+skip с причиной, партия продолжается.
+
+**Рекомендованный порядок:** сначала sessions (light), затем git. Git ДО
+sessions → возможна пара (реальная + синтетическая) для фич с записью и
+пустыми `artifacts` — обе записи полезны, удаление через `memory_prune`
+(spec §7). После light-бэкфилла coverage по `artifacts` работает полностью
+(RI-2).
+
 ## 📁 Расположение данных
 
 `<data-dir>` — platform-aware: `$XDG_DATA_HOME` → macOS
@@ -845,6 +927,9 @@ opt-in на вставку замаскированных заголовков/s
 | `memory:session_delete_failed` (error) | sessionID |
 | `memory:index_unattributed` (debug) | sessionID (нет git-якоря — запись не индексируется) |
 | `memory:pruned` | count, records (число удалённых записей и session_id) |
+| `memory:reindex.sessions` | selected, updated, no_change, already_indexed, skipped (aggregates-only, SEC-4b) |
+| `memory:reindex.git` | selected, indexed, already_indexed, no_change, skipped (aggregates-only, SEC-4b) |
+| `memory:config_fallback` (warn) | — (невалидный `history_globs` → soft fallback на `artifact_globs`; память не отключается) |
 | `memory:delete_on_session_delete_centralized` (warn) | — (флаг `delete_on_session_delete` на централизованном бэкенде) |
 | `memory:forgotten` | count, filters (массив enum: `session_id`/`author`/`before`, без значений) |
 | `memory:backfill` | considered, indexed, skipped |
@@ -939,7 +1024,7 @@ opt-in на вставку замаскированных заголовков/s
 
 - [Как включить память](../how-to/enable-memory.md) — пошаговые инструкции
 - [Конфигурация](config.md) — секция `memory` в схеме maestro.json + permission-правило
-- [Команды](commands.md) — `@maestro-memory`, `@maestro-memory-report`
+- [Команды](commands.md) — `@maestro-memory`, `@maestro-memory-report`, `@maestro-memory-prune`, `@maestro-memory-reindex`
 - [Агенты и модель доверия](../explanation/agents-and-trust.md) — memory и confidential
 - [Выбор моделей](model-selection.md) — модели памяти вне agent-tier
 - [Требования и оценка ИБ (SECURITY.md)](../../SECURITY.md) — правила §5

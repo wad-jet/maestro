@@ -115,6 +115,15 @@ HITL-утилизация брошенных/unknown записей памяти
 централизованных бэкендах). Permission `ask`. Подробнее —
 [Память](../reference/memory.md).
 
+### `@maestro-memory-reindex`
+
+HITL-бэкфилл памяти (v3.5.0): листинг кандидатов на индексацию (dry-run
+превью, 0 LLM) — секция A (sessions с пустыми `artifacts`) + секция B
+(git-история по `history_globs`) → HITL-выбор источника и объёма →
+`memory_reindex` `run` (light-путь sessions / LLM-синтез git) → агрегатный
+отчёт (SEC-4b). Рекомендованный порядок: сначала sessions, затем git.
+Permission `ask`. Подробнее — [Память](../reference/memory.md).
+
 ## 💡 Примечания
 
 - Все HITL-вопросы и сообщения пользователю — только на русском.
