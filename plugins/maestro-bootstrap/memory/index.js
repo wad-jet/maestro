@@ -4,7 +4,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { makeBoundedMap, readPluginVersion, getGitConfig, loadConfidentialConfig, confGlobMatch } from "../core.js";
-import { loadMemoryConfig, resolveEffectiveKey, resolveIdentity, resolveEffectiveTextConfig, sanitizeDirName } from "./config.js";
+import { loadMemoryConfig, resolveEffectiveKey, resolveIdentity, resolveEffectiveTextConfig, sanitizeDirName, resolveHistoryGlobs } from "./config.js";
 import { maskEntry, maskTranscript } from "./mask.js";
 import { ensureModule } from "./provision.js";
 import { createStorage } from "./storage.js";
@@ -15,8 +15,10 @@ import { Recall } from "./recall.js";
 import { createState, createProjectState, createKeyState } from "./state.js";
 import { summarizeSession, SESSIONS } from "./summarize.js";
 import { deriveProjectKey, resolveProjectKey, prefixesOf, legacyKey, canonicalizeRemote } from "./project.js";
-import { resolveBranch, resolveHead as resolveHeadReal, detectMainline as detectMainlineReal, isAncestor as isAncestorReal, revList as revListReal, revListAll as revListAllReal } from "./git.js";
+import { resolveBranch, resolveHead as resolveHeadReal, detectMainline as detectMainlineReal, isAncestor as isAncestorReal, revList as revListReal, revListAll as revListAllReal, gitLog, gitFilesOfCommit, gitCommitMessage } from "./git.js";
 import { applyBranchScope, computeBranchSets } from "./membership.js";
+import { extractArtifacts } from "./artifacts.js";
+import { reindexSessionArtifacts, scanHistory, synthesizeGitEntry } from "./backfill.js";
 
 // `@opencode-ai/plugin` не установлен в node_modules этого репо (zero-dep
 // дефолт). `tool()` — identity-функция (возвращает вход как есть), а
@@ -733,6 +735,11 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     // (title/summary/decisions); артефакты фильтруются полным набором.
     const conf = loadConfidentialConfig(maestroConfig);
     const artifactConfidentialPatterns = [...conf.paths, ...conf.builtin];
+    // Task 4: deps-сборка для memory_reindex — historyGlobs (Task 1) с
+    // inherit-семантикой; warn memory:config_fallback при soft-fallback
+    // (RI-8: память не отключается) — однократно при регистрации.
+    const historyGlobsRes = resolveHistoryGlobs(config);
+    if (historyGlobsRes.fallback) logWarn("memory:config_fallback", {});
     // M-2: init-warn — централизованный бэкенд + непустые confidential.paths
     // (имена веток, минующие sanitize, уходят на сервер). Дублируется в выдаче
     // memory_stats_detail / @maestro-memory (диагностика без логов).
@@ -856,6 +863,26 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     // Spec §3.6: снапшот листинга memory_prune — delete резолвится строго по
     // нему (не пере-сканирует storage). Заполняется в list, читается в delete.
     let pruneSnapshot = null;
+
+    // Task 4: снапшот листинга memory_reindex — run с all_*/all резолвится
+    // строго по нему (как pruneSnapshot). Одиночная per-init переменная,
+    // перезаписывается каждым list: { ts, sessions: Map, git: Map }.
+    let reindexSnapshot = null;
+
+    // Task 4: git-адаптер для scanHistory (T3→T4 wiring). Методы — реальные
+    // git-команды (git.js); переопределяются через deps.git (тесты).
+    const reindexGit = {
+      log: deps.git?.log ?? gitLog,
+      filesOfCommit: deps.git?.filesOfCommit ?? gitFilesOfCommit,
+      commitMessage: deps.git?.commitMessage ?? gitCommitMessage,
+      isAncestor,
+    };
+
+    // Task 4: git-инструкция для summarizeSession (spec §4.2.4): текст —
+    // спецификация фичи, а не транскрипт сессии; title задан отдельно
+    // (feature.title из H1) и не извлекается — контракт "title": "".
+    const GIT_SUMMARIZE_INSTRUCTIONS =
+      "Текст ниже — спецификация фичи, а не транскрипт сессии. Извлеки summary (≤150 слов) и decisions (ключевые решения из секции решений/инвариантов). Верни \"title\": \"\" — title задан отдельно и не извлекается.";
 
     const toolHooks = {
       memory_probe: makeMemoryProbeTool({ embeddings, state, log, apiKeyEnv }),
@@ -1106,6 +1133,261 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             return `Удалено ${total} записей (${snapshot.length} session_id).`;
           } catch (err) {
             return `memory_prune failed: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        },
+      }),
+      memory_reindex: tool({
+        description:
+          "HITL-бэкфилл памяти: dry-run листинг на индексацию (sessions + git-история) → run по явным ID или всё по снапшоту, cap 20/вызов (permission: ask).",
+        args: {
+          action: tool.schema.string().describe("list | run"),
+          source: tool.schema.string().optional().describe("sessions | git (для run)"),
+          session_ids: tool.schema.string().optional().describe("явный список session_id через запятую (sessions)"),
+          all_empty: tool.schema.boolean().optional().describe("все кандидаты с пустыми artifacts по снапшоту (sessions)"),
+          specs: tool.schema.string().optional().describe("явный список repo-relative spec-путей через запятую (git)"),
+          all: tool.schema.boolean().optional().describe("все фичи по снапшоту (git)"),
+          max: tool.schema.number().optional().describe("cap на источник за вызов (default 20)"),
+        },
+        execute: async (args, ctx) => {
+          try {
+            // I3: недоступен plugin-созданным сессиям саммаризатора.
+            if (SESSIONS.has(ctx?.sessionID)) return "memory_reindex недоступен для служебных сессий.";
+            if (!args?.action) return "memory_reindex: укажите action (list | run)";
+            // RI-5: cap 20/вызов (default), min 1.
+            const max = Math.max(1, Math.floor(args.max ?? 20));
+
+            if (args.action === "list") {
+              // ── Секция A: sessions — кандидаты с пустыми artifacts + dry-run
+              // превью путей (0 LLM, RI-5) + флаги model_mismatch/messages_unavailable.
+              const candidates = await storage.scan({
+                key: effectiveKey,
+                fields: ["session_id", "head", "branch", "time_last", "author", "artifacts", "model_id"],
+              });
+              const emptyArtifacts = candidates.filter((c) => !(c.artifacts ?? []).length);
+              const sessionLines = [];
+              const sessionSnapshot = new Map();
+              for (const c of emptyArtifacts) {
+                const flags = [];
+                if (c.model_id && c.model_id !== embeddings.modelId) flags.push("model_mismatch");
+                let preview = [];
+                let messages;
+                try {
+                  const resp = await client.session.messages({ path: { id: c.session_id } });
+                  messages = (resp?.data ?? resp) ?? [];
+                } catch {
+                  messages = null;
+                }
+                if (!Array.isArray(messages) || messages.length === 0) {
+                  flags.push("messages_unavailable");
+                } else {
+                  // Dry-run превью: extractArtifacts уже фильтрует по existsSync
+                  // (realpathSync) — пути, которые будут связаны при run.
+                  preview = extractArtifacts(messages, {
+                    root,
+                    globs: config.artifact_globs,
+                    confidentialPatterns: artifactConfidentialPatterns,
+                  });
+                }
+                sessionSnapshot.set(c.session_id, {
+                  head: c.head ?? "",
+                  branch: c.branch ?? "",
+                  time_last: c.time_last ?? 0,
+                  author: c.author ?? "",
+                  model_id: c.model_id ?? "",
+                  preview,
+                });
+                const flagStr = flags.length ? ` | ${flags.join(", ")}` : "";
+                const previewStr = preview.length ? ` | превью: ${preview.join("; ")}` : "";
+                sessionLines.push(`- ${c.session_id} | head=${c.head || "(нет)"} | ветка=${c.branch || "-"} | автор=${c.author} | ${c.time_last ?? 0}${previewStr}${flagStr}`);
+              }
+
+              // ── Секция B: git-история — scanHistory (0 LLM, RI-5) + флаг
+              // summarizer_model_missing (I1). Fail-soft: сбой скана → заметка.
+              const gitLines = [];
+              const gitSnapshot = new Map();
+              let gitErrorNote = "";
+              try {
+                const records = await storage.scan({ key: effectiveKey, fields: ["artifacts"] });
+                const mainline = detectMainline(root, { override: config.mainline ?? null });
+                const scan = await scanHistory({
+                  root,
+                  historyGlobs: historyGlobsRes.value,
+                  git: reindexGit,
+                  mainline: mainline?.name ?? null,
+                  records,
+                  artifactConfidentialPatterns,
+                });
+                for (const f of scan.features) {
+                  gitSnapshot.set(f.specPath, f);
+                  const planStr = f.planPath ? ` | plan=${f.planPath}` : "";
+                  const branchStr = f.branch ? ` | ветка=${f.branch}` : "";
+                  const mergedStr = f.merged === 1 ? " | merged=да" : (mainline ? " | merged=нет" : "");
+                  const previewStr = f.artifacts.length ? ` | превью: ${f.artifacts.join("; ")}` : "";
+                  gitLines.push(`- ${f.specPath} | head=${f.commitSha.slice(0, 7)}${planStr}${branchStr}${mergedStr} | ${f.timeFirst} | title: ${f.title}${previewStr}`);
+                }
+                if (scan.gitErrors.length) {
+                  gitErrorNote = `\nВнимание: ${scan.gitErrors.length} git-ошибок (fail-soft, фичи пропущены).`;
+                }
+              } catch (err) {
+                gitErrorNote = `\nОшибка сканирования git-истории: ${err instanceof Error ? err.message : String(err)}`;
+              }
+
+              reindexSnapshot = { ts: Date.now(), sessions: sessionSnapshot, git: gitSnapshot };
+
+              const lines = [`memory_reindex: кандидаты на индексацию (снапшот: ${reindexSnapshot.ts})`];
+              lines.push(`## sessions (${sessionLines.length})`);
+              lines.push(...sessionLines);
+              lines.push(`## git-история (${gitLines.length})`);
+              lines.push(...gitLines);
+              if (!config.summarizer_model) {
+                lines.push("Внимание: summarizer_model_missing — run(source: git) недоступен (задайте memory.summarizer_model).");
+              }
+              if (gitErrorNote) lines.push(gitErrorNote);
+              lines.push("LLM в list не вызывается (0 LLM); run — по явным ID или всё по снапшоту, cap 20/вызов.");
+              return lines.join("\n");
+            }
+
+            // ── run ──
+            if (!args.source) return "memory_reindex: для run укажите source (sessions | git)";
+
+            if (args.source === "sessions") {
+              // Явные session_ids (снапшот не нужен) ∪ all_empty (строго по
+              // снапшоту листинга) → cap max → reindexSessionArtifacts на
+              // каждый; fail-soft по элементу (RI-9).
+              let ids = args.session_ids ? args.session_ids.split(",").map((s) => s.trim()).filter(Boolean) : [];
+              if (args.all_empty) {
+                if (reindexSnapshot === null) {
+                  return "memory_reindex: сначала выполните list (action: \"list\"), затем run с all_empty — выбор по снапшоту листинга";
+                }
+                ids = [...reindexSnapshot.sessions.keys()];
+              }
+              const unique = [...new Set(ids)];
+              const capped = unique.length > max;
+              const selected = unique.slice(0, max);
+              if (!selected.length) return "memory_reindex: ничего не выбрано для индексации (sessions).";
+              const agg = { selected: selected.length, updated: 0, no_change: 0, already_indexed: 0, skipped: {} };
+              const lines = [];
+              for (const sid of selected) {
+                try {
+                  const r = await reindexSessionArtifacts({
+                    client, storage, root, key: effectiveKey,
+                    artifactGlobs: config.artifact_globs,
+                    artifactConfidentialPatterns,
+                    confidentialPatterns: confidentialPaths,
+                    embedModelId: embeddings.modelId,
+                  }, sid);
+                  if (r.status === "updated") agg.updated++;
+                  else if (r.status === "no_change") agg.no_change++;
+                  else agg.skipped[r.status] = (agg.skipped[r.status] ?? 0) + 1;
+                  lines.push(`- ${sid}: ${r.status}`);
+                } catch (err) {
+                  agg.skipped.error = (agg.skipped.error ?? 0) + 1;
+                  lines.push(`- ${sid}: error`);
+                }
+              }
+              // Task 4: телеметрия — aggregates-only (SEC-4b): счётчики/статусы,
+              // без путей/текста/session_id.
+              logInfo("memory:reindex.sessions", {
+                selected: agg.selected, updated: agg.updated, no_change: agg.no_change,
+                already_indexed: agg.already_indexed, skipped: agg.skipped,
+              });
+              const capNote = capped ? ` (cap: взяты первые ${max})` : "";
+              return `memory_reindex (sessions): selected=${agg.selected}, updated=${agg.updated}, no_change=${agg.no_change}, already_indexed=${agg.already_indexed}, skipped=${JSON.stringify(agg.skipped)}${capNote}\n` + lines.join("\n");
+            }
+
+            if (args.source === "git") {
+              // I1 hard guard: summarize спеки невозможен без summarizer_model
+              // (summarizeSession бросает при model=null && summarizerModel=null).
+              // Actionable-сообщение, батч не стартует (0 summarize).
+              if (!config.summarizer_model) {
+                return "memory_reindex: для source=git задайте memory.summarizer_model в maestro.json (иначе summarize спеки невозможен)";
+              }
+              // Явные specs (снапшот не нужен — пере-скан) ∪ all (строго по
+              // снапшоту листинга) → cap max → mask → summarize → synthesize.
+              let features = [];
+              let missingSpecs = [];
+              if (args.specs) {
+                const specs = new Set(args.specs.split(",").map((s) => s.trim()).filter(Boolean));
+                const records = await storage.scan({ key: effectiveKey, fields: ["artifacts"] });
+                const mainline = detectMainline(root, { override: config.mainline ?? null });
+                const scan = await scanHistory({
+                  root,
+                  historyGlobs: historyGlobsRes.value,
+                  git: reindexGit,
+                  mainline: mainline?.name ?? null,
+                  records,
+                  artifactConfidentialPatterns,
+                });
+                const byPath = new Map(scan.features.map((f) => [f.specPath, f]));
+                features = [...specs].map((p) => byPath.get(p)).filter(Boolean);
+                missingSpecs = [...specs].filter((p) => !byPath.has(p));
+              } else if (args.all) {
+                if (reindexSnapshot === null) {
+                  return "memory_reindex: сначала выполните list (action: \"list\"), затем run с all — выбор по снапшоту листинга";
+                }
+                features = [...reindexSnapshot.git.values()];
+              } else {
+                return "memory_reindex: для source=git укажите specs или all";
+              }
+              const capped = features.length > max;
+              const selected = features.slice(0, max);
+              if (!selected.length && !missingSpecs.length) return "memory_reindex: ничего не выбрано для индексации (git).";
+              const agg = { selected: selected.length, indexed: 0, already_indexed: 0, no_change: 0, skipped: {} };
+              const lines = [];
+              for (const f of selected) {
+                try {
+                  // I2: маскирование спеки ДО summarize (raw-набор).
+                  const specText = readFileSync(join(root, f.specPath), "utf8");
+                  const masked = maskTranscript(specText, { confidentialPatterns: confidentialPaths });
+                  if (!masked) {
+                    agg.skipped.mask_empty = (agg.skipped.mask_empty ?? 0) + 1;
+                    lines.push(`- ${f.specPath}: skip (mask_empty)`);
+                    continue;
+                  }
+                  // Сервис-сессия `[maestro-memory] git-<sha7>` (spec §4.2.4);
+                  // model=null — summarizer_model из конфига (hard guard выше).
+                  const llm = await summarizeSession({
+                    client,
+                    sessionID: `git-${f.commitSha.slice(0, 7)}`,
+                    transcript: masked,
+                    model: null,
+                    summarizerModel: config.summarizer_model,
+                    instructions: GIT_SUMMARIZE_INSTRUCTIONS,
+                  });
+                  const res = await synthesizeGitEntry({
+                    storage, root, key: effectiveKey, projectHash: ownHash,
+                    originRemote: gitRemote ? canonicalizeRemote(gitRemote) : "",
+                    embedModelId: embeddings.modelId,
+                    embeddings: (text) => embeddings.embed(text),
+                    confidentialPatterns: confidentialPaths,
+                    artifactConfidentialPatterns,
+                  }, f, llm);
+                  if (res.status === "indexed") agg.indexed++;
+                  else agg.already_indexed++;
+                  lines.push(`- ${f.specPath}: ${res.status}`);
+                } catch (err) {
+                  // RI-9: fail-soft по элементу — сбой summarize/синтеза → skip
+                  // с причиной, партия продолжается.
+                  agg.skipped.summarize_failed = (agg.skipped.summarize_failed ?? 0) + 1;
+                  lines.push(`- ${f.specPath}: skip (summarize_failed)`);
+                }
+              }
+              for (const p of missingSpecs) {
+                agg.skipped.not_in_scan = (agg.skipped.not_in_scan ?? 0) + 1;
+                lines.push(`- ${p}: skip (not_in_scan)`);
+              }
+              // Task 4: телеметрия — aggregates-only (SEC-4b).
+              logInfo("memory:reindex.git", {
+                selected: agg.selected, indexed: agg.indexed, already_indexed: agg.already_indexed,
+                no_change: agg.no_change, skipped: agg.skipped,
+              });
+              const capNote = capped ? ` (cap: взяты первые ${max})` : "";
+              return `memory_reindex (git): selected=${agg.selected}, indexed=${agg.indexed}, already_indexed=${agg.already_indexed}, no_change=${agg.no_change}, skipped=${JSON.stringify(agg.skipped)}${capNote}\n` + lines.join("\n");
+            }
+
+            return "memory_reindex: невалидный source (ожидается sessions | git)";
+          } catch (err) {
+            return `memory_reindex failed: ${err instanceof Error ? err.message : String(err)}`;
           }
         },
       }),
