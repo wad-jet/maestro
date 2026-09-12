@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { loadMemoryConfig, classifyMemoryConfig, DEFAULTS, resolveEffectiveKey, resolveIdentity, resolveEffectiveTextConfig, sanitizeDirName } from "./config.js";
+import { loadMemoryConfig, classifyMemoryConfig, DEFAULTS, resolveEffectiveKey, resolveIdentity, resolveEffectiveTextConfig, sanitizeDirName, resolveHistoryGlobs } from "./config.js";
 
 test("default off when no memory section", () => {
   const cfg = loadMemoryConfig({});
@@ -297,4 +297,66 @@ test("artifact_globs empty string element → disabled_reason artifact_globs_inv
 test("mergedConfig trims artifact_globs elements and deduplicates", () => {
   const cfg = loadMemoryConfig({ memory: { enabled: true, namespace: "x", artifact_globs: ["  foo/**  ", "  bar/**  ", "foo/**"] } });
   assert.deepEqual(cfg.artifact_globs, ["foo/**", "bar/**"]);
+});
+
+// ── history_globs (Task 1: reindex backfill, 3.5.0) ──
+
+test("DEFAULTS.history_globs === null (absent → inherit on use-site)", () => {
+  assert.equal(DEFAULTS.history_globs, null);
+});
+
+test("resolveHistoryGlobs: absent/history_globs=null → artifact_globs, fallback=false", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, namespace: "x" } });
+  const result = resolveHistoryGlobs(cfg);
+  assert.deepEqual(result.value, ["docs/superpowers/specs/**", "docs/superpowers/plans/**"]);
+  assert.equal(result.fallback, false);
+});
+
+test("resolveHistoryGlobs: valid array → trim + unique, fallback=false", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, namespace: "x", history_globs: ["  docs/**/*.md  ", "  README.md  ", "docs/**/*.md"] } });
+  const result = resolveHistoryGlobs(cfg);
+  assert.deepEqual(result.value, ["docs/**/*.md", "README.md"]);
+  assert.equal(result.fallback, false);
+});
+
+test("resolveHistoryGlobs: empty array → [], fallback=false (off)", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, namespace: "x", history_globs: [] } });
+  const result = resolveHistoryGlobs(cfg);
+  assert.deepEqual(result.value, []);
+  assert.equal(result.fallback, false);
+});
+
+test("resolveHistoryGlobs: non-array (string) → artifact_globs + fallback=true", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, namespace: "x", history_globs: "not-array" } });
+  const result = resolveHistoryGlobs(cfg);
+  assert.deepEqual(result.value, ["docs/superpowers/specs/**", "docs/superpowers/plans/**"]);
+  assert.equal(result.fallback, true);
+});
+
+test("resolveHistoryGlobs: non-array (number) → artifact_globs + fallback=true", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, namespace: "x", history_globs: 42 } });
+  const result = resolveHistoryGlobs(cfg);
+  assert.deepEqual(result.value, ["docs/superpowers/specs/**", "docs/superpowers/plans/**"]);
+  assert.equal(result.fallback, true);
+});
+
+test("resolveHistoryGlobs: array с не-строками → artifact_globs + fallback=true", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, namespace: "x", history_globs: [123] } });
+  const result = resolveHistoryGlobs(cfg);
+  assert.deepEqual(result.value, ["docs/superpowers/specs/**", "docs/superpowers/plans/**"]);
+  assert.equal(result.fallback, true);
+});
+
+test("resolveHistoryGlobs: >16 элементов → artifact_globs + fallback=true", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, namespace: "x", history_globs: Array(17).fill("foo") } });
+  const result = resolveHistoryGlobs(cfg);
+  assert.deepEqual(result.value, ["docs/superpowers/specs/**", "docs/superpowers/plans/**"]);
+  assert.equal(result.fallback, true);
+});
+
+test("resolveHistoryGlobs: mixed valid + invalid → artifact_globs + fallback=true", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, namespace: "x", history_globs: ["valid", 42] } });
+  const result = resolveHistoryGlobs(cfg);
+  assert.deepEqual(result.value, ["docs/superpowers/specs/**", "docs/superpowers/plans/**"]);
+  assert.equal(result.fallback, true);
 });

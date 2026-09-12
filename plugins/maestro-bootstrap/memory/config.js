@@ -55,6 +55,7 @@ export const DEFAULTS = {
   },
   probe_cooldown_min: 30,
   artifact_globs: ["docs/superpowers/specs/**", "docs/superpowers/plans/**"],
+  history_globs: null,
 };
 
 const STORAGE_TYPES = new Set(["sqlite", "qdrant", "pgvector"]);
@@ -92,6 +93,7 @@ function mergedConfig(m) {
       },
     },
     artifact_globs: [...new Set((m.artifact_globs ?? DEFAULTS.artifact_globs).map((s) => s.trim()).filter(Boolean))],
+    history_globs: m.history_globs,
   };
 }
 
@@ -291,4 +293,34 @@ export function resolveIdentity({ config, env, gitName }) {
 
 export function sanitizeDirName(s) {
   return createHash("sha256").update(s).digest("hex").slice(0, 16);
+}
+
+/**
+ * resolveHistoryGlobs: возвращает нормализованные history_globs.
+ * Если history_globs absent/null → inherit на artifact_globs (fallback=false).
+ * Валидный array → trim + unique (fallback=false); [] → [] (off, fallback=false).
+ * Не-валидный input (non-array, non-string элементы, >16) → soft fallback на
+ * artifact_globs (memory НЕ отключается, fallback=true).
+ * @param {object} config  Merged memory config (loadMemoryConfig output).
+ * @returns {{ value: string[], fallback: boolean }}
+ */
+export function resolveHistoryGlobs(config) {
+  const hg = config?.history_globs;
+  const default_globs = config?.artifact_globs ?? DEFAULTS.artifact_globs;
+
+  if (hg == null) {
+    return { value: [...default_globs], fallback: false };
+  }
+  if (!Array.isArray(hg)) {
+    return { value: [...default_globs], fallback: true };
+  }
+  if (hg.length > 16) {
+    return { value: [...default_globs], fallback: true };
+  }
+  // Validate all elements are strings BEFORE trimming
+  if (hg.some((x) => typeof x !== "string")) {
+    return { value: [...default_globs], fallback: true };
+  }
+  // valid array → trim + unique
+  return { value: [...new Set(hg.map((s) => s.trim()))], fallback: false };
 }
