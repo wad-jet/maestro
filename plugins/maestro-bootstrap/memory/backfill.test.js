@@ -577,6 +577,19 @@ test("scanHistory: git-сбой → fail-soft (gitErrors, features без фич
   assert.equal(out.considered, 1);
 });
 
+test("scanHistory: gitLog non-zero status (throw) → gitErrors, не not_in_git", async (t) => {
+  const root = makeTree(t, [SPEC]);
+  const out = await scanHistory(scanDeps(root, {
+    git: makeGit({ log: async () => { throw new Error("git log failed (status 128)"); } }),
+  }));
+
+  assert.equal(out.covered.not_in_git, 0, "не классифицируется как not_in_git");
+  assert.equal(out.gitErrors.length, 1);
+  assert.equal(out.gitErrors[0].path, SPEC);
+  assert.match(out.gitErrors[0].error, /git log failed/);
+  assert.equal(out.features.length, 0);
+});
+
 test("scanHistory: F1 early-return — пустой resolved-набор → 0 кандидатов, git не дёргается", async (t) => {
   const root = makeTree(t, [SPEC]);
   let logCalls = 0;

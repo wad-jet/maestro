@@ -4,7 +4,7 @@ import { mkdtempSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
-import { resolveBranch, resolveHead, detectMainline, revList, isAncestor, verifyBranch, revListAll } from "./git.js";
+import { resolveBranch, resolveHead, detectMainline, revList, isAncestor, verifyBranch, revListAll, gitLog } from "./git.js";
 
 function makeRepo() {
   const dir = mkdtempSync(join(tmpdir(), "mm-git-"));
@@ -149,4 +149,16 @@ test("revListAll: multiple branches — local contains all commits", () => {
   assert.ok(local.has(head));
   assert.ok(local.has(sideHead));
   // HEAD (c2) достижим из main через feature.
+});
+
+// ── gitLog: exit-status check (диагностика, не not_in_git) ────────────────
+
+test("gitLog: путь вне репо (non-zero exit) → throw, не пустой stdout", () => {
+  const dir = makeRepo();
+  assert.throws(() => gitLog(dir, "../outside.txt"), /git log failed/);
+});
+
+test("gitLog: отсутствующий путь в репо (exit 0, пустой stdout) → '' (not_in_git)", () => {
+  const dir = makeRepo();
+  assert.equal(gitLog(dir, "nope.txt"), "");
 });

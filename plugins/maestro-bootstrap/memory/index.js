@@ -39,6 +39,25 @@ try {
 }
 
 /**
+ * Локальный таймаут-обёртка для LLM-зависимых вызовов git-пути memory_reindex
+ * (spec §4.2.4). Зеркалит withTimeout из indexer.js (G4: indexer.js не трогаем).
+ * Зависший client.session.prompt (внешний summarizer) → reject по
+ * summarize_timeout_ms; per-element catch в git-run loop fail-soft'ит (RI-9).
+ * @template T
+ * @param {Promise<T>} p
+ * @param {number} ms
+ * @returns {Promise<T>}
+ */
+function withTimeout(p, ms) {
+  return Promise.race([
+    p,
+    new Promise((_, rej) =>
+      setTimeout(() => rej(new Error("memory: summarize timeout")), ms).unref?.()
+    ),
+  ]);
+}
+
+/**
  * Probe с guard-таймером: провайдер может зависнуть (сеть/таймаут). Guard
  * (20000ms) > таймаут провайдера (15s) — возвращает soft-fail, не роняя init.
  * Если probe недоступен (deps-mock) — считаем ok (fail-open для тестов).
@@ -1346,14 +1365,17 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
                   }
                   // Сервис-сессия `[maestro-memory] git-<sha7>` (spec §4.2.4);
                   // model=null — summarizer_model из конфига (hard guard выше).
-                  const llm = await summarizeSession({
+                  // Таймаут summarize_timeout_ms (spec §4.2.4): зависший
+                  // client.session.prompt не должен вешать батч — per-element
+                  // catch ниже fail-soft'ит (RI-9).
+                  const llm = await withTimeout(summarizeSession({
                     client,
                     sessionID: `git-${f.commitSha.slice(0, 7)}`,
                     transcript: masked,
                     model: null,
                     summarizerModel: config.summarizer_model,
                     instructions: GIT_SUMMARIZE_INSTRUCTIONS,
-                  });
+                  }), config.summarize_timeout_ms ?? 120_000);
                   const res = await synthesizeGitEntry({
                     storage, root, key: effectiveKey, projectHash: ownHash,
                     originRemote: gitRemote ? canonicalizeRemote(gitRemote) : "",

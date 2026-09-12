@@ -4800,6 +4800,45 @@ test("memory_reindex run git: summarize-fail на одной фиче → skip �
   }
 });
 
+test("memory_reindex run git: зависший summarize → timeout (summarize_timeout_ms) → skip, батч не виснет", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-reindex-timeout-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    mkdirSync(join(dir, "docs/superpowers/specs"), { recursive: true });
+    writeFileSync(join(dir, "docs/superpowers/specs/x-design.md"), "# My Feature\n");
+    const upserts = [];
+    const storage = mkMockStorage();
+    storage.scan = async () => [];
+    storage.get = async () => null;
+    storage.upsert = async (entries) => { upserts.push(entries); };
+    // prompt никогда не резолвится — зависший внешний summarizer (RI-9: hang,
+    // не throw). Таймаут summarize_timeout_ms обязан оборвать вызов.
+    const client = mkSummarizeClient({
+      prompt: () => new Promise(() => {}),
+    });
+    const hooks = await registerMemoryHooks({
+      client,
+      config: mkConfig(dir, { summarizer_model: "prov/m2", summarize_timeout_ms: 50 }),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git: mkReindexGit() },
+    });
+    const t0 = Date.now();
+    const res = await hooks.tool.memory_reindex.execute({ action: "run", source: "git", specs: "docs/superpowers/specs/x-design.md" }, { sessionID: "s1" });
+    const elapsed = Date.now() - t0;
+    assert.match(res, /skip \(summarize_failed\)/, "таймаут summarize → skip с причиной");
+    assert.equal(upserts.length, 0, "ничего не записано");
+    assert.ok(elapsed >= 40, `таймаут сработал (~50ms, got ${elapsed}ms)`);
+    assert.ok(elapsed < 5000, `батч не виснет (elapsed=${elapsed}ms)`);
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("memory_reindex run git: already_indexed в агрегатах (идемпотентность RI-7)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mem-reindex-already-"));
   const saved = process.env.XDG_DATA_HOME;
