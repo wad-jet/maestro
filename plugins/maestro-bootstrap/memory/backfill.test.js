@@ -171,6 +171,38 @@ test("updated: maskEntry перед upsert дропает stale-путь из ex
   assert.deepEqual(entry.artifacts, ["docs/spec.md", "docs/old.md"]);
 });
 
+test("updated: stale-purge no-delta — extracted пусто, existing содержит путь из resolved-набора → upsert чистит (post-mask guard)", async (t) => {
+  const root = makeRoot(t);
+  const existing = baseRow({ artifacts: ["docs/old.md", "secrets/key.md"] });
+  const storage = makeStorage([existing]);
+  // Сообщения непустые, но без write/edit-частей → extracted = [] (no-delta).
+  const client = makeClient({ messages: [{ parts: [{ type: "text", text: "hello" }] }] });
+  const deps = makeDeps({ root, storage, client, artifactConfidentialPatterns: ["secrets/**"] });
+
+  const out = await reindexSessionArtifacts(deps, "s1");
+
+  // Pre-mask union == existing → старый guard вернул бы no_change; post-mask
+  // union (secrets/key.md отфильтрован resolved-набором) ≠ existing → upsert.
+  assert.equal(out.status, "updated");
+  assert.equal(storage.calls.upsert.length, 1, "upsert вызван ровно 1 раз");
+  const [entry] = storage.calls.upsert[0];
+  assert.deepEqual(entry.artifacts, ["docs/old.md"], "stale-путь из resolved-набора удалён");
+  assert.equal(entry.version, 3, "version = existing.version + 1");
+  // RI-3: остальные поля сохранены из existing.
+  assert.equal(entry.title, "Title");
+  assert.equal(entry.summary, "Summary");
+  assert.deepEqual(entry.decisions, ["D1"]);
+  assert.equal(entry.model_id, "m1");
+  assert.equal(entry.head, "abc");
+  assert.equal(entry.branch, "main");
+  assert.equal(entry.merged, 1);
+  assert.equal(entry.time_first, 100);
+  assert.equal(entry.time_last, 200);
+  assert.equal(entry.author, "me");
+  assert.equal(entry.key, "k");
+  assert.equal(entry.origin_project_hash, "h");
+});
+
 test("embedding passthrough: Float32Array из scan остаётся Float32Array", async (t) => {
   const root = makeRoot(t);
   touch(path.join(root, "docs", "spec.md"));

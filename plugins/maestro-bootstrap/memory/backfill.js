@@ -1,13 +1,18 @@
+import { confGlobMatch } from "../core.js";
 import { extractArtifacts } from "./artifacts.js";
 import { maskEntry } from "./mask.js";
 import { SESSIONS } from "./summarize.js";
 
 // Локальный нормализатор embedding (spec §4.2.1 п.2): дублируется из index.js
 // без рефакторинга. sqlite возвращает Buffer (BLOB) → Float32Array-view;
-// Float32Array/Array — passthrough; прочее (string/null/…) → null.
+// Float32Array/Array — passthrough; string (JSON-массив, pgvector) — parse;
+// прочее (null/…) → null.
 function toF32(v) {
   if (v instanceof Float32Array) return v;
   if (Array.isArray(v)) return new Float32Array(v);
+  if (typeof v === "string") {
+    try { return new Float32Array(JSON.parse(v)); } catch { return null; }
+  }
   if (v?.buffer) return new Float32Array(v.buffer, v.byteOffset, v.byteLength / 4);
   return null;
 }
@@ -95,9 +100,21 @@ export async function reindexSessionArtifacts(deps, sessionID) {
   }
   const artifacts = union.slice(0, MAX_ARTIFACTS);
 
-  // 8. No-op guard (RI-7): case-insensitive set-равенство → без upsert.
+  // 8. No-op guard (RI-7): case-insensitive set-равенство **post-mask union**
+  // (union, отфильтрованной resolved-набором — тем же фильтром, что maskEntry
+  // применяет к artifacts) и сохранённых existing.artifacts → без upsert.
+  // Guard по pre-mask union запрещён (spec §4.2.1 п.8): при no-delta (extracted
+  // пусто) и stale-пути в записи, матчащем ужесточенный resolved-набор,
+  // pre-mask union == existing → no_change, и stale-путь никогда не чистится.
+  const artifactPatterns = artifactConfidentialPatterns ?? confidentialPatterns;
+  const lowerConf = artifactPatterns
+    .filter((p) => typeof p === "string" && p)
+    .map((p) => p.toLowerCase());
+  const maskedUnion = artifacts.filter(
+    (p) => typeof p === "string" && !lowerConf.some((pat) => confGlobMatch(pat, p.toLowerCase()))
+  );
   const existingLower = new Set((existing.artifacts ?? []).map((p) => String(p).toLowerCase()));
-  if (artifacts.length === existingLower.size && artifacts.every((p) => existingLower.has(String(p).toLowerCase()))) {
+  if (maskedUnion.length === existingLower.size && maskedUnion.every((p) => existingLower.has(String(p).toLowerCase()))) {
     return { status: "no_change", artifacts };
   }
 
