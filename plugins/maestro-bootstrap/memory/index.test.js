@@ -4807,7 +4807,7 @@ test("memory_reindex run git: already_indexed в агрегатах (идемп�
   try {
     mkdirSync(join(dir, "docs/superpowers/specs"), { recursive: true });
     writeFileSync(join(dir, "docs/superpowers/specs/x-design.md"), "# My Feature\n");
-    const sid = gitFeatureSessionId(GIT_SHA, "docs/superpowers/specs/x-design.md");
+    const sid = gitFeatureSessionId("test.ns", GIT_SHA, "docs/superpowers/specs/x-design.md");
     const upserts = [];
     const storage = mkMockStorage();
     storage.scan = async () => [];

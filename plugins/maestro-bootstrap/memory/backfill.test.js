@@ -319,6 +319,7 @@ test("skip_service: sessionID ∈ SESSIONS", async (t) => {
 const SHA = "a".repeat(40);
 const CT = 1700000000;
 const SPEC = "docs/superpowers/specs/x-design.md";
+const KEY = "a.b.c"; // совпадает с key в synthDeps()
 
 // Непустой resolved-набор для не-confidential кейсов (F1: fail-closed).
 const NO_CONF_RESOLVED = ["secrets/**"];
@@ -404,12 +405,19 @@ function synthDeps(overrides = {}) {
 // ── gitFeatureSessionId / isPlanPath ────────────────────────────────────────
 
 test("gitFeatureSessionId: детерминирован, формат git- + 12 hex, spec/plan одного коммита → разные ID", () => {
-  const id1 = gitFeatureSessionId(SHA, SPEC);
-  const id2 = gitFeatureSessionId(SHA, SPEC);
-  assert.equal(id1, id2, "детерминированность");
+  const id1 = gitFeatureSessionId(KEY, SHA, SPEC);
+  const id2 = gitFeatureSessionId(KEY, SHA, SPEC);
+  assert.equal(id1, id2, "детерминированность (same key+commit+specPath)");
   assert.match(id1, /^git-[0-9a-f]{12}$/, "формат git-<12 hex>");
-  const idPlan = gitFeatureSessionId(SHA, "docs/superpowers/plans/x-plan.md");
+  const idPlan = gitFeatureSessionId(KEY, SHA, "docs/superpowers/plans/x-plan.md");
   assert.notEqual(id1, idPlan, "spec и plan одного коммита → разные ID (specPath в хэше)");
+});
+
+test("gitFeatureSessionId: cross-namespace — same commit+specPath, different key → different ID (RI-1)", () => {
+  const idA = gitFeatureSessionId(KEY, SHA, SPEC);
+  const idB = gitFeatureSessionId("x.y.z", SHA, SPEC);
+  assert.notEqual(idA, idB, "key в хэше → namespace-local ID");
+  assert.match(idB, /^git-[0-9a-f]{12}$/, "формат сохраняется");
 });
 
 test("isPlanPath: basename -plan.md ИЛИ parent-каталог plans", () => {
@@ -639,9 +647,9 @@ test("synthesizeGitEntry: already_indexed — storage.get по session_id, бе�
   const out = await synthesizeGitEntry(deps, gitFeature(), { summary: "s", decisions: ["d"] });
 
   assert.equal(out.status, "already_indexed");
-  assert.equal(out.session_id, gitFeatureSessionId(SHA, SPEC));
+  assert.equal(out.session_id, gitFeatureSessionId(KEY, SHA, SPEC));
   assert.equal(storage.calls.get.length, 1);
-  assert.equal(storage.calls.get[0], gitFeatureSessionId(SHA, SPEC));
+  assert.equal(storage.calls.get[0], gitFeatureSessionId(KEY, SHA, SPEC));
   assert.equal(storage.calls.upsert.length, 0, "без upsert");
   assert.equal(embedCalls.length, 0, "без embed");
 });
@@ -660,10 +668,10 @@ test("synthesizeGitEntry: форма записи — все поля, author gi
   const out = await synthesizeGitEntry(deps, feature, { summary: "Sum", decisions: ["D1", "D2"] });
 
   assert.equal(out.status, "indexed");
-  assert.equal(out.session_id, gitFeatureSessionId(SHA, SPEC));
+  assert.equal(out.session_id, gitFeatureSessionId(KEY, SHA, SPEC));
   assert.equal(storage.calls.upsert.length, 1);
   const [entry] = storage.calls.upsert[0];
-  assert.equal(entry.session_id, gitFeatureSessionId(SHA, SPEC));
+  assert.equal(entry.session_id, gitFeatureSessionId(KEY, SHA, SPEC));
   assert.equal(entry.key, "a.b.c");
   assert.equal(entry.origin_project_hash, "ph");
   assert.equal(entry.title, "My Feature");

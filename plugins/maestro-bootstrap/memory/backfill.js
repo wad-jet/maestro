@@ -158,15 +158,21 @@ export function isPlanPath(p) {
 }
 
 /**
- * Детерминированный synthetic session_id (RI-1): `git-` + sha256(commitSha +
- * "|" + specPath).slice(0,12). spec и plan одного коммита → разные ID
- * (specPath в хэше); не коллидирует с реальными `ses_*`.
+ * Детерминированный synthetic session_id (RI-1): `git-` + sha256(key + "|" +
+ * commitSha + "|" + specPath).slice(0,12). key (effectiveKey) в хэше →
+ * namespace-local ID: на централизованных бэкендах (qdrant/pgvector, общая
+ * коллекция) один и тот же commit+specPath в разных namespace не коллизирует
+ * (иначе foreign record → sticky `already_indexed` → фича не синтезируется);
+ * intra-namespace идемпотентность сохранена (same key → same ID). spec и plan
+ * одного коммита → разные ID (specPath в хэше); не коллидирует с реальными
+ * `ses_*`.
+ * @param {string} key  effectiveKey (namespace).
  * @param {string} commitSha
  * @param {string} specPath
  * @returns {string}
  */
-export function gitFeatureSessionId(commitSha, specPath) {
-  const h = createHash("sha256").update(`${commitSha}|${specPath}`).digest("hex");
+export function gitFeatureSessionId(key, commitSha, specPath) {
+  const h = createHash("sha256").update(`${key}|${commitSha}|${specPath}`).digest("hex");
   return `git-${h.slice(0, 12)}`;
 }
 
@@ -368,8 +374,8 @@ export async function scanHistory({ root, historyGlobs, git, mainline, records, 
 /**
  * Синтез записи из фичи git-истории (spec §4.2.3).
  *
- * 1. Idempotency (RI-7): session_id = gitFeatureSessionId(commitSha, specPath);
- *    storage.get → существует → `already_indexed` (без перезаписи).
+ * 1. Idempotency (RI-7): session_id = gitFeatureSessionId(key, commitSha,
+ *    specPath); storage.get → существует → `already_indexed` (без перезаписи).
  * 2. Запись: author "git-backfill" (RI-6), version 1, prefixes = prefixesOf(key),
  *    head = commitSha, merged из feature, time из feature.
  * 3. artifacts: из feature.artifacts (scanHistory: [specPath, planPath?]) →
@@ -395,7 +401,7 @@ export async function synthesizeGitEntry(deps, feature, llm) {
     embeddings, confidentialPatterns, artifactConfidentialPatterns,
   } = deps;
 
-  const session_id = gitFeatureSessionId(feature.commitSha, feature.specPath);
+  const session_id = gitFeatureSessionId(key, feature.commitSha, feature.specPath);
   const existing = await storage.get(session_id);
   if (existing) return { status: "already_indexed", session_id };
 
