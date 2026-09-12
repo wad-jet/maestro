@@ -86,8 +86,14 @@ deps: `{ client, storage, root, key, artifactGlobs, artifactConfidentialPatterns
    как в indexer).
 7. **Union D6**: `[...extracted, ...existing.artifacts]`, dedup
    `String(p).toLowerCase()`, extracted-first, cap 8.
-8. **No-op guard (RI-7)**: case-insensitive set-равенство union и
-   `existing.artifacts` → `no_change` (upsert НЕ выполняется).
+8. **No-op guard (RI-7)**: case-insensitive set-равенство **post-mask
+   union** (`union`, отфильтрованной resolved-набором — тем же фильтром, что
+   `maskEntry` применяет к `artifacts`) и **сохранённых** `existing.artifacts`
+   → `no_change` (upsert НЕ выполняется). Guard по pre-mask union запрещён:
+   при no-delta (extracted пусто) и stale-пути в сохранённой записи,
+   матчащем ужесточенный resolved-набор, post-mask union ≠ сохранённым
+   `existing.artifacts` → upsert чистит запись (stale-purge работает и в
+   no-delta случае — key-review T2, 2026-09-12).
 9. Иначе: `entry = { ...existing, artifacts: union,
    version: existing.version + 1 }` → **`maskEntry` на всю запись перед
    upsert (G2-parity: artifacts — resolved-набор, текст — raw)** — чистит
@@ -95,7 +101,9 @@ deps: `{ client, storage, root, key, artifactGlobs, artifactConfidentialPatterns
    `storage.upsert([entry])` → `updated`.
 
 **Не меняется** (RI-3): title/summary/decisions/embedding/model_id/
-head/branch/merged/time_*/key/origin_*/prefixes — спред из `existing`.
+head/branch/merged/time_*/key/origin_*/prefixes — спред из `existing`
+(оговорка: текст может сузиться при ужесточении raw-набора — maskEntry
+G2-parity, п.9; embedding и identity-поля сохранены).
 **Не пишется** (RI-4): `state` не трогаем (no `setSummarized`/`recordFail`) —
 natural-ре-индекс при ≥3 новых сообщений работает как раньше.
 
@@ -278,7 +286,7 @@ HITL-шаги по паттерну `maestro-memory-prune`:
 | RI-4 | Light-путь не пишет в `state` (no `setSummarized`/`recordFail`) — natural-ре-индекс работает как раньше |
 | RI-5 | Cost: list — 0 LLM; run(sessions) — 0 LLM; run(git) — ≤N summarize + ≤N embed; cap 20/вызов |
 | RI-6 | Спека маскируется до summarize (raw-набор); **LLM-вывод re-mask'ится (maskEntry) до embed и upsert** (SECURITY.md §5a); artifact-пути — resolved-набор + existsSync + repo-relative; кандидат под `confidential.paths` → `skip_confidential` (fail-closed, §5a); `author: "git-backfill"` виден в recall/search/export |
-| RI-7 | Идемпотентность: git-run по existing session_id → `already_indexed`; light-run при неизменном union → `no_change` (без upsert) |
+| RI-7 | Идемпотентность: git-run по existing session_id → `already_indexed`; light-run при неизменном **post-mask** union (по отношению к сохранённым `existing.artifacts`) → `no_change` (без upsert); stale-purge — только через upsert (§4.2.1 п.8) |
 | RI-8 | Невалидное `history_globs` → fallback на `artifact_globs` + warn; память не отключается |
 | RI-9 | Fail-soft по элементу: сбой одного element → skip с причиной, партия продолжается; upsert атомен per record |
 
@@ -289,7 +297,11 @@ HITL-шаги по паттерну `maestro-memory-prune`:
     (Buffer → F32-нормализация); union (cap 8, case-insensitive,
     extracted-first); maskEntry перед upsert (G2-parity, stale-пути из
     existing чистятся); сохранение полей (embedding/model_id/head/branch/
-    merged/title/summary) + version+1; no-op guard (без upsert);
+    merged/title/summary) + version+1; no-op guard (без upsert, post-mask);
+    extracted ⊆ existing при неизменном конфиге → `no_change` (триггер
+    upsert — set-дельта post-mask, а не непустой extracted);
+    **stale-purge no-delta** (extracted пусто, existing содержит путь из
+    resolved-набора → upsert 1 раз, `artifacts` очищены, `updated`);
     skip_no_record / skip_model_mismatch / skip_messages_unavailable /
     skip_no_embedding / skip_service; state не вызывается (spy).
   - `scanHistory`: глоб-матчинг; **plan-исключение** (кандидаты без plan-путей,
@@ -337,11 +349,11 @@ HITL-шаги по паттерну `maestro-memory-prune`:
 <!-- maestro:sanitize
 status: CLEAN
 date: 2026-09-12
-hash: d903d347982fa4fef58e09c41ea9e773b5e28894855b3aae11e71bb43229a37a
+hash: 1e566a648fbcd5c88c3f1af6204817f24a647a443a8b912b70036304843caae0
 -->
 <!-- maestro:review
 reviewer: opus
 date: 2026-09-12
 verdict: approve
-hash: d903d347982fa4fef58e09c41ea9e773b5e28894855b3aae11e71bb43229a37a
+hash: 1e566a648fbcd5c88c3f1af6204817f24a647a443a8b912b70036304843caae0
 -->
