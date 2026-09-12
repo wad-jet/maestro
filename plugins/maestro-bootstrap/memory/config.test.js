@@ -319,6 +319,27 @@ test("resolveHistoryGlobs: valid array → trim + unique, fallback=false", () =>
   assert.equal(result.fallback, false);
 });
 
+test("resolveHistoryGlobs: empty string element → fallback=true", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, namespace: "x", history_globs: [""] } });
+  const result = resolveHistoryGlobs(cfg);
+  assert.deepEqual(result.value, ["docs/superpowers/specs/**", "docs/superpowers/plans/**"]);
+  assert.equal(result.fallback, true);
+});
+
+test("resolveHistoryGlobs: whitespace-only element → fallback=true", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, namespace: "x", history_globs: ["  "] } });
+  const result = resolveHistoryGlobs(cfg);
+  assert.deepEqual(result.value, ["docs/superpowers/specs/**", "docs/superpowers/plans/**"]);
+  assert.equal(result.fallback, true);
+});
+
+test("resolveHistoryGlobs: mixed valid + empty string → fallback=true", () => {
+  const cfg = loadMemoryConfig({ memory: { enabled: true, namespace: "x", history_globs: ["a", ""] } });
+  const result = resolveHistoryGlobs(cfg);
+  assert.deepEqual(result.value, ["docs/superpowers/specs/**", "docs/superpowers/plans/**"]);
+  assert.equal(result.fallback, true);
+});
+
 test("resolveHistoryGlobs: empty array → [], fallback=false (off)", () => {
   const cfg = loadMemoryConfig({ memory: { enabled: true, namespace: "x", history_globs: [] } });
   const result = resolveHistoryGlobs(cfg);

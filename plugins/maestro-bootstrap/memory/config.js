@@ -317,8 +317,8 @@ export function resolveHistoryGlobs(config) {
   if (hg.length > 16) {
     return { value: [...default_globs], fallback: true };
   }
-  // Validate all elements are strings BEFORE trimming
-  if (hg.some((x) => typeof x !== "string")) {
+  // Validate: must be array of strings; non-empty AFTER trim (mirror artifactGlobsValid).
+  if (hg.some((x) => typeof x !== "string" || x.trim().length === 0)) {
     return { value: [...default_globs], fallback: true };
   }
   // valid array → trim + unique
