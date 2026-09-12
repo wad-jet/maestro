@@ -569,6 +569,65 @@ test("scanHistory: git-сбой → fail-soft (gitErrors, features без фич
   assert.equal(out.considered, 1);
 });
 
+test("scanHistory: F1 early-return — пустой resolved-набор → 0 кандидатов, git не дёргается", async (t) => {
+  const root = makeTree(t, [SPEC]);
+  let logCalls = 0;
+  const out = await scanHistory(scanDeps(root, {
+    artifactConfidentialPatterns: [],
+    git: makeGit({ log: async () => { logCalls++; return `${SHA} ${CT}`; } }),
+  }));
+
+  assert.equal(out.considered, 0, "ни один кандидат не рассмотрен");
+  assert.equal(out.features.length, 0);
+  assert.deepEqual(out.covered, { by_artifacts: 0, not_in_git: 0, skip_confidential: 0, plan_excluded: 0 });
+  assert.deepEqual(out.gitErrors, []);
+  assert.equal(logCalls, 0, "git.log не вызван (guard до цикла)");
+});
+
+test("scanHistory: malformed git-log line → gitErrors, batch продолжается", async (t) => {
+  const root = makeTree(t, [SPEC, "docs/superpowers/specs/y-design.md"]);
+  const out = await scanHistory(scanDeps(root, {
+    git: makeGit({
+      log: async (r, p) => (p === SPEC ? "no-separator-line" : `${SHA} ${CT}`),
+    }),
+  }));
+
+  assert.equal(out.gitErrors.length, 1);
+  assert.equal(out.gitErrors[0].path, SPEC);
+  assert.match(out.gitErrors[0].error, /malformed git log line/);
+  assert.equal(out.features.length, 1, "batch продолжается — второй файл обработан");
+  assert.equal(out.features[0].specPath, "docs/superpowers/specs/y-design.md");
+});
+
+test("scanHistory: git-адаптер без log → gitErrors с явной записью, features пуст", async (t) => {
+  const root = makeTree(t, [SPEC]);
+  const out = await scanHistory(scanDeps(root, { git: {} }));
+
+  assert.equal(out.features.length, 0);
+  assert.equal(out.considered, 0, "ни один кандидат не рассмотрен");
+  assert.equal(out.gitErrors.length, 1);
+  assert.equal(out.gitErrors[0].error, "git adapter incomplete: log method missing");
+  assert.deepEqual(out.covered, { by_artifacts: 0, not_in_git: 0, skip_confidential: 0, plan_excluded: 0 });
+});
+
+test("scanHistory: filesOfCommit/commitMessage throw → gitErrors (non-fatal), фича остаётся", async (t) => {
+  const root = makeTree(t, [SPEC]);
+  const out = await scanHistory(scanDeps(root, {
+    git: makeGit({
+      filesOfCommit: async () => { throw new Error("files boom"); },
+      commitMessage: async () => { throw new Error("msg boom"); },
+    }),
+  }));
+
+  assert.equal(out.features.length, 1, "non-fatal — фича остаётся");
+  const f = out.features[0];
+  assert.equal(f.planPath, null, "planPath остаётся null");
+  assert.equal(f.branch, "", "branch остаётся ''");
+  assert.equal(out.gitErrors.length, 2, "обе ошибки в gitErrors");
+  assert.ok(out.gitErrors.some((e) => e.path === SPEC && /filesOfCommit/.test(e.error)), "filesOfCommit в gitErrors");
+  assert.ok(out.gitErrors.some((e) => e.path === SPEC && /commitMessage/.test(e.error)), "commitMessage в gitErrors");
+});
+
 // ── synthesizeGitEntry ──────────────────────────────────────────────────────
 
 test("synthesizeGitEntry: already_indexed — storage.get по session_id, без upsert и embed", async (t) => {

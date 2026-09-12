@@ -253,6 +253,13 @@ export async function scanHistory({ root, historyGlobs, git, mainline, records, 
   if (!Array.isArray(artifactConfidentialPatterns) || artifactConfidentialPatterns.length === 0) {
     return { features, considered, covered, gitErrors };
   }
+  // Git-адаптер fail-closed (RI-9): отсутствующий метод log (неполный T4-адаптер)
+  // при optional chaining дал бы undefined → "пустой вывод" → кандидаты молча
+  // стали бы not_in_git. Guard до цикла: fail LOUD (запись в gitErrors), не silent.
+  if (typeof git?.log !== "function") {
+    gitErrors.push({ error: "git adapter incomplete: log method missing" });
+    return { features, considered, covered, gitErrors };
+  }
 
   const lowerGlobs = historyGlobs
     .filter((g) => typeof g === "string" && g)
@@ -311,7 +318,11 @@ export async function scanHistory({ root, historyGlobs, git, mainline, records, 
       planPath = conv;
     } else {
       let commitFiles = [];
-      try { commitFiles = await git?.filesOfCommit?.(root, sha); } catch { commitFiles = []; }
+      try { commitFiles = await git?.filesOfCommit?.(root, sha); } catch (err) {
+        // Non-fatal (auditability): planPath остаётся null, batch продолжается.
+        gitErrors.push({ path: rel, error: `filesOfCommit: ${err instanceof Error ? err.message : String(err)}` });
+        commitFiles = [];
+      }
       const planLikes = (Array.isArray(commitFiles) ? commitFiles : [])
         .filter((f) => typeof f === "string" && f && f !== rel && isPlanPath(f));
       if (planLikes.length === 1) planPath = planLikes[0];
@@ -323,7 +334,11 @@ export async function scanHistory({ root, historyGlobs, git, mainline, records, 
       const msg = String(await git?.commitMessage?.(root, sha) ?? "");
       const m = msg.match(/^Merge branch ['"]([^'"]+)['"]/);
       if (m) branch = m[1];
-    } catch { branch = ""; }
+    } catch (err) {
+      // Non-fatal (auditability): branch остаётся "", batch продолжается.
+      gitErrors.push({ path: rel, error: `commitMessage: ${err instanceof Error ? err.message : String(err)}` });
+      branch = "";
+    }
 
     // 4. merged: isAncestor yes→1, no/error/null→0 (фича в листинге с пометкой).
     let merged = 0;
