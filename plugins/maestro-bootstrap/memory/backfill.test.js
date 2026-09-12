@@ -3,7 +3,10 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { reindexSessionArtifacts } from "./backfill.js";
+import { hostname } from "node:os";
+import { loadConfidentialConfig } from "../core.js";
+import { prefixesOf } from "./project.js";
+import { reindexSessionArtifacts, gitFeatureSessionId, isPlanPath, scanHistory, synthesizeGitEntry } from "./backfill.js";
 import { SESSIONS } from "./summarize.js";
 
 // ── helpers ────────────────────────────────────────────────────────────────
@@ -309,4 +312,375 @@ test("skip_service: sessionID ∈ SESSIONS", async (t) => {
 
   assert.equal(out.status, "skip_service");
   assert.equal(storage.calls.upsert.length, 0);
+});
+
+// ── Task 3: git-history scan + synthetic entry synthesis ────────────────────
+
+const SHA = "a".repeat(40);
+const CT = 1700000000;
+const SPEC = "docs/superpowers/specs/x-design.md";
+
+// Непустой resolved-набор для не-confidential кейсов (F1: fail-closed).
+const NO_CONF_RESOLVED = ["secrets/**"];
+
+// Resolved-набор при ПУСТОМ user-confidential.paths: default docs/confidential/**
+// + builtin (как строит index.js: [...conf.paths, ...conf.builtin]).
+function resolvedConfidential() {
+  const conf = loadConfidentialConfig({});
+  return [...conf.paths, ...conf.builtin];
+}
+
+function makeTree(t, files) {
+  const root = makeRoot(t);
+  for (const f of files) touch(path.join(root, f));
+  return root;
+}
+
+// Fake git: методы, которые scanHistory дёргает (log/isAncestor/commitMessage/
+// filesOfCommit). log — stdout `git log --diff-filter=A --format="%H %ct"
+// --reverse -- <path>`; первая строка = старейший добавивший коммит.
+function makeGit(overrides = {}) {
+  return {
+    log: async () => `${SHA} ${CT}`,
+    isAncestor: async () => "yes",
+    commitMessage: async () => "",
+    filesOfCommit: async () => [],
+    ...overrides,
+  };
+}
+
+function scanDeps(root, overrides = {}) {
+  return {
+    root,
+    historyGlobs: ["docs/**"],
+    git: makeGit(),
+    mainline: "main",
+    records: [],
+    artifactConfidentialPatterns: NO_CONF_RESOLVED,
+    ...overrides,
+  };
+}
+
+// Fake storage для synthesizeGitEntry: get + upsert (spy).
+function makeGitStorage({ existing = null } = {}) {
+  const calls = { upsert: [], get: [] };
+  return {
+    calls,
+    get: async (sid) => { calls.get.push(sid); return existing; },
+    upsert: async (entries) => { calls.upsert.push(entries); },
+  };
+}
+
+function gitFeature(overrides = {}) {
+  return {
+    specPath: SPEC,
+    planPath: null,
+    commitSha: SHA,
+    branch: "",
+    merged: 0,
+    title: "My Feature",
+    timeFirst: CT * 1000,
+    timeLast: CT * 1000,
+    artifacts: [SPEC],
+    ...overrides,
+  };
+}
+
+function synthDeps(overrides = {}) {
+  return {
+    storage: makeGitStorage(),
+    root: "/tmp",
+    key: "a.b.c",
+    projectHash: "ph",
+    originRemote: "gh/x",
+    embedModelId: "m1",
+    embeddings: async () => new Float32Array([0.1, 0.2]),
+    confidentialPatterns: [],
+    artifactConfidentialPatterns: NO_CONF_RESOLVED,
+    ...overrides,
+  };
+}
+
+// ── gitFeatureSessionId / isPlanPath ────────────────────────────────────────
+
+test("gitFeatureSessionId: детерминирован, формат git- + 12 hex, spec/plan одного коммита → разные ID", () => {
+  const id1 = gitFeatureSessionId(SHA, SPEC);
+  const id2 = gitFeatureSessionId(SHA, SPEC);
+  assert.equal(id1, id2, "детерминированность");
+  assert.match(id1, /^git-[0-9a-f]{12}$/, "формат git-<12 hex>");
+  const idPlan = gitFeatureSessionId(SHA, "docs/superpowers/plans/x-plan.md");
+  assert.notEqual(id1, idPlan, "spec и plan одного коммита → разные ID (specPath в хэше)");
+});
+
+test("isPlanPath: basename -plan.md ИЛИ parent-каталог plans", () => {
+  assert.equal(isPlanPath("docs/superpowers/plans/x-plan.md"), true);
+  assert.equal(isPlanPath("docs/superpowers/specs/x-design.md"), false);
+  assert.equal(isPlanPath("specs/x-plan.md"), true, "legacy specs/x-plan.md");
+  assert.equal(isPlanPath("docs/superpowers/plans/x.md"), true, "parent-каталог plans");
+  assert.equal(isPlanPath("docs/superpowers/specs/x.md"), false);
+  assert.equal(isPlanPath(""), false);
+});
+
+// ── scanHistory ─────────────────────────────────────────────────────────────
+
+test("scanHistory: glob-матчинг + plan-исключение + skip_confidential (default + builtin) + feature", async (t) => {
+  const root = makeTree(t, [
+    "docs/superpowers/specs/x-design.md",
+    "docs/superpowers/plans/x-plan.md",
+    "docs/confidential/secret.md",
+    ".env",
+    "README.md",
+    "src/foo.js", // вне globs → не кандидат
+  ]);
+  const out = await scanHistory(scanDeps(root, {
+    historyGlobs: ["docs/**", ".env", "README.md"],
+    artifactConfidentialPatterns: resolvedConfidential(),
+  }));
+
+  assert.equal(out.considered, 5, "только файлы, матчащие globs");
+  assert.equal(out.covered.plan_excluded, 1, "plan-путь исключён из кандидатов");
+  assert.equal(out.covered.skip_confidential, 2, "docs/confidential/** (default) + .env (builtin)");
+  assert.equal(out.covered.not_in_git, 0);
+  assert.equal(out.covered.by_artifacts, 0);
+  assert.equal(out.features.length, 2, "x-design.md + README.md");
+  assert.deepEqual(out.gitErrors, []);
+  const f = out.features.find((x) => x.specPath === SPEC);
+  assert.ok(f, "spec в features");
+  assert.equal(f.commitSha, SHA);
+  assert.equal(f.merged, 1, "isAncestor yes → 1");
+  assert.equal(f.timeFirst, CT * 1000, "%ct ×1000");
+  assert.equal(f.timeLast, CT * 1000);
+});
+
+test("scanHistory: coverage by artifacts — record.artifacts содержит путь → covered, не в features", async (t) => {
+  const root = makeTree(t, [SPEC]);
+  const out = await scanHistory(scanDeps(root, {
+    records: [{ artifacts: [SPEC] }],
+  }));
+
+  assert.equal(out.covered.by_artifacts, 1);
+  assert.equal(out.features.length, 0);
+});
+
+test("scanHistory: coverage case-insensitive (record.artifacts uppercase)", async (t) => {
+  const root = makeTree(t, [SPEC]);
+  const out = await scanHistory(scanDeps(root, {
+    records: [{ artifacts: ["DOCS/SUPERPOWERS/SPECS/X-DESIGN.MD"] }],
+  }));
+
+  assert.equal(out.covered.by_artifacts, 1);
+  assert.equal(out.features.length, 0);
+});
+
+test("scanHistory: not_in_git — git log пуст", async (t) => {
+  const root = makeTree(t, [SPEC]);
+  const out = await scanHistory(scanDeps(root, {
+    git: makeGit({ log: async () => "" }),
+  }));
+
+  assert.equal(out.covered.not_in_git, 1);
+  assert.equal(out.features.length, 0);
+});
+
+test("scanHistory: plan-ассоциация по конвенции (specs/X-design.md → plans/X-plan.md)", async (t) => {
+  const root = makeTree(t, [SPEC, "docs/superpowers/plans/x-plan.md"]);
+  const out = await scanHistory(scanDeps(root));
+
+  assert.equal(out.features.length, 1);
+  const f = out.features[0];
+  assert.equal(f.planPath, "docs/superpowers/plans/x-plan.md");
+  assert.deepEqual(f.artifacts, [SPEC, "docs/superpowers/plans/x-plan.md"]);
+});
+
+test("scanHistory: plan-ассоциация legacy (specs/X.md → specs/X-plan.md)", async (t) => {
+  const root = makeTree(t, ["specs/x.md", "specs/x-plan.md"]);
+  const out = await scanHistory(scanDeps(root, { historyGlobs: ["specs/**"] }));
+
+  assert.equal(out.features.length, 1);
+  assert.equal(out.features[0].planPath, "specs/x-plan.md");
+});
+
+test("scanHistory: plan-ассоциация same-commit — только plan-подобные файлы коммита", async (t) => {
+  const root = makeTree(t, [SPEC]);
+  const out = await scanHistory(scanDeps(root, {
+    git: makeGit({ filesOfCommit: async () => [SPEC, "docs/superpowers/plans/x-plan.md", "docs/superpowers/specs/other-design.md"] }),
+  }));
+
+  assert.equal(out.features.length, 1);
+  assert.equal(out.features[0].planPath, "docs/superpowers/plans/x-plan.md");
+});
+
+test("scanHistory: >1 plan-подобного в коммите → planPath=null, artifacts=[specPath]", async (t) => {
+  const root = makeTree(t, [SPEC]);
+  const out = await scanHistory(scanDeps(root, {
+    git: makeGit({ filesOfCommit: async () => [SPEC, "docs/superpowers/plans/a-plan.md", "docs/superpowers/plans/b-plan.md"] }),
+  }));
+
+  assert.equal(out.features.length, 1);
+  assert.equal(out.features[0].planPath, null);
+  assert.deepEqual(out.features[0].artifacts, [SPEC]);
+});
+
+test("scanHistory: title из первой H1; fallback Spec: <basename>", async (t) => {
+  const root = makeTree(t, [SPEC]);
+  fs.writeFileSync(path.join(root, SPEC), "# My Feature\n\nbody\n");
+  const out = await scanHistory(scanDeps(root));
+  assert.equal(out.features[0].title, "My Feature");
+
+  const root2 = makeTree(t, ["docs/superpowers/specs/y-design.md"]);
+  fs.writeFileSync(path.join(root2, "docs/superpowers/specs/y-design.md"), "no h1 here\n");
+  const out2 = await scanHistory(scanDeps(root2));
+  assert.equal(out2.features[0].title, "Spec: y-design.md");
+});
+
+test("scanHistory: merged по isAncestor — yes→1, no→0, error→0, mainline null→0", async (t) => {
+  const root = makeTree(t, [SPEC]);
+  const yes = await scanHistory(scanDeps(root, { git: makeGit({ isAncestor: async () => "yes" }) }));
+  assert.equal(yes.features[0].merged, 1);
+  const no = await scanHistory(scanDeps(root, { git: makeGit({ isAncestor: async () => "no" }) }));
+  assert.equal(no.features[0].merged, 0);
+  const err = await scanHistory(scanDeps(root, { git: makeGit({ isAncestor: async () => "error" }) }));
+  assert.equal(err.features[0].merged, 0, "isAncestor error → 0, фича в листинге");
+  const nullMain = await scanHistory(scanDeps(root, { mainline: null }));
+  assert.equal(nullMain.features[0].merged, 0, "mainline null → 0");
+});
+
+test("scanHistory: branch из merge-сообщения (Merge branch 'x'), иначе ''", async (t) => {
+  const root = makeTree(t, [SPEC]);
+  const merged = await scanHistory(scanDeps(root, {
+    git: makeGit({ commitMessage: async () => "Merge branch 'feature/x'" }),
+  }));
+  assert.equal(merged.features[0].branch, "feature/x");
+  const plain = await scanHistory(scanDeps(root, {
+    git: makeGit({ commitMessage: async () => "feat: something" }),
+  }));
+  assert.equal(plain.features[0].branch, "");
+});
+
+test("scanHistory: git-сбой → fail-soft (gitErrors, features без фичи)", async (t) => {
+  const root = makeTree(t, [SPEC]);
+  const out = await scanHistory(scanDeps(root, {
+    git: makeGit({ log: async () => { throw new Error("boom"); } }),
+  }));
+
+  assert.equal(out.features.length, 0);
+  assert.equal(out.gitErrors.length, 1);
+  assert.equal(out.gitErrors[0].path, SPEC);
+  assert.equal(out.considered, 1);
+});
+
+// ── synthesizeGitEntry ──────────────────────────────────────────────────────
+
+test("synthesizeGitEntry: already_indexed — storage.get по session_id, без upsert и embed", async (t) => {
+  const storage = makeGitStorage({ existing: { session_id: "git-whatever" } });
+  const embedCalls = [];
+  const embeddings = async (text) => { embedCalls.push(text); return new Float32Array([0.1]); };
+  const deps = synthDeps({ storage, embeddings });
+
+  const out = await synthesizeGitEntry(deps, gitFeature(), { summary: "s", decisions: ["d"] });
+
+  assert.equal(out.status, "already_indexed");
+  assert.equal(out.session_id, gitFeatureSessionId(SHA, SPEC));
+  assert.equal(storage.calls.get.length, 1);
+  assert.equal(storage.calls.get[0], gitFeatureSessionId(SHA, SPEC));
+  assert.equal(storage.calls.upsert.length, 0, "без upsert");
+  assert.equal(embedCalls.length, 0, "без embed");
+});
+
+test("synthesizeGitEntry: форма записи — все поля, author git-backfill, version 1, prefixes, merged из feature", async (t) => {
+  const root = makeTree(t, [SPEC, "docs/superpowers/plans/x-plan.md"]);
+  const storage = makeGitStorage();
+  const deps = synthDeps({ storage, root });
+  const feature = gitFeature({
+    planPath: "docs/superpowers/plans/x-plan.md",
+    branch: "feature/x",
+    merged: 1,
+    artifacts: [SPEC, "docs/superpowers/plans/x-plan.md"],
+  });
+
+  const out = await synthesizeGitEntry(deps, feature, { summary: "Sum", decisions: ["D1", "D2"] });
+
+  assert.equal(out.status, "indexed");
+  assert.equal(out.session_id, gitFeatureSessionId(SHA, SPEC));
+  assert.equal(storage.calls.upsert.length, 1);
+  const [entry] = storage.calls.upsert[0];
+  assert.equal(entry.session_id, gitFeatureSessionId(SHA, SPEC));
+  assert.equal(entry.key, "a.b.c");
+  assert.equal(entry.origin_project_hash, "ph");
+  assert.equal(entry.title, "My Feature");
+  assert.equal(entry.summary, "Sum");
+  assert.deepEqual(entry.decisions, ["D1", "D2"]);
+  assert.equal(entry.model_id, "m1");
+  assert.equal(entry.author, "git-backfill", "RI-6 author-маркер");
+  assert.equal(entry.time_first, CT * 1000);
+  assert.equal(entry.time_last, CT * 1000);
+  assert.equal(entry.version, 1);
+  assert.equal(entry.branch, "feature/x");
+  assert.equal(entry.head, SHA);
+  assert.equal(entry.merged, 1, "merged из feature");
+  assert.equal(entry.host, hostname());
+  assert.equal(entry.origin_remote, "gh/x");
+  assert.deepEqual(entry.prefixes, prefixesOf("a.b.c"));
+  assert.deepEqual(entry.artifacts, [SPEC, "docs/superpowers/plans/x-plan.md"]);
+  assert.ok(entry.embedding instanceof Float32Array);
+});
+
+test("synthesizeGitEntry: artifacts-фильтр — existsSync=false дроп, resolved-матч дроп, dedup lowercase, cap 8", async (t) => {
+  const root = makeTree(t, [
+    SPEC,
+    "docs/superpowers/plans/x-plan.md",
+    "docs/confidential/secret.md",
+    "docs/a.md", "docs/b.md", "docs/c.md", "docs/d.md", "docs/e.md", "docs/f.md",
+  ]);
+  const storage = makeGitStorage();
+  const deps = synthDeps({ storage, root, artifactConfidentialPatterns: ["docs/confidential/**"] });
+  const feature = gitFeature({
+    planPath: "docs/superpowers/plans/x-plan.md",
+    artifacts: [
+      SPEC,
+      "docs/superpowers/SPECS/x-design.md", // lowercase-дубль
+      "docs/superpowers/plans/x-plan.md",
+      "docs/superpowers/plans/missing-plan.md", // не существует → дроп
+      "docs/confidential/secret.md", // resolved-матч → дроп
+      "docs/a.md", "docs/b.md", "docs/c.md", "docs/d.md", "docs/e.md", "docs/f.md",
+    ],
+  });
+
+  const out = await synthesizeGitEntry(deps, feature, { summary: "s", decisions: [] });
+
+  assert.equal(out.status, "indexed");
+  const [entry] = storage.calls.upsert[0];
+  assert.equal(entry.artifacts.length, 8, "cap 8");
+  assert.ok(entry.artifacts.includes(SPEC));
+  assert.ok(entry.artifacts.includes("docs/superpowers/plans/x-plan.md"));
+  assert.ok(!entry.artifacts.includes("docs/superpowers/SPECS/x-design.md"), "dedup lowercase");
+  assert.ok(!entry.artifacts.includes("docs/superpowers/plans/missing-plan.md"), "existsSync=false дроп");
+  assert.ok(!entry.artifacts.includes("docs/confidential/secret.md"), "resolved-матч дроп");
+});
+
+test("synthesizeGitEntry: re-mask LLM-вывода до embed — embed-вход от маскированного контента", async (t) => {
+  const root = makeTree(t, [SPEC]);
+  const storage = makeGitStorage();
+  const embedInputs = [];
+  const embeddings = async (text) => { embedInputs.push(text); return new Float32Array([0.1]); };
+  const deps = synthDeps({
+    storage, root,
+    embeddings,
+    confidentialPatterns: ["docs/confidential/**"],
+    artifactConfidentialPatterns: ["docs/confidential/**"],
+  });
+  const llm = { summary: "line one\ndocs/confidential/secret.md\nline three", decisions: ["keep this"] };
+
+  const out = await synthesizeGitEntry(deps, gitFeature(), llm);
+
+  assert.equal(out.status, "indexed");
+  assert.equal(embedInputs.length, 1, "embed вызван ровно 1 раз");
+  const input = embedInputs[0];
+  assert.equal(input, "My Feature\nline one\n[confidential]\nline three\nkeep this",
+    "embed-вход = title + \\n + summary + \\n + decisions.join(\\n) от МАСКИРОВАННЫХ значений");
+  assert.ok(!input.includes("docs/confidential/secret.md"), "raw confidential-строка не ушла в embed");
+  const [entry] = storage.calls.upsert[0];
+  assert.ok(!entry.summary.includes("docs/confidential/secret.md"), "upsert-запись тоже замаскирована");
+  assert.ok(entry.summary.includes("[confidential]"));
+  assert.ok(entry.embedding instanceof Float32Array, "embedding записан");
 });
