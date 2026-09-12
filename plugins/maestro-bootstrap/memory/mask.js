@@ -39,7 +39,7 @@ export function maskEntry(entry, { confidentialPatterns = [], artifactConfidenti
     .map((p) => p.toLowerCase());
   const artifacts = Array.isArray(entry.artifacts)
     ? entry.artifacts.filter((p) => typeof p === "string" && !lowerConf.some((pat) => confGlobMatch(pat, p.toLowerCase())))
-    : entry.artifacts;
+    : (entry.artifacts ?? []);
   return {
     ...entry,
     title: maskField(entry.title),

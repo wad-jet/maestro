@@ -312,7 +312,10 @@ export class Indexer {
         entry.artifacts = union.slice(0, 8);
 
         // G2: re-mask entry before write (defense-in-depth)
-        const maskedEntry = maskEntry(entry, { confidentialPatterns: this.confidentialPatterns });
+        const maskedEntry = maskEntry(entry, {
+          confidentialPatterns: this.confidentialPatterns,
+          artifactConfidentialPatterns: this.artifactConfidentialPatterns,
+        });
 
         // I1: embed AFTER mask
         const vec = await this.embeddings.embed(`${maskedEntry.title}\n${maskedEntry.summary}\n${maskedEntry.decisions.join("\n")}`);

@@ -137,8 +137,9 @@ function similarityThresholdValid(m) {
 }
 
 /**
- * artifact_globs: null (off) or an array of non-empty strings (≤ 16 items);
- * anything else → invalid (memory disabled). Shared by classifyMemoryConfig
+ * artifact_globs: absent/null → default (see DEFAULTS); `[]` = off;
+ * array of non-empty strings (≤ 16 items) → used; anything else → invalid
+ * (memory disabled). Shared by classifyMemoryConfig
  * (zero-dep gate) and loadMemoryConfig.
  * @param {object} m  The `memory` config section.
  * @returns {boolean}  True when artifact_globs is valid (or absent).

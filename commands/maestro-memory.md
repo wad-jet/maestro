@@ -53,15 +53,15 @@ description: Показать статус memory layer плагина maestro-b
 1. Прочитай `maestro.json` (файл в корне проекта) через `read`.
 2. Извлеки секцию `memory`. Если секция отсутствует → используй значения по умолчанию:
 
-   | Параметр              | Значение по умолчанию                                           |
-   |---|---|
-   | `top_k`               | `3`                                                             |
-   | `min_score`           | `0.35`                                                          |
-   | `idle_debounce_min`   | `10`                                                            |
-   | `embedding_model`     | `Xenova/paraphrase-multilingual-MiniLM-L12-v2`                  |
-   | `storage.type`        | `sqlite`                                                        |
-   | `retention_days`      | `null` (выключено)                                              |
-   | `artifact_globs`      | `["docs/superpowers/specs/**", "docs/superpowers/plans/**"]`     |
+   | Параметр            | Значение по умолчанию                                        |
+   | ---                 | ---                                                          |
+   | `top_k`             | `3`                                                          |
+   | `min_score`         | `0.35`                                                       |
+   | `idle_debounce_min` | `10`                                                         |
+   | `embedding_model`   | `Xenova/paraphrase-multilingual-MiniLM-L12-v2`               |
+   | `storage.type`      | `sqlite`                                                     |
+   | `retention_days`    | `null` (выключено)                                           |
+   | `artifact_globs`    | `["docs/superpowers/specs/**", "docs/superpowers/plans/**"]` |
 
 3. Зафиксируй фактические значения (файла или дефолты).
 
