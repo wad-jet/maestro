@@ -239,7 +239,7 @@
   confidential) и тела ошибок (`Error.message`/`.stack`/HTTP-body — только
   `error_class`), `base_url`/эндпоинты, raw free-text branch, значения секретов.
   **Event-имена в whitelist (v3.5.0):** `memory:reindex.sessions` /
-  `memory:reindex.git` — aggregates-only (status/счётчики/spec-пути; текстовые
+  `memory:reindex.git` — aggregates-only (status/счётчики; текстовые
   поля записей в лог НЕ попадают); `memory:config_fallback` (warn) — без полей.
   `.maestro/` в `.gitignore` — лог по умолчанию не покидает машину; при непустых
   `confidential.paths` — doc-note `memory:log_confidential_note` (warn): локальный
