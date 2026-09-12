@@ -87,7 +87,7 @@
 **Interfaces:**
 - Produces:
   - `export function isPlanPath(p)` — basename `-plan.md` ИЛИ parent-каталог `plans`.
-  - `export function gitFeatureSessionId(commitSha, specPath)` → RI-1.
+  - `export function gitFeatureSessionId(key, commitSha, specPath)` → RI-1 (обновлено: key-review T4, 2026-09-12).
   - `export async function scanHistory({ root, historyGlobs, git, mainline, records, artifactConfidentialPatterns })`
     → `{ features, considered, covered: { by_artifacts, not_in_git, skip_confidential, plan_excluded }, gitErrors }`;
     feature: `{ specPath, planPath|null, commitSha, branch, merged, title, timeFirst, timeLast, artifacts }`.
