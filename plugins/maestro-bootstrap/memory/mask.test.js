@@ -65,3 +65,23 @@ test("maskEntry masks confidential lines", () => {
   assert.ok(!out.title.includes("secret"));
   assert.equal(out.summary, "normal");
 });
+
+// ── Task 7 (v5.2): artifacts filter (F2) ───────────────────────────────
+
+test("maskEntry drops artifacts matching confidential patterns (F2)", () => {
+  const e = { title: "t", summary: "s", decisions: [], artifacts: ["docs/confidential/x.md", "docs/spec.md"] };
+  const out = maskEntry(e, { confidentialPatterns: ["docs/confidential/**"] });
+  assert.deepEqual(out.artifacts, ["docs/spec.md"], "confidential artifacts dropped (masked path is useless as pointer)");
+});
+
+test("maskEntry artifacts filter uses artifactConfidentialPatterns when provided (F2)", () => {
+  const e = { title: "t", summary: "s", decisions: [], artifacts: [".env", "docs/spec.md"] };
+  const out = maskEntry(e, { confidentialPatterns: [], artifactConfidentialPatterns: [".env"] });
+  assert.deepEqual(out.artifacts, ["docs/spec.md"], "artifactConfidentialPatterns applied to artifacts only");
+});
+
+test("maskEntry keeps artifacts when no patterns match", () => {
+  const e = { title: "t", summary: "s", decisions: [], artifacts: ["docs/spec.md", "src/index.js"] };
+  const out = maskEntry(e, { confidentialPatterns: ["docs/confidential/**"] });
+  assert.deepEqual(out.artifacts, ["docs/spec.md", "src/index.js"], "non-matching artifacts kept");
+});
