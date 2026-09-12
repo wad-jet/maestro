@@ -22,21 +22,29 @@ const MAX_PATH_LENGTH = 512;
  *  - glob-miss по `globs` → skip (confGlobMatch, case-insensitive);
  *  - confidential-матч по `confidentialPatterns` → skip (Z4);
  *  - CR-2: длина > 512 / control chars → skip;
- *  - dedup first-seen, cap 8.
+ *  - dedup first-seen (case-insensitive), cap 8.
  *
  * Invariants: без LLM; throw не покидает функцию (любой сбой → `[]`).
+ * Z4 fail-closed: `confidentialPatterns` обязателен и непуст — пустой/
+ * отсутствующий набор → `[]` (resolved-набор loadConfidentialConfig всегда
+ * непуст: built-in паттерны применяются всегда).
  *
  * @param {Array<{parts: Array<object>}>} messages  Сообщения сессии.
  * @param {object} opts
  * @param {string} opts.root                 Project root (absolute).
  * @param {string[]} opts.globs              Artifact globs (пусто → `[]`).
- * @param {string[]} [opts.confidentialPatterns]  Resolved confidential globs.
+ * @param {string[]} opts.confidentialPatterns  Resolved confidential globs
+ *     (обязателен, непустой; пустой/отсутствующий → `[]`).
  * @returns {string[]}  Repo-relative пути (posix-разделители), ≤ 8.
  */
 export function extractArtifacts(messages, { root, globs, confidentialPatterns } = {}) {
   try {
     if (!Array.isArray(globs) || globs.length === 0) return [];
     if (typeof root !== "string" || !root) return [];
+    // F1: fail-closed на границе модуля — confidential-фильтр обязателен (Z4).
+    // Легитимного пустого набора не существует по построению: resolved-набор
+    // loadConfidentialConfig всегда непуст (built-in паттерны применяются всегда).
+    if (!Array.isArray(confidentialPatterns) || confidentialPatterns.length === 0) return [];
 
     const rootReal = fs.realpathSync(root);
 
@@ -45,9 +53,12 @@ export function extractArtifacts(messages, { root, globs, confidentialPatterns }
       .map((g) => g.toLowerCase());
     if (lowerGlobs.length === 0) return [];
 
-    const lowerConf = (confidentialPatterns ?? [])
+    const lowerConf = confidentialPatterns
       .filter((p) => typeof p === "string" && p)
       .map((p) => p.toLowerCase());
+    // F1: набор, отфильтровавшийся до пустоты (не-строки/пустые элементы) —
+    // тоже fail-closed (эффективно пустой набор).
+    if (lowerConf.length === 0) return [];
 
     const seen = new Set();
     const out = [];
@@ -90,9 +101,11 @@ export function extractArtifacts(messages, { root, globs, confidentialPatterns }
         // Resolved confidential-матч → skip (Z4).
         if (lowerConf.some((p) => confGlobMatch(p, lowerRel))) continue;
 
-        // Dedup first-seen.
-        if (seen.has(relPosix)) continue;
-        seen.add(relPosix);
+        // Dedup first-seen (F2: по lowerRel — граница матчинга case-insensitive;
+        // case-варианты одного физического файла на case-insensitive FS дают
+        // разный relPosix, но это один артефакт).
+        if (seen.has(lowerRel)) continue;
+        seen.add(lowerRel);
         out.push(relPosix);
       }
     }
