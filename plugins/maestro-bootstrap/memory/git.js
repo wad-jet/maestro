@@ -143,3 +143,46 @@ export function isAncestor(root, head, mainline) {
     return "error";
   } catch { return "error"; }
 }
+
+// ── Task 4: git-адаптер для scanHistory (spec §4.2.2) ───────────────────────
+
+/**
+ * Старейший добавивший коммит файла: `git log --diff-filter=A --format="%H %ct"
+ * --reverse -- <path>`. Возвращает stdout целиком (первая строка = старейший
+ * добавивший коммит: SHA + unix-время); пустой stdout — файл не в git-истории
+ * (not_in_git). Spawn-ошибка (git отсутствует) → throw — caller fail-soft'ит
+ * (scanHistory → gitErrors). Non-zero exit (git-ошибка: таймаут команды,
+ * экзотический путь вне репо) → throw — иначе пустой stdout был бы
+ * классифицирован как not_in_git вместо gitErrors (диагностика, RI-9).
+ * @param {string} root  cwd для git.
+ * @param {string} path  Repo-relative путь.
+ * @returns {string}
+ */
+export function gitLog(root, path) {
+  const r = runGit(root, ["log", "--diff-filter=A", "--format=%H %ct", "--reverse", "--", path], { quiet: true });
+  if (r.status !== 0) throw new Error(`git log failed (status ${r.status})`);
+  return r.stdout ?? "";
+}
+
+/**
+ * Repo-relative пути файлов коммита (scanHistory, same-commit plan-ассоциация):
+ * `git show --name-only --format= <sha>`. Spawn-ошибка → throw.
+ * @param {string} root  cwd для git.
+ * @param {string} sha
+ * @returns {string[]}
+ */
+export function gitFilesOfCommit(root, sha) {
+  const r = runGit(root, ["show", "--name-only", "--format=", sha], { quiet: true });
+  return String(r.stdout ?? "").split("\n").map((s) => s.trim()).filter(Boolean);
+}
+
+/**
+ * Subject коммита (scanHistory, merge-детект ветки): `git log -1 --format=%s <sha>`.
+ * @param {string} root  cwd для git.
+ * @param {string} sha
+ * @returns {string}
+ */
+export function gitCommitMessage(root, sha) {
+  const r = runGit(root, ["log", "-1", "--format=%s", sha], { quiet: true });
+  return String(r.stdout ?? "").trim();
+}

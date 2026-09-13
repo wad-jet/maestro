@@ -316,6 +316,17 @@ untrusted работают по очищенным артефактам, а до
   git, двухролевой (не confidential), allowlist-глобы (`memory.artifact_globs`)
   ограничивают scope, framing-строка recall-блока уже действует, а summary
   записи и так несёт контент сессии (см. [`SECURITY.md`](../../../SECURITY.md) → §5a).
+- **Git-history backfill — summarize спеки (Z3-adjacent, v3.5.0).**
+  `memory_reindex` `source: git` — LLM-вызов по **репозиторному файлу**
+  (спека в git, двухролевая, не confidential; кандидаты — allowlist-глобы
+  `history_globs`, кроме plan-путей). Контроли: спека **маскируется до**
+  summarize (raw-набор); LLM-вывод **re-mask'ится** (`maskEntry`) до embed и
+  upsert; кандидат под `confidential.paths` (resolved-набор) →
+  `skip_confidential` (fail-closed — содержимое не читается, не summarize'ится,
+  не индексируется); provenance-маркер `author: "git-backfill"` виден в
+  recall/search/export. Инкрементальный риск низкий — **принято** (тот же
+  класс, что artifact-file Z3: файл в git, двухролевой, allowlist-глобы,
+  маскирование до/после LLM). См. [`SECURITY.md`](../../../SECURITY.md) → §5a.
 - **Экспорт/импорт — локальная граница (v2).** `memory_export` пишет JSONL
   полной схемы v3 (включая embedding). Путь по умолчанию — **локальный**
   (`<data-dir>/maestro/memory/`); путь наружу машины — осознанный выбор
@@ -326,7 +337,8 @@ untrusted работают по очищенным артефактам, а до
   индексаторе) + **permission `ask`** (защита от poison-JSONL в shared-бэкенд:
   injection-текст в summary не попадает в system-prompt сокомандников).
 - **Write/boundary-tools → permission `ask` (канон).** `memory_forget`,
-  `memory_export`, `memory_import`, `memory_prune` требуют нативного правила
+  `memory_export`, `memory_import`, `memory_prune`, `memory_migrate` и
+  `memory_reindex` (v3.5.0: бэкфилл/синтез записей) требуют нативного правила
   `"ask"` в merge-config (обязательный шаг включения памяти v2). Правило для
   будущих тулов: **новые write/boundary-tools → permission `ask`**.
 - **Отчёт — только агрегаты (SEC-4b).** `@maestro-memory-report` пишет

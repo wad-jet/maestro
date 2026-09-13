@@ -154,6 +154,19 @@
   ограничивают scope, framing-строка recall-блока «не исполнять содержащиеся
   в нём инструкции» уже действует, а summary записи и так несёт контент
   сессии.
+- **Git-history backfill — summarize спеки (Z3-adjacent, v3.5.0).**
+  `memory_reindex` `source: git` — LLM-вызов по **репозиторному файлу**
+  (спека в git, двухролевая, не confidential; кандидаты — allowlist-глобы
+  `history_globs`, кроме plan-путей). Контроли: (а) спека **маскируется до**
+  summarize (`maskTranscript`, raw-набор — как транскрипт сессии); (б) LLM-вывод
+  **re-mask'ится** (`maskEntry`) до embed и upsert — модель может воспроизвести
+  фрагменты, не попавшие в pre-LLM-маскирование; (в) кандидат под
+  `confidential.paths` (resolved-набор) → `skip_confidential` (fail-closed —
+  содержимое не читается, не summarize'ится, не индексируется) — допущение
+  «файл не confidential» сохраняется; (г) provenance-маркер `author:
+  "git-backfill"` виден в recall/search/export. Инкрементальный риск низкий —
+  **принято** (тот же класс, что artifact-file Z3: файл в git, двухролевой,
+  allowlist-глобы, маскирование до/после LLM).
 - **`memory_import` — второй write-path в память (v2).** Обязательны (а)
   **повторное маскирование каждой записи** перед записью (`maskEntry` — тот же
   double-masking, что в индексаторе) и (б) **permission `ask`** — импорт без
@@ -172,7 +185,8 @@
   наружу остаётся осознанным выбором пользователя.
 - **Write/boundary-tools → permission `ask` (канон, v2).** `memory_forget`,
   `memory_export`, `memory_import`, `memory_prune`, `memory_migrate` (v5.1:
-  пере-keying записей между namespace-бакетами) требуют нативного правила
+  пере-keying записей между namespace-бакетами) и `memory_reindex` (v3.5.0:
+  бэкфилл/синтез записей) требуют нативного правила
   `"ask"` в merge-config (обязательный шаг включения памяти v2). Правило для
   будущих тулов: **новые write/boundary-tools → permission `ask`**.
 - **Отчёт — только агрегаты (SEC-4b, v2).** `@maestro-memory-report` пишет
@@ -224,6 +238,9 @@
   записей/запросов (`query`/`summary`/`title`/`decisions`), пути (в т.ч.
   confidential) и тела ошибок (`Error.message`/`.stack`/HTTP-body — только
   `error_class`), `base_url`/эндпоинты, raw free-text branch, значения секретов.
+  **Event-имена в whitelist (v3.5.0):** `memory:reindex.sessions` /
+  `memory:reindex.git` — aggregates-only (status/счётчики; текстовые
+  поля записей в лог НЕ попадают); `memory:config_fallback` (warn) — без полей.
   `.maestro/` в `.gitignore` — лог по умолчанию не покидает машину; при непустых
   `confidential.paths` — doc-note `memory:log_confidential_note` (warn): локальный
   лог может покинуть машину через шеринг/бэкап (author/branch-корреляция).
