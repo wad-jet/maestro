@@ -27,7 +27,7 @@
 - SF-2: внутренние пробелы в частях (`"prov /m1"`, `"prov/ m1"`) — отклонять, класс degenerate-ссылок (→ Task 1).
 - SF-3: явные якоря док-правок вне memory.md (config.md 381/430, model-selection.md 163/169, README 228, maestro-assistant 73/193) (→ Task 5).
 - SF-4: `memory:summarize.duration` не именован в whitelist SECURITY.md (pre-existing) — добавить имя события + уточнить формулировку (→ Task 5).
-- SF-5: в `model_source` duration-события (sessions-путь) возможны только `small_model | model | session` — `agent_maestro`/`agent_build` недостижимы; НЕ синтезировать такие тест-кейсы (→ Task 3).
+- SF-5 (уточнено Ruling 1): sessions-путь использует **core-цепочку** (`chain: "core"` — только `small_model` + `model`, spec D-4) → в `model_source` duration-события возможны только `small_model | model | session`; `agent_maestro`/`agent_build` недостижимы на sessions-пути (full-цепочка — git-путь). НЕ синтезировать agent-кейсы в duration (→ Task 3).
 
 ---
 
@@ -39,7 +39,7 @@
 
 **Interfaces:**
 - Produces:
-  - `resolveSummarizerModel({ client, root, timeoutMs = 5000 }) → Promise<{ model: string|null, source: "small_model"|"model"|"agent_maestro"|"agent_build"|null, error: "config_get_failed"|"invalid_model_ref"|"no_model_resolved"|null }>`
+  - `resolveSummarizerModel({ client, root, timeoutMs = 5000, chain = "full" }) → Promise<{ model: string|null, source: "small_model"|"model"|"agent_maestro"|"agent_build"|null, error: "config_get_failed"|"invalid_model_ref"|"no_model_resolved"|null }>` (`"core"` = только `small_model` + `model` — sessions-путь, spec D-4; `"full"` = все 4 кандидата — git-путь, spec D-3)
   - `parseModelRef(s) → { providerID: string, modelID: string } | null` (split по первому `/`, обе части валидированы)
 - Consumes: ничего (zero-dep модуль; локальный timeout-хелпер, НЕ импорт из `index.js` — цикл зависимостей).
 
@@ -143,6 +143,14 @@ test("model with '/' in modelID: 'akash/Qwen/Qwen3.8-27B'", async () => {
   const r = await resolveSummarizerModel({ client: mkClient({ small_model: "akash/Qwen/Qwen3.8-27B" }), root: ROOT });
   assert.deepEqual(r, { model: "akash/Qwen/Qwen3.8-27B", source: "small_model", error: null });
 });
+test("chain: 'core' skips agent steps (D-4: sessions path)", async () => {
+  const r = await resolveSummarizerModel({ client: mkClient({ agent: { maestro: { model: "c/m" } } }), root: ROOT, chain: "core" });
+  assert.deepEqual(r, { model: null, source: null, error: "no_model_resolved" });
+});
+test("chain: 'core' resolves small_model", async () => {
+  const r = await resolveSummarizerModel({ client: mkClient({ small_model: "a/s", agent: { build: { model: "d/m" } } }), root: ROOT, chain: "core" });
+  assert.deepEqual(r, { model: "a/s", source: "small_model", error: null });
+});
 test("parseModelRef: '/' in modelID", () => {
   assert.deepEqual(parseModelRef("akash/Qwen/Qwen3.8-27B"), { providerID: "akash", modelID: "Qwen/Qwen3.8-27B" });
 });
@@ -174,6 +182,8 @@ const CHAIN = [
   ["agent_maestro", (c) => c.agent?.maestro?.model],
   ["agent_build", (c) => c.agent?.build?.model],
 ];
+// D-4: sessions-путь — core-цепочка (без agent-шагов); git-путь — full (D-3).
+const CORE_CHAIN = CHAIN.slice(0, 2);
 
 function validRef(v) {
   if (typeof v !== "string") return null;
@@ -215,9 +225,10 @@ function withLocalTimeout(p, ms) {
  * @param {object} o.client  opencode SDK client
  * @param {string} o.root    project directory (config.get query)
  * @param {number} [o.timeoutMs]  guard-таймаут (default 5000)
+ * @param {"full"|"core"} [o.chain]  "core" — только small_model + model (sessions, D-4)
  * @returns {Promise<{model: (string|null), source: ("small_model"|"model"|"agent_maestro"|"agent_build"|null), error: ("config_get_failed"|"invalid_model_ref"|"no_model_resolved"|null)}>}
  */
-export async function resolveSummarizerModel({ client, root, timeoutMs = 5000 } = {}) {
+export async function resolveSummarizerModel({ client, root, timeoutMs = 5000, chain = "full" } = {}) {
   let cfg;
   try {
     const fn = client?.config?.get;
@@ -231,7 +242,8 @@ export async function resolveSummarizerModel({ client, root, timeoutMs = 5000 } 
     return { model: null, source: null, error: "config_get_failed" };
   }
   let sawInvalid = false;
-  for (const [source, pick] of CHAIN) {
+  const steps = chain === "core" ? CORE_CHAIN : CHAIN;
+  for (const [source, pick] of steps) {
     let candidate;
     try { candidate = pick(cfg); } catch { continue; }
     if (candidate == null) continue; // absent — без invalid-флага (SF-1)
@@ -412,6 +424,33 @@ test("4.0.0 sessions: invalid_model_ref → warn (симметрично, SF и�
   idx.dispose();
 });
 
+test("4.0.0 sessions: только agent.maestro.model → core-цепочка игнорирует → fallback модель сессии (D-4)", async () => {
+  const client = {
+    session: {
+      get: async ({ path }) => ({ data: { id: path.id, parentID: null, title: "st", time: { created: 1, updated: 100 } } }),
+      messages: async () => ({ data: [{ info: { role: "assistant", providerID: "prov", modelID: "sess-m" }, parts: [{ type: "text", text: "hello" }] }] }),
+      list: async () => ({ data: [] }),
+    },
+    config: { get: async () => ({ data: { agent: { maestro: { model: "c/m" } } } }) },
+  };
+  const storage = { upserts: [], upsert: async () => {}, get: async () => null, search: async () => [], delete: async () => {}, stats: async () => ({ entries: 0 }) };
+  let captured = null;
+  const durations = [];
+  const idx = new Indexer({
+    client, config: mkConfig(), embeddings: mkMockEmbeddings(), storage,
+    state: mkState(),
+    summarize: async (args) => { captured = args; return { title: "t", summary: "s", decisions: [] }; },
+    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(), root: "/tmp/root",
+    logDebug: (ev, fields) => { if (ev === "memory:summarize.duration") durations.push(fields); },
+  });
+  await idx._run("s1");
+  assert.equal(captured.summarizerModel, null, "core-цепочка: agent-шаги не резолвятся");
+  assert.equal(durations[0].model, "sess-m");
+  assert.equal(durations[0].model_source, "session");
+  idx.dispose();
+});
+
 test("4.0.0 sessions: model (не small_model) → source: model", async () => {
   const client = {
     session: {
@@ -460,8 +499,9 @@ import { resolveSummarizerModel, parseModelRef } from "./resolve-model.js";
 ```js
         const summarizeStart = Date.now();
         // 4.0.0: zero-key — модель саммаризации из opencode-конфига (spec §4.3).
+        // D-4: core-цепочка (small_model + model, без agent-шагов).
         // Fail-soft: любой error → модель сессии (текущая семантика summarize.js).
-        const resolved = await resolveSummarizerModel({ client: this.client, root: this.root });
+        const resolved = await resolveSummarizerModel({ client: this.client, root: this.root, chain: "core" });
         if (resolved.error) {
           this.logWarn?.("memory:summarizer_unavailable", { reason: resolved.error });
         }

@@ -99,11 +99,15 @@ M-1…M-4 учтены в настоящей спеке.
 ### 4.2 Новый модуль `memory/resolve-model.js` (+ co-located тесты)
 
 ```js
-resolveSummarizerModel({ client, root, timeoutMs = 5000 })
+resolveSummarizerModel({ client, root, timeoutMs = 5000, chain = "full" })
   → { model: string|null,
       source: "small_model"|"model"|"agent_maestro"|"agent_build"|null,
       error: "config_get_failed"|"invalid_model_ref"|"no_model_resolved"|null }
 ```
+
+- **`chain`** (уточнение Ruling 1, 2026-09-14): `"full"` (default) — все 4
+  кандидата (git-путь, D-3); `"core"` — только `small_model` + `model`
+  (sessions-путь, D-4 — agent-шаги недостижимы, fallback на модель сессии).
 
 - Вызов: `client.config.get({ query: { directory: root } })` → unwrap
   `resp?.data ?? resp` (паттерн summarize.js:37).
@@ -129,7 +133,7 @@ resolveSummarizerModel({ client, root, timeoutMs = 5000 })
 
 ### 4.3 Sessions-путь (`memory/indexer.js`)
 
-- Перед саммаризацией: `const r = await resolveSummarizerModel({ client, root })`;
+- Перед саммаризацией: `const r = await resolveSummarizerModel({ client, root, chain: "core" })`;
   в `summarize(...)` передаётся `summarizerModel: r.model` (вместо
   `this.config.summarizer_model ?? null`).
 - `r.model === null` → текущая семантика: fallback на модель саммаризируемой
@@ -142,7 +146,8 @@ resolveSummarizerModel({ client, root, timeoutMs = 5000 })
 - `memory:summarize.duration`: поле `model` — **effective-модель**
   саммаризации (resolved-модель, либо модель сессии при fallback — сейчас в
   индексе модель сессии, indexer.js:266); добавить поле `model_source`
-  (enum: `small_model | model | agent_maestro | agent_build | session`).
+  (enum на sessions-пути: `small_model | model | session` — core-цепочка,
+  D-4; `agent_*` недостижимы).
 
 ### 4.4 Git-путь (`memory_reindex`, `memory/index.js`)
 
@@ -288,7 +293,7 @@ Follow-ups (не блокируют):
 <!-- maestro:sanitize
 status: CLEAN
 date: 2026-09-14
-hash: 968db53dac729ba4ef055ed67e0b198cbd89819602809447af1426c537be99cf
+hash: 5e32a502fa25040d2835bd5d9870b31cdd429730dac73511a8fc2f94c72ffc0f
 -->
 
 <!-- maestro:review
