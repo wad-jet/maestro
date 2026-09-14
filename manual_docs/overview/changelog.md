@@ -7,6 +7,33 @@
 > Хронология составлена по истории authoring-репо `maestro-agent`. Даты
 > приблизительные (по коммитам).
 
+## [2026-09-14]
+
+> **Версия 4.0.0** — Major-релиз (BREAKING): zero-key резолв модели
+> саммаризации памяти.
+
+### Изменено (BREAKING)
+
+- **Memory layer — zero-key резолв модели саммаризации (4.0.0).** Ключ
+  `memory.summarizer_model` **удалён** из схемы конфига (без обратной
+  совместимости: остаток в старых конфигах молчаливо игнорируется). Модель
+  фонового саммаризатора резолвится из opencode-конфига (глобальный
+  `~/.config/opencode/opencode.json` / проектный `.opencode/opencode.json`)
+  по цепочке `small_model → model → agent.maestro.model →
+  agent.build.model` (per-call, без кэша). **Смена поведения
+  sessions-пути:** при заданном `small_model`/`model` фоновая саммаризация
+  сессий теперь идёт на нём (ранее — модель саммаризируемой сессии;
+  fallback на модель сессии сохраняется при нерезолве, fail-soft).
+  Git-путь `memory_reindex` (source: git) — **fail-closed guard по
+  резолву** до батча (0 LLM): причины — enum `no_model_resolved` /
+  `config_get_failed` / `invalid_model_ref`, actionable-сообщение указывает
+  на opencode.json. Наблюдаемость: warn `memory:summarizer_unavailable`
+  (reason enum), `memory:summarize.duration` — effective-модель +
+  `model_source` (enum); `memory_reindex list` выводит строку
+  «Модель саммаризации: …». Спека:
+  `docs/superpowers/specs/2026-09-14-memory-summarizer-resolve-design.md`,
+  план: `docs/superpowers/plans/2026-09-14-memory-summarizer-resolve-plan.md`.
+
 ## [2026-09-12]
 
 > **Версия 3.5.0** — Minor-релиз: memory layer reindex & history backfill.

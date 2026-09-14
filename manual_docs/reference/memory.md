@@ -38,7 +38,6 @@
     "enabled": true,
     "auto_recall": true,
     "embedding_model": "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
-    "summarizer_model": null,
     "identity": null,
     "identity_env": null,
     "namespace": "microservices.sales.pay",
@@ -88,7 +87,24 @@
 | `probe_cooldown_min` | `number` | `30` | Интервал в минутах между live-probe модели на старте (кэш результата в `state.json`); число > 0 |
 | `artifact_globs` | `string[]` | `["docs/superpowers/specs/**", "docs/superpowers/plans/**"]` | Allowlist-глобы артефактов (спеки/планы, v5.2): repo-relative пути из `write`/`edit` сессии, матчащие глобы, попадают в поле записи `artifacts[]`. `[]` — явный off. ≤16 непустых строк; невалиден → память disabled (`artifact_globs_invalid`) |
 | `history_globs` | `string[]` \| `null` | `null` (inherit `artifact_globs`) | Allowlist-глобы для **git-history backfill** (`memory_reindex`, v3.5.0): repo-relative пути спек в git-истории — кандидаты на синтез записей. `null`/absent → **inherit** `artifact_globs` (резолв на use-site); `[]` — явный off (кандидатов нет). Валидный массив: ≤16 непустых строк (trim + unique). Невалидное (non-array / не-строки / >16) → **soft fallback** на `artifact_globs` + warn `memory:config_fallback` — память НЕ отключается, нового `disabled_reason` нет |
-| `summarizer_model` | `string` \| `null` | `null` | Модель фонового саммаризатора; `null` → модель саммаризируемой сессии |
+#### Резолв модели саммаризации (4.0.0, zero-key)
+
+Ключа `summarizer_model` больше нет. Модель фонового саммаризатора
+резолвится из **opencode-конфига** (глобальный `~/.config/opencode/opencode.json`
+или проектный `.opencode/opencode.json`) по цепочке (первый валидный
+кандидат): `small_model` → `model` → `agent.maestro.model` →
+`agent.build.model`. `agent.*` — только **источник model-строки** (агенты
+не используются для саммаризации).
+
+- **Sessions-путь** (фоновая саммаризация): резолв → fallback на модель
+  саммаризируемой сессии (fail-soft; warn `memory:summarizer_unavailable`
+  с `reason`). При заданном `small_model`/`model` саммаризация сессий идёт
+  на нём (не на модели сессии).
+- **Git-путь** (`memory_reindex`, `source: git`): guard **по резолву** до
+  батча (0 LLM). Причины — enum: `no_model_resolved` | `config_get_failed`
+  | `invalid_model_ref`. Actionable-сообщение указывает на opencode.json.
+
+
 | `identity` | `string` \| `null` | `null` | Явный override identity (напр. сервисный аккаунт). Обычно identity берётся из `identity_env` → git `user.name` |
 | `identity_env` | `string` \| `null` | `null` | Имя env-переменной с identity (per-machine, не в общем `maestro.json`) |
 | `namespace` | `string` | — | **Обязателен** (v5.1). Ключ изоляции памяти; формат `microservices.sales.pay` (1–3 сегмента, lowercase, разделитель `.`); нормализация trim+lowercase. Отсутствует/невалиден → память disabled (`namespace_missing`/`namespace_invalid`) |
@@ -505,12 +521,13 @@ memory_reindex({action: "list" | "run", source: "sessions" | "git", session_ids?
   - `source: "git"` — **git-история**: LLM-summarize спек из git-истории
     (кандидаты — `history_globs`, кроме plan-путей; 1 вызов/фича) → синтез
     записи (`author: "git-backfill"`, `session_id = "git-" + sha12(key|sha|path)`,
-    детерминированный — RI-1). Требует `memory.summarizer_model` (иначе —
-    hard guard с actionable-сообщением).
+    детерминированный — RI-1). Требует **резолвлённую модель саммаризации** (см. «Резолв модели саммаризации»).
 - **`action: "list"`** — 0 LLM (RI-5): секция A (sessions) — кандидаты с
   пустыми `artifacts` + dry-run превью путей + флаги `model_mismatch` /
   `messages_unavailable`; секция B (git) — фичи из git-истории без покрытия
-  по `artifacts` + превью spec-путей + флаг `summarizer_model_missing`.
+  по `artifacts` + превью spec-путей; `run(source: git)` выводит строку
+  `Модель саммаризации: <model> (source: <source>)` или
+  `не резолвлена (<reason>) — run(source: git) недоступен`.
   Листинг пишет **снапшот** — `run` с `all_empty`/`all` резолвится строго по
   нему (как `pruneSnapshot` у `memory_prune`).
 - **`action: "run"`** — по явным `session_ids`/`specs` **или** по снапшоту
@@ -740,7 +757,7 @@ opt-in на вставку замаскированных заголовков/s
    промптом (замаскированный транскрипт → JSON `{title, summary, decisions[]}`).
    Промпт содержит инструкцию: **не переносить императивные/командные фрагменты
    в summary/decisions** (митигация prompt-injection). Модель:
-   `summarizer_model` ?? модель саммаризируемой сессии. Сессия регистрируется в
+   резолв из opencode-конфига (`small_model` → `model`) → модель саммаризируемой сессии. Сессия регистрируется в
    реестре `SESSIONS` и **удаляется** после чтения ответа. Парсинг устойчивый:
    brace-matching + strip markdown-фенсов + валидация полей.
 5. **Повторное маскирование результата** `sanitize()` перед записью
@@ -791,7 +808,7 @@ upsert (SECURITY.md §5a); кандидат под `confidential.paths` (resolve
 "git-backfill"` (маркер provenance, виден в recall/search/export),
 `session_id = "git-" + sha256(key + "|" + commitSha + "|" + specPath).slice(0,12)`
 (детерминированный, RI-1), `head` = добавляющий коммит, `merged` — по
-`isAncestor`. Требует `memory.summarizer_model` (иначе — hard guard).
+`isAncestor`. Требует резолвлённую модель саммаризации (иначе — hard guard, 0 LLM; причины — enum).
 
 **Cost-модель (RI-5):** `list` — 0 LLM (dry-run превью + снапшот);
 `run(sessions)` — 0 LLM; `run(git)` — ≤N summarize + ≤N embed (1 вызов/фича);
@@ -974,8 +991,9 @@ sessions → возможна пара (реальная + синтетичес�
 |---|---|
 | `memory:embed.duration` | provider, duration_ms, len_bucket; `cache_hit` — только для openai |
 | `memory:embed.cache_stats` (info, openai) | hit_rate, cache_size |
-| `memory:summarize.duration` | sessionID, duration_ms, model |
+| `memory:summarize.duration` | sessionID, duration_ms, model (effective), model_source (enum) |
 | `memory:storage.<op>.duration` | op, duration_ms |
+| `memory:summarizer_unavailable (warn)` | reason (enum: config_get_failed / no_model_resolved / invalid_model_ref) |
 | `memory:recall.duration` | duration_ms, hits, topK, minScore, scope |
 | `memory:recall.hits` | hits |
 | `memory:recall.injected` (info) | records |
