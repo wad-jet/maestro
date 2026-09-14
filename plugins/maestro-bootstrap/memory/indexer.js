@@ -4,6 +4,7 @@ import { resolveEffectiveKey } from "./config.js";
 import { SESSIONS } from "./summarize.js";
 import { prefixesOf } from "./project.js";
 import { extractArtifacts } from "./artifacts.js";
+import { resolveSummarizerModel, parseModelRef } from "./resolve-model.js";
 
 function withTimeout(p, ms) {
   return Promise.race([
@@ -251,19 +252,28 @@ export class Indexer {
 
         // Summarize inside withTimeout (I1) — if client.session.prompt hangs, timeout releases lock
         const summarizeStart = Date.now();
+        // 4.0.0: zero-key — модель саммаризации из opencode-конфига (spec §4.3).
+        // Fail-soft: любой error → модель сессии (текущая семантика summarize.js).
+        const resolved = await resolveSummarizerModel({ client: this.client, root: this.root });
+        if (resolved.error) {
+          this.logWarn?.("memory:summarizer_unavailable", { reason: resolved.error });
+        }
         const { title, summary, decisions } = await this.summarize({
           client: this.client,
           sessionID,
           transcript: masked,
           model: modelRef,
-          summarizerModel: this.config.summarizer_model ?? null,
+          summarizerModel: resolved.model,
         });
-        // Task 3: перф-аудит (spec §4.3) — длительность summarize; model —
-        // только имя модели (spec §3: без @base_url/эндпоинта).
+        // Task 3: перф-аудит — duration; model — effective-модель саммаризации
+        // (resolved, либо модель сессии при fallback); model_source — enum (SEC-4b).
         this.logDebug?.("memory:summarize.duration", {
           sessionID,
           duration_ms: Date.now() - summarizeStart,
-          model: modelRef?.modelID ?? null,
+          model: resolved.model
+            ? (parseModelRef(resolved.model)?.modelID ?? null)
+            : (modelRef?.modelID ?? null),
+          model_source: resolved.model ? resolved.source : "session",
         });
 
         // Build entry, mask FIRST, then embed masked content (I1: embed after maskEntry)

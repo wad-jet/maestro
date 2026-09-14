@@ -78,6 +78,11 @@ function mkGit({ branch = "feature/x", head = "a".repeat(40) } = {}) {
   };
 }
 
+// 4.0.0: mock embeddings (аналог из memory/index.test.js).
+function mkMockEmbeddings() {
+  return { embed: async () => new Float32Array([0.1, 0.2, 0.3]), dim: 3, modelId: "m" };
+}
+
 // ── Basic functionality ──────────────────────────────────────────────
 
 test("indexer summarizes and upserts on _run, masking secrets", async () => {
@@ -1361,5 +1366,117 @@ test("union dedup is case-insensitive, extracted-first ordering (Task 3 deferred
     ["docs/Spec.md"],
     "extracted-first ordering; case-variant existing deduped (case-insensitive union)",
   );
+  idx.dispose();
+});
+
+// ── 4.0.0: sessions-путь — резолв модели саммаризации из opencode-конфига ──
+
+test("4.0.0 sessions: small_model из opencode-конфига → summarizerModel (mock summarize)", async () => {
+  const client = {
+    session: {
+      get: async ({ path }) => ({ data: { id: path.id, parentID: null, title: "st", time: { created: 1, updated: 100 } } }),
+      messages: async () => ({ data: [{ info: {}, parts: [{ type: "text", text: "hello" }] }] }),
+      list: async () => ({ data: [] }),
+    },
+    config: { get: async () => ({ data: { small_model: "a/s" } }) },
+  };
+  const storage = {
+    upserts: [],
+    upsert: async (es) => { for (const e of es) storage.upserts.push(e); },
+    get: async () => null, search: async () => [], delete: async () => {}, stats: async () => ({ entries: 0 }),
+  };
+  let captured = null;
+  const durations = [];
+  const idx = new Indexer({
+    client, config: mkConfig(), embeddings: mkMockEmbeddings(), storage,
+    state: mkState(),
+    summarize: async (args) => { captured = args; return { title: "t", summary: "s", decisions: [] }; },
+    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(), root: "/tmp/root",
+    logDebug: (ev, fields) => { if (ev === "memory:summarize.duration") durations.push(fields); },
+    logWarn: () => {},
+  });
+  await idx._run("s1");
+  assert.equal(captured.summarizerModel, "a/s", "resolved small_model передан в summarize");
+  assert.equal(durations[0].model, "s", "effective modelID в duration");
+  assert.equal(durations[0].model_source, "small_model");
+  idx.dispose();
+});
+
+test("4.0.0 sessions: пустой резолв (нет client.config) → summarizerModel null + модель сессии в duration", async () => {
+  // mkClient() без config — резолв → config_get_failed → fail-soft на модель сессии
+  const client = mkClient();
+  client.session.messages = async () => ({ data: [{ info: { role: "assistant", providerID: "prov", modelID: "sess-m" }, parts: [{ type: "text", text: "hello" }] }] });
+  const storage = { upserts: [], upsert: async () => {}, get: async () => null, search: async () => [], delete: async () => {}, stats: async () => ({ entries: 0 }) };
+  let captured = null;
+  const durations = [];
+  const warns = [];
+  const idx = new Indexer({
+    client, config: mkConfig(), embeddings: mkMockEmbeddings(), storage,
+    state: mkState(),
+    summarize: async (args) => { captured = args; return { title: "t", summary: "s", decisions: [] }; },
+    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(), root: "/tmp/root",
+    logDebug: (ev, fields) => { if (ev === "memory:summarize.duration") durations.push(fields); },
+    logWarn: (ev, fields) => warns.push([ev, fields]),
+  });
+  await idx._run("s1");
+  assert.equal(captured.summarizerModel, null, "fallback: summarizerModel null → модель сессии внутри summarize.js");
+  assert.equal(durations[0].model, "sess-m", "модель сессии в duration (текущее поведение)");
+  assert.equal(durations[0].model_source, "session");
+  assert.ok(warns.some(([ev, f]) => ev === "memory:summarizer_unavailable" && f.reason === "config_get_failed"), "warn с reason enum");
+  idx.dispose();
+});
+
+test("4.0.0 sessions: invalid_model_ref → warn (симметрично, SF из Minor-1) + fail-soft", async () => {
+  const client = {
+    session: {
+      get: async ({ path }) => ({ data: { id: path.id, parentID: null, title: "st", time: { created: 1, updated: 100 } } }),
+      messages: async () => ({ data: [{ info: {}, parts: [{ type: "text", text: "hello" }] }] }),
+      list: async () => ({ data: [] }),
+    },
+    config: { get: async () => ({ data: { model: "noslash" } }) },
+  };
+  const storage = { upserts: [], upsert: async () => {}, get: async () => null, search: async () => [], delete: async () => {}, stats: async () => ({ entries: 0 }) };
+  let captured = null;
+  const warns = [];
+  const idx = new Indexer({
+    client, config: mkConfig(), embeddings: mkMockEmbeddings(), storage,
+    state: mkState(),
+    summarize: async (args) => { captured = args; return { title: "t", summary: "s", decisions: [] }; },
+    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(), root: "/tmp/root",
+    logWarn: (ev, fields) => warns.push([ev, fields]),
+  });
+  await idx._run("s1");
+  assert.equal(captured.summarizerModel, null);
+  assert.ok(warns.some(([ev, f]) => ev === "memory:summarizer_unavailable" && f.reason === "invalid_model_ref"));
+  idx.dispose();
+});
+
+test("4.0.0 sessions: model (не small_model) → source: model", async () => {
+  const client = {
+    session: {
+      get: async ({ path }) => ({ data: { id: path.id, parentID: null, title: "st", time: { created: 1, updated: 100 } } }),
+      messages: async () => ({ data: [{ info: {}, parts: [{ type: "text", text: "hello" }] }] }),
+      list: async () => ({ data: [] }),
+    },
+    config: { get: async () => ({ data: { model: "main/m1" } }) },
+  };
+  const storage = { upserts: [], upsert: async () => {}, get: async () => null, search: async () => [], delete: async () => {}, stats: async () => ({ entries: 0 }) };
+  let captured = null;
+  const durations = [];
+  const idx = new Indexer({
+    client, config: mkConfig(), embeddings: mkMockEmbeddings(), storage,
+    state: mkState(),
+    summarize: async (args) => { captured = args; return { title: "t", summary: "s", decisions: [] }; },
+    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(), root: "/tmp/root",
+    logDebug: (ev, fields) => { if (ev === "memory:summarize.duration") durations.push(fields); },
+  });
+  await idx._run("s1");
+  assert.equal(captured.summarizerModel, "main/m1");
+  assert.equal(durations[0].model, "m1");
+  assert.equal(durations[0].model_source, "model");
   idx.dispose();
 });
