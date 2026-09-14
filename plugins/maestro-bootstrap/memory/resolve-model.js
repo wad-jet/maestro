@@ -8,6 +8,9 @@ const CHAIN = [
   ["agent_build", (c) => c.agent?.build?.model],
 ];
 
+// D-4: sessions-путь — core-цепочка (без agent-шагов); git-путь — full (D-3).
+const CORE_CHAIN = CHAIN.slice(0, 2);
+
 function validRef(v) {
   if (typeof v !== "string") return null;
   const s = v.trim();
@@ -48,9 +51,10 @@ function withLocalTimeout(p, ms) {
  * @param {object} o.client  opencode SDK client
  * @param {string} o.root    project directory (config.get query)
  * @param {number} [o.timeoutMs]  guard-таймаут (default 5000)
+ * @param {"full"|"core"} [o.chain]  "core" — только small_model + model (sessions, D-4)
  * @returns {Promise<{model: (string|null), source: ("small_model"|"model"|"agent_maestro"|"agent_build"|null), error: ("config_get_failed"|"invalid_model_ref"|"no_model_resolved"|null)}>}
  */
-export async function resolveSummarizerModel({ client, root, timeoutMs = 5000 } = {}) {
+export async function resolveSummarizerModel({ client, root, timeoutMs = 5000, chain = "full" } = {}) {
   let cfg;
   try {
     const fn = client?.config?.get;
@@ -64,7 +68,8 @@ export async function resolveSummarizerModel({ client, root, timeoutMs = 5000 } 
     return { model: null, source: null, error: "config_get_failed" };
   }
   let sawInvalid = false;
-  for (const [source, pick] of CHAIN) {
+  const steps = chain === "core" ? CORE_CHAIN : CHAIN;
+  for (const [source, pick] of steps) {
     let candidate;
     try { candidate = pick(cfg); } catch { continue; }
     if (candidate == null) continue; // absent — без invalid-флага (SF-1)

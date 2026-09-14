@@ -1454,6 +1454,33 @@ test("4.0.0 sessions: invalid_model_ref → warn (симметрично, SF и�
   idx.dispose();
 });
 
+test("4.0.0 sessions: только agent.maestro.model → core-цепочка игнорирует → fallback модель сессии (D-4)", async () => {
+  const client = {
+    session: {
+      get: async ({ path }) => ({ data: { id: path.id, parentID: null, title: "st", time: { created: 1, updated: 100 } } }),
+      messages: async () => ({ data: [{ info: { role: "assistant", providerID: "prov", modelID: "sess-m" }, parts: [{ type: "text", text: "hello" }] }] }),
+      list: async () => ({ data: [] }),
+    },
+    config: { get: async () => ({ data: { agent: { maestro: { model: "c/m" } } } }) },
+  };
+  const storage = { upserts: [], upsert: async () => {}, get: async () => null, search: async () => [], delete: async () => {}, stats: async () => ({ entries: 0 }) };
+  let captured = null;
+  const durations = [];
+  const idx = new Indexer({
+    client, config: mkConfig(), embeddings: mkMockEmbeddings(), storage,
+    state: mkState(),
+    summarize: async (args) => { captured = args; return { title: "t", summary: "s", decisions: [] }; },
+    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(), root: "/tmp/root",
+    logDebug: (ev, fields) => { if (ev === "memory:summarize.duration") durations.push(fields); },
+  });
+  await idx._run("s1");
+  assert.equal(captured.summarizerModel, null, "core-цепочка: agent-шаги не резолвятся");
+  assert.equal(durations[0].model, "sess-m");
+  assert.equal(durations[0].model_source, "session");
+  idx.dispose();
+});
+
 test("4.0.0 sessions: model (не small_model) → source: model", async () => {
   const client = {
     session: {

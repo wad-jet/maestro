@@ -254,7 +254,8 @@ export class Indexer {
         const summarizeStart = Date.now();
         // 4.0.0: zero-key — модель саммаризации из opencode-конфига (spec §4.3).
         // Fail-soft: любой error → модель сессии (текущая семантика summarize.js).
-        const resolved = await resolveSummarizerModel({ client: this.client, root: this.root });
+        // D-4: core-цепочка (small_model + model, без agent-шагов).
+        const resolved = await resolveSummarizerModel({ client: this.client, root: this.root, chain: "core" });
         if (resolved.error) {
           this.logWarn?.("memory:summarizer_unavailable", { reason: resolved.error });
         }

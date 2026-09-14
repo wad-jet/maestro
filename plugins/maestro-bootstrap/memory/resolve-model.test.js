@@ -93,6 +93,14 @@ test("model with '/' in modelID: 'akash/Qwen/Qwen3.8-27B'", async () => {
   const r = await resolveSummarizerModel({ client: mkClient({ small_model: "akash/Qwen/Qwen3.8-27B" }), root: ROOT });
   assert.deepEqual(r, { model: "akash/Qwen/Qwen3.8-27B", source: "small_model", error: null });
 });
+test("chain: 'core' skips agent steps (D-4: sessions path)", async () => {
+  const r = await resolveSummarizerModel({ client: mkClient({ agent: { maestro: { model: "c/m" } } }), root: ROOT, chain: "core" });
+  assert.deepEqual(r, { model: null, source: null, error: "no_model_resolved" });
+});
+test("chain: 'core' resolves small_model", async () => {
+  const r = await resolveSummarizerModel({ client: mkClient({ small_model: "a/s", agent: { build: { model: "d/m" } } }), root: ROOT, chain: "core" });
+  assert.deepEqual(r, { model: "a/s", source: "small_model", error: null });
+});
 test("parseModelRef: '/' in modelID", () => {
   assert.deepEqual(parseModelRef("akash/Qwen/Qwen3.8-27B"), { providerID: "akash", modelID: "Qwen/Qwen3.8-27B" });
 });
