@@ -166,7 +166,7 @@
   «файл не confidential» сохраняется; (г) provenance-маркер `author:
   "git-backfill"` виден в recall/search/export. Инкрементальный риск низкий —
   **принято** (тот же класс, что artifact-file Z3: файл в git, двухролевой,
-  allowlist-глобы, маскирование до/после LLM).
+  allowlist-глобы, маскирование до/после LLM). (4.0.0: модель саммаризации — **наблюдаемый резолв из opencode-конфига** `small_model → model → agent.maestro/build` (zero-key, ключа `summarizer_model` нет); **fail-closed при нерезолве** — guard до батча, 0 LLM, причины enum: `no_model_resolved` / `config_get_failed` / `invalid_model_ref`).
 - **`memory_import` — второй write-path в память (v2).** Обязательны (а)
   **повторное маскирование каждой записи** перед записью (`maskEntry` — тот же
   double-masking, что в индексаторе) и (б) **permission `ask`** — импорт без
@@ -238,9 +238,12 @@
   записей/запросов (`query`/`summary`/`title`/`decisions`), пути (в т.ч.
   confidential) и тела ошибок (`Error.message`/`.stack`/HTTP-body — только
   `error_class`), `base_url`/эндпоинты, raw free-text branch, значения секретов.
-  **Event-имена в whitelist (v3.5.0):** `memory:reindex.sessions` /
+  **Event-имена в whitelist (v3.5.0+):** `memory:reindex.sessions` /
   `memory:reindex.git` — aggregates-only (status/счётчики; текстовые
-  поля записей в лог НЕ попадают); `memory:config_fallback` (warn) — без полей.
+  поля записей в лог НЕ попадают);
+  `memory:summarizer_unavailable` (warn) — reason enum;
+  `memory:summarize.duration` (debug) — sessionID, duration_ms, model (effective), `model_source` (enum) — закрывает pre-existing пробел (SF-4: имя события не было именовано).
+  `memory:config_fallback` (warn) — без полей.
   `.maestro/` в `.gitignore` — лог по умолчанию не покидает машину; при непустых
   `confidential.paths` — doc-note `memory:log_confidential_note` (warn): локальный
   лог может покинуть машину через шеринг/бэкап (author/branch-корреляция).

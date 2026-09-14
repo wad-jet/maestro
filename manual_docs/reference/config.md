@@ -378,7 +378,6 @@ deny. Trust не наследуется вложенными субагента�
     "enabled": true,
     "auto_recall": true,
     "embedding_model": "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
-    "summarizer_model": null,
     "identity": null,
     "identity_env": null,
     "namespace": "microservices.sales.pay",
@@ -427,7 +426,7 @@ deny. Trust не наследуется вложенными субагента�
 | `probe_cooldown_min` | `number` | `30` | Интервал в минутах между live-probe модели на старте (кэш результата в `state.json`); число > 0 |
 | `artifact_globs` | `string[]` | `["docs/superpowers/specs/**", "docs/superpowers/plans/**"]` | Allowlist-глобы артефактов (спеки/планы, v5.2): repo-relative пути из `write`/`edit` сессии, матчащие глобы, попадают в поле записи `artifacts[]`. `[]` — явный off. ≤16 непустых строк; невалиден → память disabled (`artifact_globs_invalid`). Полный справочник — в [Память maestro (reference)](memory.md) |
 | `history_globs` | `string[]` \| `null` | `null` (inherit `artifact_globs`) | Allowlist-глобы для git-history backfill (`memory_reindex`, v3.5.0): repo-relative пути спек в git-истории — кандидаты на синтез записей. `null`/absent → **inherit** `artifact_globs` (резолв на use-site); `[]` — явный off. Валидный массив: ≤16 непустых строк (trim + unique). Невалидное → **soft fallback** на `artifact_globs` + warn `memory:config_fallback` — память НЕ отключается. Полный справочник — в [Память maestro (reference)](memory.md) |
-| `summarizer_model` | `string` \| `null` | `null` | Модель фонового саммаризатора; `null` → модель саммаризируемой сессии |
+| Модель саммаризации | — | — | Без ключа в `maestro.json` (4.0.0, zero-key): резолв из opencode-конфига, см. [Память maestro (reference)](memory.md) → «Резолв модели саммаризации» |
 | `identity` | `string` \| `null` | `null` | Явный override identity (напр. сервисный аккаунт) |
 | `identity_env` | `string` \| `null` | `null` | Имя env-переменной с identity (per-machine, не в общем `maestro.json`) |
 | `namespace` | `string` | — | **Обязателен** (v5.1). Ключ изоляции памяти; формат `microservices.sales.pay` (1–3 сегмента, lowercase, разделитель `.`); нормализация trim+lowercase. Отсутствует/невалиден → память disabled (`namespace_missing`/`namespace_invalid`) |

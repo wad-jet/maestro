@@ -36,13 +36,15 @@ function mkConfig(dir, extra = {}) {
 }
 
 function mkClient(overrides = {}) {
+  const { session: sessionOverrides, ...rest } = overrides;
   return {
     session: {
       get: async () => ({ data: { id: "s", parentID: null } }),
       messages: async () => ({ data: [] }),
       list: async () => ({ data: [] }),
-      ...overrides,
+      ...sessionOverrides,
     },
+    ...rest,
   };
 }
 
@@ -294,7 +296,7 @@ test("I2: chat.message skips subagent sessions", async () => {
   process.env.XDG_DATA_HOME = dir;
   try {
     const storage = mkMockStorage();
-    const client = mkClient({ get: async () => ({ data: { id: "sub", parentID: "root" } }) });
+    const client = mkClient({ session: { get: async () => ({ data: { id: "sub", parentID: "root" } }) } });
     const hooks = await registerMemoryHooks({
       client,
       config: mkConfig(dir),
@@ -432,7 +434,7 @@ test("I6: onStartup is called (session.list invoked)", async () => {
   process.env.XDG_DATA_HOME = dir;
   try {
     let listed = 0;
-    const client = mkClient({ list: async () => { listed++; return { data: [] }; } });
+    const client = mkClient({ session: { list: async () => { listed++; return { data: [] }; } } });
     const hooks = await registerMemoryHooks({ client, config: mkConfig(dir), log: silentLog, root: dir, deps: { embeddings: mkMockEmbeddings() } });
     await new Promise((r) => setTimeout(r, 20));
     assert.ok(listed >= 1, "onStartup must call session.list");
@@ -4458,7 +4460,10 @@ function mkReindexGit(overrides = {}) {
 }
 
 // Client с summarize-путем (create/prompt/delete) + messages для превью.
+// Топ-левел overrides (config и т.п.) — как у mkClient; session-оверрайды
+// вкладываются под `session`.
 function mkSummarizeClient(overrides = {}) {
+  const { session: sessionOverrides, ...rest } = overrides;
   return {
     session: {
       get: async () => ({ data: { id: "s", parentID: null } }),
@@ -4467,8 +4472,9 @@ function mkSummarizeClient(overrides = {}) {
       create: async () => ({ data: { id: "sm-reindex" } }),
       prompt: async () => ({ data: { info: {}, parts: [{ type: "text", text: '{"title":"","summary":"sum","decisions":["d1"]}' }] } }),
       delete: async () => ({ data: {} }),
-      ...overrides,
+      ...sessionOverrides,
     },
+    ...rest,
   };
 }
 
@@ -4513,11 +4519,13 @@ test("memory_reindex list: секция A — кандидаты с пустым
     ];
     let createCalls = 0;
     const client = mkClient({
-      messages: async ({ path }) => {
-        if (path.id === "s2") throw new Error("gone");
-        return { data: [{ parts: [{ type: "tool", tool: "write", state: { status: "completed", input: { filePath: "docs/superpowers/specs/x-design.md" } } }] }] };
+      session: {
+        messages: async ({ path }) => {
+          if (path.id === "s2") throw new Error("gone");
+          return { data: [{ parts: [{ type: "tool", tool: "write", state: { status: "completed", input: { filePath: "docs/superpowers/specs/x-design.md" } } }] }] };
+        },
+        create: async () => { createCalls++; return { data: { id: "sm" } }; },
       },
-      create: async () => { createCalls++; return { data: { id: "sm" } }; },
     });
     const hooks = await registerMemoryHooks({
       client,
@@ -4543,8 +4551,33 @@ test("memory_reindex list: секция A — кандидаты с пустым
   }
 });
 
-test("memory_reindex list: секция B — scanHistory + summarizer_model_missing (конфиг null) + снапшот", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "mem-reindex-listB-"));
+test("memory_reindex list: строка модели саммаризации — резолв из opencode-конфига (4.0.0)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-reindex-listM-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    mkdirSync(join(dir, "docs/superpowers/specs"), { recursive: true });
+    writeFileSync(join(dir, "docs/superpowers/specs/x-design.md"), "# My Feature\n");
+    const storage = mkMockStorage();
+    storage.scan = async () => [];
+    const client = mkClient({ config: { get: async () => ({ data: { small_model: "prov/m2" } }) } });
+    const hooks = await registerMemoryHooks({
+      client, config: mkConfig(dir), log: silentLog, root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings(), git: mkReindexGit() },
+    });
+    const res = await hooks.tool.memory_reindex.execute({ action: "list" }, { sessionID: "s1" });
+    assert.match(res, /Модель саммаризации: prov\/m2 \(source: small_model\)/, "строка с моделью+source");
+    assert.doesNotMatch(res, /summarizer_model_missing/, "старый флаг удалён");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_reindex list: нерезолв → строка с reason (config_get_failed)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-reindex-listN-"));
   const saved = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = dir;
   try {
@@ -4553,20 +4586,13 @@ test("memory_reindex list: секция B — scanHistory + summarizer_model_mis
     const storage = mkMockStorage();
     storage.scan = async () => [];
     const hooks = await registerMemoryHooks({
-      client: mkClient(),
-      config: mkConfig(dir), // summarizer_model: null (default)
-      log: silentLog,
-      root: dir,
+      client: mkClient(), // без client.config
+      config: mkConfig(dir), log: silentLog, root: dir,
       deps: { storage, embeddings: mkMockEmbeddings(), git: mkReindexGit() },
     });
     const res = await hooks.tool.memory_reindex.execute({ action: "list" }, { sessionID: "s1" });
-    assert.match(res, /## git-история \(1\)/, "scanHistory → одна фича");
-    assert.match(res, /docs\/superpowers\/specs\/x-design\.md/, "spec-путь в листинге");
-    assert.match(res, /My Feature/, "title из H1");
-    assert.match(res, /summarizer_model_missing/, "флаг при summarizer_model null");
-    // Снапшот создан: run all по снапшоту резолвится (но hard guard при null).
-    const runRes = await hooks.tool.memory_reindex.execute({ action: "run", source: "git", all: true }, { sessionID: "s1" });
-    assert.match(runRes, /summarizer_model/, "hard guard при summarizer_model null");
+    assert.match(res, /Модель саммаризации: не резолвлена \(config_get_failed\)/);
+    assert.match(res, /run\(source: git\) недоступен/);
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
@@ -4587,7 +4613,9 @@ test("memory_reindex run sessions: явные session_ids (снапшот не �
     storage.scan = async () => [mkSessionRecord("s1"), mkSessionRecord("s2")];
     storage.upsert = async (entries) => { upserts.push(entries); };
     const client = mkClient({
-      messages: async () => ({ data: [{ parts: [{ type: "tool", tool: "write", state: { status: "completed", input: { filePath: "docs/superpowers/specs/x-design.md" } } }] }] }),
+      session: {
+        messages: async () => ({ data: [{ parts: [{ type: "tool", tool: "write", state: { status: "completed", input: { filePath: "docs/superpowers/specs/x-design.md" } } }] }] }),
+      },
     });
     const hooks = await registerMemoryHooks({
       client,
@@ -4645,7 +4673,9 @@ test("memory_reindex run sessions: cap max — первые max, пометка 
     storage.scan = async () => [mkSessionRecord("s1"), mkSessionRecord("s2"), mkSessionRecord("s3")];
     storage.upsert = async (entries) => { upserts.push(entries); };
     const client = mkClient({
-      messages: async () => ({ data: [{ parts: [{ type: "tool", tool: "write", state: { status: "completed", input: { filePath: "docs/superpowers/specs/x-design.md" } } }] }] }),
+      session: {
+        messages: async () => ({ data: [{ parts: [{ type: "tool", tool: "write", state: { status: "completed", input: { filePath: "docs/superpowers/specs/x-design.md" } } }] }] }),
+      },
     });
     const hooks = await registerMemoryHooks({
       client,
@@ -4681,8 +4711,8 @@ test("memory_reindex run git: явные specs → summarize + synthesize → in
     storage.get = async () => null;
     storage.upsert = async (entries) => { upserts.push(entries); };
     const hooks = await registerMemoryHooks({
-      client: mkSummarizeClient(),
-      config: mkConfig(dir, { summarizer_model: "prov/m2" }),
+      client: mkSummarizeClient({ config: { get: async () => ({ data: { model: "prov/m2" } }) } }),
+      config: mkConfig(dir),
       log: silentLog,
       root: dir,
       deps: { storage, embeddings: mkMockEmbeddings(), git: mkReindexGit() },
@@ -4715,8 +4745,8 @@ test("memory_reindex run git: all по снапшоту", async () => {
     storage.get = async () => null;
     storage.upsert = async (entries) => { upserts.push(entries); };
     const hooks = await registerMemoryHooks({
-      client: mkSummarizeClient(),
-      config: mkConfig(dir, { summarizer_model: "prov/m2" }),
+      client: mkSummarizeClient({ config: { get: async () => ({ data: { model: "prov/m2" } }) } }),
+      config: mkConfig(dir),
       log: silentLog,
       root: dir,
       deps: { storage, embeddings: mkMockEmbeddings(), git: mkReindexGit() },
@@ -4733,27 +4763,69 @@ test("memory_reindex run git: all по снапшоту", async () => {
   }
 });
 
-test("memory_reindex run git: hard guard при summarizer_model null → actionable, 0 summarize", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "mem-reindex-hardGuard-"));
+test("memory_reindex run git: hard guard при нерезолве — 0 summarize, actionable (все причины)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-reindex-guard-"));
   const saved = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = dir;
   try {
     mkdirSync(join(dir, "docs/superpowers/specs"), { recursive: true });
     writeFileSync(join(dir, "docs/superpowers/specs/x-design.md"), "# My Feature\n");
-    let createCalls = 0;
-    const client = mkSummarizeClient({ create: async () => { createCalls++; return { data: { id: "sm" } }; } });
+    const storage = mkMockStorage();
+    storage.scan = async () => [];
+    const prompts = [];
+    const baseClient = (configGet) => ({
+      session: {
+        get: async () => ({ data: { id: "s", parentID: null } }),
+        messages: async () => ({ data: [] }),
+        list: async () => ({ data: [] }),
+        create: async () => ({ data: { id: "svc" } }),
+        prompt: async (args) => { prompts.push(args); return { data: { parts: [{ type: "text", text: '{"title":"t","summary":"s","decisions":[]}' }] } }; },
+        delete: async () => {},
+      },
+      config: { get: configGet },
+    });
+    const reasons = [
+      [{}, "no_model_resolved"],
+      [null, "config_get_failed"], // client без config
+      [{ model: "noslash" }, "invalid_model_ref"],
+    ];
+    for (const [cfg, reason] of reasons) {
+      const client = cfg === null ? mkClient() : baseClient(async () => ({ data: cfg }));
+      const hooks = await registerMemoryHooks({
+        client, config: mkConfig(dir), log: silentLog, root: dir,
+        deps: { storage, embeddings: mkMockEmbeddings(), git: mkReindexGit() },
+      });
+      const res = await hooks.tool.memory_reindex.execute({ action: "run", source: "git", specs: "docs/superpowers/specs/x-design.md" }, { sessionID: "s1" });
+      assert.match(res, new RegExp(`модель саммаризации не резолвлена \\(${reason}\\)`), `guard: ${reason}`);
+      assert.match(res, /opencode\.json/, "actionable: указывает на opencode.json");
+      assert.equal(prompts.length, 0, `0 LLM-вызовов при ${reason}`);
+      await hooks.dispose?.();
+    }
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_reindex: legacy summarizer_model в конфиге — инертен (I5)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-reindex-legacy-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    mkdirSync(join(dir, "docs/superpowers/specs"), { recursive: true });
+    writeFileSync(join(dir, "docs/superpowers/specs/x-design.md"), "# My Feature\n");
     const storage = mkMockStorage();
     storage.scan = async () => [];
     const hooks = await registerMemoryHooks({
-      client,
-      config: mkConfig(dir), // summarizer_model: null
-      log: silentLog,
-      root: dir,
+      client: mkClient(), // без opencode-конфига
+      config: mkConfig(dir, { summarizer_model: "prov/m2" }), // legacy-ключ
+      log: silentLog, root: dir,
       deps: { storage, embeddings: mkMockEmbeddings(), git: mkReindexGit() },
     });
     const res = await hooks.tool.memory_reindex.execute({ action: "run", source: "git", specs: "docs/superpowers/specs/x-design.md" }, { sessionID: "s1" });
-    assert.match(res, /summarizer_model/, "actionable-сообщение про memory.summarizer_model");
-    assert.equal(createCalls, 0, "0 summarize-вызовов (батч не стартует)");
+    // Legacy-ключ не работает: guard по резолву (нет opencode-модели).
+    assert.match(res, /модель саммаризации не резолвлена \(config_get_failed\)/);
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
@@ -4776,14 +4848,17 @@ test("memory_reindex run git: summarize-fail на одной фиче → skip �
     storage.get = async () => null;
     storage.upsert = async (entries) => { upserts.push(entries); };
     const client = mkSummarizeClient({
-      prompt: async ({ body }) => {
-        if (body.parts[0].text.includes("FAIL")) throw new Error("llm down");
-        return { data: { info: {}, parts: [{ type: "text", text: '{"title":"","summary":"sum","decisions":["d1"]}' }] } };
+      session: {
+        prompt: async ({ body }) => {
+          if (body.parts[0].text.includes("FAIL")) throw new Error("llm down");
+          return { data: { info: {}, parts: [{ type: "text", text: '{"title":"","summary":"sum","decisions":["d1"]}' }] } };
+        },
       },
+      config: { get: async () => ({ data: { model: "prov/m2" } }) },
     });
     const hooks = await registerMemoryHooks({
       client,
-      config: mkConfig(dir, { summarizer_model: "prov/m2" }),
+      config: mkConfig(dir),
       log: silentLog,
       root: dir,
       deps: { storage, embeddings: mkMockEmbeddings(), git: mkReindexGit() },
@@ -4815,11 +4890,14 @@ test("memory_reindex run git: зависший summarize → timeout (summarize_
     // prompt никогда не резолвится — зависший внешний summarizer (RI-9: hang,
     // не throw). Таймаут summarize_timeout_ms обязан оборвать вызов.
     const client = mkSummarizeClient({
-      prompt: () => new Promise(() => {}),
+      session: {
+        prompt: () => new Promise(() => {}),
+      },
+      config: { get: async () => ({ data: { model: "prov/m2" } }) },
     });
     const hooks = await registerMemoryHooks({
       client,
-      config: mkConfig(dir, { summarizer_model: "prov/m2", summarize_timeout_ms: 50 }),
+      config: mkConfig(dir, { summarize_timeout_ms: 50 }),
       log: silentLog,
       root: dir,
       deps: { storage, embeddings: mkMockEmbeddings(), git: mkReindexGit() },
@@ -4853,8 +4931,8 @@ test("memory_reindex run git: already_indexed в агрегатах (идемп�
     storage.get = async (id) => (id === sid ? { session_id: sid } : null);
     storage.upsert = async (entries) => { upserts.push(entries); };
     const hooks = await registerMemoryHooks({
-      client: mkSummarizeClient(),
-      config: mkConfig(dir, { summarizer_model: "prov/m2" }),
+      client: mkSummarizeClient({ config: { get: async () => ({ data: { model: "prov/m2" } }) } }),
+      config: mkConfig(dir),
       log: silentLog,
       root: dir,
       deps: { storage, embeddings: mkMockEmbeddings(), git: mkReindexGit() },
@@ -4945,8 +5023,8 @@ test("memory_reindex телеметрия: memory:reindex.git — aggregates-onl
     storage.get = async () => null;
     storage.upsert = async (entries) => { upserts.push(entries); };
     const hooks = await registerMemoryHooks({
-      client: mkSummarizeClient(),
-      config: mkConfig(dir, { summarizer_model: "prov/m2" }),
+      client: mkSummarizeClient({ config: { get: async () => ({ data: { model: "prov/m2" } }) } }),
+      config: mkConfig(dir),
       log,
       root: dir,
       deps: { storage, embeddings: mkMockEmbeddings(), git: mkReindexGit() },
@@ -4978,8 +5056,8 @@ test("memory_reindex: git-адаптер end-to-end — реальный tmp git
     const storage = mkMockStorage();
     storage.scan = async () => [];
     const hooks = await registerMemoryHooks({
-      client: mkClient(),
-      config: mkConfig(dir, { summarizer_model: "prov/m2" }),
+      client: mkClient({ config: { get: async () => ({ data: { model: "prov/m2" } }) } }),
+      config: mkConfig(dir),
       log: silentLog,
       root: dir,
       deps: { storage, embeddings: mkMockEmbeddings() },

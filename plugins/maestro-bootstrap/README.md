@@ -225,7 +225,6 @@ untrusted, access-policy не enforced, дефолтные sanitizer-прави�
     "enabled": true,
     "auto_recall": true,
     "embedding_model": "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
-    "summarizer_model": null,
     "identity": null,
     "identity_env": null,
     "namespace": "microservices.sales.pay",

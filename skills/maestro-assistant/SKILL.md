@@ -70,7 +70,6 @@ description: Use when the user asks for help configuring maestro, organizing pro
     "enabled": true,
     "auto_recall": true,
     "embedding_model": "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
-    "summarizer_model": null,
     "identity": null,
     "identity_env": null,
     "namespace": null,
@@ -190,8 +189,11 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
   `artifact_globs` + однократный warn `memory:config_fallback` — память НЕ
   отключается, нового `disabled_reason` нет (в отличие от
   `artifact_globs_invalid`). После правки — OP-1 (перезапуск opencode).
-- **`summarizer_model`** — модель фонового саммаризатора; `null` → модель
-  саммаризируемой сессии.
+- **Модель саммаризации (4.0.0, zero-key)** — ключа `summarizer_model`
+  нет; резолв из opencode-конфига: `small_model` → `model` →
+  `agent.maestro.model` → `agent.build.model`; sessions-путь — fallback
+  на модель сессии, git-путь (`memory_reindex`) — guard при нерезолве
+  (причины enum). Отдельно от И-1 allowlist провайдеров.
 - **`identity` / `identity_env`** — подпись записей (`author`), **не
   access-control**. Источник: `identity_env` (env-переменная, per-machine) → git
   `user.name` → OS username. `identity` в `maestro.json` — только явный override

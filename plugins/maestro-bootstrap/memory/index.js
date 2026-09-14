@@ -19,6 +19,7 @@ import { resolveBranch, resolveHead as resolveHeadReal, detectMainline as detect
 import { applyBranchScope, computeBranchSets } from "./membership.js";
 import { extractArtifacts } from "./artifacts.js";
 import { reindexSessionArtifacts, scanHistory, synthesizeGitEntry } from "./backfill.js";
+import { resolveSummarizerModel } from "./resolve-model.js";
 
 // `@opencode-ai/plugin` не установлен в node_modules этого репо (zero-dep
 // дефолт). `tool()` — identity-функция (возвращает вход как есть), а
@@ -1220,8 +1221,9 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
                 sessionLines.push(`- ${c.session_id} | head=${c.head || "(нет)"} | ветка=${c.branch || "-"} | автор=${c.author} | ${c.time_last ?? 0}${previewStr}${flagStr}`);
               }
 
-              // ── Секция B: git-история — scanHistory (0 LLM, RI-5) + флаг
-              // summarizer_model_missing (I1). Fail-soft: сбой скана → заметка.
+              // ── Секция B: git-история — scanHistory (0 LLM, RI-5) + строка
+              // модели саммаризации (4.0.0: резолв из opencode-конфига).
+              // Fail-soft: сбой скана → заметка.
               const gitLines = [];
               const gitSnapshot = new Map();
               let gitErrorNote = "";
@@ -1258,8 +1260,13 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
               lines.push(...sessionLines);
               lines.push(`## git-история (${gitLines.length})`);
               lines.push(...gitLines);
-              if (!config.summarizer_model) {
-                lines.push("Внимание: summarizer_model_missing — run(source: git) недоступен (задайте memory.summarizer_model).");
+              // 4.0.0: резолв модели саммаризации из opencode-конфига (zero-key).
+              const smRes = await resolveSummarizerModel({ client, root });
+              if (smRes.model) {
+                lines.push(`Модель саммаризации: ${smRes.model} (source: ${smRes.source})`);
+              } else {
+                logWarn("memory:summarizer_unavailable", { reason: smRes.error });
+                lines.push(`Модель саммаризации: не резолвлена (${smRes.error}) — run(source: git) недоступен`);
               }
               if (gitErrorNote) lines.push(gitErrorNote);
               lines.push("LLM в list не вызывается (0 LLM); run — по явным ID или всё по снапшоту, cap 20/вызов.");
@@ -1315,11 +1322,11 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             }
 
             if (args.source === "git") {
-              // I1 hard guard: summarize спеки невозможен без summarizer_model
-              // (summarizeSession бросает при model=null && summarizerModel=null).
-              // Actionable-сообщение, батч не стартует (0 summarize).
-              if (!config.summarizer_model) {
-                return "memory_reindex: для source=git задайте memory.summarizer_model в maestro.json (иначе summarize спеки невозможен)";
+              // I1' (4.0.0): guard по РЕЗОЛВУ (не по ключу) — до батча, 0 LLM.
+              const smRes = await resolveSummarizerModel({ client, root });
+              if (!smRes.model) {
+                logWarn("memory:summarizer_unavailable", { reason: smRes.error });
+                return `memory_reindex: модель саммаризации не резолвлена (${smRes.error}). Задайте small_model или model в opencode.json (глобальный ~/.config/opencode/opencode.json или проектный .opencode/opencode.json)`;
               }
               // Явные specs (снапшот не нужен — пере-скан) ∪ all (строго по
               // снапшоту листинга) → cap max → mask → summarize → synthesize.
@@ -1364,7 +1371,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
                     continue;
                   }
                   // Сервис-сессия `[maestro-memory] git-<sha7>` (spec §4.2.4);
-                  // model=null — summarizer_model из конфига (hard guard выше).
+                  // model=null — модель из opencode-резолва (hard guard выше).
                   // Таймаут summarize_timeout_ms (spec §4.2.4): зависший
                   // client.session.prompt не должен вешать батч — per-element
                   // catch ниже fail-soft'ит (RI-9).
@@ -1373,7 +1380,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
                     sessionID: `git-${f.commitSha.slice(0, 7)}`,
                     transcript: masked,
                     model: null,
-                    summarizerModel: config.summarizer_model,
+                    summarizerModel: smRes.model,
                     instructions: GIT_SUMMARIZE_INSTRUCTIONS,
                   }), config.summarize_timeout_ms ?? 120_000);
                   const res = await synthesizeGitEntry({
