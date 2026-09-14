@@ -25,7 +25,6 @@ export const DEFAULTS = {
   enabled: false,
   auto_recall: true,
   embedding_model: "Xenova/paraphrase-multilingual-MiniLM-L12-v2",
-  summarizer_model: null,
   identity: null,
   identity_env: null,
   namespace: null,

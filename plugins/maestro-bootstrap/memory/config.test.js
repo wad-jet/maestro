@@ -381,3 +381,19 @@ test("resolveHistoryGlobs: mixed valid + invalid → artifact_globs + fallback=t
   assert.deepEqual(result.value, ["docs/superpowers/specs/**", "docs/superpowers/plans/**"]);
   assert.equal(result.fallback, true);
 });
+
+// ── Task 2: summarizer_model removed from schema (4.0.0, zero-key) ──
+
+test("4.0.0: DEFAULTS без summarizer_model (zero-key)", () => {
+  assert.ok(!("summarizer_model" in DEFAULTS), "ключ удалён из схемы");
+});
+test("4.0.0: legacy summarizer_model в конфиге — инертен (I5, нет warn/детекта)", () => {
+  const res = classifyMemoryConfig({
+    memory: { enabled: true, namespace: "x.y", summarizer_model: "prov/m" },
+  });
+  assert.equal(res.enabled, true, "ключ не отключает память");
+  const cfg = loadMemoryConfig({
+    memory: { enabled: true, namespace: "x.y", summarizer_model: "prov/m" },
+  });
+  assert.equal(cfg.enabled, true);
+});
