@@ -87,6 +87,20 @@
 | `probe_cooldown_min` | `number` | `30` | Интервал в минутах между live-probe модели на старте (кэш результата в `state.json`); число > 0 |
 | `artifact_globs` | `string[]` | `["docs/superpowers/specs/**", "docs/superpowers/plans/**"]` | Allowlist-глобы артефактов (спеки/планы, v5.2): repo-relative пути из `write`/`edit` сессии, матчащие глобы, попадают в поле записи `artifacts[]`. `[]` — явный off. ≤16 непустых строк; невалиден → память disabled (`artifact_globs_invalid`) |
 | `history_globs` | `string[]` \| `null` | `null` (inherit `artifact_globs`) | Allowlist-глобы для **git-history backfill** (`memory_reindex`, v3.5.0): repo-relative пути спек в git-истории — кандидаты на синтез записей. `null`/absent → **inherit** `artifact_globs` (резолв на use-site); `[]` — явный off (кандидатов нет). Валидный массив: ≤16 непустых строк (trim + unique). Невалидное (non-array / не-строки / >16) → **soft fallback** на `artifact_globs` + warn `memory:config_fallback` — память НЕ отключается, нового `disabled_reason` нет |
+
+| `identity` | `string` \| `null` | `null` | Явный override identity (напр. сервисный аккаунт). Обычно identity берётся из `identity_env` → git `user.name` |
+| `identity_env` | `string` \| `null` | `null` | Имя env-переменной с identity (per-machine, не в общем `maestro.json`) |
+| `namespace` | `string` | — | **Обязателен** (v5.1). Ключ изоляции памяти; формат `microservices.sales.pay` (1–3 сегмента, lowercase, разделитель `.`); нормализация trim+lowercase. Отсутствует/невалиден → память disabled (`namespace_missing`/`namespace_invalid`) |
+| `module_dir` | `string` \| `null` | `null` | Каталог кода модуля; `null` → `<data-dir>/maestro/memory/module` |
+| `idle_debounce_min` | `number` | `10` | Debounce индексации после события `session.idle` (минуты) |
+| `min_new_messages` | `number` | `3` | Мин. новых сообщений с последнего саммари для повторной индексации |
+| `backfill_window_days` | `number` | `30` | Окно backfill при первом включении (сессии не старше N дней от первого запуска) |
+| `backfill_max_per_start` | `number` | `5` | Cap саммаризаций за один старт плагина |
+| `retry_interval_min` | `number` | `60` | Интервал ретрая упавшей сессии (минуты) |
+| `top_k` | `number` | `3` | Число результатов поиска / авто-вспоминания |
+| `min_score` | `number` | `0.35` | Порог display-score после RRF-фьюжн (ниже — не показывать; применяется к векторным и FTS-only хитам). FTS-only хит имеет display-score 0.5 — при `min_score` > 0.5 не показывается |
+| `similarity_threshold` | `number` | `0.7` | Порог косинусной близости для кластеров тем и графа похожести в `memory_stats_detail` / отчёте (диапазон `[0, 1]`; вне диапазона — память off + лог) |
+| `retention_days` | `number` \| `null` | `null` | TTL записей: при старте плагина удаляются записи с `time_last` старше N дней (`storage.prune`). `null` (default) — выключено, данные не удаляются молча |
 #### Резолв модели саммаризации (4.0.0, zero-key)
 
 Ключа `summarizer_model` больше нет. Модель фонового саммаризатора
@@ -104,20 +118,6 @@
   батча (0 LLM). Причины — enum: `no_model_resolved` | `config_get_failed`
   | `invalid_model_ref`. Actionable-сообщение указывает на opencode.json.
 
-
-| `identity` | `string` \| `null` | `null` | Явный override identity (напр. сервисный аккаунт). Обычно identity берётся из `identity_env` → git `user.name` |
-| `identity_env` | `string` \| `null` | `null` | Имя env-переменной с identity (per-machine, не в общем `maestro.json`) |
-| `namespace` | `string` | — | **Обязателен** (v5.1). Ключ изоляции памяти; формат `microservices.sales.pay` (1–3 сегмента, lowercase, разделитель `.`); нормализация trim+lowercase. Отсутствует/невалиден → память disabled (`namespace_missing`/`namespace_invalid`) |
-| `module_dir` | `string` \| `null` | `null` | Каталог кода модуля; `null` → `<data-dir>/maestro/memory/module` |
-| `idle_debounce_min` | `number` | `10` | Debounce индексации после события `session.idle` (минуты) |
-| `min_new_messages` | `number` | `3` | Мин. новых сообщений с последнего саммари для повторной индексации |
-| `backfill_window_days` | `number` | `30` | Окно backfill при первом включении (сессии не старше N дней от первого запуска) |
-| `backfill_max_per_start` | `number` | `5` | Cap саммаризаций за один старт плагина |
-| `retry_interval_min` | `number` | `60` | Интервал ретрая упавшей сессии (минуты) |
-| `top_k` | `number` | `3` | Число результатов поиска / авто-вспоминания |
-| `min_score` | `number` | `0.35` | Порог display-score после RRF-фьюжн (ниже — не показывать; применяется к векторным и FTS-only хитам). FTS-only хит имеет display-score 0.5 — при `min_score` > 0.5 не показывается |
-| `similarity_threshold` | `number` | `0.7` | Порог косинусной близости для кластеров тем и графа похожести в `memory_stats_detail` / отчёте (диапазон `[0, 1]`; вне диапазона — память off + лог) |
-| `retention_days` | `number` \| `null` | `null` | TTL записей: при старте плагина удаляются записи с `time_last` старше N дней (`storage.prune`). `null` (default) — выключено, данные не удаляются молча |
 | `summarize_timeout_ms` | `number` | `120000` | Таймаут цепочки «саммаризация → эмбеддинг → запись» (защита от зависшего LLM-вызова) |
 | `report.include_text` | `boolean` | `false` | Разрешает вставку замаскированных заголовков/summary в HTML-отчёт `@maestro-memory-report`. `false` (default) — только агрегаты (SEC-4b); `true` — осознанное понижение уровня безопасности |
 | `report.preview` | `boolean` | `true` | Авто-запуск локального preview-сервера командой `@maestro-memory-report` (bind `127.0.0.1`, свободный порт, TTL 60 мин, state-файл `.maestro/preview-server.json`); `false` — только генерация HTML |
@@ -525,7 +525,7 @@ memory_reindex({action: "list" | "run", source: "sessions" | "git", session_ids?
 - **`action: "list"`** — 0 LLM (RI-5): секция A (sessions) — кандидаты с
   пустыми `artifacts` + dry-run превью путей + флаги `model_mismatch` /
   `messages_unavailable`; секция B (git) — фичи из git-истории без покрытия
-  по `artifacts` + превью spec-путей; `run(source: git)` выводит строку
+  по `artifacts` + превью spec-путей;   `list` выводит строку
   `Модель саммаризации: <model> (source: <source>)` или
   `не резолвлена (<reason>) — run(source: git) недоступен`.
   Листинг пишет **снапшот** — `run` с `all_empty`/`all` резолвится строго по

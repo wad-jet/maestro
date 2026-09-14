@@ -242,7 +242,7 @@
   `memory:reindex.git` — aggregates-only (status/счётчики; текстовые
   поля записей в лог НЕ попадают);
   `memory:summarizer_unavailable` (warn) — reason enum;
-  `memory:summarize.duration` (info) — sessionID, duration_ms, model (effective), `model_source` (enum) — закрывает pre-existing пробел (SF-4: имя события не было именовано).
+  `memory:summarize.duration` (debug) — sessionID, duration_ms, model (effective), `model_source` (enum) — закрывает pre-existing пробел (SF-4: имя события не было именовано).
   `memory:config_fallback` (warn) — без полей.
   `.maestro/` в `.gitignore` — лог по умолчанию не покидает машину; при непустых
   `confidential.paths` — doc-note `memory:log_confidential_note` (warn): локальный
