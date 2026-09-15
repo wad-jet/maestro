@@ -437,6 +437,9 @@ untrusted работают по очищенным артефактам, а до
 
 - [Требования и оценка ИБ (SECURITY.md)](../../../SECURITY.md) — внутренний
   стандарт ИБ; источник принципов доверия
+- Авто-режимы `@maestro-init` (`--auto-answer`/`--auto-ai`) не ослабляют
+  security-гейты, гейты 10/17 и чувствительные изменения (⚑1–4) — см. P8
+  в SECURITY.md и [HITL-гейты](../reference/hitl-gates.md)
 - [Выбор моделей](../reference/model-selection.md)
 - [Справочник HITL-гейтов](../reference/hitl-gates.md)
 - [Устройство pipeline](pipeline-overview.md)
