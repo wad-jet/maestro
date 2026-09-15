@@ -193,7 +193,7 @@ Trusted по роли: `custodian` + `sanitizer` (обоим доступен `d
 ```bash
 /maestro-init "Реализуй экспорт в CSV с пагинацией"
 /maestro-init --auto-answer "…"   # auto-answer (-aa): полный флоу, рекомендации на рутинных гейтах — авто
-/maestro-init --auto-ai "…"       # auto-ai (-ai): ИИ решает сам с доп. анализом (ralph loop)
+/maestro-init --auto-ai "…"       # auto-ai (-ai): ИИ решает сам с доп. анализом (ralph loop; Phase 2)
 ```
 
 Оркестратор проведёт через HITL-гейты: контекст → pre-flight → категория фичи → spec (если сложная) → план → реализация → ревью → merge.
