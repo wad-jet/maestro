@@ -64,7 +64,8 @@
   только явная команда. Механический пол (Ур.1 маскирование task-промптов,
   read-блоки access_policy, confidential-deny) исполняется плагином безусловно
   в любом режиме. Инварианты ⚑1–4 действуют во всех режимах
-  (manual / auto-answer / auto-ai). Статус: инструкция SKILL (не enforcement).
+  (manual / auto-answer / auto-ai) — канон: `skills/maestro/invariants.md`. Статус: инструкция
+  SKILL (не enforcement).
 
 ## 4. Реализованные контрмеры
 
