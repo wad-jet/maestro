@@ -27,7 +27,7 @@ control.
 
 Оркестратор работает в primary-сессии дефолтной модели — **НЕ доверен**:
 доступ к `confidential/**` для него закрыт (плагин deny'ит root/primary,
-инвариант конфига; см. [`SECURITY.md`](../../../SECURITY.md) → P1).
+инвариант конфига; см. [`SECURITY.md`](../../SECURITY.md) → P1).
 Любой субагент — отдельный инференс/сессия; данные покидают контекст
 оркестратора. Поэтому **по умолчанию все субагенты untrusted** (кроме `custodian`
 и `sanitizer`).
@@ -37,7 +37,7 @@ control.
 > Это не «понижение доверия» — агент не может выполнять свою роль. Для
 > `custodian`: нет чтения confidential; для `sanitizer`: рекурсия (промпт
 > санизируется Ур.1 до него — он не видит raw для пометки). Не удаляйте их из
-> trust без понимания последствий (см. [`SECURITY.md`](../../../SECURITY.md) → P4a).
+> trust без понимания последствий (см. [`SECURITY.md`](../../SECURITY.md) → P4a).
 
 Trust-статус управляет **двумя** измерениями защиты:
 
@@ -120,7 +120,7 @@ bash/glob/grep — нативные permissions. Файл `maestro.json` (сек
 формирует сабагент `sanitizer` или вручную; если файла нет — плагин не блокирует (fail-open).
 
 > **`maestro.json` остаётся за `access_policy`** — конфиг не выносится из-под
-> контроля доступа (fail-closed, см. [`SECURITY.md`](../../../SECURITY.md) → P6).
+> контроля доступа (fail-closed, см. [`SECURITY.md`](../../SECURITY.md) → P6).
 > Расширение `isPluginMetaFile` касается **только одного semver-метафайла**
 > (`.maestro/plugin-version`) — `/maestro-version` использует его, не ослабляя
 > доступ к конфигу.
@@ -249,7 +249,7 @@ confidential-ДАННЫХ обеспечивается иначе: spec/plan **�
 untrusted работают по очищенным артефактам, а доступ к исходным confidential-
 файлам им закрыт. Confidential покрывает **исходные данные**, а не очищенные
 артефакты на их основе. Подпись spec — provenance-рекомендация, не основание
-авто-пропуска 8.6/9 (см. [`SECURITY.md`](../../../SECURITY.md) → P7); защиту
+авто-пропуска 8.6/9 (см. [`SECURITY.md`](../../SECURITY.md) → P7); защиту
 обеспечивает очистка (шаг 8.6), а не подпись.
 
 ### Память maestro и confidential (memory layer)
@@ -315,7 +315,7 @@ untrusted работают по очищенным артефактам, а до
   может порекомендовать прочитать их. Инкрементальный риск низкий: файл в
   git, двухролевой (не confidential), allowlist-глобы (`memory.artifact_globs`)
   ограничивают scope, framing-строка recall-блока уже действует, а summary
-  записи и так несёт контент сессии (см. [`SECURITY.md`](../../../SECURITY.md) → §5a).
+  записи и так несёт контент сессии (см. [`SECURITY.md`](../../SECURITY.md) → §5a).
 - **Git-history backfill — summarize спеки (Z3-adjacent, v3.5.0).**
   `memory_reindex` `source: git` — LLM-вызов по **репозиторному файлу**
   (спека в git, двухролевая, не confidential; кандидаты — allowlist-глобы
@@ -326,7 +326,7 @@ untrusted работают по очищенным артефактам, а до
   не индексируется); provenance-маркер `author: "git-backfill"` виден в
   recall/search/export. Инкрементальный риск низкий — **принято** (тот же
   класс, что artifact-file Z3: файл в git, двухролевой, allowlist-глобы,
-  маскирование до/после LLM). См. [`SECURITY.md`](../../../SECURITY.md) → §5a.
+  маскирование до/после LLM). См. [`SECURITY.md`](../../SECURITY.md) → §5a.
 - **Экспорт/импорт — локальная граница (v2).** `memory_export` пишет JSONL
   полной схемы v3 (включая embedding). Путь по умолчанию — **локальный**
   (`<data-dir>/maestro/memory/`); путь наружу машины — осознанный выбор
@@ -435,8 +435,11 @@ untrusted работают по очищенным артефактам, а до
 
 ## 🔗 Связанные разделы
 
-- [Требования и оценка ИБ (SECURITY.md)](../../../SECURITY.md) — внутренний
+- [Требования и оценка ИБ (SECURITY.md)](../../SECURITY.md) — внутренний
   стандарт ИБ; источник принципов доверия
+- Авто-режимы `@maestro-init` (`--auto-answer`/`--auto-ai`) не ослабляют
+  security-гейты, гейты 10/17 и чувствительные изменения (⚑1–4) — см. P8
+  в SECURITY.md и [HITL-гейты](../reference/hitl-gates.md)
 - [Выбор моделей](../reference/model-selection.md)
 - [Справочник HITL-гейтов](../reference/hitl-gates.md)
 - [Устройство pipeline](pipeline-overview.md)

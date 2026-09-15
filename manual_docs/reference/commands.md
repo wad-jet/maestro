@@ -15,6 +15,17 @@
 Вход в pipeline: загружает скилл `maestro` и следует pipeline из SKILL.md.
 Работает в любой primary-сессии (привязки к агенту нет).
 
+**Режимы запуска** (per-run флаг, не персистится):
+
+```
+/maestro-init "задача"                        # manual — все гейты вручную (по умолчанию)
+/maestro-init --auto-answer "задача"          # auto-answer (-aa): полный флоу, рекомендации на рутинных гейтах — авто
+/maestro-init --auto-ai "задача"              # auto-ai (-ai): ИИ решает сам с доп. анализом (ralph loop)
+/maestro-init --no-auto "задача"              # явный manual
+```
+
+Подробнее о поведении гейтов по режимам — [HITL-гейты](hitl-gates.md).
+
 ### `/regression`
 
 Регрессионный прогон по реестру рисков (`regression/`, в git). Standalone —
