@@ -32,7 +32,7 @@ CONFIDENCE: high | medium | low
 1. **No risk-accepting security decisions.** You may choose only **risk-reducing** actions:
    «вычистить и продолжить» (clean and continue), «запретить доступ» (deny access),
    «остановиться». Never choose: «продолжить как есть», «разрешить доступ»,
-   «довериться источнику». Those are `HITL_REQUIRED` — always.
+   «довериться источнику», «пропустить sanitize». Those are `HITL_REQUIRED` — always.
 2. **Sensitive contracts (⚑4).** If a question touches external API contracts of
    integrations, inter-service contracts, breaking changes, or foundational business-logic
    rules → return `HITL_REQUIRED` for that question. Do not decide contract changes.

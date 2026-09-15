@@ -7,7 +7,7 @@ This is the **authoring repo** for the OpenCode `maestro` system (the "maestro" 
 - `skills/maestro/SKILL.md` — authoritative pipeline spec (feature/bugfix orchestration, HITL gates, regression registry). Read it before touching anything in `skills/`.
 - `agents/*.md` — OpenCode agent configs (`mode`, `permission`, `hidden`, `description` in YAML frontmatter). All are subagents (`custodian`, `haiku`, `sonnet`, `opus`, `fable`, `code-reviewer`, `sanitizer`). `custodian` and `sanitizer` are trusted by default (custodian: Q/A по confidential; sanitizer: security review). There is **no primary `maestro` agent** — entry is via the `@maestro-init` command (skill).
 - `commands/*.md` — `@command` configs (frontmatter `agent:` field; `@maestro-init` is the entry point).
-- `skills/maestro/{custodian-prompt.md,implementer-prompt.md,spec-review-prompt.md,stack-detection.md}` — support files referenced by SKILL.md.
+- `skills/maestro/{custodian-prompt.md,implementer-prompt.md,spec-review-prompt.md,stack-detection.md,auto-ai-decision-prompt.md}` — support files referenced by SKILL.md.
 - `skills/maestro-setup/{SKILL.md,init-context.md}` — `/maestro-setup` skill for initializing new or existing projects (project-context.md 14 categories, maestro config, dirs, checks; design/scaffold/roadmap are in `/maestro-design`).
 - `skills/maestro-design/SKILL.md` — `/maestro-design` skill for design + spec (via primary brainstorm + custodian Q/A), code scaffold (TDD), and roadmap.
 - `skills/maestro-assistant/SKILL.md` — `/maestro-assistant` skill: consultation & config/structure/context organization for maestro (single source of config rules). Self-contained; loaded by `/maestro-setup` (tasks 2/3/3a) and `/maestro-init` (pipeline config questions).
