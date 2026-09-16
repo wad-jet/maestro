@@ -7,6 +7,19 @@
 > Хронология составлена по истории authoring-репо `maestro-agent`. Даты
 > приблизительные (по коммитам).
 
+## [Unreleased]
+
+### Удалено
+
+- `access_policy` из `maestro.json` и плагина `maestro-bootstrap` (R3/R9 rebalance):
+  плагин больше не блокирует `read`; защита `maestro.json`/`.maestro/**` — нативные
+  permissions (`.opencode/opencode.json`): read/glob/grep deny + edit ask
+  (`maestro.json`) + allow `.maestro/plugin-version`.
+  **BREAKING:** секция `access_policy` в конфиге игнорируется/удаляется.
+  **Миграция:** после обновления перезапустите `/maestro-setup` (генерирует нативные
+  deny); кастомные правила перенесите вручную в `.opencode/opencode.json`.
+  Обновление локальных `.opencode/skills/*`-зеркал не требуется (`.opencode/` gitignored, регенерация при установке).
+
 ## [2026-09-16]
 
 > **Версия 4.1.0** — Minor-релиз: канон инвариантов ⚑1–4 (единая точка правды).

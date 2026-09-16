@@ -1,7 +1,7 @@
 # maestro-bootstrap
 
-Плагин для OpenCode: **глобальная observability + санитайзинг промптов +
-file access control** (не привязан к агенту). Скилл `maestro` вызывается через
+Плагин для OpenCode: **глобальная observability + санитайзинг промптов**
+(не привязан к агенту). Скилл `maestro` вызывается через
 команду `/maestro-init` в любой primary-сессии; инжекция директивы в сессии агента
 удалена (уход от агента, 2026-08-18).
 
@@ -11,10 +11,6 @@ file access control** (не привязан к агенту). Скилл `maest
   чувствительные данные (env-secrets, поля данных, `.env`, DB/SFTP credentials,
   ledger) ДО отправки промпта в сабагента. Авто, без HITL. **Trusted сабагенты
   (maestro.json → `trust`) — skip** (получают промпт как есть).
-- **File access control** (Уровень 3): перехват `read` по правилам
-  `maestro.json` → `access_policy`. `allow` → пропуск, `ask` → блокировка (HITL
-  решает оркестратор), `deny` → жёсткий блок. **`bash`/`glob`/`grep` НЕ
-  покрываются** — для них нативные permissions OpenCode.
 - Логирует вызовы `task`-тула (диспатч субагентов) — observability.
 - Логирует ошибки/повторы сессий (`session.error`, `session.status.retry`).
 - Детектит пустой результат субагента (`tool.execute.after.empty_result`).
@@ -71,44 +67,12 @@ Whitelist — секция `sanitizer_whitelist` в `maestro.json` (см. ниж
   добавляются к дефолтному списку.
 - `extra_uri_schemes` — дополнительные URI-схемы для credentials-детекта.
 
-## File access control (access-policy)
-
-Секция `access_policy` в `maestro.json` (см. ниже).
-Определяет, к каким файлам сабагенты могут обращаться без запроса через `read`:
-
-```json
-{
-  "version": 1,
-  "default": "ask",
-  "allow": ["src/**", "test/**"],
-  "ask": ["docs/**", "*.config.*"],
-  "deny": ["*.env", "*.{pem,key,cert}"]
-}
-```
-
-- `default` — действие для несовпавших путей: `allow` | `ask`.
-- `allow` — без запроса; `ask` — требует HITL; `deny` — жёсткий блок.
-  Приоритет: `deny` > `ask` > `allow` > `default`.
-- Контролируется **только `read`**. `bash`/`glob`/`grep` НЕ покрываются
-  (bash-пути ненадёжно извлекаются; glob/grep — паттерны) — используйте нативные
-  permissions OpenCode (`bash: ask` и т.п.).
-- Файл `maestro.json` (секция `access_policy`) формируется сабагентом
-  `sanitizer` (по структуре проекта/стеку) или вручную. Полный JSON-канон и правила — в
-  скилле `maestro-assistant` (`skills/maestro-assistant/SKILL.md`).
-- Если файла нет — плагин НЕ блокирует (fail-open), полагаясь на нативные
-  permissions OpenCode.
-- Плагин **НЕ форсирует** `file_access` OpenCode (не задаёт `config.file_access`)
-  — нативные permissions остаются в силе. Плагин управляет только `read` через
-  `access_policy` (см. выше); `bash`/`glob`/`grep` — нативные permissions.
-- Trusted сабагенты (maestro.json → `trust`) — file access control применяется для
-  всех; trusted-skip полный требует верификации перехвата child-сессий (C2).
-
 ### Секция `confidential`
 
 Закрывает конфиденциальные пути (дефолт `docs/confidential/**`) для `read`/
 `write`/`edit` от всех, кроме trusted-субагентов. Primary и untrusted — жёсткий
 deny; trusted читает по умолчанию (`trusted.read: allow`), пишет по явному
-`trusted.write`/`trusted.edit: allow`. Строже `access_policy` и имеет приоритет.
+`trusted.write`/`trusted.edit: allow`.
 Идентичность отправителя определяется через `client.session.get` +
 `session.messages` (детект по `parentID` и имени агента). Подробнее —
 `manual_docs/reference/config.md`.
@@ -116,8 +80,8 @@ deny; trusted читает по умолчанию (`trusted.read: allow`), пи
 `confidential.paths` принимает папки, отдельные файлы по полному имени и по
 маске, включая корневую папку. Сегментная семантика: `**` = 0+ сегментов
 (покрывает корень), `*`/`?` — в пределах одного сегмента (не через `/`), маска
-без `/` (напр. `*.env`) закрывает только корневые файлы. В отличие от
-`access_policy` (где `*` пересекает `/`), в `confidential` маска сегментная.
+без `/` (напр. `*.env`) закрывает только корневые файлы. В отличие от общего
+glob-матчинга (где `*` пересекает `/`), в `confidential` маска сегментная.
 
 ### Built-in confidential (OQ-3, `BUILTIN_CONFIDENTIAL_PATTERNS`)
 
@@ -140,13 +104,10 @@ Security-фактура по доступу пишется в **отдельны
   субагент читал/писал, уровень `info`) или `action: "deny"` (блокировка для
   untrusted/primary, уровень `warn`). Включает `agent` (имя trusted-агента) и
   `target` (только `basename`, SEC-5).
-- `access_policy.blocked` — блокировка файла по `access_policy` (`ask`/`deny`),
-  уровень `warn`.
-
 Структура записи (JSON):
 
 ```json
-{"ts":"<ISO>","level":"info|warn","msg":"confidential.access|access_policy.blocked","sessionID":"...","callID":"...","tool":"read|write|edit","action":"allow|deny","agent":"<trusted-агент>|null","target":"<basename>"}
+{"ts":"<ISO>","level":"info|warn","msg":"confidential.access","sessionID":"...","callID":"...","tool":"read|write|edit","action":"allow|deny","agent":"<trusted-агент>|null","target":"<basename>"}
 ```
 
 **Security-события живут ТОЛЬКО в аудит-логе** — bootstrap-лог их не дублирует
@@ -171,13 +132,6 @@ Security-фактура по доступу пишется в **отдельны
     "custodian": true,
     "sanitizer": true
   },
-  "access_policy": {
-    "version": 1,
-    "default": "ask",
-    "allow": ["src/**", "test/**"],
-    "ask": ["docs/**", "*.config.*"],
-    "deny": ["*.env", "*.{pem,key,cert}"]
-  },
   "sanitizer_whitelist": {
     "rules": { "env_secret": true, "data_field": true, ... },
     "by_agent": { "code-reviewer": [] },
@@ -189,13 +143,12 @@ Security-фактура по доступу пишется в **отдельны
 ```
 
 - **`trust`** — trusted-агенты (`true` = trusted). Остальные — untrusted.
-- **`access_policy`** — file access control (см. раздел выше).
 - **`sanitizer_whitelist`** — правила sanitizer (см. раздел выше).
 
 ### Разрешение конфигов (resolution order)
 
-`maestro.json` — **единственный** источник конфигурации. Все три секции
-(`trust`, `access_policy`, `sanitizer_whitelist`) читаются из него одним
+`maestro.json` — **единственный** источник конфигурации. Все секции
+(`trust`, `confidential`, `sanitizer_whitelist`) читаются из него одним
 загрузчиком `loadMaestroConfig()`.
 
 Порядок разрешения пути к файлу:
@@ -203,11 +156,10 @@ Security-фактура по доступу пишется в **отдельны
 1. **Env override** — `MAESTRO_CONFIG` (путь к `maestro.json`).
 2. **По умолчанию** — `<project>/maestro.json`.
 
-Старые файлы `trust-config.json`, `.maestro/access-policy.json`,
-`.maestro/sanitizer-whitelist.json` **не поддерживаются** (не читаются).
+Старые файлы `trust-config.json`, `.maestro/sanitizer-whitelist.json` **не поддерживаются** (не читаются).
 
 Если `maestro.json` отсутствует — плагин работает (fail-open): все агенты
-untrusted, access-policy не enforced, дефолтные sanitizer-правила.
+untrusted, дефолтные sanitizer-правила.
 
 ## Memory layer (опционально)
 
@@ -398,7 +350,7 @@ aggregates-only field whitelist, SEC-4b+). Уровень/маска/катал�
 `MAESTRO_MEMORY_LOG_LEVEL` (default `info`)/`MAESTRO_MEMORY_LOG_MASK`/
 `MAESTRO_MEMORY_LOG_DIR`. Полный список событий — `manual_docs/reference/memory.md`.
 
-Security-события доступа (`confidential.access`, `access_policy.blocked`) в
+Security-события доступа (`confidential.access`) в
 bootstrap-лог **не пишутся** — они только в аудит-логе (см. раздел «Аудит-лог»).
 
 Детальное логирование `bash`/`skill`/`read` убрано (сокращение observability).

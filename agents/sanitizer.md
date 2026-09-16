@@ -103,37 +103,20 @@ STATUS: FINDINGS_FOUND
 - Если ничего не найдено — `STATUS: CLEAN` с пустым списком findings.
 - Не диспатчь вложенных сабагентов (`task: deny`).
 
-## Файл правил доступа (maestro.json → access_policy)
+## Файл-доступ (нативный permission-слой opencode)
 
-Ты также поддерживаешь **секцию `access_policy`** в `maestro.json`, которая
-определяет, к каким файлам сабагенты могут обращаться без запроса, а к
-каким — только с подтверждения HITL. Формат:
+Файл-доступ сабагентов регулируется **нативным permission-слоем opencode**
+(`.opencode/opencode.json` или global), а не секцией `maestro.json`: `read`/`glob`/
+`grep` deny `maestro.json`/`.maestro/**`, `read`-allow `.maestro/plugin-version`,
+`edit`-ask `maestro.json`, confidential-deny — см. канон нативных permissions
+в `maestro-assistant`. Ты **не генерируешь и не поддерживаешь** правила
+файл-доступа в `maestro.json` — это конфигурация merge-config, а не твоя роль.
 
-```json
-{
-  "version": 1,
-  "default": "ask",
-  "allow": ["src/**", "test/**"],
-  "ask": ["docs/**", "*.config.*"],
-  "deny": ["*.env", "*.{pem,key,cert}"]
-}
-```
+### Правила формирования (контекст для ревью)
 
-- **`default`** — действие для несовпавших путей: `allow` | `ask`.
-- **`allow`** — паттерны, доступ без запроса (код, тесты).
-- **`ask`** — паттерны, требующие HITL (доки, спеки, конфиги).
-- **`deny`** — жёсткий блок (`.env`, секреты). Имеет приоритет над `allow`/`ask`.
-
-### Правила формирования
-
-- Перед любой работой проверь наличие `maestro.json` (секция `access_policy`).
-- Если файла нет — сформируй его по структуре проекта и стеку:
-  - код/тесты (`src/**`, `packages/**`, `test/**`, `*.{ts,js,py,go,...}`) → `allow`;
-  - доки/спеки/конфиги (`docs/**`, `specs/**`, `manual_docs/**`, `*.config.*`,
-    `*.{yaml,yml,toml,ini}`, `*.{md,mdx}`) → `ask`;
-  - секреты (`.env*`, `*.{pem,key,cert,secret}`) → `deny`.
-- Если сомневаешься, добавлять ли правило — **уточни у HITL** (варианты a/b/c).
-- Файл может быть также сформирован при инициализации проекта (`/maestro-setup`).
-- Файл может корректироваться вручную по правилам, описанным в скилле
-  `maestro-assistant` (`skills/maestro-assistant/SKILL.md`).
-- Файл исполняется плагином `maestro-bootstrap` (динамический перехват file-тулов).
+- Нативные permissions настраиваются в `.opencode/opencode.json` (merge-config)
+  по канону `maestro-assistant`; при необходимости правок — предложи HITL
+  (варианты a/b/c), не редактируй конфиг сам.
+- Конфиг может быть также сформирован при инициализации проекта (`/maestro-setup`)
+  и корректироваться вручную по правилам, описанным в скилле `maestro-assistant`
+  (`skills/maestro-assistant/SKILL.md`).

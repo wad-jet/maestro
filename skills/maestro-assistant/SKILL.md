@@ -1,6 +1,6 @@
 ---
 name: maestro-assistant
-description: Use when the user asks for help configuring maestro, organizing project structure/context, or wants to consult the rules of maestro (trust, access_policy, confidential, sanitizer_whitelist, opencode.json models, project-context, pipeline structure). Also loaded by maestro-setup (tasks 2/3/3a) and maestro-init (pipeline config questions). Not for feature implementation.
+description: Use when the user asks for help configuring maestro, organizing project structure/context, or wants to consult the rules of maestro (trust, confidential, sanitizer_whitelist, opencode.json models, project-context, pipeline structure). Also loaded by maestro-setup (tasks 2/3/3a) and maestro-init (pipeline config questions). Not for feature implementation.
 ---
 
 # Maestro Assistant — конфигурация, структура и консультации по maestro
@@ -41,19 +41,10 @@ description: Use when the user asks for help configuring maestro, organizing pro
 ## Канон `maestro.json` (источник истины)
 
 Полный JSON-канон (эталон формата, который правит/генерирует assistant) — **inline здесь**.
-Держать синхронно с правилами парсинга плагина (`loadMaestroConfig`/`loadWhitelist`/
-`loadAccessPolicy`/`loadConfidentialConfig`). Контроль дрейфа — конвенцией.
-
+Держать синхронно с правилами парсинга плагина (`loadMaestroConfig`/`loadWhitelist`/`loadConfidentialConfig`). Контроль дрейфа — конвенцией.
 ```json
 {
   "trust": { "custodian": true, "sanitizer": true },
-  "access_policy": {
-    "version": 1,
-    "default": "ask",
-    "allow": ["src/**", "test/**", "packages/**", "*.{ts,js,py,go,rs}"],
-    "ask": ["docs/**", "specs/**", "manual_docs/**", "*.{md,mdx}", "*.config.*"],
-    "deny": ["*.env", "*.env.*", "*.{pem,key,cert,secret}"]
-  },
   "confidential": {
     "version": 1,
     "paths": ["docs/confidential/**"],
@@ -108,9 +99,7 @@ description: Use when the user asks for help configuring maestro, organizing pro
 
 - **`trust`** — только trusted сабагенты (`true`). `custodian` и `sanitizer` — trusted по роли.
   Остальные — untrusted (default). Файл коммитится в git.
-- **`access_policy`** — file access control для untrusted через `read` (`allow`/`ask`/`deny`;
-  приоритет deny > ask > allow; default `ask`). Покрывает только `read`; bash/glob/grep — нативные permissions.
-- **`confidential`** — защита конфиденциальных путей (жёстче access_policy). Дефолт
+- **`confidential`** — защита конфиденциальных путей (жёстче плагин-контроля). Дефолт
   `paths: ["docs/confidential/**"]`; trusted читает по умолчанию, запись/редактирование deny
   (выдаются явно). Primary/untrusted — всегда deny.
 - **`confidential.paths`** — принимает папки, отдельные файлы по полному имени
@@ -128,8 +117,6 @@ description: Use when the user asks for help configuring maestro, organizing pro
   > Это не «понижение доверия» — агент не может выполнять свою роль. Для
   > custodian: нет чтения confidential; для sanitizer: рекурсия (промпт
   > санизируется до него). Не удаляйте их из trust без понимания последствий.
-- **`access_policy.allow`:** из §3 (стек) + §5 (домены): каталоги исходников + расширения языков.
-- **`access_policy.deny`:** секреты (`*.env`, `*.env.*`, `*.{pem,key,cert,secret}`).
 - **`sanitizer_whitelist`:** по §12; `extra_uri_schemes` из §3.
 
 ### Секция `memory` (опциональный memory layer)
@@ -311,11 +298,11 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
 ```json
 {
   "permission": {
-    "read": { "*": "allow", "docs/confidential/*": "deny", "*.env": "deny", "*.env.*": "deny", "*.env.example": "allow", "*.pem": "deny", "*.key": "deny", "*.crt": "deny", "*.p12": "deny", "*.pfx": "deny" },
-    "edit": { "*": "allow", "docs/confidential/*": "deny", "*.env": "deny", "*.env.*": "deny", "*.env.example": "allow", "*.pem": "deny", "*.key": "deny", "*.crt": "deny", "*.p12": "deny", "*.pfx": "deny" },
+    "read": { "*": "allow", "maestro.json": "deny", ".maestro/**": "deny", ".maestro/plugin-version": "allow", "docs/confidential/*": "deny", "*.env": "deny", "*.env.*": "deny", "*.env.example": "allow", "*.pem": "deny", "*.key": "deny", "*.crt": "deny", "*.p12": "deny", "*.pfx": "deny" },
+    "edit": { "*": "allow", "maestro.json": "ask", "docs/confidential/*": "deny", "*.env": "deny", "*.env.*": "deny", "*.env.example": "allow", "*.pem": "deny", "*.key": "deny", "*.crt": "deny", "*.p12": "deny", "*.pfx": "deny" },
     "bash": { "*": "allow", "*cat*confidential*": "deny", "*grep*confidential*": "deny", "*ls*confidential*": "deny", "*glob*confidential*": "deny" },
-    "glob": { "*": "allow", "docs/confidential/*": "deny" },
-    "grep": { "*": "allow", "docs/confidential/*": "deny" }
+    "glob": { "*": "allow", "maestro.json": "deny", ".maestro/**": "deny", "docs/confidential/*": "deny" },
+    "grep": { "*": "allow", "maestro.json": "deny", ".maestro/**": "deny", "docs/confidential/*": "deny" }
   }
 }
 ```
@@ -340,9 +327,6 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
 
 ### Правила вывода
 
-- **`access_policy` → `permission.read`** (когда R3 в Этапе B): deny>ask>allow →
-  last-match-wins с catch-all первым. Пока `access_policy` остаётся активным
-  механизмом плагина; нативный слой — дополнение (bash/glob/grep + read-baseline).
 - **Sync-правило двойного источника (I3):** confidential-пути живут в двух местах —
   `maestro.json → confidential.paths` (плагин) и нативные `permission.read`/`edit`
   deny (merge-config). **Любое изменение `confidential.paths` зеркалируется в
@@ -363,10 +347,9 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
 - **OP-1 — перезапуск после правки `maestro.json`:** после записи любых изменений
   `maestro.json` сообщить HITL: «изменения вступят в силу после перезапуска opencode»
   (плагин читает конфиг один раз при старте). Предложить рестарт/отложить. Критично для
-  `trust`/`access_policy`/`confidential`/`sanitizer_whitelist`.
+  `trust`/`confidential`/`sanitizer_whitelist`.
 - **OP-4 — адресный diff + HITL для ослабления security-слоёв:** при правке
-  `access_policy.deny→allow` (ослабление) и `sanitizer_whitelist.rules→false` (отключение
-  защиты) — показать адресный diff (стало vs было) и получить явное HITL-подтверждение,
+  `sanitizer_whitelist.rules→false` (отключение защиты) — показать адресный diff (стало vs было) и получить явное HITL-подтверждение,
   как для `confidential.paths`.
 - **OP-7 — граница «схема vs наполнение» project-context:** схема 14 категорий — канон в
   `init-context.md` (не менять); assistant правит только **наполнение** (актуализацию §3/§5/§12/§14).
@@ -387,15 +370,16 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
 
 ### 1. Объяснение правил (read-only)
 
-Пользователь спрашивает «как работает X» (trust, access_policy, confidential, sanitizer,
+Пользователь спрашивает «как работает X» (trust, confidential, sanitizer,
 14 категорий, структура). Ответить на основе канона выше + краткая сводка. Не менять файлы.
 
 ### 2. Настройка конфигурации (правка)
 
-1. Прочитать текущий артефакт (`maestro.json` / `.opencode/opencode.json` / `project-context.md`).
+1. Прочитать текущий артефакт (`maestro.json` — через bash, `cat`/`sed`: нативный
+   permission-слой deny-ит `read`-тул; `.opencode/opencode.json` / `project-context.md`).
 2. Сформировать diff-merge (идемпотентно, сохраняя пользовательские правки).
 3. **HITL-гейт:** «(a) approve — (b) правки — (c) отмена» + показ diff-merge.
-4. Для `confidential.paths` / `access_policy.deny→allow` / `sanitizer_whitelist.rules→false` —
+4. Для `confidential.paths` / `sanitizer_whitelist.rules→false` —
    адресный diff + явное HITL-подтверждение (IMP-3, OP-4).
 5. Записать. **OP-1:** сообщить о необходимости перезапуска opencode.
 

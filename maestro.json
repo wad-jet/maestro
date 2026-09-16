@@ -3,35 +3,6 @@
     "custodian": true,
     "sanitizer": true
   },
-  "access_policy": {
-    "version": 1,
-    "default": "ask",
-    "allow": [
-      "src/**",
-      "test/**",
-      "packages/**",
-      "plugins/**",
-      "skills/**",
-      ".superpowers/sdd/**",
-      "manual_docs/**",
-      "AGENTS.md",
-      "SECURITY.md",
-      "agents/**",
-      "commands/**",
-      "specs/**",
-      "*.{ts,js,py,go,rs}"
-    ],
-    "ask": [
-      "docs/**",
-      "*.{md,mdx}",
-      "*.config.*"
-    ],
-    "deny": [
-      "*.env",
-      "*.env.*",
-      "*.{pem,key,cert,secret}"
-    ]
-  },
   "confidential": {
     "version": 1,
     "paths": [

@@ -5,8 +5,7 @@
 ## 🎯 Назначение
 
 Как устроены роли агентов и модель доверия в скилле `maestro`: почему субагенты
-по умолчанию untrusted, как работает security review (sanitizer) и file access
-control.
+по умолчанию untrusted, как работает security review (sanitizer).
 
 ## 📖 Роли агентов
 
@@ -41,13 +40,10 @@ control.
 
 Trust-статус управляет **двумя** измерениями защиты:
 
-| Уровень | Sanitize промпта | File access control |
+| Уровень | Sanitize промпта | File-доступ |
 |---|---|---|
-| **trusted** (`maestro.json` → `trust` = `true`) | **skip** | **skip** (без ограничений по `access_policy`); доступ к `confidential` — по `confidential.trusted.<tool>`; **нативный per-agent `read`/`glob`/`grep` allow** поверх глобального deny (R2-конфиг, Этап A) |
-| **untrusted** (default) | Security Review (Ур.1 + Ур.2) | перехват `read` по access-policy (ask → блок); доступ к `confidential` — **всегда deny** (нативный глобальный deny + плагин) |
-
-> File access control применяется ко всем сабагентам; trusted-skip для file
-> access — ограничен (требует верификации перехвата child-сессий, C2).
+| **trusted** (`maestro.json` → `trust` = `true`) | **skip** | **skip sanitize; file-доступ — нативный permission-слой**; доступ к `confidential` — по `confidential.trusted.<tool>`; **нативный per-agent `read`/`glob`/`grep` allow** поверх глобального deny (R2-конфиг, Этап A) |
+| **untrusted** (default) | Security Review (Ур.1 + Ур.2) | нативные permissions OpenCode (deny/ask в `.opencode/opencode.json`); доступ к `confidential` — **всегда deny** (нативный глобальный deny + плагин) |
 >
 > **Нативное trusted-исключение (R2-конфиг, Этап A).** Нативный глобальный deny
 > `docs/confidential/*` (R1) применяется ко всем агентам, включая `custodian`/
@@ -61,7 +57,7 @@ Trust-статус управляет **двумя** измерениями за
 ### trust-config → maestro.json
 
 Файл `maestro.json` в корне проекта — консолидированный
-конфиг с четырьмя секциями: `trust`, `access_policy`, `confidential`,
+конфиг с тремя секциями: `trust`, `confidential`,
 `sanitizer_whitelist`. Секция
 `trust` перечисляет **только trusted** сабагентов. Всё, чего нет в файле —
 untrusted. Если файла нет — все untrusted.
@@ -91,36 +87,33 @@ untrusted. Если файла нет — все untrusted.
 
 ## 📖 Security Review (двухуровневая защита)
 
-Защита чувствительных данных перед диспатчем в untrusted сабагенты + file
-access control. Два уровня + HITL-гейт:
+Защита чувствительных данных перед диспатчем в untrusted сабагенты
+(sanitize) + нативный file-доступ. Два уровня + HITL-гейт:
 
 ```
 untrusted диспатч →
   [Ур.1] плагин maestro-bootstrap — авто-маскирование промпта, без HITL
   [Ур.2] сабагент sanitizer (trusted, read-only) — пометки, не вычищает
   пометки есть → HITL: (a) вычистить и продолжить / (b) продолжить как есть / (c) стоп
-  → во время работы: file access control (перехват file-тулов по access-policy.json)
+  → во время работы: file-доступ — нативные permissions OpenCode (deny/ask)
 ```
 
 **Роль сабагента `sanitizer`:** trusted, read-only. Находит и **помечает**
 чувствительные данные (где, что, почему) — не вычищает. Оркестратор вычищает
 по пометкам. Выход — structured-блок `SANITIZER FINDINGS` + `STATUS: CLEAN |
-FINDINGS_FOUND`. Также генерирует/поддерживает секцию `access_policy` в `maestro.json`
-(файл правил доступа по структуре проекта/стеку).
+FINDINGS_FOUND`.
 
 **Trusted skip:** если сабагент в `maestro.json` → `trust` = `true` — sanitize промпта
-и file access control **не применяются** (данные передаются как есть, доступ к
-файлам свободен).
+**не применяется** (данные передаются как есть); file-доступ — нативный
+permission-слой (trusted-исключения — per-agent allow).
 
-**File access control (реализован в плагине):** untrusted сабагент при попытке
-`read` ask/deny-файла → блокировка плагином `maestro-bootstrap` по
-`maestro.json` → `access_policy` (`allow` → пропуск, `ask` → блок с HITL-сигналом,
-`deny` → жёсткий блок; приоритет deny > ask > allow). Покрывается только `read`;
-bash/glob/grep — нативные permissions. Файл `maestro.json` (секция `access_policy`)
-формирует сабагент `sanitizer` или вручную; если файла нет — плагин не блокирует (fail-open).
+**File-доступ — нативные permissions opencode:** untrusted сабагент при попытке
+`read` deny/ask-файла → блокировка/запрос нативным permission-слоем OpenCode
+(deny/ask в `.opencode/opencode.json`); плагин больше не блокирует `read`.
+`bash`/`glob`/`grep` — нативные permissions (эвристический deny-слой).
 
-> **`maestro.json` остаётся за `access_policy`** — конфиг не выносится из-под
-> контроля доступа (fail-closed, см. [`SECURITY.md`](../../SECURITY.md) → P6).
+> **`maestro.json` защищается нативно** — deny `read`/`glob`/`grep` + edit-ask
+> в `.opencode/opencode.json` (fail-closed, см. [`SECURITY.md`](../../SECURITY.md) → P6).
 > Расширение `isPluginMetaFile` касается **только одного semver-метафайла**
 > (`.maestro/plugin-version`) — `/maestro-version` использует его, не ослабляя
 > доступ к конфигу.
@@ -188,9 +181,8 @@ bash-команд ненадёжно извлекаются).
 прямое указание паттерна `confidential`, а широкие паттерны-обход
 (`glob("docs/**/*.md")`) — нет; основной барьер — `read`/`edit`. Канон и
 семантика (`*` пересекает `/`, last-match-wins) — в скилле `maestro-assistant`.
-При настройке вынесите `docs/confidential/**` из `access_policy.allow`, чтобы
-избежать путаницы (confidential технически выигрывает, но явная настройка
-читается яснее).
+При настройке не добавляйте `docs/confidential/**` в нативные allow-правила
+(confidential технически выигрывает, но явная настройка читается яснее).
 
 **Прочее:**
 - **Смена `maestro.json`** — требует рестарта opencode (конфиг читается при
@@ -223,7 +215,7 @@ bash-команд ненадёжно извлекаются).
 > **⚠️ Риск: данные confidential при отключённом плагине — частично смягчён.**
 > Sanitizer и trusted-исключения (enforcement плагина) реализованы в плагине
 > `maestro-bootstrap` и **не являются файловой защитой ОС (не chmod/ACL)**.
-> При отключённом/незагруженном плагине **sanitizer и access_policy не работают**,
+> При отключённом/незагруженном плагине **sanitizer не работает**,
 > однако **файловая защита confidential для `read`/`edit` сохраняется**: нативный
 > deny-baseline (стандарт init) действует в ядре OpenCode независимо от плагина.
 > Эвристические deny `bash`/`glob`/`grep` остаются, но закрывают только прямое
@@ -431,7 +423,7 @@ untrusted работают по очищенным артефактам, а до
 
 **Аудит-лог:** плагин пишет события sanitizer в
 `.maestro/logs/maestro-bootstrap-<date>.log` с маркерами `sanitizer.redacted`
-(что замаскировано, без содержимого) и `access_policy.blocked` (файл-доступ).
+(что замаскировано, без содержимого).
 
 ## 🔗 Связанные разделы
 

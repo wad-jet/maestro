@@ -19,7 +19,7 @@
 - **Цель:** корректная, безопасная и воспроизводимая оркестрация фич/багфиксов через
   пайплайн maestro (design → spec → plan → SDD → review) в целевом приложении.
 - **Безопасность:** соблюдение внутреннего стандарта ИБ `SECURITY.md` (trust-модель,
-  требования P1–P5, инварианты confidential/access_policy/sanitizer).
+  требования P1–P5, инварианты confidential/sanitizer).
 - **Самоподдерживаемость (dogfooding):** maestro способен разрабатывать сам себя по
   собственному пайплайну.
 - **Non-goals:** не является продуктовым приложением для конечных пользователей; не
@@ -35,7 +35,7 @@
 - **Инструменты:** git, `agpack` (доставка скиллов/команд/агентов в `.opencode/`),
   bash (скрипты `maestro-install.sh`, `maestro-sandbox.sh`).
 - **Менеджер:** npm (только для плагина, `package.json`).
-- **Текущая версия дистрибутива:** `3.3.3` (корневой `package.json → version`; единая
+- **Текущая версия дистрибутива:** `4.1.0` (корневой `package.json → version`; единая
   для скиллов и плагина, см. `manual_docs/how-to/update-maestro.md`).
 - **Memory layer:** опциональный модуль плагина (векторная память сессий); НЕ часть
   стандартной установки, включается по запросу (секция `memory` в `maestro.json`;
@@ -72,7 +72,7 @@
 - **`agents/`** — промпты субагентов (`custodian`, `sanitizer`, `opus`, `sonnet`,
   `haiku`, `fable`, `code-reviewer`).
 - **`commands/`** — команды `@maestro-init`, `/maestro-setup`, `/maestro-design`, и др.
-- **`plugins/maestro-bootstrap/`** — плагин: санитайзинг промптов, access_policy,
+- **`plugins/maestro-bootstrap/`** — плагин: санитайзинг промптов,
   confidential-контур, observability-логи.
 - **`SECURITY.md`** — внутренний стандарт ИБ (источник истины для security-решений).
 - **`manual_docs/`** — пользовательская документация (Diátaxis) для разработчиков
@@ -171,6 +171,8 @@
 - **Confidential-контур:** `docs/confidential/**` закрыт для primary/untrusted; trusted
   читает, запись/редактирование deny.
 - **Секреты:** `.env`, `*.env.*`, `*.{pem,key,cert,secret}` — deny (built-in + config).
+- **File-доступ — нативный:** deny/ask в `.opencode/opencode.json` (read/glob/grep);
+  `maestro.json`/`.maestro` защищены нативно (deny + edit-ask).
 - **Санитайзинг:** маскировка чувствительных данных перед untrusted-диспатчем
   (`sanitizer_whitelist`).
 - **Память (memory layer):** маскирование `sanitize()` до и после саммаризации —
@@ -184,7 +186,7 @@
 ## 13. Мониторинг и observability
 
 - **Логи плагина:** JSONL в `.maestro/logs/maestro-bootstrap-<date>.log` и
-  `maestro-audit-<date>.log` (session.error, task, access_policy.blocked,
+  `maestro-audit-<date>.log` (session.error, task,
   confidential.access, sanitizer.redacted).
 - **Уровень логов:** env `MAESTRO_BOOTSTRAP_LOG_LEVEL` (default `info`).
 - Официальных метрик/алертов нет (авторский репозиторий).

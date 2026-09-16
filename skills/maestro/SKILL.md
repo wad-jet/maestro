@@ -20,8 +20,8 @@ description: Use when implementing a feature end-to-end — orchestrates brainst
 
    > **Плагин `maestro-bootstrap` не подключён или не загружен.**
    > Защита `docs/confidential/**` НЕ действует: confidential-данные могут быть
-   > доступны untrusted-агентам и primary-сессии. `access_policy` и sanitizer тоже
-   > не работают (все — в плагине `maestro-bootstrap`).
+   > доступны untrusted-агентам и primary-сессии. sanitizer тоже
+   > не работает (в плагине `maestro-bootstrap`).
    >
    > Продолжение работы запрещено. Единственный способ продолжить — подключить
    > плагин и перезапустить opencode:
@@ -393,10 +393,10 @@ Interactive — агент комментирует находки по ходу
          содержимое spec проходит Уровень 1 (regex-санитайзер плагина) с
          **0 находок** — оркестратор прогоняет содержимое spec-файла через
          sanitize, а не только промпт диспатча. При `FINDINGS_ACCEPTED`
-         (вариант (b)) spec остаётся под `ask` в access_policy (не `allow`):
-         untrusted ревьюеры (opus/implementer/code-reviewer) читают
-         spec/plan/diff только через file-access gate с HITL — чувствительные
-         данные не уходят молча.
+         (вариант (b)) spec принимается как есть: untrusted ревьюеры
+         (opus/implementer/code-reviewer) читают spec/plan/diff по нативным
+         permissions opencode — чувствительные данные не уходят молча
+         (маскирование Ур.1 остаётся).
        — После `CLEAN` или (a)/(b) оркестратор **штампует подпись
          `<!-- maestro:sanitize -->`** в конец spec файла (см. «Подписи
          spec-файла»): `status: CLEAN | FINDINGS_ACCEPTED` + date + hash
@@ -800,7 +800,7 @@ Interactive — агент комментирует находки по ходу
 Decision gates (шаги 2, 7, 10, 12, 17) — явный вопрос с вариантами (a)/(b)/(c),
 сопровождаемый рекомендуемым дефолтом (п. 3а). Остальные gates в pipeline
 (шаги 0, 1, 1.5, D2, D6, D7, а также плато и особый случай на шаге 10 и
-security-гейты 8.6 / Security Review Точка 2 / File access control) следуют
+security-гейты 8.6 / Security Review Точка 2) следуют
 тому же протоколу, но без дефолтов и с вариантами, специфичными для каждого
 gate (см. inline-описание в pipeline). Оркестратор ОБЯЗАН следовать этому
 протоколу для всех gates:
@@ -828,8 +828,6 @@ Feature:
 - Шаг 17 — pre-PR (approve merge/fix/cancel)
 - Security Review (Точка 2) — при находке sanitizer перед untrusted-диспатчем
   (вычистить и продолжить / продолжить как есть (принять риск) / стоп)
-- File access control — untrusted сабагент при попытке доступа к файлу
-  (разрешить / запретить)
 
 Bugfix:
 - Шаг D2 — утвердить гипотезу (да/новая гипотеза)
@@ -867,7 +865,7 @@ Bugfix:
    - Дефолт предлагается ТОЛЬКО на этих пяти вопросах; все прочие HITL-вопросы —
      гейты 0, 1, 1.5 (предпочтения), D2/D6/D7 (контентные), плато и особый
      случай confidential на шаге 10, security-гейты (8.6, Security Review
-     Точка 2, File access control) — дефолтов НЕ имеют.
+     Точка 2) — дефолтов НЕ имеют.
    - Если условие-источник дефолта НЕ выполнено — дефолт НЕ предлагается,
      вопрос остаётся открытым, без рекомендации.
    - Источники дефолтов: шаг 2 — маршрут и режим только что выбраны (1/1.5);
@@ -921,7 +919,7 @@ Bugfix:
    контентные вопросы фичи (brainstorm Q/A, custodian-сходимость, имя ветки при
    неоднозначности, D2/D6/D7, spike-гейты); security-гейты (8.6 при
    `FINDINGS_FOUND`, включая HITL-заверение «sanitize пропустить» — P7; Точка 2;
-   File access control; гейт плагина P5).
+   гейт плагина P5).
    В auto-ai: контентные вопросы — ИИ решает сам с доп. анализом; security-гейты —
    гибрид: безопасный дефолт («вычистить и продолжить» / «запретить доступ») ИИ
    применяет сам; принятие риска и стоп — HITL. Правило направления:
@@ -942,7 +940,7 @@ Bugfix:
      завершает цикл `<promise>DONE</promise>` — `active: true` сохраняется, ответ
      человека на гейте открывает следующую итерацию ralph loop (цикл ждёт, не
      завершается).
-   - **Анти-тупик (R2):** отказ в доступе (File access deny) не ретраится в цикле
+   - **Анти-тупик (R2):** отказ в доступе (нативный deny) не ретраится в цикле
      (>1 попытки) — оркестратор передаёт нужный контекст через санизированный
      промпт либо фиксирует деградацию в журнал решений.
 
@@ -961,8 +959,10 @@ Bugfix:
      (эвристика оркестратора) → пауза с HITL даже для безопасного направления.
    - **R4 P5 — предпосылка режима:** без работающего плагина авто-режимы не стартуют
      (жёсткий стоп, fail-closed); это условие существования режима, не «гибрид».
-   - **Механический пол:** Ур.1 маскирование task-промптов, read-блоки access_policy
-     и confidential-deny исполняются плагином безусловно — авто-режимы их не отключают.
+   - **Механический пол:** Ур.1 маскирование task-промптов и confidential-deny
+     исполняются плагином `maestro-bootstrap`; read-блоки нативного
+     permission-слоя — ядром opencode; всё это действует безусловно —
+     авто-режимы их не отключают.
 
 4. **После ответа:**
    - (a) Approve → следующий шаг pipeline
@@ -1207,18 +1207,17 @@ read-only, применяет оркестратор.
 `maestro.json` (загружен на шаге 0). Trust-статус управляет **двумя**
 измерениями защиты:
 
-| Trust | Sanitize промпта | File access control |
+| Trust | Sanitize промпта | Файл-доступ |
 |---|---|---|
-| **trusted** (`true` в `maestro.json`) | **skip** | **skip** (без ограничений) |
-| **untrusted** (default) | Уровень 1 + Уровень 2 (см. Security Review) | HITL на каждый доступ к файлу |
+| **trusted** (`true` в `maestro.json`) | **skip** | по нативным permissions opencode (без дополнительных ограничений сверх нативных) |
+| **untrusted** (default) | Уровень 1 + Уровень 2 (см. Security Review) | нативный permission-слой opencode |
 
 - **Sanitize промпта:** для untrusted — прогон через Security Review (см.
   одноимённую секцию). Для trusted — промпт уходит как есть.
-- **File access control:** untrusted сабагент при попытке `read` ask/deny-файла →
-  HITL: `(a) разрешить` / `(b) запретить` (см. Security Review). Trusted — без
-  ограничений. Покрывается только `read`; bash/glob/grep — нативные permissions.
-  Реализовано плагином `maestro-bootstrap` (перехват `read` по
-  `maestro.json`).
+- **Файл-доступ:** нативный permission-слой opencode (`.opencode/opencode.json`
+  или global): `read`/`glob`/`grep` deny `maestro.json`/`.maestro/**`,
+  `edit`-ask `maestro.json`, confidential-deny — см. канон нативных permissions
+  в `maestro-assistant`. Плагин `maestro-bootstrap` file-доступ не перехватывает.
 - **`sanitizer` сабагент — trusted:** единственный, кому разрешено видеть сырые
   данные (чтобы пометить). Его собственный промпт при диспатче **не** санизируется
   (он доверенный) — рекурсии нет.
@@ -1320,8 +1319,8 @@ task(
 
 | Уровень | Описание | Контроль |
 |---|---|---|
-| **trusted** | Указан в `maestro.json` со значением `true` | **Skip** sanitize промпта + **skip** file access control — данные передаются как есть, доступ к файлам без ограничений |
-| **untrusted** | Не указан в `maestro.json` или значение ≠ `true` | Перед диспатчем — Security Review (sanitizer); во время работы — file access control (HITL на каждый доступ к файлу) |
+| **trusted** | Указан в `maestro.json` со значением `true` | **Skip** sanitize промпта — данные передаются как есть; файл-доступ — по нативным permissions opencode |
+| **untrusted** | Не указан в `maestro.json` или значение ≠ `true` | Перед диспатчем — Security Review (sanitizer); во время работы — нативный permission-слой opencode |
 
 ### Subagent Trust Matrix
 
@@ -1329,7 +1328,7 @@ task(
 |---|---|---|
 | `haiku` | untrusted | |
 | `sonnet` | untrusted | |
-| `opus` | untrusted | Spec review + правки на Revise. **Если указан trusted (`trust.opus: true`)** — Слои 2 (маскирование промпта) и 3-5 (confidential-deny / access_policy / Ур.1) для него НЕ действуют: opus получает промпт как есть и доступ к файлам по конфигу; гарантия «opus не видит confidential» снимается. Это осознанное решение конфигурации (пользователь расширил доверие). Рекомендация — не помечать opus trusted; при необходимости фиксировать с пониманием последствий. |
+| `opus` | untrusted | Spec review + правки на Revise. **Если указан trusted (`trust.opus: true`)** — Слои 2 (маскирование промпта) и 3-5 (confidential-deny / нативный permission-слой / Ур.1) для него НЕ действуют: opus получает промпт как есть и доступ к файлам по конфигу; гарантия «opus не видит confidential» снимается. Это осознанное решение конфигурации (пользователь расширил доверие). Рекомендация — не помечать opus trusted; при необходимости фиксировать с пониманием последствий. |
 | `code-reviewer` | untrusted | |
 | `fable` | untrusted | |
 | `custodian` | **trusted** | Q/A-брокер по confidential (шаг 8): читает confidential-источники, отвечает primary агрегатами (тип/ограничение/чувствительность/связь) БЕЗ raw-значений. Его промпт при диспатче не санизируется. Если `trust: false`/absent — агент **non-functional** (confidential deny + sanitize промпта); не fallback, а блокировка роли. |
@@ -1343,7 +1342,7 @@ trust не зависит.
 ### Управление: maestro.json
 
 Файл `maestro.json` в корне проекта — консолидированный
-конфиг: три секции (`trust`, `access_policy`, `sanitizer_whitelist`). Секция
+конфиг: три секции (`trust`, `confidential`, `sanitizer_whitelist`). Секция
 `trust` перечисляет **только trusted** сабагентов. Всё, чего нет в секции —
 untrusted.
 
@@ -1353,7 +1352,7 @@ untrusted.
     "custodian": true,
     "sanitizer": true
   },
-  "access_policy": { ... },
+  "confidential": { ... },
   "sanitizer_whitelist": { ... }
 }
 ```
@@ -1363,13 +1362,14 @@ untrusted.
 - Если файла `maestro.json` нет → **все сабагенты untrusted** (безопасное значение по умолчанию)
 - Файл коммитится в git — trust-level + security policy проекта
 - `maestro.json` — единственный источник конфигурации. Старые `trust-config.json`,
-  `.maestro/access-policy.json`, `.maestro/sanitizer-whitelist.json` больше
+  `.maestro/sanitizer-whitelist.json` больше
   **не читаются** плагином.
 
 **Как применять:**
 
 1. Оркестратор читает `maestro.json` **один раз за сессию** — на шаге 0
-   (Load Project Context), кэширует для всех последующих диспатчей
+   (Load Project Context), **через bash** (`cat`/`sed`): нативный permission-слой
+   deny-ит `read`-тул по `maestro.json`. Кэширует для всех последующих диспатчей
 2. При каждом диспатче сабагента (шаги 8, 9, 13, 16): проверить кэш. Если
    сабагент есть в секции `trust` с `true` → trusted, иначе → untrusted
 3. Изменения в `maestro.json` вступают в силу со следующей сессии
@@ -1380,7 +1380,7 @@ untrusted.
 Правила детекта чувствительных данных — основа для пометок (сабагент
 `sanitizer`) и маскирования (плагин `maestro-sanitizer`, Этап 2). Сама
 процедура security review описана в секции [Security Review](#security-review)
-ниже — два уровня (плагин + сабагент), HITL-гейт, file access control.
+ниже — два уровня (плагин + сабагент), HITL-гейт.
 
 ### Что фильтруется
 
@@ -1455,17 +1455,18 @@ Trust-уровень определяется по `maestro.json` (см. Trust M
 3. Оригинальный контекст оркестратора **не изменяется** — санитайзер
    создаёт копию промпта для untrusted сабагента
 4. Аудит-лог: плагин пишет события sanitizer в общий лог
-   `.maestro/logs/maestro-bootstrap-<date>.log` с маркерами `sanitizer.redacted`
-   (что замаскировано, без содержимого) и `access_policy.blocked` (файл-доступ):
+   `.maestro/logs/maestro-bootstrap-<date>.log` с маркером `sanitizer.redacted`
+   (что замаскировано, без содержимого):
    - timestamp
    - сабагент / sessionID
-   - что замаскировано/заблокировано (без содержимого)
+   - что замаскировано (без содержимого)
 
 ## Security Review
 
 Двухуровневая защита чувствительных данных перед диспатчем в untrusted сабагенты
-+ file access control во время работы. Цель: субагенты не должны получить
-чувствительные данные; минимум данных доходит даже до trusted-модели sanitizer.
++ нативный permission-слой opencode во время работы. Цель: субагенты не должны
+получить чувствительные данные; минимум данных доходит даже до trusted-модели
+sanitizer.
 
 ### Архитектура
 
@@ -1473,7 +1474,7 @@ Trust-уровень определяется по `maestro.json` (см. Trust M
 Диспатч в сабагента:
   trust check (maestro.json)
     │
-    ├── trusted → SKIP sanitize + SKIP file access control → диспатч как есть
+    ├── trusted → SKIP sanitize → диспатч как есть (файл-доступ — по нативным permissions)
     │
     └── untrusted →
          [УРОВЕНЬ 1] maestro-sanitizer (плагин, Этап 2) ── авто, БЕЗ HITL
@@ -1486,8 +1487,8 @@ Trust-уровень определяется по `maestro.json` (см. Trust M
             ▼
          [HITL] (a) вычистить и продолжить / (b) продолжить как есть (принять риск) / (c) стоп
             │
-         [FILE ACCESS CONTROL] — во время работы untrusted сабагента:
-            `read` ask/deny-файла → блок (HITL решает оркестратор)
+         [FILE ACCESS] — файл-доступ: нативный permission-слой opencode
+            (read/glob/grep deny без HITL; edit-ask — прямой промпт пользователя)
 ```
 
 ### Точки встраивания в pipeline
@@ -1538,38 +1539,21 @@ Trust-уровень определяется по `maestro.json` (см. Trust M
   применении правки) + маскирование входа opus (Слой 2). Вопрос «полный vs
   diff» снимается: на opus-циклах прогона sanitizer нет.
 
-### File access control (реализовано в плагине)
+### Файл-доступ (нативный permission-слой opencode)
 
-Untrusted сабагент при попытке `read` ask/deny-файла → блокировка плагином
-`maestro-bootstrap` по `maestro.json` → `access_policy` (`allow` → пропуск, `ask` →
-блок с HITL-сигналом оркестратору, `deny` → жёсткий блок). Trusted — без
-ограничений (skip sanitize промпта; file access — по maestro.json). Файл
-правил формирует сабагент `sanitizer` (по структуре проекта/стеку) или вручную.
-Если файла нет — плагин не блокирует (fail-open), полагаясь на нативные
-permissions OpenCode.
-
-**Покрываются только `read`.** `bash`/`glob`/`grep` НЕ покрываются access-policy
-(пути из bash-команд ненадёжно извлекаются; glob/grep работают с паттернами) —
-для них используйте нативные permissions OpenCode (`bash: ask` и т.п.).
-
-**HITL-flow при блоке (ask):** плагин бросает ошибку с маркером
-`[access-policy:ask]`. Оркестратор ловит маркер в результате сабагента и
-запрашивает HITL:
-- `(a) разрешить` — дописать путь/паттерн в `allow`-секцию
-  `maestro.json`, затем **re-dispatch** сабагента;
-- `(b) запретить` — сообщить сабагенту/продолжить без файла;
-- `(c) стоп` — остановить процесс.
-При `deny` — жёсткий блок без HITL (сабагент получает ошибку, оркестратор
-решает по ситуации).
+Файл-доступ сабагентов и primary-сессии регулируется **нативным permission-слоем
+opencode** (`.opencode/opencode.json` или global), а не плагином: `read`/`glob`/
+`grep` deny `maestro.json`/`.maestro/**`, `read`-allow `.maestro/plugin-version`,
+`edit`-ask `maestro.json`, confidential-deny — см. канон нативных permissions
+в `maestro-assistant`. Плагин `maestro-bootstrap` file-тулы не перехватывает.
 
 ### Этапность
 
-- **Этап 1 (сделан):** сабагент `sanitizer` (Уровень 2) + HITL-гейт + правила +
-  file access control инструктивно. Sanitizer там **primary**.
+- **Этап 1 (сделан):** сабагент `sanitizer` (Уровень 2) + HITL-гейт + правила.
+  Sanitizer там **primary**.
 - **Этап 2 (сделан):** в плагине `maestro-bootstrap` реализованы Уровень 1
-  (авто-маскирование промптов task) + file access control (перехват file-тулов
-  по maestro.json) + whitelist. Сабагент остаётся доп. слоем (Уровень 2)
-  и генерирует/поддерживает maestro.json.
+  (авто-маскирование промптов task) + whitelist. Сабагент остаётся доп. слоем
+  (Уровень 2).
 
 ### Known gaps Этапа 1 (закрыты на Этапе 2)
 
@@ -1577,8 +1561,6 @@ permissions OpenCode.
   маскирует промпт до sanitizer-сабагента.
 - **Этап 1 модель-зависим** — закрыт: плагин санизирует промпт автоматически
   при каждом task-диспатче.
-- **File access control не enforced** — закрыт: плагин перехватывает file-тулы
-  по maestro.json.
 
 ## Spec Review (опционально)
 
@@ -1702,7 +1684,7 @@ hash: <sha256 содержимого spec без блоков maestro:*>
 | **Plan gate: revise (12b)** | Вернуться к шагу 11 (writing-plans), доработать план |
 | **Spec review: revise** | re-dispatch `opus` для правок, оркестратор применяет их (Ур.1); повторить review (шаг 9); после контрольного ревью с пустыми C/I-бакетами (только Minor) — fast-path: гейт 10 с дефолтом (a) Approve (Minor → spec-follow-up); 8.6 только при trusted-контуре (OQ-2). |
 | **Spec review: reject** | Эскалация к пользователю: пересмотр требований или отмена фичи |
-| **`custodian`/`sanitizer`: `confidential:deny`** | Агент untrusted (проверить `maestro.json` → `trust`: absent/`false`) — он non-functional без доверия. Предупредить: "custodian/sanitizer не trusted (проверьте `maestro.json` → `trust`), без доверия агент не может выполнять свою роль" → HITL: (a) обновить конфиг и перезапустить / (b) стоп. Не ретраить как обычную ошибку сабагента. |
+| **`custodian`/`sanitizer`: `confidential:deny`** | Агент untrusted (проверить `maestro.json` → `trust`: absent/`false`) — он non-functional без доверия. Предупредить: "custodian/sanitizer не trusted (проверьте `maestro.json` → `trust`), без доверия агент не может выполнять свою роль" → HITL: (a) обновить конфиг и перезапустить / (b) стоп. Правка `maestro.json` — через нативный `edit`-ask (HITL) или bash (read-тул deny-ится нативным permission-слоем). Не ретраить как обычную ошибку сабагента. |
 | **Gate: отмена (шаги 7c, 10c, 12c, 17c, D7b)** | STOP + cleanup: удалить feature-ветку (`git branch -D <branch>`) и worktree (`git worktree remove <path>`), если создан. Решение оставить в `regression/cancelled-features.md` (в git) для последующей архивации. **Regression cleanup:** если `entries/<YYYY-MM-DD-<feature>>.md` существует → `git mv entries/X.md released/X.md`, `status: cancelled`, `released: <дата>`, дописать решение в `regression/cancelled-features.md` и закоммитить оба файла (`chore(regression): <feature> cancelled`) (только после шага 12a; до 12a entry ещё не создан — no-op). |
 | **Implementer: BLOCKED** | Оркестратор: (1) дать контекст, (2) мощнее модель, (3) разбить задачу, (4) эскалация |
 | **Implementer: NEEDS_CONTEXT** | Оркестратор предоставляет недостающий контекст, re-dispatch |

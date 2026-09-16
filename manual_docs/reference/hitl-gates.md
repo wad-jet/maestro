@@ -51,7 +51,7 @@ Decision gates (шаги 2, 7, 10, 12, 17) — явный вопрос с вар
 | 12 — plan gate | HITL | авто (a) при P1.3 + guard ⚑4 | авто; чувствительные → HITL (⚑4) |
 | 17 — pre-PR/merge | **HITL (⚑1)** | **HITL (⚑1)** | **HITL (⚑1)** |
 | Контентные вопросы (brainstorm, custodian, D2/D6/D7, имя ветки, spike) | HITL | HITL | авто (доп. анализ) |
-| Security-гейты (8.6, Точка 2, File access, P5) | HITL | HITL | гибрид: только risk-reducing дефолты сам; риск/стоп — HITL |
+| Security-гейты (8.6, Точка 2, P5) | HITL | HITL | гибрид: только risk-reducing дефолты сам; риск/стоп — HITL |
 | Чувствительные изменения ⚑4 | HITL | HITL | HITL |
 | Tier 3 / падение команд (15/15a), docs-расхождения (14), reconciliation (13f) | HITL | HITL | HITL |
 
@@ -89,7 +89,6 @@ offer, docs-шаг) — диспатч батчами через `auto-ai-decisi
 | Гейт | Когда | Варианты |
 |---|---|---|
 | Security Review (Точка 2) | sanitizer нашёл чувствительные данные перед untrusted-диспатчем (шаги 9/13/16) | (a) вычистить и продолжить · (b) продолжить как есть (принять риск) · (c) стоп |
-| File access control | untrusted сабагент пытается прочитать файл вне scope | (a) разрешить · (b) запретить |
 
 ## 📖 Гейты bugfix-маршрута (debug sub-pipeline)
 
