@@ -41,9 +41,7 @@ description: Use when the user asks for help configuring maestro, organizing pro
 ## Канон `maestro.json` (источник истины)
 
 Полный JSON-канон (эталон формата, который правит/генерирует assistant) — **inline здесь**.
-Держать синхронно с правилами парсинга плагина (`loadMaestroConfig`/`loadWhitelist`/
-`loadAccessPolicy`/`loadConfidentialConfig`). Контроль дрейфа — конвенцией.
-
+Держать синхронно с правилами парсинга плагина (`loadMaestroConfig`/`loadWhitelist`/`loadConfidentialConfig`). Контроль дрейфа — конвенцией.
 ```json
 {
   "trust": { "custodian": true, "sanitizer": true },
