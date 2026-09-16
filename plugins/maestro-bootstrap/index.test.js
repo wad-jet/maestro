@@ -979,6 +979,9 @@ describe("maestro-bootstrap filePathOf for confidential tools", () => {
   it("returns undefined for non-file tools", () => {
     assert.equal(filePathOf("bash", { command: "ls" }), undefined);
     assert.equal(filePathOf("read", {}), undefined);
+    assert.equal(filePathOf("glob", { pattern: "**/*.ts" }), undefined);
+    assert.equal(filePathOf("grep", { pattern: "foo", path: "src" }), undefined);
+    assert.equal(filePathOf("task", { description: "subagent" }), undefined);
   });
 });
 

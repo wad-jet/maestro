@@ -22,3 +22,7 @@
   - **sanitizer (Mask):**
     - run: Ур.1 и Ур.2 маскируют промпты → pass
     - workdir: корень целевого приложения
+  - **AC9 — edit maestro.json из untrusted-сабагента:**
+    - run: untrusted-сабагент правит `maestro.json` → ask-HITL или deny/error
+      (fail-closed, НЕ auto-allow)
+    - workdir: корень целевого приложения

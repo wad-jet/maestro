@@ -757,4 +757,4 @@ MAESTRO_MEMORY_LOG_DIR="/var/log/maestro"
 - [Агенты и модель доверия](../explanation/agents-and-trust.md)
 - [Плагин maestro-bootstrap](../reference/commands.md) (установка из `@maestro-setup`)
 - Техническая деталь: `plugins/maestro-bootstrap/core.js` (loadMaestroConfig,
-  resolveFileAccess, resolveSanitizeOptions)
+  resolveSanitizeOptions)
