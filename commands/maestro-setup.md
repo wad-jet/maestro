@@ -9,13 +9,16 @@ description: Инициализация maestro для нового или уж�
 1. Предусловие: если `AGENTS.md` нет — предложить выполнить встроенный `/init`.
 2. Проверка `docs/project-context.md` + запрос git-решения (без автокоммитов).
 3. Собрать контекст по 14 категориям -> `docs/project-context.md`.
-4. Конфигурация: `maestro.json` (trust/access_policy/confidential/sanitizer_whitelist),
+4. Конфигурация: `maestro.json` (trust/confidential/sanitizer_whitelist) + нативные
+   permissions (`.opencode/opencode.json`),
    плагин + модели агентов по M1 (`.opencode/opencode.json` или global), `.gitignore`
    (весь `.maestro/` и `.opencode/`),
    `regression/` структура. Каталоги: `.maestro/`,
    `docs/superpowers/{specs,plans}/`. **Задача 3 требует скилл `maestro-assistant`
    (жёсткий gate): если его нет — установить и продолжить, иначе прерывание.**
-   Правила/канон конфига — из `skills/maestro-assistant/SKILL.md`.
+   Правила/канон конфига — из `skills/maestro-assistant/SKILL.md`. Чтение текущего
+   `maestro.json` (diff секций) — через bash (`cat`/`sed`), не через read-тул
+   (нативный deny по `maestro.json`).
 5. Проверка скилов superpowers (пробник через `skill` tool; при отсутствии —
    предложить установку через HITL).
 6. Проверка плагина `maestro-bootstrap` (не блокер).

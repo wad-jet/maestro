@@ -8,7 +8,8 @@ description: Консультации и настройка maestro-конфиг
 
 ## Что обрабатывает
 
-- `maestro.json` (trust / access_policy / confidential / sanitizer_whitelist)
+- `maestro.json` (trust / confidential / sanitizer_whitelist) — чтение через bash
+  (`cat`/`sed`), нативный deny блокирует read-тул
 - `.opencode/opencode.json` / global (плагин, модели/температура агентов) — как консультация
 - `project-context.md` (14 категорий, актуализация наполнения)
 - Структура каталогов pipeline + `.gitignore` (весь `.maestro/` и `.opencode/`)

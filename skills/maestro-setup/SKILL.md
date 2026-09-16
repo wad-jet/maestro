@@ -29,7 +29,7 @@ description: Use when initializing maestro for a new or existing project — gen
 |---|---|
 | 1. `/init` гейт | `AGENTS.md` (проверка/создание через встроенный `/init`) |
 | 2. Контекст | `docs/project-context.md` (14 категорий, см. `init-context.md`) |
-| 3. Конфиг | `maestro.json` (trust/access_policy/confidential/sanitizer_whitelist) + плагин/модели (`.opencode/opencode.json` или global) + `.gitignore` + `regression/` |
+| 3. Конфиг | `maestro.json` (trust/confidential/sanitizer_whitelist) + нативные permissions (`.opencode/opencode.json`) + плагин/модели (`.opencode/opencode.json` или global) + `.gitignore` + `regression/` |
 | 3а. Каталоги | `.maestro/`, `docs/superpowers/{specs,plans}/`, `docs/confidential/` |
 | 4. superpowers | проверка/установка (HITL) |
 | 5. плагин | проверка подключения `maestro-bootstrap` (не блокер) |
@@ -128,7 +128,7 @@ description: Use when initializing maestro for a new or existing project — gen
 **Перед генерацией — probe скилла `maestro-assistant` (жёсткий gate, CRIT-2).**
 Вызвать `skill` tool с bogus-именем и проверить наличие `maestro-assistant` в списке доступных.
 - **Скилл есть** → загрузить `maestro-assistant` (`skill` tool) и следовать его **канону**
-  `maestro.json` (четыре секции: `trust` / `access_policy` / `confidential` / `sanitizer_whitelist`;
+  `maestro.json` (три секции: `trust` / `confidential` / `sanitizer_whitelist`;
   полный JSON-канон — в `skills/maestro-assistant/SKILL.md`).
 - **Скилла нет** → HITL-сообщение «необходимо установить скилл `maestro-assistant` для
   продолжения» и **жёсткое прерывание задачи 3 и всего процесса `/maestro-setup`** (не переходить
@@ -136,9 +136,18 @@ description: Use when initializing maestro for a new or existing project — gen
   реально генерирует/обновляет конфиг; при пропуске задачи (конфиг уже есть) — не проверяется.
 
 Правила вывода секций (по канону assistant): `trust` — всегда `custodian: true`, `sanitizer: true`;
-`access_policy.allow` из §3/§5, `deny` из §12; `confidential.paths` дефолт `["docs/confidential/**"]`;
+`confidential.paths` дефолт `["docs/confidential/**"]`;
 `sanitizer_whitelist` из §3/§12. Идемпотентность: при существовании `maestro.json` — diff по
 секциям; merge сохраняет пользовательские правки; если файла нет — создаётся целиком.
+
+**Чтение текущего `maestro.json`** (существующий проект, diff секций) — **через bash**
+(`cat`/`sed`), не через read-тул: нативный permission-слой deny-ит `read` по
+`maestro.json` (см. канон нативных permissions в `maestro-assistant`).
+
+**Нативные permissions** (файл-доступ) генерируются в
+`.opencode/opencode.json` (merge-config) по канону `maestro-assistant` §«Канон нативных
+permissions OpenCode»: `read`/`glob`/`grep` deny `maestro.json`/`.maestro/**`,
+`read`-allow `.maestro/plugin-version`, `edit`-ask `maestro.json`.
 
 ### Секция `memory` (опциональный memory layer)
 
