@@ -18,11 +18,10 @@
 1. Переменная окружения `MAESTRO_CONFIG`
 2. `<project>/maestro.json` (по умолчанию)
 
-Если файл отсутствует — все сабагенты untrusted, access-policy не enforced,
+Если файл отсутствует — все сабагенты untrusted,
 дефолтные sanitizer-правила (fail-open).
 
-Старые файлы `trust-config.json`, `.maestro/access-policy.json`,
-`.maestro/sanitizer-whitelist.json` **не поддерживаются**.
+Старые файлы `trust-config.json`, `.maestro/sanitizer-whitelist.json` **не поддерживаются**.
 
 > **Генерация/настройка конфига — через `/maestro-assistant`.** Полный JSON-канон
 > `maestro.json` и правила вывода секций из контекста живут в скилле `maestro-assistant`

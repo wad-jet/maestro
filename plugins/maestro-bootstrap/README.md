@@ -156,11 +156,10 @@ Security-фактура по доступу пишется в **отдельны
 1. **Env override** — `MAESTRO_CONFIG` (путь к `maestro.json`).
 2. **По умолчанию** — `<project>/maestro.json`.
 
-Старые файлы `trust-config.json`, `.maestro/access-policy.json`,
-`.maestro/sanitizer-whitelist.json` **не поддерживаются** (не читаются).
+Старые файлы `trust-config.json`, `.maestro/sanitizer-whitelist.json` **не поддерживаются** (не читаются).
 
 Если `maestro.json` отсутствует — плагин работает (fail-open): все агенты
-untrusted, access-policy не enforced, дефолтные sanitizer-правила.
+untrusted, дефолтные sanitizer-правила.
 
 ## Memory layer (опционально)
 

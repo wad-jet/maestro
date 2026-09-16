@@ -5,8 +5,7 @@
 ## 🎯 Назначение
 
 Как устроены роли агентов и модель доверия в скилле `maestro`: почему субагенты
-по умолчанию untrusted, как работает security review (sanitizer) и file access
-control.
+по умолчанию untrusted, как работает security review (sanitizer).
 
 ## 📖 Роли агентов
 

@@ -15,7 +15,7 @@
 | **Скилл `maestro`** | Спецификация pipeline (фичи / багфиксы / баг-дебаг) — `skills/maestro/SKILL.md` |
 | **Команда `/maestro-init`** | Точка входа в пайплайн — загружает скилл и стартует pipeline |
 | **Субагенты** | `custodian`, `haiku`, `sonnet`, `opus`, `fable`, `code-reviewer`, `sanitizer` |
-| **Плагин** | `maestro-bootstrap` — санитайзинг промптов, file access control, audit-логи |
+| **Плагин** | `maestro-bootstrap` — санитайзинг промптов, audit-логи |
 | **Память (опционально)** | Memory layer плагина — векторная память сессий (`memory_search`, авто-вспоминание); включается секцией `memory` в `maestro.json` |
 | **Команды** | `/maestro-init`, `/maestro-setup`, `/maestro-design`, `/regression`, `/test-agents` |
 
@@ -71,7 +71,7 @@ bash maestro-install.sh
 
 ### 2. Подключите плагин
 
-Плагин `maestro-bootstrap` (санитайзинг промптов, file access control, audit-логи)
+Плагин `maestro-bootstrap` (санитайзинг промптов, audit-логи)
 подключается **до** запуска пайплайна. Он поставляется из git-репозитория `wad-jet/maestro`
 (публикация в npm не используется). Подключение (из git или локально) — в
 [Первая установка maestro](manual_docs/how-to/install-maestro.md).
