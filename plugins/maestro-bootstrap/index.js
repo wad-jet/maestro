@@ -6,7 +6,7 @@
  * hook[name] по любому ключу (event, tool, tool.execute.before/after,
  * chat.message, experimental.*, dispose, ...). Поэтому адаптер ОБЯЗАН
  * пробрасывать ВСЕ хуки core, а не только config/event/startup/dispose —
- * иначе memory-инструменты (tool), санитайзер/access_policy/confidential
+ * иначе memory-инструменты (tool), санитайзер/confidential
  * (tool.execute.before/after) и auto_recall (chat.message +
  * experimental.chat.system.transform) недоступны в сессиях.
  *
@@ -35,7 +35,7 @@ export default async function opencodePlugin(input) {
       });
     } catch (err) {
       // I2: проглоченный сбой init тихо отключает ВСЕ хуки (confidential,
-      // sanitizer, access_policy) → fail-open. Логируем, чтобы не было тихого
+      // sanitizer) → fail-open. Логируем, чтобы не было тихого
       // отключения защиты. Плагин не кэшируется — следующая инвокация повторит.
       console.error("[maestro-bootstrap] init failed:", err instanceof Error ? err.message : err);
       _mbHooks = null;
@@ -53,7 +53,7 @@ export default async function opencodePlugin(input) {
   }
 
   // Пробрасываем ВСЕ хуки core в opencode: event, dispose,
-  // tool.execute.before/after (санитайзер/access_policy/confidential),
+  // tool.execute.before/after (санитайзер/confidential),
   // tool (memory-инструменты), chat.message + experimental.chat.system.transform
   // (auto_recall). `config: undefined` из core перекрываем пустой функцией —
   // opencode вызывает hook.config?.(cfg) (M12: НЕ форсируем file_access).

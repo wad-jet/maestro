@@ -338,7 +338,7 @@ export function sanitize(prompt, opts = {}) {
 
 /**
  * Load the maestro config from `maestro.json` (корень проекта) — единственный
- * источник конфигурации. Sections: `trust`, `access_policy`, `sanitizer_whitelist`.
+ * источник конфигурации. Sections: `trust`, `sanitizer_whitelist`, `confidential`.
  * @param {string} [file]  Explicit path. Defaults to MAESTRO_CONFIG env
  *   or `<dir>/maestro.json`.
  * @param {string} [dir]   Project directory.
@@ -437,28 +437,6 @@ export function loadTrustConfig(config) {
   return trusted;
 }
 
-// --- File access control ---------------------------------------------------
-
-/**
- * Extract the access policy from a parsed maestro config.
- * @param {object} config  Parsed `maestro.json` (from loadMaestroConfig).
- * @returns {{ exists: boolean, default: string, allow: string[], ask: string[], deny: string[] }}
- */
-export function loadAccessPolicy(config) {
-  const section = config?.access_policy;
-  if (!section || typeof section !== "object") {
-    // Секции нет → политика не enforced (fail-open).
-    return { exists: false, default: "ask", allow: [], ask: [], deny: [] };
-  }
-  return {
-    exists: true,
-    default: section.default === "allow" ? "allow" : "ask",
-    allow: Array.isArray(section.allow) ? section.allow : [],
-    ask: Array.isArray(section.ask) ? section.ask : [],
-    deny: Array.isArray(section.deny) ? section.deny : [],
-  };
-}
-
 // --- Confidential access control ------------------------------------------
 
 // Допустимые значения политики trusted для инструмента.
@@ -482,8 +460,7 @@ const BUILTIN_CONFIDENTIAL_PATTERNS = [
 
 /**
  * Extract the confidential access policy from a parsed maestro config.
- * Секция `confidential` — строже access_policy и применяется к read/write/edit
- * по путям из `paths`. Для untrusted/primary — всегда deny (инвариант, не
+ * Секция `confidential` применяется к read/write/edit по путям из `paths`. Для untrusted/primary — всегда deny (инвариант, не
  * конфигурируется). Для trusted-субагентов действие задаётся мапой `trusted`.
  * @param {object} config  Parsed `maestro.json`.
  * @returns {{ exists: boolean, paths: string[], builtin: string[], trusted: {read:string, write:string, edit:string} }}
@@ -578,46 +555,9 @@ export async function resolveIsTrustedSubagent(client, trustedAgents, sessionID)
 }
 
 /**
- * Simple glob→boolean matcher. Supports `*` (any chars), `?` (one char),
- * and `{a,b,c}` brace alternation.
- * @param {string} pattern  Glob pattern.
- * @param {string} value    Path to match.
- * @returns {boolean}
- */
-function globMatch(pattern, value) {
-  // {a,b,c} → (a|b|c), значения экранируются.
-  let out = "";
-  let i = 0;
-  while (i < pattern.length) {
-    const ch = pattern[i];
-    if (ch === "{") {
-      const end = pattern.indexOf("}", i);
-      if (end !== -1) {
-        const alts = pattern
-          .slice(i + 1, end)
-          .split(",")
-          .map((a) => a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
-        out += `(?:${alts.join("|")})`;
-        i = end + 1;
-        continue;
-      }
-    }
-    if (ch === "*") {
-      out += ".*";
-    } else if (ch === "?") {
-      out += ".";
-    } else {
-      out += ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    }
-    i += 1;
-  }
-  return new RegExp(`^${out}$`).test(value);
-}
-
-/**
  * Segment-aware glob matcher for confidential paths ONLY.
  * Confidential-граница использует более строгую семантику, чем общий
- * `globMatch` (который оставлен для access_policy, где `*` пересекает `/`):
+ * `globMatch` (общий) — там `*` пересекает `/` (не используется в confidential):
  *  - `**`  — 0+ сегментов (0 включительно ⇒ покрывает корень);
  *  - `*`   — любые символы в пределах ОДНОГО сегмента (не пересекает `/`);
  *  - `?`   — один символ в пределах одного сегмента;
@@ -705,7 +645,7 @@ export function normalizeTarget(root, target) {
 /**
  * Whether a target path is one of the plugin's own version metadata files.
  * `.maestro/plugin-version` — внутренний diagnostic-файл плагина; не подпадает
- * под access_policy/confidential (должен быть всегда читаем для /maestro-version).
+ * под confidential (должен быть всегда читаем для /maestro-version).
  * Содержимое — только semver (не чувствительно). Сопоставление
  * case-sensitive: плагин пишет каноническое имя; несовпадение = fail-closed
  * (файл блокируется).
@@ -746,41 +686,8 @@ export function isConfidentialTarget(root, patterns, target) {
 }
 
 /**
- * Resolve access action for a path against the policy. Priority:
- * deny > ask > allow > default (наиболее строгое выигрывает).
- * @param {object} policy  Parsed access policy.
- * @param {string} path    File path being accessed.
- * @returns {"allow"|"ask"|"deny"}
- */
-export function resolveFileAccess(policy, filePath) {
-  if (typeof filePath !== "string" || !filePath) return policy.default || "ask";
-  // Приоритет: deny=3, ask=2, allow=1. Default — только fallback, если ни один
-  // паттерн не совпал. bestRank=0 означает «ничего не совпало».
-  const RANK = { deny: 3, ask: 2, allow: 1 };
-  let best;
-  let bestRank = 0;
-  const consider = (patterns, action) => {
-    const rank = RANK[action] ?? 0;
-    if (rank <= bestRank) return;
-    for (const p of patterns ?? []) {
-      if (globMatch(p, filePath)) {
-        best = action;
-        bestRank = rank;
-        return;
-      }
-    }
-  };
-  consider(policy.allow ?? [], "allow");
-  consider(policy.ask ?? [], "ask");
-  consider(policy.deny ?? [], "deny");
-  return best ?? (policy.default || "ask");
-}
-
-/**
- * Extract a target file path from a file tool's args for access-policy checks.
- * access-policy контролирует только `read` (чёткий filePath); bash/glob/grep
- * не покрываются (bash-пути ненадёжно извлекаются, glob/grep — паттерны).
- * Confidential-контроль распространяет `filePathOf` на `write`/`edit`
+ * Extract a target file path from a file tool's args.
+ * Confidential-контроль применяет проверку к read/write/edit
  * (у всех трёх тулов аргумент `filePath`).
  * @param {string} tool  Tool name (read|write|edit).
  * @param {object} args  Tool args.
@@ -946,7 +853,6 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
   });
   const config = loadMaestroConfig(undefined, root);
   const whitelist = loadWhitelist(config);
-  const accessPolicy = loadAccessPolicy(config);
   const confidential = loadConfidentialConfig(config);
   const trustedAgents = loadTrustConfig(config);
   // SEC-6: если whitelist-`patterns` содержит значения, которые сами матчатся
@@ -1003,9 +909,7 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
     "tool.execute.before": async (input, output) => {
       try {
         // Confidential control (Уровень 3+): жёсткий deny для не-trusted по
-        // `confidential.paths`. Строже access_policy: если путь confidential —
-        // access_policy для него не применяется (confidential выигрывает).
-        // Покрывает read/write/edit. bash/glob/grep — нативные permissions.
+        // `confidential.paths`. Покрывает read/write/edit. bash/glob/grep — нативные permissions.
         const CONF_TOOLS = new Set(["read", "write", "edit"]);
         let wasConfidential = false;
         // `.maestro/plugin-version` (isPluginMetaFile) исключён из confidential
@@ -1014,7 +918,7 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
         // Built-in набор (OQ-3) применяется даже при отсутствии секции `confidential`
         // в maestro.json: `confidential.builtin` непуст всегда. Если целевой путь
         // попадает под конфигурируемые `confidential.paths` ИЛИ под built-in —
-        // это confidential-граница (confidential выигрывает у access_policy).
+        // это confidential-граница.
         if (CONF_TOOLS.has(input.tool)) {
           const target = filePathOf(input.tool, output?.args);
           const isConfTarget = target && !isPluginMetaFile(root, target) &&
@@ -1046,39 +950,6 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
                   `Доступ к confidential-путям разрешён только trusted-субагентам.`,
               );
               err.confidential = true;
-              throw err;
-            }
-          }
-        }
-
-        // File access control (Уровень 3): перехват file-тулов по
-        // access-policy.json. `allow` → пропускаем, `ask` → блокируем с
-        // сообщением (HITL решает оркестратор), `deny` → жёсткий блок.
-        // Контролируется только `read` — у него чёткий filePath.
-        // bash/glob/grep НЕ покрываются (bash-пути не извлекаются надёжно,
-        // glob/grep работают с паттернами, не путями) — для них используйте
-        // нативные permissions OpenCode (bash: ask и т.п.).
-        const FILE_TOOLS = new Set(["read"]);
-        if (accessPolicy.exists && FILE_TOOLS.has(input.tool) && !wasConfidential) {
-          const target = filePathOf(input.tool, output?.args);
-          if (target && !isPluginMetaFile(root, target)) {
-            const action = resolveFileAccess(accessPolicy, target);
-            if (action !== "allow") {
-              // SEC-5: в лог — только basename (не раскрывать полную структуру путей);
-              // полный путь остаётся только в ошибке для оркестратора.
-              // Security-событие — ТОЛЬКО в audit-лог (без дублей в bootstrap).
-              auditLog.warn("access_policy.blocked", {
-                sessionID: input.sessionID,
-                callID: input.callID,
-                tool: input.tool,
-                action,
-                target: path.basename(target),
-              });
-              const err = new Error(
-                `[access-policy:${action}] Доступ к "${target}" требует подтверждения. ` +
-                  `Правило: ${action}. Обратитесь к оркестратору за HITL-решением.`,
-              );
-              err.accessPolicy = true;
               throw err;
             }
           }
@@ -1127,8 +998,8 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
           });
         }
       } catch (err) {
-        if (err?.accessPolicy || err?.confidential) {
-          // Access/confidential-нарушение — обязано дойти до OpenCode (реальный
+        if (err?.confidential) {
+          // Confidential-нарушение — обязано дойти до OpenCode (реальный
           // блок), не замалчиваться логгером.
           throw err;
         }

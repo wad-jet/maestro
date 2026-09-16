@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, loadAccessPolicy, resolveFileAccess, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile } from "./core.js";
+import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile } from "./core.js";
 import opencodePlugin from "./index.js";
 
 function readLogs(dir, filePrefix = "maestro-bootstrap") {
@@ -456,12 +456,10 @@ describe("maestro-bootstrap sanitize (Context Sanitizer, Level 1)", () => {
     try {
       fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({
         trust: { custodian: true, sanitizer: true },
-        access_policy: { default: "ask", allow: ["src/**"] },
         sanitizer_whitelist: { patterns: ["safe_value"], extra_fields: ["custom_field"] },
       }));
       const config = loadMaestroConfig(undefined, dir);
       assert.deepEqual(config.trust, { custodian: true, sanitizer: true });
-      assert.deepEqual(config.access_policy.allow, ["src/**"]);
       assert.deepEqual(config.sanitizer_whitelist.patterns, ["safe_value"]);
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
@@ -614,111 +612,7 @@ describe("maestro-bootstrap trusted skip (D2/D3)", () => {
   });
 });
 
-describe("maestro-bootstrap access policy (file access control)", () => {
-  it("loadAccessPolicy returns exists:false when section absent", () => {
-    const p = loadAccessPolicy({});
-    assert.equal(p.exists, false);
-    assert.equal(p.default, "ask");
-  });
 
-  it("loadAccessPolicy extracts access_policy section from config", () => {
-    const p = loadAccessPolicy({ access_policy: { default: "ask", allow: ["src/**"], ask: ["docs/**"], deny: ["*.env"] } });
-    assert.equal(p.exists, true);
-    assert.deepEqual(p.allow, ["src/**"]);
-    assert.deepEqual(p.ask, ["docs/**"]);
-  });
-
-  it("resolveFileAccess allow-matches code paths", () => {
-    const policy = { default: "ask", allow: ["src/**", "*.{ts,js}"], ask: ["docs/**"], deny: ["*.env"] };
-    assert.equal(resolveFileAccess(policy, "src/app.ts"), "allow");
-    assert.equal(resolveFileAccess(policy, "index.ts"), "allow");
-  });
-
-  it("resolveFileAccess ask-matches protected paths", () => {
-    const policy = { default: "ask", allow: ["src/**"], ask: ["docs/**", "*.config.*"], deny: [] };
-    assert.equal(resolveFileAccess(policy, "docs/architecture.md"), "ask");
-    assert.equal(resolveFileAccess(policy, "webpack.config.js"), "ask");
-  });
-
-  it("resolveFileAccess deny always wins", () => {
-    const policy = { default: "ask", allow: ["src/**"], ask: [], deny: ["src/.env"] };
-    assert.equal(resolveFileAccess(policy, "src/.env"), "deny");
-    assert.equal(resolveFileAccess(policy, "src/other.ts"), "allow");
-  });
-
-  it("resolveFileAccess falls back to default when no pattern matches", () => {
-    const policy = { default: "ask", allow: ["src/**"], ask: [], deny: [] };
-    assert.equal(resolveFileAccess(policy, "misc/readme.txt"), "ask");
-    const allowDefault = { default: "allow", allow: [], ask: ["docs/**"], deny: [] };
-    assert.equal(resolveFileAccess(allowDefault, "anything"), "allow");
-  });
-
-  it("filePathOf extracts target for read/write/edit, not bash/glob/grep", () => {
-    assert.equal(filePathOf("read", { filePath: "a.ts" }), "a.ts");
-    assert.equal(filePathOf("read", {}), undefined);
-    assert.equal(filePathOf("write", { filePath: "docs/confidential/x.md", content: "hi" }), "docs/confidential/x.md");
-    assert.equal(filePathOf("edit", { filePath: "docs/confidential/y.md", oldString: "a", newString: "b" }), "docs/confidential/y.md");
-    // bash/glob/grep не покрываются access-policy (C1/I4) — возвращают undefined.
-    assert.equal(filePathOf("glob", { pattern: "src/**" }), undefined);
-    assert.equal(filePathOf("bash", { command: "cat docs/x.md" }), undefined);
-    assert.equal(filePathOf("grep", { pattern: "secret" }), undefined);
-    assert.equal(filePathOf("task", { prompt: "x" }), undefined);
-  });
-});
-
-describe("maestro-bootstrap access policy hook", () => {
-  let dir, hooks, savedLogEnv;
-
-  const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR", "MAESTRO_CONFIG"];
-
-  before(async () => {
-    savedLogEnv = {};
-    for (const k of LOG_ENV) {
-      savedLogEnv[k] = process.env[k];
-      delete process.env[k];
-    }
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-ap-hook-"));
-    // Создаём maestro.json с access_policy: code allow, docs/config ask.
-    fs.writeFileSync(
-      path.join(dir, "maestro.json"),
-      JSON.stringify({
-        access_policy: { default: "ask", allow: ["src/**", "*.{ts,js}"], ask: ["docs/**", "*.config.*"], deny: ["*.env"] },
-      }),
-    );
-    hooks = await MaestroBootstrapPlugin({ directory: dir });
-  });
-
-  after(() => {
-    fs.rmSync(dir, { recursive: true, force: true });
-    for (const k of LOG_ENV) {
-      if (savedLogEnv[k] === undefined) delete process.env[k];
-      else process.env[k] = savedLogEnv[k];
-    }
-  });
-
-  it("allows code file reads (allow match)", async () => {
-    const output = { args: { filePath: "src/app.ts" } };
-    await hooks["tool.execute.before"]({ tool: "read", sessionID: "s", callID: "c1" }, output);
-    // не должно выбросить ошибку
-    assert.ok(true);
-  });
-
-  it("throws on ask-matched path (docs/config)", async () => {
-    const output = { args: { filePath: "docs/architecture.md" } };
-    await assert.rejects(
-      hooks["tool.execute.before"]({ tool: "read", sessionID: "s", callID: "c2" }, output),
-      /access-policy:ask/,
-    );
-  });
-
-  it("throws on deny-matched path (.env)", async () => {
-    const output = { args: { filePath: "src/.env" } };
-    await assert.rejects(
-      hooks["tool.execute.before"]({ tool: "read", sessionID: "s", callID: "c3" }, output),
-      /access-policy:deny/,
-    );
-  });
-});
 
 describe("maestro-bootstrap log mask (MAESTRO_BOOTSTRAP_LOG_MASK)", () => {
   // Каждый case строит собственный плагин, т.к. маска читается при инициализации.
@@ -1197,16 +1091,15 @@ describe("maestro-bootstrap confidential enforcement", () => {
     }
   });
 
-  it("does not apply confidential to non-confidential paths (passes to access_policy)", async () => {
+  it("does not apply confidential to non-confidential paths", async () => {
     const out = { args: { filePath: "src/app.ts" } };
     await hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c6" }, out);
     assert.ok(true);
   });
 
-  it("ignores access_policy.allow on confidential path (confidential wins)", async () => {
+  it("confidential wins over any allow", async () => {
     const dir3 = fs.mkdtempSync(path.join(os.tmpdir(), "fab-conf3-"));
     fs.writeFileSync(path.join(dir3, "maestro.json"), JSON.stringify({
-      access_policy: { default: "allow", allow: ["docs/confidential/**"] },
       confidential: { paths: ["docs/confidential/**"] },
     }));
     const h3 = await MaestroBootstrapPlugin({ directory: dir3 });
@@ -1562,19 +1455,6 @@ describe("maestro-bootstrap plugin version", () => {
     assert.equal(isPluginMetaFile(dir, ".maestro/logs/x.log"), false);
   });
 
-  it("read of maestro.json IS still blocked by restrictive access_policy (ИБ)", async () => {
-    const d = fs.mkdtempSync(path.join(os.tmpdir(), "fab-json-acc-"));
-    fs.writeFileSync(path.join(d, "maestro.json"), JSON.stringify({
-      access_policy: { version: 1, default: "deny", allow: [], ask: [], deny: ["**"] },
-    }));
-    const hooks = await MaestroBootstrapPlugin({ directory: d });
-    const out = { args: { filePath: "maestro.json" } };
-    await assert.rejects(
-      hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c2" }, out),
-      /access-policy/,
-    );
-    fs.rmSync(d, { recursive: true, force: true });
-  });
 });
 
 describe("maestro-bootstrap plugin version file access", () => {
@@ -1585,10 +1465,7 @@ describe("maestro-bootstrap plugin version file access", () => {
     savedLogEnv = {};
     for (const k of LOG_ENV) { savedLogEnv[k] = process.env[k]; delete process.env[k]; }
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-ver-access-"));
-    // Строгий access_policy: всё — ask (default), ничего не allow.
-    fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({
-      access_policy: { default: "ask", allow: [], ask: [], deny: [] },
-    }));
+    fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({}));
     hooks = await MaestroBootstrapPlugin({ directory: dir });
   });
 
@@ -1606,20 +1483,13 @@ describe("maestro-bootstrap plugin version file access", () => {
     assert.equal(isPluginMetaFile(dir, ".maestro/logs/x.log"), false);
   });
 
-  it("read of .maestro/plugin-version is NOT blocked by restrictive access_policy", async () => {
+  it("read of .maestro/plugin-version does not throw (no file-access gate)", async () => {
     const out = { args: { filePath: ".maestro/plugin-version" } };
-    // не должно выбросить [access-policy:ask]
+    // без file-access gate не должно блокироваться
     await hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c-ver" }, out);
     assert.ok(true, "plugin version read must not be blocked");
   });
 
-  it("read of a normal file still blocked by restrictive access_policy", async () => {
-    const out = { args: { filePath: "docs/readme.md" } };
-    await assert.rejects(
-      hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c-blocked" }, out),
-      /access-policy:ask/,
-    );
-  });
 });
 
 describe("maestro-bootstrap audit logger", () => {
@@ -1756,34 +1626,12 @@ describe("maestro-bootstrap confidential audit log", () => {
     await hooks["tool.execute.before"]({ tool: "read", sessionID: "childTrusted", callID: "c-a4" }, out);
     const bootstrap = readLogs(dir, "maestro-bootstrap");
     assert.equal(
-      bootstrap.find((x) => x.msg === "confidential.access" || x.msg === "confidential.blocked" || x.msg === "access_policy.blocked"),
+      bootstrap.find((x) => x.msg === "confidential.access" || x.msg === "confidential.blocked"),
       undefined,
       "security events must NOT appear in bootstrap log",
     );
   });
 
-  it("logs access_policy.blocked only in audit log", async () => {
-    const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), "fab-audit-ap-"));
-    try {
-      fs.writeFileSync(path.join(dir2, "maestro.json"), JSON.stringify({
-        access_policy: { default: "ask", allow: [], ask: ["docs/**"], deny: [] },
-      }));
-      const h2 = await MaestroBootstrapPlugin({ directory: dir2 });
-      const out = { args: { filePath: "docs/architecture.md" } };
-      await assert.rejects(
-        h2["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "c-ap1" }, out),
-        /access-policy:ask/,
-      );
-      const audit = readLogs(dir2, "maestro-audit").find((x) => x.callID === "c-ap1");
-      assert.ok(audit, "access_policy.blocked in audit log");
-      assert.equal(audit.msg, "access_policy.blocked");
-      assert.equal(audit.target, "architecture.md");
-      const bootstrap = readLogs(dir2, "maestro-bootstrap");
-      assert.equal(bootstrap.find((x) => x.msg === "access_policy.blocked"), undefined, "not duplicated in bootstrap");
-    } finally {
-      fs.rmSync(dir2, { recursive: true, force: true });
-    }
-  });
 
   it("does not log non-confidential paths to audit log", async () => {
     const before = readLogs(dir, "maestro-audit").length;
