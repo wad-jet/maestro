@@ -4,7 +4,7 @@
 - **feature:** feature/remove-access-policy
 - **added:** 2026-09-16
 - **status:** active
-- **risk:** HIGH
+- **risk:** HIGH (maestro.json/.maestro) + MEDIUM (удаление секции)
 - **scenarios:**
   - **Нативный deny read maestro.json/.maestro:** (`.opencode/opencode.json` deny-правила):
     - run: read `maestro.json` через read-тул → блокируется нативно (deny)
