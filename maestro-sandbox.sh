@@ -7,7 +7,7 @@
 # каталог, имитирующий целевое приложение:
 #   docs/project-context.md        14 категорий, фиктивный проект
 #   docs/confidential/             фиктивные конфиденциальные данные
-#   maestro.json                   trust/access_policy/confidential
+#   maestro.json                   trust/confidential
 #   .env                           фиктивные секреты (закрыты built-in confidential)
 #   secrets/other.conf             фиктивный секрет вне built-in (закрыт конфигом)
 #   src/, tests/                   минимальный код-скелет (TS) для debug/bugfix
@@ -154,20 +154,6 @@ gen_maestro_json() {
     "custodian": true,
     "sanitizer": true
   },
-  "access_policy": {
-    "version": 1,
-    "default": "ask",
-    "allow": [
-      "src/**",
-      "tests/**",
-      "docs/project-context.md",
-      "docs/superpowers/specs/**",
-      "docs/superpowers/plans/**"
-    ],
-    "deny": [
-      "secrets/**"
-    ]
-  },
   "confidential": {
     "version": 1,
     "paths": [
@@ -253,7 +239,7 @@ EOF
 }
 
 gen_secrets() {
-  # Секрет вне built-in набора. Закрывается через confidential.paths/access_policy.deny
+  # Секрет вне built-in набора. Закрывается через confidential.paths
   # в maestro.json (не входит в built-in).
   cat >"$SANDBOX/secrets/other.conf" <<'EOF'
 # Фиктивный секрет вне built-in confidential набора.

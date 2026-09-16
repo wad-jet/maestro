@@ -32,7 +32,7 @@
 | **Оркестрация** | Автоматическая: orchestrator сам диспатчит субагентов по маршруту | Ручная: вы решаете, какой скил и когда вызвать |
 | **HITL-гейты** | Встроены на ключевых точках (категория, spec, plan, pre-PR) | Нет — каждый скил работает по своей схеме |
 | **Spec / Spec Review** | Автоматически для сложных/архитектурных фич | Вызываете вручную (`brainstorming`, `writing-plans`) |
-| **Безопасность** | Встроенный sanitizer + file access control | Нет (полагаетесь на permissions OpenCode) |
+| **Безопасность** | Встроенный sanitizer + нативные permissions OpenCode (deny/ask) | Нет (полагаетесь на permissions OpenCode) |
 | **Регрессия** | Реестр рисков + `/regression` | Нет |
 | **Когда использовать** | Сквозная фича/багфикс от начала до конца | Один конкретный шаг, ручной контроль каждого шага |
 
@@ -231,7 +231,7 @@ qdrant/pgvector. Управление: `memory_forget`, `memory_export`/`memory_
 ```
 agents/          — конфиги субагентов (custodian, haiku, sonnet, opus, fable, code-reviewer, sanitizer)
 commands/        — @command конфиги (/maestro-init, /maestro-setup, /regression, /test-agents)
-plugins/         — maestro-bootstrap (ESM-плагин: sanitize, access_policy, observability)
+plugins/         — maestro-bootstrap (ESM-плагин: sanitize, observability)
 skills/          — скиллы (maestro, maestro-setup, maestro-design, manual-docs — generic user-docs)
 specs/           — дизайн-спеки и план-ы этого репо (never in root!)
 manual_docs/     — пользовательская документация скилла (Diátaxis)

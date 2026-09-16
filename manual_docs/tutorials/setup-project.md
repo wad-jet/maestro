@@ -36,7 +36,7 @@
 2. **Сбор контекста** — интерактивный опрос по 14 категориям → создаёт
    `docs/project-context.md`. Обязательные секции: 1, 2, 3, 4, 9, 14.
 3. **Конфигурация** — генерирует (по канону скилла `maestro-assistant`):
-   - `maestro.json` — `trust` (custodian, sanitizer), `access_policy`, `confidential`,
+   - `maestro.json` — `trust` (custodian, sanitizer), `confidential`,
      `sanitizer_whitelist`;
    - плагин `maestro-bootstrap` + модели агентов — в `.opencode/opencode.json`
      (реком.) или глобальном конфиге;
@@ -90,7 +90,7 @@
 1. **`project-context.md`** — если существует, HITL: (a) перечитать и перейти к
    конфигурации / (b) пересоздать с нуля / (c) отмена.
 2. **Конфигурация** — если `maestro.json` есть, покажет diff «желаемое vs
-   текущее» по секциям (`trust`, `access_policy`, `sanitizer_whitelist`) и
+   текущее» по секциям (`trust`, `sanitizer_whitelist`) и
    предложит: обновить / пропустить / отмена. **Пользовательские правки
    сохраняются** (merge).
 3. **Модели агентов** — для каждого из 7 агентов предложение формируется из:
@@ -98,6 +98,12 @@
    2. global (`~/.config/opencode/opencode.json`);
    3. tier-подсказка (для новых/не настроенных).
 4. **Каталоги и проверки** — как в новом проекте.
+
+> **Миграционная заметка (после обновления maestro):** перезапустите
+> `/maestro-setup` — он сгенерирует нативные deny для `maestro.json`/`.maestro`
+> (`read`/`glob`/`grep` deny + edit-ask в `.opencode/opencode.json`). Кастомные
+> `access_policy`-правила перенесите вручную в `.opencode/opencode.json`
+> (deny → read/glob/grep deny).
 
 ### Шаг 2: `/maestro-design`
 

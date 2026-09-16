@@ -12,7 +12,7 @@
 
 Консолидированный конфиг в корне проекта. Коммитится
 в git — он описывает security-политику и trust-модель проекта. Файл состоит из
-четырёх секций: `trust`, `access_policy`, `confidential`, `sanitizer_whitelist`.
+трёх секций: `trust`, `confidential`, `sanitizer_whitelist`.
 
 Путь к файлу resolves в таком порядке:
 1. Переменная окружения `MAESTRO_CONFIG`
@@ -36,9 +36,9 @@
 **не** хранит версию дистрибутива; `/maestro-version` показывает фактическую
 версию загруженного плагина из `.maestro/plugin-version` (см. [Команды](commands.md)).
 
-> **ИБ:** версия плагина — только `.maestro/plugin-version` (semver-only), вне
-> `access_policy`; конфиг `maestro.json` остаётся под контролем доступа
-> (см. [`SECURITY.md`](../../../SECURITY.md)).
+> **ИБ:** версия плагина — только `.maestro/plugin-version` (semver-only);
+> конфиг `maestro.json` защищается **нативно** — deny `read`/`glob`/`grep` +
+> edit-ask в `.opencode/opencode.json` (см. [`SECURITY.md`](../../../SECURITY.md)).
 
 ### Секция `trust`
 
@@ -63,66 +63,10 @@
 > `custodian` и `sanitizer` — trusted по умолчанию (по роли). Изменять не нужно,
 > если не требуется доверять другим сабагентам.
 
-### Секция `access_policy`
-
-File access control: определяет, к каким файлам untrusted сабагенты могут
-обращаться через `read` без HITL. Применяется **только к `read`**: `bash`/
-`glob`/`grep` НЕ покрываются (используйте нативные permissions OpenCode).
-
-```json
-{
-  "access_policy": {
-    "version": 1,
-    "default": "ask",
-    "allow": [
-      "src/**",
-      "packages/**",
-      "test/**",
-      "tests/**",
-      "*.{ts,js,tsx,jsx,py,go,rs,java}"
-    ],
-    "ask": [
-      "docs/**",
-      "specs/**",
-      "manual_docs/**",
-      "*.{md,mdx}",
-      "*.config.*",
-      "*.conf.*",
-      "*.{yaml,yml,toml,ini}"
-    ],
-    "deny": [
-      "*.env",
-      "*.env.*",
-      "*.{pem,key,cert,secret}"
-    ]
-  }
-}
-```
-
-| Ключ | Тип | Обязательно | Описание |
-|---|---|---|---|
-| `version` | `number` | нет | Версия схемы политик (сейчас всегда `1`) |
-| `default` | `"allow"` \| `"ask"` | да | Действие по умолчанию, если ни один паттерн не совпал. **Рекомендуется `"ask"`** |
-| `allow` | `string[]` | нет | Glob-шаблоны — доступ без HITL |
-| `ask` | `string[]` | нет | Glob-шаблоны — запрос HITL у оркестратора |
-| `deny` | `string[]` | нет | Glob-шаблоны — жёсткий блок |
-
-### Разрешение конфликтов
-
-Приоритет: `deny` > `ask` > `allow` > `default` (наиболее строгое побеждает).
-
-Формат шаблонов — упрощённые glob: `*` (любые символы), `?` (один символ),
-`{a,b,c}` (альтернативы). Без рекурсивного `**` в нативном понимании —
-`**` транслируется в `.*`.
-
-> Приоритет работает на уровне паттернов, не файлов. Если файл совпадает с
-> паттернами в `allow` и `deny`, — `deny` побеждает.
-
 ### Секция `confidential`
 
 Защита конфиденциальных путей: жёсткий deny чтения и записи для всех, кроме
-**trusted-субагентов**. Строже `access_policy` — если путь попал в `paths`,
-применяется правило `confidential`, `access_policy` для него игнорируется.
+**trusted-субагентов**.
 
 **Инвариант (не конфигурируется):** любое обращение к `paths` через
 `read`/`write`/`edit` от НЕ trusted (primary/root-сессия, untrusted-субагент) →
@@ -172,11 +116,10 @@ File access control: определяет, к каким файлам untrusted 
 > через `bash` (`cat prod.env`), плагин не заблокирует (fail-open). Для таких
 > инструментов используйте нативные permissions OpenCode (2-й эшелон).
 
-**⚠️ Отличие от `access_policy`:** маски в `access_policy` используют общий
-матчер, где `*` пересекает `/` (напр. `*.env` в `deny` матчит и `config/prod.env`).
-В `confidential` маска без `/` закрывает только корневые файлы. Одна и та же
-маска `*.env` в двух секциях ведёт себя по-разному — это намеренно. Для
-рекурсивной защиты секретов используйте `**/*.env`.
+**⚠️ Отличие от общего glob-матчинга:** в общем матчинге `*` пересекает `/`
+(напр. `*.env` матчит и `config/prod.env`). В `confidential` маска без `/`
+закрывает только корневые файлы. Для рекурсивной защиты секретов используйте
+`**/*.env`.
 
 **Built-in confidential (OQ-3).** Помимо `confidential.paths`, плагин применяет
 **built-in набор по умолчанию** — `.env`, `.env.*`, `*.pem`, `*.key`, `*.crt`,
@@ -201,8 +144,8 @@ deny. Trust не наследуется вложенными субагента�
 > `maestro-bootstrap`), не загрузился,
 > деактивирован или opencode запущен без него — `read`/`write`/`edit` в
 > `docs/confidential/**` выполняются **как обычные** (без каких-либо ограничений).
-> То же касается `access_policy` и sanitizer (все — в плагине): отключение
-> плагина снимает ВСЮ file-политику. **Не полагайтесь на confidential как на
+> То же касается sanitizer (в плагине): отключение
+> плагина снимает маскирование промптов. **Не полагайтесь на confidential как на
 > единственный барьер** — при отключённом плагине данные доступны любому
 > (primary и untrusted). Для гарантированного барьера на уровне ОС ограничьте
 > права каталога средствами ОС/репозитория (read-only для не-нужного,
@@ -218,7 +161,7 @@ deny. Trust не наследуется вложенными субагента�
 - `maestro-bootstrap-<дата>.log` — **observability**: task-диспатчи, ошибки/повторы
   сессий, sanitizer. Подчиняется `MAESTRO_BOOTSTRAP_LOG_MASK`/`LOG_LEVEL`.
 - `maestro-audit-<дата>.log` — **security-фактура**: доступ к confidential
-  (`allow`/`deny`) и блокировки `access_policy`. Пишется **всегда**, не зависит
+  (`allow`/`deny`). Пишется **всегда**, не зависит
   от bootstrap-маски/порога.
 
 **Security-события живут ТОЛЬКО в аудит-логе** — bootstrap-лог их не дублирует.
@@ -251,19 +194,18 @@ deny. Trust не наследуется вложенными субагента�
 | `msg` | Уровень | Доп. поля |
 |---|---|---|
 | `confidential.access` | info (allow) / warn (deny) | `tool`, `action`, `agent`, `target` |
-| `access_policy.blocked` | warn | `tool`, `action`, `target` |
 
 Структура записи аудит-лога (JSON):
 
 ```json
-{"ts":"<ISO>","level":"info|warn","msg":"confidential.access|access_policy.blocked","sessionID":"...","callID":"...","tool":"read|write|edit","action":"allow|deny","agent":"<trusted-агент>|null","target":"<basename>"}
+{"ts":"<ISO>","level":"info|warn","msg":"confidential.access","sessionID":"...","callID":"...","tool":"read|write|edit","action":"allow|deny","agent":"<trusted-агент>|null","target":"<basename>"}
 ```
 
 | Поле | Тип | Описание |
 |---|---|---|
 | `level` | `info` \| `warn` | `info` — allow, `warn` — deny/block |
-| `msg` | `confidential.access` \| `access_policy.blocked` | Тип события |
-| `tool` | `read` \| `write` \| `edit` | Инструмент (для `access_policy.blocked` — всегда `read`) |
+| `msg` | `confidential.access` | Тип события |
+| `tool` | `read` \| `write` \| `edit` | Инструмент |
 | `action` | `allow` \| `deny` | Исход проверки |
 | `agent` | `string` \| `null` | Имя trusted-субагента (из `trust`), если определено; `null` для root/primary |
 | `target` | `string` | `basename` файла (без пути, SEC-5) |
@@ -273,8 +215,6 @@ deny. Trust не наследуется вложенными субагента�
 - `confidential.access` — доступ к confidential-пути. `action: "allow"` — trusted-
   субагент читал/писал (уровень `info`); `action: "deny"` — заблокировано для
   untrusted/primary или trusted с `trusted.<tool>: deny` (уровень `warn`).
-- `access_policy.blocked` — блокировка файла по `access_policy` (`ask`/`deny`),
-  уровень `warn`.
 
 Каталоги логов задаются env: bootstrap — `MAESTRO_BOOTSTRAP_LOG_DIR`, аудит —
 `MAESTRO_AUDIT_LOG_DIR` (по умолчанию оба `<project>/.maestro/logs`). Сбой записи
@@ -798,7 +738,7 @@ MAESTRO_MEMORY_LOG_DIR="/var/log/maestro"
 
 | Путь | Назначение | В git? |
 |---|---|---|
-| `maestro.json` | Консолидированный конфиг (trust, access_policy, confidential, sanitizer_whitelist) | Да |
+| `maestro.json` | Консолидированный конфиг (trust, confidential, sanitizer_whitelist) | Да |
 | `.opencode/opencode.json` | Плагин (альтернативно) + модели сабагентов | Нет (в `.gitignore`) |
 | `.opencode/` (скиллы/агенты/команды) | Доставляемая конфигурация средств (вручную/agpack) | Нет (в `.gitignore`) |
 | `docs/project-context.md` | Проектовый контекст шага 0 (14 категорий) | Да |
@@ -813,7 +753,7 @@ MAESTRO_MEMORY_LOG_DIR="/var/log/maestro"
 ## 🔗 Связанные разделы
 
 - [Требования и оценка ИБ (SECURITY.md)](../../../SECURITY.md) — модель доверия,
-  секции `confidential`/`trust`/`access_policy`
+  секции `confidential`/`trust`
 - [Кастомизация скилла](../how-to/customize-maestro.md)
 - [Агенты и модель доверия](../explanation/agents-and-trust.md)
 - [Плагин maestro-bootstrap](../reference/commands.md) (установка из `@maestro-setup`)

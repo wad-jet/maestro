@@ -38,7 +38,7 @@
 |---|---|---|---|---|
 | C1 | opus (untrusted) ревьюит очищенный spec | ✅ | не получает raw-confidential | |
 | C2 | opus-правки → primary применяет (Edit, Ур.1 Слой 5) | ✅ | правка применяется, Ур.1 фильтрует | |
-| C3 | opus не читает confidential | ❌ | audit-лог `access_policy.blocked` | |
+| C3 | opus не читает confidential | ❌ | нативный deny (read/glob/grep) + audit-лог `confidential.access` | |
 | C4 | Повторный 8.6 НЕ запускается на opus-цикле (OQ-2) | ✅ | полный прогон sanitizer не повторяется | |
 | C5 | Повторный 8.6 при trusted-контуре (особый случай a) | ✅ | custodian-участие → полный 8.6 | |
 | C6 | **Особый случай (маркер):** правка по `из confidential`-секции → HITL → custodian | ✅ | **уточнение по маркированным данным через custodian, не primary**. Парный с D6 (обязательный security-набор). Маркер-детект формален, не эвристика | |

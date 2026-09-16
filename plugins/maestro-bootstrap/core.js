@@ -557,7 +557,7 @@ export async function resolveIsTrustedSubagent(client, trustedAgents, sessionID)
 /**
  * Segment-aware glob matcher for confidential paths ONLY.
  * Confidential-граница использует более строгую семантику, чем общий
- * `globMatch` (общий) — там `*` пересекает `/` (не используется в confidential):
+ * glob-матчинг — там `*` пересекает `/` (в отличие от confidential):
  *  - `**`  — 0+ сегментов (0 включительно ⇒ покрывает корень);
  *  - `*`   — любые символы в пределах ОДНОГО сегмента (не пересекает `/`);
  *  - `?`   — один символ в пределах одного сегмента;

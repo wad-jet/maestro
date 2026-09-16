@@ -43,10 +43,13 @@
   дизайну: доступ блокируется, агент не может выполнять свою роль.
 - **P5.** Плагин `maestro-bootstrap` обязателен (гейт на входе `/maestro-init`). При
   отключённом плагине защита fail-open — признанный риск (см. §5).
-- **P6.** `maestro.json` (в т.ч. `sanitizer_whitelist.patterns`) НЕ выносится
-  из-под `access_policy` — конфиг остаётся под контролем доступа (fail-closed).
-  Предупреждение о версии (`/maestro-version`) использует только
-  `.maestro/plugin-version` (semver-only) и НЕ ослабляет доступ к конфигу.
+- **P6.** `maestro.json` (в т.ч. `sanitizer_whitelist.patterns`) защищается
+  **нативно** — deny в `.opencode/opencode.json` (`read`/`glob`/`grep`) + edit-ask;
+  не плагином. Residual risk: bash `cat` остаётся доступен untrusted (паритет с
+  прежним access_policy). Tamper: `.opencode/opencode.json` редактируем untrusted
+  (parity), усиление — вне scope. Предупреждение о версии (`/maestro-version`)
+  использует только `.maestro/plugin-version` (semver-only) и НЕ ослабляет доступ
+  к конфигу.
 - **P7.** Для fast-track-входов (шаг 7d) подпись spec (`maestro:sanitize`/
   `maestro:review`) не является основанием авто-пропуска sanitize/review:
   подпись подделываема и доказывает лишь соответствие hash'а содержимому, не
@@ -56,13 +59,13 @@
   enforcement), как P5-гейт.
 - **P8.** Авто-режимы `@maestro-init` (`--auto-answer`/`--auto-ai`) НЕ
   распространяются на security-гейты (8.6 при `FINDINGS_FOUND`, включая
-  HITL-заверение «sanitize пропустить» — P7; Точка 2; File access control;
+  HITL-заверение «sanitize пропустить» — P7; Точка 2;
   гейт плагина P5), гейты 10 (spec, ⚑2) и 17 (pre-PR/merge, ⚑1) и
   чувствительные изменения (⚑4). В auto-ai допустим гибрид только для
   **risk-reducing** дефолтов (вычистить и продолжить / запретить доступ) — не
   риск-принятие; принятие риска и стоп — HITL. Принятие спеки на гейте 10 —
   только явная команда. Механический пол (Ур.1 маскирование task-промптов,
-  read-блоки access_policy, confidential-deny) исполняется плагином безусловно
+  confidential-deny) исполняется плагином безусловно
   в любом режиме. Инварианты ⚑1–4 действуют во всех режимах
   (manual / auto-answer / auto-ai) — канон: `skills/maestro/invariants.md`. Статус: инструкция
   SKILL (не enforcement).
@@ -70,8 +73,7 @@
 ## 4. Реализованные контрмеры
 
 - **Плагин `maestro-bootstrap`:** confidential deny (по имени/структуре сессии,
-  fail-closed), sanitize промпта (Уровень 1, авто-маскирование), access_policy
-  (HITL на `read`), аудит-лог.
+  fail-closed), sanitize промпта (Уровень 1, авто-маскирование), аудит-лог.
 - **Правило подписей (P7):** в fast-track (шаг 7d) подпись spec =
   provenance-рекомендация, не основание авто-пропуска 8.6/9 (для 7d-входов
   8.6 выполняется всегда, кроме HITL-заверения при валидной `CLEAN`).
@@ -89,7 +91,7 @@
   enforced deny/allow провайдеров в ядре для изолированных моделей trusted-агентов.
 - **Сабагент `sanitizer`** (trusted, read-only): Уровень 2 — пометки
   чувствительных данных перед untrusted-диспатчем.
-- **HITL-гейты:** security review, file access control, гейт «плагин работает».
+- **HITL-гейты:** security review, гейт «плагин работает».
 
 ## 5. Известные ограничения
 
@@ -98,9 +100,11 @@
   **файловая защита confidential для `read`/`edit` сохраняется** (нативный
   deny-baseline в ядре), а **trusted-агенты (`custodian`/`sanitizer`) сохраняют
   доступ** через нативный per-agent `read`/`glob`/`grep` allow (R2-конфиг, Этап A).
-  Эвристические deny `bash`/`glob`/`grep` остаются, но закрывают только прямое
-  указание паттерна (широкие паттерны-обход не блокируются). **Sanitizer** и
-  **enforcement плагина** (access_policy, проверка trusted-канала по сессии)
+  **`maestro.json`/`.maestro` защищены нативно** (deny `read`/`glob`/`grep` +
+  edit-ask в `.opencode/opencode.json`) независимо от плагина. Эвристические deny
+  `bash`/`glob`/`grep` остаются, но закрывают только прямое указание паттерна
+  (широкие паттерны-обход не блокируются). **Sanitizer** и
+  **enforcement плагина** (проверка trusted-канала по сессии)
   по-прежнему требуют плагина → P5-гейт сохраняется. Удаление enforcement из
   плагина (оставшаяся половина R2/R3) — Этап B после V1.
 - **Доверие по имени, не по модели.** Действует при нескомпрометированном конфиге.

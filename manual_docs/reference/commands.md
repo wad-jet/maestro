@@ -99,7 +99,7 @@ primary-сессия при чтении того же файла получае
 
 Консультации и настройка maestro-конфигурации/структуры/контекста в течение жизни
 проекта. Загружает скилл `maestro-assistant` (tool: skill) и применяет его к запросу HITL.
-Обрабатывает: `maestro.json` (trust/access_policy/confidential/sanitizer_whitelist),
+Обрабатывает: `maestro.json` (trust/confidential/sanitizer_whitelist),
 `.opencode/opencode.json` / global (плагин, модели), структуру каталогов,
 актуализацию `project-context.md`, консультации по
 правилам работы maestro. Плагин-гейт не требуется. Если запрос требует изменения кода/spec/плана
