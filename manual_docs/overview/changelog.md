@@ -21,8 +21,9 @@
 - **Качество планов (P2.3):** обязательная секция `## Spec Coverage Matrix`
   в каждом плане (требования спеки → задачи, для табличных секций построчно);
   self-check плана перед plan-gate (покрытие, план-тесты vs spec, файлы-цели
-  существуют, grep-команды dry-run); task-review ключевых задач сверяет
-  spec-инварианты (цепочки/timeout/guard) по коду. Regression: LOW.
+  сверены: Modify существуют / Create отсутствуют, grep-команды dry-run);
+  task-review задач сверяет spec-инварианты (цепочки/timeout/guard/enum)
+  по коду. Regression: LOW.
 
 ## [2026-09-16]
 
