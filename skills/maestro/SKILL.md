@@ -576,10 +576,10 @@ Interactive — агент комментирует находки по ходу
         (case-sensitive паттерны, ожидаемые счётчики — проверить запуском).
       - **Task-review сверка spec-инвариантов:** при диспатче task-reviewer
         задач (шаг 13; Global constraints заполняются из спеки для каждой
-        задачи, затрагивающей spec-инварианты: контракты, timeout/guard,
-        enum-соглашения) включать явные spec-инварианты задачи
-        (цепочки, timeout/guard, enum-консистентность)
-        и требовать их сверки по коду — см. task-reviewer-prompt.md Part 1.
+        задачи, затрагивающей spec-инварианты: контракты/цепочки,
+        timeout/guard, enum-соглашения) включать эти инварианты задачи
+        явно и требовать их сверки по коду —
+        см. task-reviewer-prompt.md Part 1.
       - **Если есть pending context changes (шаг 8.5):** добавить в plan
         секцию `## Project Context Changes` — что изменилось, какие
         категории/команды/стек нужно обновить в `docs/project-context.md`.
