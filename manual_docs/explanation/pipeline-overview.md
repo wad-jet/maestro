@@ -46,12 +46,12 @@ project context, запускает pre-flight, определяет катег�
 | 10 | Spec gate | Approve → к плану · Revise → правки opus + оркестратор применяет (Ур.1), повторный review; после контрольного ревью с пустыми C/I-бакетами (только Minor) — fast-path: дефолт (a) Approve, Minor → follow-up; 8.6 только при trusted-контуре · Reject → стоп. Особый случай (нужен confidential) → HITL custodian/follow-up |
 | 11 | Plan | Создание плана задач: tasks, **Spec Coverage Matrix** (требования спеки → задачи), Project Context Changes, spec-follow-up, regression risk; self-check (файлы-цели, grep-команды, план-тесты vs spec) |
 | 12 | Plan gate | Approve (коммит spec+plan+regression-entry) · Revise · Cancel |
-| 13 | SDD | Реализация: субагенты haiku/sonnet по сложности, per-task review (sonnet), progress log |
+| 13 | SDD | Реализация: субагенты haiku/sonnet по сложности, per-task review (sonnet), progress log; **production-путь в тестах** — минимум один интеграционный тест через production-конструктор (без ручной подстановки `deps.*`/логгера) на каждый публичный «шов» |
 | 14 | Docs | Обязательное обновление пользовательской документации: diff-сверка кода с manual_docs/; HITL только при расхождении. Coverage — на шаге 15 |
 | 15 | Checks | Тесты (TEST_COMMAND), e2e, coverage (docs/obs), lint |
 | 15a | Build | Проверка компиляции (BUILD_COMMAND) |
 | 16 | Code Review | Финальное ревью всей ветки (`code-reviewer`, opus-tier). Secret-scan diff. Трекинг issues: fixed / open + follow-up |
-| 17 | Pre-PR | Итоговая проверка: git log, тесты, coverage, открытые issues. Approve merge · Fix (→ шаг 13) · Cancel |
+| 17 | Pre-PR | Итоговая проверка: git log, тесты, coverage, открытые issues. Approve merge · Fix (→ шаг 13) · Cancel. **E2E-критерии приёмки** (если в спеке): прогнать или явно зафиксировать «пропущено, риск принят» — мягкий гейт, решение HITL |
 | 18 | Merge | Слияние feature-ветки в base-ветку. При fast-forward доп. тесты не нужны |
 
 > Подробнее: [HITL-гейты](../reference/hitl-gates.md), [Агенты и доверие](../explanation/agents-and-trust.md), [Конфигурация](../reference/config.md).
