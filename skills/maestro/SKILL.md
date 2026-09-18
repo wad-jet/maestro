@@ -16,6 +16,15 @@ description: Use when implementing a feature end-to-end — orchestrates brainst
    `plugin initialized`. Если есть И её ISO-`ts` не старше 24 часов от текущего
    момента — плагин работает, продолжить работу. Иначе → шаг 3 (стоп).
 
+   После подтверждения свежести — проверь рассинхрон версий (warn, НЕ stop):
+   init-строка содержит `"version":"X.Y.Z"` — сравни с версией из кэша плагина:
+   `~/.cache/opencode/packages/maestro-bootstrap@git+*/github.com/wad-jet/maestro.git/
+   node_modules/maestro-bootstrap/package.json` (glob; тот же файл читает
+   `readPluginVersion()`). Сравнение semver-осознанное; файл не найден / `#sha`-pin /
+   runtime новее кэша → молча пропустить. При отставании runtime от кэша — показать:
+   «Версия плагина (A) отстаёт от кэша (B) — runtime-правки не активны до перезапуска
+   opencode» и продолжить (не блокировать).
+
 3. **Жёсткий STOP (без «продолжить»).** Останови работу и покажи HITL:
 
    > **Плагин `maestro-bootstrap` не подключён или не загружен.**

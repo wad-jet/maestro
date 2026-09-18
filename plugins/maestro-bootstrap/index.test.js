@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MaestroBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile } from "./core.js";
+import { MaestroBootstrapPlugin, createBootstrapAdapter, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile } from "./core.js";
 import opencodePlugin from "./index.js";
 
 function readLogs(dir, filePrefix = "maestro-bootstrap") {
@@ -2124,5 +2124,48 @@ describe("maestro-bootstrap adapter forwarding core hooks", () => {
     assert.equal((await hooks.config({})).file_access, undefined);
     // memory-инструменты регистрируются в ключе `tool` (пусто при memory off).
     assert.equal(Object.hasOwn(hooks, "tool"), true);
+  });
+
+  it("fail-soft: throwing factory returns minimal skeleton, retries init on next call", async () => {
+    let calls = 0;
+    const realHooks = { event: async () => {}, dispose: async () => {}, marker: "real" };
+    const adapter = createBootstrapAdapter(async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("boom");
+      return realHooks;
+    });
+    const hooks1 = await adapter({});
+    assert.equal(typeof hooks1.config, "function");
+    assert.equal(typeof hooks1.event, "function");
+    assert.equal(typeof hooks1.startup, "function");
+    assert.equal(typeof hooks1.dispose, "function");
+    assert.notEqual(hooks1.marker, "real", "first call is the fail-soft skeleton");
+    const hooks2 = await adapter({});
+    assert.equal(hooks2.marker, "real", "second call retried init and got real hooks");
+  });
+
+  it("forwards ALL core hook keys (superset, incl chat/experimental)", async () => {
+    const coreHooks = await MaestroBootstrapPlugin({ directory: dir });
+    const adapter = createBootstrapAdapter(async () => coreHooks);
+    const out = await adapter({});
+    const coreKeys = Object.keys(coreHooks);
+    const override = new Set(["config", "startup"]);
+    for (const k of coreKeys) {
+      if (override.has(k)) continue;
+      assert.ok(Object.hasOwn(out, k), `core hook ${k} must be forwarded`);
+    }
+    // chat/experimental присутствуют (даже если undefined при memory off)
+    assert.equal(Object.hasOwn(out, "chat.message"), true);
+    assert.equal(Object.hasOwn(out, "experimental.chat.system.transform"), true);
+  });
+
+  it("spread mechanism: stub core hooks all forwarded", async () => {
+    const stub = { event: async () => {}, tool: {}, "chat.message": undefined, "experimental.chat.system.transform": undefined, dispose: async () => {} };
+    const out = await createBootstrapAdapter(async () => stub)({});
+    assert.equal(typeof out.event, "function");
+    assert.equal(typeof out.dispose, "function");
+    assert.equal(Object.hasOwn(out, "tool"), true);
+    assert.equal(Object.hasOwn(out, "chat.message"), true);
+    assert.equal(Object.hasOwn(out, "experimental.chat.system.transform"), true);
   });
 });

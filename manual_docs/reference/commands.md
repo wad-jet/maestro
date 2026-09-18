@@ -110,14 +110,17 @@ primary-сессия при чтении того же файла получае
 Статус memory layer плагина `maestro-bootstrap`: бэкенд, модель, активный `key`,
 число записей (по авторам и датам), кластеры/граф, подсказки по тюнингу
 (`top_k`, `min_score`, `retention_days`). Данные — из `memory_stats_detail` +
-чтение `maestro.json`. Только агрегаты (SEC-4b). Подробнее —
-[Память](../reference/memory.md).
+чтение `maestro.json`. Только агрегаты (SEC-4b). При недоступном
+`memory_stats_detail` команда различает: «память выключена» (`memory.enabled:
+false`), «конфиг-невалиден» (честная причина по `disabled_reason`) и «плагин
+недоступен» (`enabled: true` + инструмент недоступен → перезапустить opencode).
+Подробнее — [Память](../reference/memory.md).
 
 ### `@maestro-memory-report`
 
 Генерация самодостаточного статического HTML-отчёта по memory layer
 (агрегаты, timeline-гистограмма, кластеры, commit-граф по head с тирами; SEC-4b) в
-`.maestro/memory-report-<YYYYMMDD-HHMMSS>.html` с авто-preview в браузере (отключается `memory.report.preview: false`). При отсутствии секции `Узлы графа (M):` в выводе `memory_stats_detail` (устаревший плагин) — предупреждение и упрощённый session-level граф. Подробнее —
+`.maestro/memory-report-<YYYYMMDD-HHMMSS>.html` с авто-preview в браузере (отключается `memory.report.preview: false`). При отсутствии секции `Узлы графа (M):` в выводе `memory_stats_detail` (устаревший плагин) — предупреждение и упрощённый session-level граф. При недоступном `memory_stats_detail` команда ветвится по `maestro.json`: `enabled: false` → «Память выключена»; `enabled: true` + конфиг-невалиден → честная причина по `disabled_reason`; `enabled: true` + sqlite → **fallback** на прямое чтение sqlite (упрощённый HTML с плашкой «Плагин недоступен», только агрегаты, `include_text` не поддерживается); `enabled: true` + qdrant/pgvector → «Плагин недоступен; бэкенд централизованный — fallback невозможен». Подробнее —
 [Память](../reference/memory.md).
 
 ### `@maestro-memory-prune`

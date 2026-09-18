@@ -12,16 +12,23 @@ description: Сгенерировать статический HTML-отчёт �
 
 ## Шаг 1. Получить детальную статистику памяти
 
-1. Вызови инструмент `memory_stats_detail` (без параметров).
-2. Если вызов не удался / инструмент недоступен / память выключена → выведи:
-
-    ```
-    Память maestro выключена — включите в maestro.json:
-    memory.enabled: true (см. manual_docs/how-to/enable-memory.md)
-    ```
-
-   Заметь: в отличие от `@maestro-memory`, команда завершается без создания отчёта.
-3. Сохрани полученные данные для шага 2.
+1. Прочитай `maestro.json` через bash (cat/sed — нативный deny-ит read-тул):
+   `memory.enabled`, `memory.storage.type`, `memory.module_dir`.
+2. Ветвление:
+   - `memory.enabled: false` → выведи «Память maestro выключена — включите в maestro.json:
+     memory.enabled: true» (текущее сообщение; fallback НЕ запускать).
+   - `memory.enabled: true` + конфиг-невалиден (нет/невалиден `namespace`, внешний
+     embedder без api_key_env и т.п. — disabled_reason из `@maestro-memory`) → выведи
+     честную причину по `disabled_reason` (классификация как в `@maestro-memory` шаг 1.2),
+     НЕ «перезапустите opencode» (нужно чинить конфиг).
+   - `memory.enabled: true` + `storage.type` не sqlite (qdrant/pgvector) + инструмент
+     недоступен → выведи «Плагин maestro-bootstrap недоступен; бэкенд централизованный —
+     fallback невозможен; перезапустите opencode». НЕ «память выключена».
+   - `memory.enabled: true` + `storage.type: sqlite` + инструмент недоступен → шаг 1a
+     (fallback sqlite).
+3. Вызови инструмент `memory_stats_detail` (без параметров). Если доступен — продолжи
+   обычным путём (сохрани данные, guard на «Узлы графа», шаг 2). Если недоступен — по
+   ветвлению выше.
 4. **Проверь полноту данных (guard):** в выводе должна присутствовать секция
    `Узлы графа (M):`. Если её НЕТ — работающий плагин старше фичи commit-графа
    (`memory-report-commit-nodes`): выведи предупреждение
@@ -31,11 +38,47 @@ description: Сгенерировать статический HTML-отчёт �
    (рёбра между `session_id`, узлы — сессии). НЕ рендерь молча несогласованный
    отчёт (пустой commit-граф / неверный формат).
 
+## Шаг 1a. Fallback: прямое чтение sqlite (только при sqlite-бэкенде, tool недоступен)
+
+1. Резолв данных (через provisioned-код module_dir, НЕ дублируя логику):
+   - `<data-dir>`: вычисли из XDG/`~/Library/Application Support` (maestro).
+   - module_dir: `memory.module_dir` из maestro.json, иначе `<data-dir>/maestro/memory/module`.
+   - `<key>`: импортируй `resolveEffectiveKey`/`sanitizeDirName` из
+     `<module_dir>/config.js` и `deriveProjectKey` из `<module_dir>/project.js`
+     через dynamic import (ESM). projectHash вычисли как
+     `deriveProjectKey({ gitRemote, absPath }).hash` (gitRemote — из
+     `git remote get-url origin` в корне проекта, absPath — корень проекта;
+     зеркалит логику плагина index.js). Затем
+     `effectiveKey = resolveEffectiveKey({ projectHash, namespace })` — при
+     валидном конфиге (namespace задан) это просто namespace. Путь БД:
+     `<data-dir>/maestro/memory/<sanitizeDirName(effectiveKey)>/memory.db`.
+   - better-sqlite3: `createRequire` из `<module_dir>/package.json` (CJS).
+2. Открой БД readonly: `new Database(dbPath, { readonly: true })`.
+   - ENOENT (файла нет) → «Память пуста / нет данных».
+   - open-сбой на существующем файле (WAL recovery) → «Не удалось открыть БД (readonly);
+     перезапустите opencode».
+   - better-sqlite3 не установлен → «Плагин недоступен для fallback; перезапустите opencode».
+3. Собери агрегаты (SEC-4b — только числа/авторы/даты/ветки/merged/head; title/summary/
+   decisions/embedding НЕ выбирать). **`include_text` в fallback не поддерживается —
+   всегда `false`:** даже при `memory.report.include_text: true` упрощённый отчёт
+   содержит только агрегаты, без title/summary/decisions (fallback не читает
+   текстовые поля записей):
+   - `SELECT COUNT(*) FROM memory WHERE key = ?`
+   - `SELECT author, COUNT(*) ... GROUP BY author`
+   - `SELECT date(time_last/1000,'unixepoch','localtime') AS day, COUNT(*) c ... GROUP BY day`
+   - `SELECT branch, COUNT(*) ... GROUP BY branch`
+   - `SELECT head, COUNT(*) sessions, MIN(time_first) first, MAX(time_last) last
+      ... GROUP BY head`
+   - `SELECT COUNT(*) FROM memory WHERE merged = 1`
+4. Сформируй упрощённый HTML-отчёт (те же секции, что обычный, но без кластеров/графа/
+   тиров) + плашка: «Плагин maestro-bootstrap недоступен — отчёт упрощён (без кластеров,
+   графа, тиров). Перезапустите opencode после обновления».
+
 ## Шаг 2. Прочитать конфигурацию
 
-1. Прочитай `maestro.json` (файл в корне проекта) через **bash** (`cat`/`sed`) —
-   нативный permission-слой deny-ит `read`-тул по `maestro.json`.
-2. Извлеки `memory.report.include_text`. Если отсутствует → `false` (по умолчанию).
+1. Извлеки `memory.report.include_text` из уже прочитанного в шаге 1 `maestro.json`
+   (чтение через bash — нативный permission-слой deny-ит `read`-тул по `maestro.json`).
+   Если отсутствует → `false` (по умолчанию).
 
 ## Шаг 3. Сформировать статический HTML
 

@@ -34,6 +34,9 @@
 `.maestro/plugin-version` (эфемерный метафайл, semver-only). Конфиг `maestro.json`
 **не** хранит версию дистрибутива; `/maestro-version` показывает фактическую
 версию загруженного плагина из `.maestro/plugin-version` (см. [Команды](commands.md)).
+Та же фактическая версия дублируется в init-строке bootstrap-лога
+(`plugin initialized`, поле `version`) — Гейт 0 сравнивает её с версией из кэша
+плагина (warn при рассинхроне, см. ниже).
 
 > **ИБ:** версия плагина — только `.maestro/plugin-version` (semver-only);
 > конфиг `maestro.json` защищается **нативно** — deny `read`/`glob`/`grep` +
@@ -516,8 +519,15 @@ merge-config (`.opencode/opencode.json`
 
 1. самый свежий `.maestro/logs/maestro-bootstrap-<дата>.log` должен содержать
    запись `plugin initialized` с timestamp не старше 24 часов.
+2. После подтверждения свежести — проверка рассинхрона версий (warn, НЕ stop):
+   `"version":"X.Y.Z"` из init-строки сравнивается с версией из кэша плагина
+   (`~/.cache/opencode/packages/maestro-bootstrap@git+*/github.com/wad-jet/maestro.git/
+   node_modules/maestro-bootstrap/package.json`; semver-осознанно). При отставании
+   runtime от кэша — warn «Версия плагина (A) отстаёт от кэша (B) — runtime-правки
+   не активны до перезапуска opencode» и продолжение. Кэш не найден / `#sha`-pin /
+   runtime новее кэша → молча пропустить.
 
-Если условие не выполнено — жёсткий STOP без «продолжить»: только
+Если условие 1 не выполнено — жёсткий STOP без «продолжить»: только
 «(a) подключить плагин и перезапустить» / «(c) стоп». Причина: без плагина
 защита `docs/confidential/**` и sanitize не действуют (fail-open), confidential-
 данные доступны untrusted-агентам. `@maestro-setup` и `@regression` не гейтятся.
