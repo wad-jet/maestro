@@ -77,6 +77,11 @@ BLOCKER: <if BLOCKED, describe; else "none">
 CONTEXT_NEEDED: <if NEEDS_CONTEXT, describe; else "none">
 ```
 
+**Контракт отчёта (обязателен):** верни Status (DONE | DONE_WITH_CONCERNS |
+BLOCKED | NEEDS_CONTEXT) + Commits + Files changed + Test output + отчёт-файл.
+Отчёт без Status/Files/Test/Commit считается бессодержательным (нарушение
+контракта) — оркестратор не примет его как DONE.
+
 ## Codebase Pattern Checklist
 
 Before reporting DONE, verify these codebase-wide patterns. They are NOT

@@ -83,6 +83,11 @@ Markdown. No JSON, no numeric scores.
 
 **Reasoning:** [1-2 sentence technical assessment.]
 
+**Контракт вывода (обязателен):** Верни VERDICT: approve | revise | reject +
+бакеты CRITICAL/IMPORTANT/MINOR. Отчёт без вердикта и бакетов считается
+бессодержательным (нарушение контракта) — оркестратор классифицирует его как
+бессодержательный результат (1 повтор → HITL).
+
 ## Rules
 
 - Review the SPEC, not the (nonexistent) plan.

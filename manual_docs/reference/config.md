@@ -182,7 +182,7 @@ deny. Trust не наследуется вложенными субагента�
 | `tool.execute.before` | info | `tool` (=task) |
 | `tool.execute.after` | info | `tool`, `durationMs`, `title` (санитизирован, SEC-4) |
 | `tool.execute.after.empty_result` | warn | `tool` |
-| `session.error` | warn | `errorType`, `errorMessage` |
+| `session.error` | warn | `errorType` (`name ?? type`, для строки — "Error"), `errorMessage` (`data?.message ?? message`, для строки — сама строка), `aborted` (true = MessageAbortedError/прерывание пользователем) |
 | `session.status.retry` | warn | `attempt`, `message` |
 | `sanitizer.redacted` | warn | `tool`, `agent`, `redacted` |
 | `sanitizer.all_rules_disabled` | warn | `tool`, `agent` |
