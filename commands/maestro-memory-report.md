@@ -44,8 +44,14 @@ description: Сгенерировать статический HTML-отчёт �
    - `<data-dir>`: вычисли из XDG/`~/Library/Application Support` (maestro).
    - module_dir: `memory.module_dir` из maestro.json, иначе `<data-dir>/maestro/memory/module`.
    - `<key>`: импортируй `resolveEffectiveKey`/`sanitizeDirName` из
-     `<module_dir>/config.js` через dynamic import (ESM) — путь БД:
-     `<data-dir>/maestro/memory/<sanitizeDirName(key)>/memory.db`.
+     `<module_dir>/config.js` и `deriveProjectKey` из `<module_dir>/project.js`
+     через dynamic import (ESM). projectHash вычисли как
+     `deriveProjectKey({ gitRemote, absPath }).hash` (gitRemote — из
+     `git remote get-url origin` в корне проекта, absPath — корень проекта;
+     зеркалит логику плагина index.js). Затем
+     `effectiveKey = resolveEffectiveKey({ projectHash, namespace })` — при
+     валидном конфиге (namespace задан) это просто namespace. Путь БД:
+     `<data-dir>/maestro/memory/<sanitizeDirName(effectiveKey)>/memory.db`.
    - better-sqlite3: `createRequire` из `<module_dir>/package.json` (CJS).
 2. Открой БД readonly: `new Database(dbPath, { readonly: true })`.
    - ENOENT (файла нет) → «Память пуста / нет данных».
@@ -53,7 +59,10 @@ description: Сгенерировать статический HTML-отчёт �
      перезапустите opencode».
    - better-sqlite3 не установлен → «Плагин недоступен для fallback; перезапустите opencode».
 3. Собери агрегаты (SEC-4b — только числа/авторы/даты/ветки/merged/head; title/summary/
-   decisions/embedding НЕ выбирать):
+   decisions/embedding НЕ выбирать). **`include_text` в fallback не поддерживается —
+   всегда `false`:** даже при `memory.report.include_text: true` упрощённый отчёт
+   содержит только агрегаты, без title/summary/decisions (fallback не читает
+   текстовые поля записей):
    - `SELECT COUNT(*) FROM memory WHERE key = ?`
    - `SELECT author, COUNT(*) ... GROUP BY author`
    - `SELECT date(time_last/1000,'unixepoch','localtime') ... GROUP BY date`
