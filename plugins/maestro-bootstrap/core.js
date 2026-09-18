@@ -1109,3 +1109,44 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
 
   return plugin;
 };
+
+/**
+ * Адаптер opencode-плагина: оборачивает фабрику плагина в форвардинг всех хуков.
+ * Мемо успешного init + retry после сбоя (каркас НЕ кэшируется — следующая
+ * инвокация повторяет init). Логирование сбоя init — I2-guard против тихого
+ * fail-open. config/startup — условный override: config всегда функция (opencode
+ * вызывает hook.config?.(cfg), M12: НЕ форсируем file_access); startup — только
+ * если core его не дал (hooks.startup ?? noop), чтобы не глушить будущий core-хук.
+ * @param {(input: object) => Promise<object>} factory  Асинхронная фабрика плагина.
+ * @returns {(input: object) => Promise<object>}  Функция opencode-plugin.
+ */
+export function createBootstrapAdapter(factory) {
+  let hooks = null;
+  return async function adapter(input) {
+    if (!hooks) {
+      try {
+        hooks = await factory(input);
+      } catch (err) {
+        // I2: проглоченный сбой init тихо отключает ВСЕ хуки (confidential,
+        // sanitizer) → fail-open. Логируем, чтобы не было тихого отключения
+        // защиты. Плагин не кэшируется — следующая инвокация повторит.
+        console.error("[maestro-bootstrap] init failed:", err instanceof Error ? err.message : err);
+        hooks = null;
+      }
+    }
+    // Fail-soft: init упал → минимальный каркас (без защиты).
+    if (!hooks) {
+      return {
+        config: async () => ({}),
+        event: async () => {},
+        startup: async () => {},
+        dispose: async () => {},
+      };
+    }
+    return {
+      ...hooks,
+      config: async () => ({}),
+      startup: hooks.startup ?? (async () => {}),
+    };
+  };
+}

@@ -21,45 +21,13 @@
  * of type string, got object"). Поэтому index.js — только адаптер с default
  * export, а все named exports живут в core.js (для тестов и прямого импорта).
  */
+import { createBootstrapAdapter, MaestroBootstrapPlugin } from "./core.js";
 
-import { MaestroBootstrapPlugin } from "./core.js";
+const adapter = createBootstrapAdapter(async (input) =>
+  MaestroBootstrapPlugin({
+    directory: process.cwd(),
+    client: input?.client,
+  }),
+);
 
-let _mbHooks = null;
-
-export default async function opencodePlugin(input) {
-  if (!_mbHooks) {
-    try {
-      _mbHooks = await MaestroBootstrapPlugin({
-        directory: process.cwd(),
-        client: input?.client,
-      });
-    } catch (err) {
-      // I2: проглоченный сбой init тихо отключает ВСЕ хуки (confidential,
-      // sanitizer) → fail-open. Логируем, чтобы не было тихого
-      // отключения защиты. Плагин не кэшируется — следующая инвокация повторит.
-      console.error("[maestro-bootstrap] init failed:", err instanceof Error ? err.message : err);
-      _mbHooks = null;
-    }
-  }
-
-  // Fail-soft: init упал → минимальный каркас (без защиты).
-  if (!_mbHooks) {
-    return {
-      config: async () => ({}),
-      event: async () => {},
-      startup: async () => {},
-      dispose: async () => {},
-    };
-  }
-
-  // Пробрасываем ВСЕ хуки core в opencode: event, dispose,
-  // tool.execute.before/after (санитайзер/confidential),
-  // tool (memory-инструменты), chat.message + experimental.chat.system.transform
-  // (auto_recall). `config: undefined` из core перекрываем пустой функцией —
-  // opencode вызывает hook.config?.(cfg) (M12: НЕ форсируем file_access).
-  return {
-    ..._mbHooks,
-    config: async () => ({}),
-    startup: async () => {},
-  };
-}
+export default adapter;
