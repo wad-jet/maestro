@@ -2126,16 +2126,22 @@ describe("maestro-bootstrap adapter forwarding core hooks", () => {
     assert.equal(Object.hasOwn(hooks, "tool"), true);
   });
 
-  it("fail-soft: throwing factory returns minimal skeleton, retries on next call", async () => {
-    const adapter = createBootstrapAdapter(async () => { throw new Error("boom"); });
+  it("fail-soft: throwing factory returns minimal skeleton, retries init on next call", async () => {
+    let calls = 0;
+    const realHooks = { event: async () => {}, dispose: async () => {}, marker: "real" };
+    const adapter = createBootstrapAdapter(async () => {
+      calls += 1;
+      if (calls === 1) throw new Error("boom");
+      return realHooks;
+    });
     const hooks1 = await adapter({});
     assert.equal(typeof hooks1.config, "function");
     assert.equal(typeof hooks1.event, "function");
     assert.equal(typeof hooks1.startup, "function");
     assert.equal(typeof hooks1.dispose, "function");
-    // второй вызов снова пытается init (не кэширует каркас) — фабрика снова throw
+    assert.notEqual(hooks1.marker, "real", "first call is the fail-soft skeleton");
     const hooks2 = await adapter({});
-    assert.equal(typeof hooks2.config, "function");
+    assert.equal(hooks2.marker, "real", "second call retried init and got real hooks");
   });
 
   it("forwards ALL core hook keys (superset, incl chat/experimental)", async () => {
