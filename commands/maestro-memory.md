@@ -11,12 +11,13 @@ description: Показать статус memory layer плагина maestro-b
 ## Шаг 1. Проверить доступность инструментов памяти
 
 1. Попробуй вызвать инструмент `memory_stats_detail` (без параметров).
-2. Если вызов не удался / инструмент недоступен / память выключена → выведи:
-
-   ```
-   Память maestro выключена (disabled_reason: <причина>).
-   Включите в maestro.json: memory.enabled: true (см. manual_docs/how-to/enable-memory.md)
-   ```
+1.2. Если `memory_stats_detail` недоступен:
+   - Прочитай maestro.json через bash: `memory.enabled`, `memory.storage.type`.
+   - `memory.enabled: false` → «Память maestro выключена — включите memory.enabled: true».
+   - `enabled: true` + конфиг-невалиден (disabled_reason) → честная причина по
+     `disabled_reason` (namespace, embedder, mainline и т.п.).
+   - `enabled: true` + конфиг валиден → «Плагин maestro-bootstrap недоступен —
+     перезапустите opencode». НЕ «память выключена».
 
    Причину (`disabled_reason`) определи по `maestro.json`: отсутствие секции `memory` →
    `no_memory_section`; `memory.enabled: false` → `explicitly_disabled`; невалидные ключи
