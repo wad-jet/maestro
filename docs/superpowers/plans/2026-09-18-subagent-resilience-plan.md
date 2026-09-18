@@ -223,7 +223,7 @@ console.error("[maestro-bootstrap] session.error raw:", typeof err, err && Objec
 ```js
 it("session.error logs name/message for Error object", async () => {
   const p = await MaestroBootstrapPlugin({ directory: dir });
-  await p.event({ event: { type: "session.error", properties: { sessionID: "s", error: { name: "OverloadedError", message: "overloaded" } } } });
+  await p.event({ event: { type: "session.error", properties: { sessionID: "s", error: { name: "OverloadedError", data: { message: "overloaded" } } } } });
   const e = readLogs(dir, "maestro-bootstrap").find((x) => x.msg === "session.error");
   assert.equal(e.errorType, "OverloadedError");
   assert.equal(e.errorMessage, "overloaded");
@@ -269,10 +269,12 @@ Expected: новые тесты FAIL (старый handler не пишет error
 if (type === "session.error") {
   const err = properties?.error;
   const errName = typeof err === "string" ? err : err?.name ?? err?.type;
+  const errMessage = typeof err === "string" ? undefined
+    : err?.data?.message ?? err?.message;
   log.warn("session.error", {
     sessionID,
     errorType: errName,
-    errorMessage: typeof err === "string" ? undefined : err?.message,
+    errorMessage: errMessage,
     aborted: errName === "MessageAbortedError" || err?.type === "message_aborted",
   });
 }
