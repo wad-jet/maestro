@@ -178,6 +178,96 @@ describe("maestro-bootstrap global logging", () => {
     assert.equal(errEntry.errorType, "message_aborted");
   });
 
+  it("should log session.error robust to Error object (name + data.message)", async () => {
+    await hooks.event({
+      event: {
+        type: "session.error",
+        properties: {
+          sessionID: "robust-error-session",
+          error: new Error("Aborted"),
+        },
+      },
+    });
+
+    entries = readLogs(dir);
+    const errEntry = entries.find((e) => e.msg === "session.error" && e.sessionID === "robust-error-session");
+    assert.ok(errEntry, "session.error entry must exist for Error object");
+    assert.equal(errEntry.errorType, "Error");
+    assert.equal(errEntry.errorMessage, "Aborted");
+  });
+
+  it("should log session.error robust to Error with data.message", async () => {
+    await hooks.event({
+      event: {
+        type: "session.error",
+        properties: {
+          sessionID: "robust-data-session",
+          error: { name: "AbortError", data: { message: "User cancelled" } },
+        },
+      },
+    });
+
+    entries = readLogs(dir);
+    const errEntry = entries.find((e) => e.msg === "session.error" && e.sessionID === "robust-data-session");
+    assert.ok(errEntry, "session.error entry must exist for data.message format");
+    assert.equal(errEntry.errorType, "AbortError");
+    assert.equal(errEntry.errorMessage, "User cancelled");
+  });
+
+  it("should log session.error robust to legacy {type, message}", async () => {
+    await hooks.event({
+      event: {
+        type: "session.error",
+        properties: {
+          sessionID: "robust-legacy-session",
+          error: { type: "message_aborted", message: "Legacy abort" },
+        },
+      },
+    });
+
+    entries = readLogs(dir);
+    const errEntry = entries.find((e) => e.msg === "session.error" && e.sessionID === "robust-legacy-session");
+    assert.ok(errEntry, "session.error entry must exist for legacy format");
+    assert.equal(errEntry.errorType, "message_aborted");
+    assert.equal(errEntry.errorMessage, "Legacy abort");
+  });
+
+  it("should log session.error robust to raw string", async () => {
+    await hooks.event({
+      event: {
+        type: "session.error",
+        properties: {
+          sessionID: "robust-string-session",
+          error: "Something went wrong",
+        },
+      },
+    });
+
+    entries = readLogs(dir);
+    const errEntry = entries.find((e) => e.msg === "session.error" && e.sessionID === "robust-string-session");
+    assert.ok(errEntry, "session.error entry must exist for string error");
+    assert.equal(errEntry.errorType, "Error");
+    assert.equal(errEntry.errorMessage, "Something went wrong");
+  });
+
+  it("should log session.error robust when error has name but no data/message", async () => {
+    await hooks.event({
+      event: {
+        type: "session.error",
+        properties: {
+          sessionID: "robust-no-data-session",
+          error: { name: "TimeoutError" },
+        },
+      },
+    });
+
+    entries = readLogs(dir);
+    const errEntry = entries.find((e) => e.msg === "session.error" && e.sessionID === "robust-no-data-session");
+    assert.ok(errEntry, "session.error entry must exist for name-only error");
+    assert.equal(errEntry.errorType, "TimeoutError");
+    assert.equal(errEntry.errorMessage, null);
+  });
+
   it("should log session.status retry globally", async () => {
     await hooks.event({
       event: {

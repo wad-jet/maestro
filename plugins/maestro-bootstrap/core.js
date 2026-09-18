@@ -887,10 +887,23 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
         const { type, properties } = event ?? {};
         const sessionID = properties?.sessionID;
         if (type === "session.error") {
+          const err = properties?.error;
+          let errorType = null;
+          let errorMessage = null;
+          if (err && typeof err === "object") {
+            // New format: Error object { name, data: { message } }
+            // Legacy fallback: { type, message }.
+            errorType = err.name ?? err.type ?? null;
+            errorMessage = err.data?.message ?? err.message ?? null;
+          } else if (typeof err === "string") {
+            // Raw string error.
+            errorType = "Error";
+            errorMessage = err;
+          }
           log.warn("session.error", {
             sessionID,
-            errorType: properties?.error?.type,
-            errorMessage: properties?.error?.message,
+            errorType,
+            errorMessage,
           });
         } else if (type === "session.status" && properties?.status?.type === "retry") {
           log.warn("session.status.retry", {
