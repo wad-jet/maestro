@@ -112,21 +112,25 @@ raw-объекта ошибки. В `core.js` handler временно доба�
 `console.error` с `String(err)` идёт мимо маскирующего логгера — обход
 маскирования; уборка фиксируется в §3.5 и критерии №2).
 
-**Изменение `core.js:889-894` (устойчивое к наблюдаемой реальности):**
+**Изменение `core.js:889-894` (устойчивое к фактической схеме opencode — верифицировано
+09-18 по бинарю: `error = {name, data:{message}}`, fallback legacy `{type,message}`, строка, `{}`):**
 ```js
 if (type === "session.error") {
   const err = properties?.error;
   const errName = typeof err === "string" ? err : err?.name ?? err?.type;
+  const errMessage = typeof err === "string" ? undefined
+    : err?.data?.message ?? err?.message;
   log.warn("session.error", {
     sessionID,
     errorType: errName,
-    errorMessage: typeof err === "string" ? undefined : err?.message,
+    errorMessage: errMessage,
     aborted: errName === "MessageAbortedError" || err?.type === "message_aborted",
   });
 }
 ```
-(Обрабатывает Error-объект `{name,message}`, legacy `{type,message}`, строку,
-`{}`/undefined. После live-верификации формы — скорректировать под факт.)
+(Обрабатывает фактическую форму opencode `{name, data.message}` (верифицирована),
+legacy `{type, message}`, строку, `{}`/undefined. После live-верификации формы —
+скорректировать под факт.)
 
 ## 3. Изменения
 
@@ -160,8 +164,8 @@ if (type === "session.error") {
   handler (см. §2-C).
 
 ### 3.6. `plugins/maestro-bootstrap/index.test.js`
-- C: тесты: (1) Error-объект `{name, message}` → `errorType: name`, `errorMessage:
-  message`, `aborted: false`; (2) `{name:"MessageAbortedError"}` → `aborted: true`;
+- C: тесты: (1) Error-объект `{name, data:{message}}` → `errorType: name`, `errorMessage:
+  data.message`, `aborted: false`; (2) `{name:"MessageAbortedError"}` → `aborted: true`;
   (3) legacy `{type:"message_aborted", message}` → `errorType: type`, `aborted: true`;
   (4) строка `"boom"` → `errorType: "boom"`; (5) `{}`/undefined → поля undefined,
   entry существует.
@@ -208,5 +212,5 @@ if (type === "session.error") {
 reviewer: opus
 date: 2026-09-18
 verdict: approve
-hash: 4e90e9b6fb7cb22fdf526263e44866536426a7d7dc51bd6622e01e1b8a7c1b04
+e31c84a239fd9b68696c8303e4336ef86600fb3c5763c4c6a41f8a25d99544
 -->
