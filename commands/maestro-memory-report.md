@@ -65,7 +65,7 @@ description: Сгенерировать статический HTML-отчёт �
    текстовые поля записей):
    - `SELECT COUNT(*) FROM memory WHERE key = ?`
    - `SELECT author, COUNT(*) ... GROUP BY author`
-   - `SELECT date(time_last/1000,'unixepoch','localtime') ... GROUP BY date`
+   - `SELECT date(time_last/1000,'unixepoch','localtime') AS day, COUNT(*) c ... GROUP BY day`
    - `SELECT branch, COUNT(*) ... GROUP BY branch`
    - `SELECT head, COUNT(*) sessions, MIN(time_first) first, MAX(time_last) last
       ... GROUP BY head`
