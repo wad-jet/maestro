@@ -84,7 +84,8 @@ description: Сбор фактуры по прошлым процессам maes
 
 - **task-диспатчи** (`tool.execute.before`/`after`): количество, средняя/макс
   длительность (`durationMs`), тайтлы — **только количество** (без содержимого).
-- **`session.error`** — ошибки сессии.
+- **`session.error`** — ошибки сессии (отдельно: `aborted: true` — прерывания
+  пользователем, НЕ сбой; в общий счётчик ошибок не включаются).
 - **`session.status.retry`** — повторы (attempt, message — напр. rate limit).
 - **`tool.execute.after.empty_result`** — пустые результаты сабагентов.
 - **`sanitizer.redacted`** — что замаскировано (без содержимого).

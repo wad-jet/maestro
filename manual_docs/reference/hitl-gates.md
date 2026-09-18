@@ -114,6 +114,13 @@ offer, docs-шаг) — диспатч батчами через `auto-ai-decisi
   блокирует вход.
 - **Trivial fix (1–2 строки):** maestro не используется — redirect на `@haiku`.
 
+## 📋 SCOPE NOTE
+
+> **Повтор после Revise (anti-loop): не более 1 повтора.** В отличие от budget
+> повторов 3 для проверки доступности модели (SKILL.md, п. 1339), повтор после
+> `revise`-вердикта spec-ревью ограничен **одним** повтором для пустого/
+> бессодержательного результата —以防止 infinite loop. См. [SKILL.md](../../skills/maestro/SKILL.md).
+
 ## 🔗 Связанные разделы
 
 - [Запуск первой фичи](../tutorials/run-first-feature.md)
