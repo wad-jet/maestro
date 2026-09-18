@@ -15,6 +15,3 @@
   - **SCOPE NOTE:** (SDD SKILL.md + review-package):
     - run: review-package выводит секцию "Auxiliary commits (out of scope)"
   - **feedback-report:** aborted-прерывания не в счётчике ошибок
-  - **confidential-доступ trusted-агентов (custodian/sanitizer):**
-    - run: custodian/sanitizer выполняют работу с confidential-данными → работает
-    - workdir: корень целевого приложения

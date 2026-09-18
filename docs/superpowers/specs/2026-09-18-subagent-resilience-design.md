@@ -117,8 +117,8 @@ raw-объекта ошибки. В `core.js` handler временно доба�
 ```js
 if (type === "session.error") {
   const err = properties?.error;
-  const errName = typeof err === "string" ? err : err?.name ?? err?.type;
-  const errMessage = typeof err === "string" ? undefined
+  const errName = typeof err === "string" ? "Error" : err?.name ?? err?.type;
+  const errMessage = typeof err === "string" ? err
     : err?.data?.message ?? err?.message;
   log.warn("session.error", {
     sessionID,
@@ -130,7 +130,8 @@ if (type === "session.error") {
 ```
 (Обрабатывает фактическую форму opencode `{name, data.message}` (верифицирована),
 legacy `{type, message}`, строку, `{}`/undefined. После live-верификации формы —
-скорректировать под факт.)
+скорректировать под факт. Строковый кейс — ruling 09-18: errorType="Error" +
+errorMessage = строка.)
 
 ## 3. Изменения
 
@@ -167,7 +168,7 @@ legacy `{type, message}`, строку, `{}`/undefined. После live-вери
 - C: тесты: (1) Error-объект `{name, data:{message}}` → `errorType: name`, `errorMessage:
   data.message`, `aborted: false`; (2) `{name:"MessageAbortedError"}` → `aborted: true`;
   (3) legacy `{type:"message_aborted", message}` → `errorType: type`, `aborted: true`;
-  (4) строка `"boom"` → `errorType: "boom"`; (5) `{}`/undefined → поля undefined,
+  (4) строка `"boom"` → `errorType: "Error"`, `errorMessage: "boom"`; (5) `{}`/undefined → поля undefined,
   entry существует.
 
 ### 3.7. `skills/maestro-feedback-report/SKILL.md`
@@ -212,5 +213,5 @@ legacy `{type, message}`, строку, `{}`/undefined. После live-вери
 reviewer: opus
 date: 2026-09-18
 verdict: approve
-e31c84a239fd9b68696c8303e4336ef86600fb3c5763c4c6a41f8a25d99544
+8546953cf41ce62e0572c97fdafa83bd723485968e5373047571b171778b5323
 -->
