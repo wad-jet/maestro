@@ -16,7 +16,10 @@
 - Детектит пустой результат субагента (`tool.execute.after.empty_result`).
 - **Версия плагина**: пишет `.maestro/plugin-version` (фактическая версия
   загруженного плагина, semver-only). Конфиг `maestro.json` версию не хранит;
-  `/maestro-version` показывает её без сравнения с ожидаемой.
+  `/maestro-version` показывает её без сравнения с ожидаемой. Та же версия
+  дублируется в init-строке bootstrap-лога (`plugin initialized`, поле `version`);
+  Гейт 0 (SKILL.md) сравнивает её с версией из кэша плагина — warn при
+  рассинхроне (не STOP).
 
 Плагин **глобальный** — не фильтрует по агенту, работает во всех сессиях.
 
@@ -260,11 +263,13 @@ untrusted, дефолтные sanitizer-правила.
   `memory_prune`), `chat.message`,
   `experimental.chat.system.transform`, `event` (`session.idle`/`session.deleted`),
   расширенный `dispose`. Инвариант: `experimental.chat.messages.transform` НЕ
-  присваивается. **Адаптер `index.js` (default export) обязан пробрасывать ВСЕ
-  хуки, которые собирает `MaestroBootstrapPlugin` (core.js)** — не только
-  `config`/`event`/`start`/`dispose`, но и `tool`, `tool.execute.before`/`after`,
-  `chat.message`, `experimental.*`. Иначе memory-инструменты и защитные хуки
-  недоступны в сессиях.
+  присваивается. **Адаптер вынесен в core.js — `createBootstrapAdapter(factory)`**
+  (named export; мемо успешного init + retry после сбоя + fail-soft каркас +
+  spread всех хуков). `index.js` — тонкий, только default export. Адаптер обязан
+  пробрасывать ВСЕ хуки, которые собирает `MaestroBootstrapPlugin` (core.js) —
+  не только `config`/`event`/`start`/`dispose`, но и `tool`,
+  `tool.execute.before`/`after`, `chat.message`, `experimental.*`. Иначе
+  memory-инструменты и защитные хуки недоступны в сессиях.
 - **Гибридный поиск (все бэкенды, v3a):** векторный KNN + лексические совпадения
   (title+summary+decisions), слияние RRF (k=60); sqlite — FTS5, pgvector —
   `tsvector`+`ts_rank`, qdrant — payload full-text (filter-leg); backfill при init,
@@ -316,7 +321,9 @@ logs/, feedback-reports/, plugin-version); конфиг проекта — `maes
 
 Что логируется:
 
-- `plugin initialized` — загрузка плагина (info)
+- `plugin initialized` — загрузка плагина (info; поле `version` — фактическая
+  версия, та же, что в `.maestro/plugin-version`; Гейт 0 сравнивает её с версией
+  из кэша плагина — warn при рассинхроне)
 - `tool.execute.before` — вызов `task`-тула (info)
 - `tool.execute.after` — завершение `task` + `durationMs` (info)
 - `tool.execute.after.empty_result` — субагент вернул пустой результат (warn)

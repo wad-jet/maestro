@@ -683,6 +683,10 @@ memory_stats_detail() → агрегаты (без summary-текста)
 `memory_probe` (live-проверка, минуя cooldown) и показывает результат.
 Вывод также включает **`Каталог данных: <path>`** — резолвнутый
 `<data-dir>/maestro` (где лежат `memory.db`, `module/`, `state.json`).
+При недоступном `memory_stats_detail` команда различает: «память выключена»
+(`memory.enabled: false`), «конфиг-невалиден» (честная причина по
+`disabled_reason`) и «плагин недоступен» (`enabled: true` + инструмент
+недоступен → перезапустить opencode).
 
 ### `@maestro-memory-report`
 
@@ -707,6 +711,13 @@ opt-in на вставку замаскированных заголовков/s
 
 Отчёт завершается блоком-легендой с определениями ключевых терминов (кластер,
 размер, узел, тир, head, session_id и др.) — статические формулировки, без текста записей.
+
+При недоступном `memory_stats_detail` команда ветвится по `maestro.json`:
+`enabled: false` → «Память выключена»; `enabled: true` + конфиг-невалиден →
+честная причина по `disabled_reason`; `enabled: true` + sqlite → **fallback** на
+прямое чтение sqlite (упрощённый HTML с плашкой «Плагин недоступен», только
+агрегаты, `include_text` не поддерживается); `enabled: true` + qdrant/pgvector →
+«Плагин недоступен; бэкенд централизованный — fallback невозможен».
 
 > **Отклонение от спецификации (имя файла):** спецификация
 > (`docs/superpowers/specs/2026-09-07-maestro-memory-v2-design.md`) предполагала
