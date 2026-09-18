@@ -220,5 +220,5 @@ embeddings+cosine), тиры experience/dead (нужна git-логика).
 reviewer: opus
 date: 2026-09-18
 verdict: approve
-hash: 
+hash: 7c2ad1f19fd766a8fb781181a1b2ae3beaa92c1f01e53034c6217ecc9c40aab1
 -->
