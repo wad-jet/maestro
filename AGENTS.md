@@ -28,6 +28,8 @@ This is the **authoring repo** for the OpenCode `maestro` system (the "maestro" 
 
 `skills/` here is the source of truth. OpenCode loads skills/commands/agents from the **target application** repo (`.opencode/`). Delivery of changes to the target application is done via the **standard mechanism**: manually from the remote repository or through `agpack`. **Separate `.opencode/`-mirroring is NOT required** — the authoring repo is the single copy, published to the target application via repo/`agpack`.
 
+**Локальный dev-зеркал `.opencode/` (gitignored, dogfooding) — условная гигиена.** Для доставки не требуется (см. выше), но если используется — синхронизируется **только целиком** через `agpack sync` после push в remote (источник — remote, не локальное дерево); частичные ручные правки запрещены. При переименованиях (скиллы/команды/агенты/пути): push → `agpack sync` → grep остатков старого имени по всей поверхности (skills/, commands/, agents/, manual_docs/, скрипты) + удаление stale-каталогов (agpack старые имена не удаляет).
+
 - **Changes to `skills/maestro/SKILL.md`, `commands/*.md` or `agents/*.md` must also be reflected in `manual_docs/`** (user-facing docs for the maestro skill). Keeping `manual_docs/` in sync is part of the acceptance criteria for skill changes — see `manual_docs/how-to/keep-docs-up-to-date.md`.
 - **Changes to `SECURITY.md` (ИБ principles) must also be reflected in `manual_docs/`** — `explanation/agents-and-trust.md`, `reference/model-selection.md`, `reference/config.md` (same rule as for `SKILL.md`). `SECURITY.md` is the root-level source of truth, outside `manual_docs/`.
 

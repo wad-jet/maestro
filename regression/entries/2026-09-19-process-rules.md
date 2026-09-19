@@ -1,0 +1,21 @@
+# Regression — процессные правила (2026-09-19)
+
+- **version:** 1
+- **feature:** feature/process-rules
+- **added:** 2026-09-19
+- **status:** active
+- **risk:** LOW
+- **scenarios:**
+  - **Прерванное ревью возобновляется:** (SKILL.md Anti-loop п.5):
+    - run: отмена зависшего диспатча ревью → обязательное ревью пере-диспатчится
+    - run: grep "≠ отказ от ревью" skills/maestro/SKILL.md → ≥1
+  - **Комментарий ≠ команда:** (гейт 10):
+    - run: «Внеси правки» в обсуждении спеки → применяется к спеке, НЕ к коду
+    - run: grep "Внеси правки" skills/maestro/SKILL.md manual_docs/reference/hitl-gates.md → ≥1
+  - **Rollout плагина:** (update-maestro.md):
+    - run: push → agpack sync → очистить кэш → перезапуск (порядок закреплён)
+    - run: grep "Rollout-порядок" manual_docs/how-to/update-maestro.md → ≥1
+  - **Dev-зеркал .opencode:** (AGENTS.md):
+    - run: grep "только целиком" AGENTS.md → ≥1
+  - **Grep-синк переименований:** (keep-docs-up-to-date.md):
+    - run: grep "Grep-синхронизация" manual_docs/how-to/keep-docs-up-to-date.md → ≥1
