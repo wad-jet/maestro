@@ -9,6 +9,15 @@
 
 ## [Unreleased]
 
+### Изменено
+
+- **Follow-up волны P2 (P2.8):** bash-паттерны по слову `*cat*confidential*` убраны
+  (не защищали произвольные `confidential.paths`, блокировали служебные команды);
+  `maestro.json → confidential.paths` — единственный ручной источник путей, нативные
+  deny — производные (генерация при правке через `/maestro-assistant` + детектор
+  дрейфа); V1 runtime-верификация merge-семантики подтверждена (untrusted deny,
+  trusted per-agent allow поверх global deny). Regression: LOW.
+
 ## [2026-09-19]
 
 > **Версия 4.2.4** — Patch-релиз: процессные правила (P2.7) + наблюдаемость плагина (P2.6) + тестовая дисциплина (P2.5).
