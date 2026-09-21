@@ -34,7 +34,7 @@ project context, запускает pre-flight, определяет катег�
 
 | # | Шаг | Назначение |
 |---|---|---|
-| 0 | Project Context | Загрузка проекта контекста из `docs/project-context.md` (или создание через HITL). **Memory layer:** старт Plan-фазы — минимум 1 `memory_search` по теме задачи до первого вопроса пользователю (обязательно; память не включена → молча пропуск; канон — SKILL.md, секция «Memory layer (memory_search)») |
+| 0 | Project Context | Загрузка проекта контекста из `docs/project-context.md` (или создание через HITL). **Memory layer:** старт Plan-фазы — минимум 1 `memory_search` по теме задачи до первого дизайн-вопроса пользователю (обязательно; память не включена → молча пропуск; канон — SKILL.md, секция «Memory layer (memory_search)») |
 | 1 | Выбор маршрута | Feature / Bugfix / Spike? Определяет дальнейший путь. Spike — feasibility/ресеч, без spec/plan/мержа. |
 | 1.5 | Режим работы | Efficient (молчит между гейтами) / Interactive (комментирует находки) |
 | 2–6 | Pre-flight и изоляция | Диагностика рабочего дерева → создание рабочей ветки → изоляция (worktree/checkout) |

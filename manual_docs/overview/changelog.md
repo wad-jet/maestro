@@ -9,6 +9,20 @@
 
 ## [Unreleased]
 
+### Добавлено
+
+- **memory_search на точках принятия решений pipeline:** канон-правило в
+  SKILL.md (секция «Memory layer (memory_search)») — обязательный минимум
+  1 запрос до первого дизайн-вопроса на старте Plan-фазы и на ресече bugfix
+  (D1–D2), на шагах 11/13/16 и в Spec Review (opus) — на усмотрение ИИ;
+  guard: память не включена → молча пропуск. Ссылки/упоминания:
+  `@maestro-init`, `agents/sonnet.md`, `agents/opus.md`,
+  `spec-review-prompt.md`. Логирование обращений:
+  `memory_search: <точка> → <N> найдено; <оценка>`. Regression: LOW.
+- **Секция `## Memory layer usage` в `@maestro-feedback-report`:** статус
+  памяти (подключена/нет), обращения с оценкой эффективности и **пропуски
+  обязательного поиска** по достигнутым точкам с причиной. Regression: LOW.
+
 ### Изменено
 
 - **Follow-up волны P2 (P2.8):** bash-паттерны по слову `*cat*confidential*` убраны
