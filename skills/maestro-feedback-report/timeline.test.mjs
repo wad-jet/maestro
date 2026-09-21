@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, chmodSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -331,7 +331,7 @@ test("gaps limited to 5", () => {
   };
   const data = runFixture(fixture, "gaps5");
   const userWaitGaps = data.gaps.filter(g => g.type === "user_wait");
-  assert.ok(userWaitGaps.length <= 5, `gaps limited to 5, got ${userWaitGaps.length}`);
+  assert.ok(userWaitGaps.length === 5, `gaps limited to 5, got ${userWaitGaps.length}`);
 });
 
 test("empty file yields export_failed", () => {
@@ -348,4 +348,61 @@ test("empty file yields export_failed", () => {
     assert.equal(data.error, "export_failed");
     assert.equal(e.status, 1);
   }
+});
+
+test("path-less export path (shim opencode)", () => {
+  const fixtureData = {
+    info: {
+      id: "ses_shim",
+      model: { providerID: "openai", modelID: "gpt-4" },
+      time: { created: 1000, end: 1000 },
+    },
+    messages: [
+      {
+        info: { role: "user", time: { created: 1000 }, id: "u1", sessionID: "ses_shim" },
+        parts: [{ type: "text", text: "start" }],
+      },
+      {
+        info: { role: "assistant", time: { created: 2000 }, agent: "haiku", id: "a1", sessionID: "ses_shim" },
+        parts: [
+          { type: "text", text: "ok" },
+          {
+            type: "tool", tool: "read", callID: "r1",
+            state: {
+              status: "completed", input: { filePath: "/x.js" }, output: "x",
+              time: { start: 1000, end: 2000 },
+            },
+            id: "tr1", sessionID: "ses_shim", messageID: "a1",
+          },
+        ],
+      },
+    ],
+  };
+  const shimDir = join(tmpDir, "shim");
+  try { rmSync(shimDir, { recursive: true, force: true }); } catch { }
+  mkdirSync(shimDir);
+  const fixturePath = join(shimDir, "fixture.json");
+  writeFileSync(fixturePath, JSON.stringify(fixtureData));
+  const shimPath = join(shimDir, "opencode");
+  writeFileSync(shimPath, [
+    '#!/bin/sh',
+    'cat "' + fixturePath + '"',
+  ].join("\n"));
+  chmodSync(shimPath, "755");
+
+  const shimPathEnv = shimDir + ":" + process.env.PATH;
+  const out = execFileSync(process.execPath, [scriptPath, "ses_shim"], {
+    encoding: "utf-8",
+    timeout: 30000,
+    env: { ...process.env, PATH: shimPathEnv },
+  });
+  const data = JSON.parse(out.trim());
+  assert.equal(data.session.id, "ses_shim");
+  assert.equal(data.totals.toolOps, 1);
+  assert.equal(data.totals.toolTimeMs, 1000);
+  assert.equal(data.totals.inferenceMs, 0);
+  assert.equal(data.totals.userMessages, 1);
+  assert.equal(data.totals.idleWaitMs, 0);
+  assert.equal(Object.keys(data.tools).length, 1);
+  assert.equal(data.tools.read.count, 1);
 });

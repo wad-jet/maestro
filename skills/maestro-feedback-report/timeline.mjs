@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, unlinkSync } from "node:fs";
+import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
@@ -107,9 +107,6 @@ for (const msg of messages) {
   let nTools = 0;
   let toolMs = 0;
   let infMs = 0;
-  let earliestStart = Infinity;
-  let latestEnd = -Infinity;
-
   for (const tp of toolParts) {
     const toolName = tp.tool || null;
     if (!toolName) continue;
@@ -120,9 +117,6 @@ for (const msg of messages) {
     const t = st.time || {};
     const dur = (typeof t.start === "number" && typeof t.end === "number")
       ? (t.end - t.start) : null;
-
-    if (typeof t.start === "number") earliestStart = Math.min(earliestStart, t.start);
-    if (typeof t.end === "number") latestEnd = Math.max(latestEnd, t.end);
 
     if (dur !== null) {
       toolMs += dur;
