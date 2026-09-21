@@ -26,6 +26,11 @@
 
 Подробнее о поведении гейтов по режимам — [HITL-гейты](hitl-gates.md).
 
+**Memory layer:** в Plan mode (ресеч, обсуждение фичи/багфикса, подготовка
+spec) и на ресече bugfix — сначала `memory_search` по теме задачи (канон —
+SKILL.md, секция «Memory layer (memory_search)», детали —
+[Память maestro](memory.md)); память не включена → молча пропуск.
+
 ### `/regression`
 
 Регрессионный прогон по реестру рисков (`regression/`, в git). Standalone —
