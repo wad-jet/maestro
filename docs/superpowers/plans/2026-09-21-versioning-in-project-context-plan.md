@@ -25,7 +25,7 @@
 
 4. **`skills/maestro/SKILL.md`**:
    - шаг 0: в блок извлечения — «правила версионирования (если поле есть в
-     §3) — в PROJECT_CONTEXT (бump при релизе по гейту 17/шагу 18)»;
+     §3) — в PROJECT_CONTEXT (bump при релизе по гейту 17/шагу 18)»;
    - гейт 17: перед ВАРИАНТАМИ — «**Версия (если в project context есть
      версионирование):** показать `Версия: <текущая> → <предлагаемая> (правило:
      <тип изменения → уровень>)`; bump выполняется на шаге 18 после merge»;
@@ -45,7 +45,7 @@
 - Task 1 → `docs: design + plan for versioning-in-project-context`
 - Task 2 → `docs: project-context — блок "Версионирование"`
 - Task 3 → `docs(maestro-setup): init-context — категория 3, версионирование`
-- Task 4 → `docs(maestro): SKILL.md — verioning hook (шаг 0, гейт 17, шаг 18)`
+- Task 4 → `docs(maestro): SKILL.md — versioning hook (шаг 0, гейт 17, шаг 18)`
 - Task 5 → `docs: manual_docs sync — версионирование в project-context`
 
 ## Верификация
@@ -59,7 +59,8 @@
 - Финальное ревью — `code-reviewer`.
 - Гейт 17 (HITL): показать предлагаемую версию **4.3.0 → 4.4.0** (minor, новая
   фича — догфудинг правила).
-- После merge: bump 4.3.0 → 4.4.0 (package.json, project-context.md, новая
-  changelog-секция `## [2026-09-21]` (вторая за день, своя строка «Версия
-  4.4.0»; секция 4.3.0 не переписывается — она уже выпущена) + push +
+- После merge: bump 4.3.0 → 4.4.0 (package.json, project-context.md, changelog:
+  буллит из `[Unreleased]` **переезжает** в новую секцию `## [2026-09-21]`
+  (вторая за день; секция 4.3.0 не переписывается — она уже выпущена) со
+  строкой `> **Версия 4.4.0** — <кратко>`; `[Unreleased]` очищается) + push +
   `agpack sync`.

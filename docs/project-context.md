@@ -45,7 +45,9 @@
     скилла — **minor**; багфикс / патч — **patch**; **memory layer в beta** —
     дистрибутивная версия **не бампается** (beta-модуль, см. `manual_docs/reference/memory.md`).
   - **Действия при релизе:** changelog `manual_docs/overview/changelog.md` —
-    новая секция `## [YYYY-MM-DD]` + строка «Версия X.Y.Z — <кратко>»;
+    новая секция `## [YYYY-MM-DD]` + строка `> **Версия X.Y.Z** — <кратко>`
+    (формат blockquote+bold, как у существующих секций); буллиты `[Unreleased]`
+    переезжают в секцию релиза;
     синхронизация всех файлов, ссылающихся на текущую версию (`package.json`,
     этот файл; README — по факту наличия); bump — отдельный коммит
     `chore: bump version to X.Y.Z — <содержание> (changelog/version)`,

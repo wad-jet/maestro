@@ -108,7 +108,8 @@ baseline-тесты) и начало работы · `(b) отмена`. Pre-fli
 ### Шаги 17–18: Завершение
 
 - Шаг 17 — pre-PR: `(a) Approve merge` · `(b) Fix` · `(c) Отмена`.
-- Шаг 18 — merge в base-ветку (fast-forward или --no-ff).
+- Шаг 18 — merge в base-ветку (fast-forward или --no-ff); при версионировании
+  в project context — bump версии (версия + changelog).
 
 ## 💡 Советы
 
