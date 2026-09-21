@@ -290,6 +290,10 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
   **best-effort слой**; основной fail-closed — `read`/`edit`.
 - **Не вводить глобальный `"*": "ask"` для `bash`** — эскалирует каждый bash-вызов
   в per-call HITL (противоречит не-форсированию плагина). Только точечные deny.
+- **Bash-паттерны по слову — запрещены** (напр. `*cat*confidential*`): они не
+  защищают реальные `confidential.paths` (произвольные пути) и блокируют служебные
+  команды (агрегация аудит-лога). Защита bash от секретов — через `read`/`edit`
+  deny по реальным путям + санитайзер промптов; bash — best-effort слой.
 
 ### Глобальные deny (R1+R4) — эталон конфигурации init
 
@@ -300,7 +304,7 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
   "permission": {
     "read": { "*": "allow", "maestro.json": "deny", ".maestro/**": "deny", ".maestro/plugin-version": "allow", "docs/confidential/*": "deny", "*.env": "deny", "*.env.*": "deny", "*.env.example": "allow", "*.pem": "deny", "*.key": "deny", "*.crt": "deny", "*.p12": "deny", "*.pfx": "deny" },
     "edit": { "*": "allow", "maestro.json": "ask", "docs/confidential/*": "deny", "*.env": "deny", "*.env.*": "deny", "*.env.example": "allow", "*.pem": "deny", "*.key": "deny", "*.crt": "deny", "*.p12": "deny", "*.pfx": "deny" },
-    "bash": { "*": "allow", "*cat*confidential*": "deny", "*grep*confidential*": "deny", "*ls*confidential*": "deny", "*glob*confidential*": "deny" },
+    "bash": { "*": "allow" },
     "glob": { "*": "allow", "maestro.json": "deny", ".maestro/**": "deny", "docs/confidential/*": "deny" },
     "grep": { "*": "allow", "maestro.json": "deny", ".maestro/**": "deny", "docs/confidential/*": "deny" }
   }
@@ -323,15 +327,17 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
   НЕ удаляется. Оставшаяся половина R2 (удаление enforcement из плагина) — Этап B,
   после V1. Ограничение: если runtime-V1 покажет, что agent allow не перекрывает
   global deny → fallback: скоупить нативный confidential-deny из Этапа A
-  (оставить built-in секреты + bash-эвристики).
+  (оставить built-in секреты).
 
 ### Правила вывода
 
-- **Sync-правило двойного источника (I3):** confidential-пути живут в двух местах —
-  `maestro.json → confidential.paths` (плагин) и нативные `permission.read`/`edit`
-  deny (merge-config). **Любое изменение `confidential.paths` зеркалируется в
-  нативные deny и наоборот** (и для per-agent allow `custodian`/`sanitizer`).
-  Дрейф — дефект; проверять при правке любой из сторон.
+- **Sync-правило двойного источника (I3):** `maestro.json → confidential.paths` —
+  **единственный ручной источник** путей; нативные `permission.read`/`edit`/`glob`/
+  `grep` deny (merge-config) — **производные**, генерируются из paths (см. воркфлоу
+  «Настройка конфигурации», шаг 6). **Любое изменение `confidential.paths` →
+  перегенерация нативных deny** (+ per-agent allow `custodian`/`sanitizer`). Дрейф
+  недопустим; детектируется при консультации (шаг 2 воркфлоу). Пути вручную в
+  `.opencode/opencode.json` не дублируются.
 - **Не добавлять** `docs/superpowers/{specs,plans}/*` в deny (двухролевые).
 - **Policies (P4, R5):** `experimental.policies` (`provider.use`) — глобальный
   deny/allow провайдеров; global приоритетнее project; не перезаписывать.
@@ -377,11 +383,20 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
 
 1. Прочитать текущий артефакт (`maestro.json` — через bash, `cat`/`sed`: нативный
    permission-слой deny-ит `read`-тул; `.opencode/opencode.json` / `project-context.md`).
-2. Сформировать diff-merge (идемпотентно, сохраняя пользовательские правки).
-3. **HITL-гейт:** «(a) approve — (b) правки — (c) отмена» + показ diff-merge.
-4. Для `confidential.paths` / `sanitizer_whitelist.rules→false` —
+2. **Детектор дрейфа:** сверить `confidential.paths` из `maestro.json` с нативными
+   deny в `.opencode/opencode.json` (read/edit/glob/grep). При расхождении —
+   предупредить «paths и нативные deny расходятся — перегенерирую» (включается в
+   HITL-гейт шага 3).
+3. Сформировать diff-merge (идемпотентно, сохраняя пользовательские правки).
+4. **HITL-гейт:** «(a) approve — (b) правки — (c) отмена» + показ diff-merge.
+5. Для `confidential.paths` / `sanitizer_whitelist.rules→false` —
    адресный diff + явное HITL-подтверждение (IMP-3, OP-4).
-5. Записать. **OP-1:** сообщить о необходимости перезапуска opencode.
+6. **При правке `confidential.paths` — перегенерировать нативные deny**
+   (производные от paths): для каждого пути из `confidential.paths` — deny в
+   `read`/`edit`/`glob`/`grep` + per-agent allow `custodian`/`sanitizer` на те же
+   пути. Показать diff-merge до записи. `maestro.json` — единственный ручной
+   источник путей; `.opencode/opencode.json` — производный.
+7. Записать. **OP-1:** сообщить о необходимости перезапуска opencode.
 
 ### 3. Актуализация project-context (наполнение)
 

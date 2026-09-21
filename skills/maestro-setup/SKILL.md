@@ -263,26 +263,29 @@ fail-closed baseline, не зависящий от плагина. Идемпо�
 }
 ```
 
-**R4 — 2-й эшелон (bash/glob/grep) — закрывает пробел плагина.** Плагин не
+**Генерация из `confidential.paths`:** deny для `docs/confidential/*` в примере —
+дефолт; фактический набор deny (R1 и R4: read/edit/glob/grep) генерируется из
+`confidential.paths` в `maestro.json` (для каждого пути — deny + per-agent allow
+`custodian`/`sanitizer`). `maestro.json` — единственный ручной источник путей;
+`.opencode/opencode.json` — производный (генерируется, вручную пути не
+дублируются).
+
+**R4 — 2-й эшелон (glob/grep) — закрывает пробел плагина.** Плагин не
 перехватывает `bash`/`glob`/`grep`; нативный слой добавляет эвристические deny по
-confidential-путям. **Семантика:** `bash` матчится по строке команды (эвристика),
-`glob`/`grep` — по **аргументу-паттерну**, а не по путям-результатам → закрывают
+confidential-путям для `glob`/`grep`. **Семантика:** `glob`/`grep` — по
+**аргументу-паттерну**, а не по путям-результатам → закрывают
 только прямое указание паттерна `confidential`, широкие паттерны-обход (напр.
 `glob("docs/**/*.md")`) не блокируются. Это **best-effort слой**, не абсолютный
 барьер; основной fail-closed — `read`/`edit` (R1). Не вводим глобальный
 `"*": "ask"` для bash — он эскалировал бы каждый bash-вызов в per-call HITL
-(противоречит не-форсированию плагина); только точечные deny:
+(противоречит не-форсированию плагина); только точечные deny. **Bash-паттерны по
+слову запрещены** (напр. `*cat*confidential*`) — не защищают произвольные пути и
+блокируют служебные команды; защита bash — через `read`/`edit` deny по реальным путям:
 
 ```json
 {
   "permission": {
-    "bash": {
-      "*": "allow",
-      "*cat*confidential*": "deny",
-      "*grep*confidential*": "deny",
-      "*ls*confidential*": "deny",
-      "*glob*confidential*": "deny"
-    },
+    "bash": { "*": "allow" },
     "glob": { "*": "allow", "docs/confidential/*": "deny" },
     "grep": { "*": "allow", "docs/confidential/*": "deny" }
   }
@@ -340,7 +343,7 @@ merge-config (`agent.<name>.permission`), идемпотентно:
 для untrusted не удаляются. Нативное trusted-исключение — необходимый мост поверх
 нативного глобального deny; если runtime-V1 покажет, что agent allow не
 перекрывает global deny → fallback: скоупить нативный confidential-deny из Этапа A
-(оставить built-in секреты + bash-эвристики), положившись на плагин (см. spec, V1).
+(оставить built-in секреты), положившись на плагин (см. spec, V1).
 
 ### Policies для P4 (R5, опционально)
 

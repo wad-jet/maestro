@@ -167,7 +167,7 @@ bash-команд ненадёжно извлекаются).
   "permission": {
     "read": { "*": "allow", "docs/confidential/*": "deny", "*.env": "deny", "*.env.*": "deny", "*.env.example": "allow", "*.pem": "deny", "*.key": "deny", "*.crt": "deny", "*.p12": "deny", "*.pfx": "deny" },
     "edit": { "*": "allow", "docs/confidential/*": "deny", "*.env": "deny", "*.env.*": "deny", "*.env.example": "allow", "*.pem": "deny", "*.key": "deny", "*.crt": "deny", "*.p12": "deny", "*.pfx": "deny" },
-    "bash": { "*": "allow", "*cat*confidential*": "deny", "*grep*confidential*": "deny", "*ls*confidential*": "deny", "*glob*confidential*": "deny" },
+    "bash": { "*": "allow" },
     "glob": { "*": "allow", "docs/confidential/*": "deny" },
     "grep": { "*": "allow", "docs/confidential/*": "deny" }
   }
@@ -176,10 +176,13 @@ bash-команд ненадёжно извлекаются).
 
 Два слоя работают независимо: плагин закрывает `read/write/edit` (по имени/trust),
 нативные permissions OpenCode дают fail-closed baseline в ядре для `read`/`edit`
-(не зависит от плагина). `bash`/`glob`/`grep` — **эвристический слой**: `glob`/
-`grep` матчат аргумент-паттерн, не пути-результаты, поэтому закрывают только
-прямое указание паттерна `confidential`, а широкие паттерны-обход
-(`glob("docs/**/*.md")`) — нет; основной барьер — `read`/`edit`. Канон и
+(не зависит от плагина). `glob`/`grep` — **эвристический слой**: матчат
+аргумент-паттерн, не пути-результаты, поэтому закрывают только прямое указание
+паттерна `confidential`, а широкие паттерны-обход
+(`glob("docs/**/*.md")`) — нет; основной барьер — `read`/`edit`. `bash`-паттерны
+по слову (напр. `*cat*confidential*`) **не используются** — они не защищают
+произвольные `confidential.paths` и блокируют служебные команды; защита `bash` —
+через `read`/`edit` deny по реальным путям + санитайзер промптов. Канон и
 семантика (`*` пересекает `/`, last-match-wins) — в скилле `maestro-assistant`.
 При настройке не добавляйте `docs/confidential/**` в нативные allow-правила
 (confidential технически выигрывает, но явная настройка читается яснее).

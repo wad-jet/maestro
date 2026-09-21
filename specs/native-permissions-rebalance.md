@@ -85,6 +85,10 @@ maestro-assistant.
 
 ### R4 (medium) — 2-й эшелон из рекомендации в обязанность
 
+> **Обновлено 2026-09-20 (P2.8):** bash-паттерны по слову убраны из канона и
+> эталона (не защищали произвольные `confidential.paths`, блокировали служебные
+> команды) — см. канон maestro-assistant. Актуальный 2-й эшелон — `glob`/`grep`.
+
 Bash deny-паттерны (`*cat*confidential*` и т.п.) + `glob`/`grep` deny для
 confidential — писать при init, не только документировать. **Реализация (уточнено
 при review):** только точечные deny, без глобального `"*": "ask"` для bash (иначе
@@ -133,7 +137,15 @@ deny и per-agent allow и наоборот (иначе дрейф).
   против deny-паттерна глобала). Заявлена в доке («agent rules take precedence»);
   **runtime-верификация** — в синтетическом fixture-проекте (реальных
   confidential-данных не требуется; попытка 2026-09-02 заблокирована
-  недоступностью провайдера — **pending**). Нужна **до** подтверждения Этапа A
+  недоступностью провайдера — pending; **подтверждена 2026-09-20**: в fixture
+  `.sandbox/` — untrusted (haiku) заблокирован глобальным deny `maestro.json`,
+  trusted (custodian) читает `docs/confidential/*` через per-agent allow поверх
+  global deny; в конфиге authoring-репо — специфичный allow перекрывает общий
+  deny (`.maestro/plugin-version` поверх `.maestro/**`). **Следствие:** per-agent
+  `"*": "allow"` у trusted-агентов
+  перекрывает глобальные deny — custodian/sanitizer читают `maestro.json`
+  (дизайн: они читают конфиг для роли); защита untrusted-агентов (без per-agent
+  правил) от глобального deny — подтверждена). Нужна **до** подтверждения Этапа A
   (trusted-исключения нативно); при провале — fallback: скоупить нативный
   confidential-deny из Этапа A, положившись на плагин.
 - **V2.** Как surfac'ятся `ask`-промпты из сабагент-сессий в TUI — не ломает ли
