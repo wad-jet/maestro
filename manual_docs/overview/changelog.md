@@ -9,6 +9,11 @@
 
 ## [Unreleased]
 
+## [2026-09-21]
+
+> **Версия 4.3.0** — Minor-релиз: memory_search на точках принятия решений
+> pipeline + секция Memory layer usage в feedback-отчёте (+ follow-up волны P2).
+
 ### Добавлено
 
 - **memory_search на точках принятия решений pipeline:** канон-правило в
