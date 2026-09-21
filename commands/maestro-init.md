@@ -36,6 +36,9 @@ per-run, не персистится в `maestro.json`.
 - После утверждения плана (шаг 12) — один коммит `docs: design + plan for <feature-name>`
 - После SDD (шаг 13) — per-task code коммиты
 - Финальное ревью (шаг 16) — диспатч code-reviewer
+- В Plan mode (ресеч, обсуждение фичи/багфикса, подготовка spec) и на ресече
+  bugfix — сначала `memory_search` по теме задачи (канон: SKILL.md, секция
+  «Memory layer (memory_search)»); память не включена → молча пропуск
 
 ## Связанные команды
 
