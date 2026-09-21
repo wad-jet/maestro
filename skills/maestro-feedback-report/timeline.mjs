@@ -1,8 +1,8 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync, unlinkSync } from "node:fs";
-import { join } from "node:path";
+import { readFileSync, writeFileSync, unlinkSync, openSync, closeSync, mkdirSync, rmSync } from "node:fs";
+import { join, sep } from "node:path";
 import { tmpdir } from "node:os";
-import { execFileSync } from "node:child_process";
+import { spawn } from "node:child_process";
 
 const args = process.argv.slice(2);
 if (args.length < 1) {
@@ -22,21 +22,39 @@ try {
       process.exit(1);
     }
   } else {
+    const shimDir = join(tmpdir(), `maestro-feedback-${Date.now()}`);
+    mkdirSync(shimDir);
+    const shimPath = join(shimDir, "opencode" + (sep === "\\" ? ".cmd" : ""));
     const tmpFile = join(tmpdir(), `opencode-export-${Date.now()}.json`);
+    const shimScript = [
+      '#!/bin/sh',
+      'exec opencode export "$@" ' + sep + tmpFile.replace(/ /g, '\\ '),
+    ].join("\n");
+    writeFileSync(shimPath, shimScript, { mode: 0o755 });
     try {
-      const out = execFileSync("opencode", ["export", sessionID], {
-        encoding: "utf-8",
-        stdio: ["ignore", "pipe", "ignore"],
-        timeout: 60000,
+      await new Promise((resolve, reject) => {
+        const fd = openSync(tmpFile, "w");
+        const child = spawn("opencode", ["export", sessionID], {
+          stdio: ["ignore", fd, "inherit"],
+        });
+        child.on("exit", (code) => {
+          closeSync(fd);
+          if (code !== 0) {
+            reject(new Error("export failed"));
+          } else {
+            resolve();
+          }
+        });
+        child.on("error", reject);
       });
-      if (!out || !out.trim()) {
+      raw = readFileSync(tmpFile, "utf-8");
+      if (!raw || !raw.trim()) {
         process.stdout.write(JSON.stringify({ error: "export_failed" }) + "\n");
         process.exit(1);
       }
-      writeFileSync(tmpFile, out);
-      raw = readFileSync(tmpFile, "utf-8");
     } finally {
       try { unlinkSync(tmpFile); } catch { }
+      try { rmSync(shimDir, { recursive: true, force: true }); } catch { }
     }
   }
 } catch {

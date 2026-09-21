@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync, chmodSync } from "node:fs";
+import { execFileSync, spawn } from "node:child_process";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, chmodSync, openSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -405,4 +405,55 @@ test("path-less export path (shim opencode)", () => {
   assert.equal(data.totals.idleWaitMs, 0);
   assert.equal(Object.keys(data.tools).length, 1);
   assert.equal(data.tools.read.count, 1);
+});
+
+test("large export >128K via spawn path (regression)", () => {
+  const largeText = "x".repeat(200000);
+  const fixtureData = {
+    info: {
+      id: "ses_large",
+      model: { providerID: "openai", modelID: "gpt-4" },
+      time: { created: 1000, end: 1000 },
+    },
+    messages: [
+      {
+        info: { role: "user", time: { created: 1000 }, id: "u1", sessionID: "ses_large" },
+        parts: [{ type: "text", text: largeText }],
+      },
+      {
+        info: { role: "assistant", time: { created: 2000 }, agent: "haiku", id: "a1", sessionID: "ses_large" },
+        parts: [
+          { type: "text", text: "ok" },
+          {
+            type: "tool", tool: "task", callID: "c1",
+            state: { status: "completed", input: { subagent_type: "sonnet", description: "test" }, output: "done", time: { start: 3000, end: 8000 } },
+            id: "t1", sessionID: "ses_large", messageID: "a1",
+          },
+        ],
+      },
+    ],
+  };
+  const shimDir = join(tmpDir, "shim_large");
+  try { rmSync(shimDir, { recursive: true, force: true }); } catch { }
+  mkdirSync(shimDir);
+  const fixturePath = join(shimDir, "fixture.json");
+  writeFileSync(fixturePath, JSON.stringify(fixtureData));
+  const shimPath = join(shimDir, "opencode");
+  writeFileSync(shimPath, [
+    '#!/bin/sh',
+    'cat "' + fixturePath + '"',
+  ].join("\n"));
+  chmodSync(shimPath, "755");
+
+  const shimPathEnv = shimDir + ":" + process.env.PATH;
+  const out = execFileSync(process.execPath, [scriptPath, "ses_large"], {
+    encoding: "utf-8",
+    timeout: 30000,
+    env: { ...process.env, PATH: shimPathEnv },
+  });
+  const data = JSON.parse(out.trim());
+  assert.equal(data.session.id, "ses_large");
+  assert.equal(data.totals.toolOps, 1);
+  assert.equal(data.totals.toolTimeMs, 5000);
+  assert.equal(data.totals.userMessages, 1);
 });
