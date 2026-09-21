@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync, unlinkSync, mkdtempSync, writeFileSync as fsWrite } from "node:fs";
+import { readFileSync, unlinkSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { execFileSync } from "node:child_process";
@@ -17,6 +17,10 @@ let raw;
 try {
   if (exportPath) {
     raw = readFileSync(exportPath, "utf-8");
+    if (!raw || !raw.trim()) {
+      process.stdout.write(JSON.stringify({ error: "export_failed" }) + "\n");
+      process.exit(1);
+    }
   } else {
     const tmpFile = join(tmpdir(), `opencode-export-${Date.now()}.json`);
     try {
@@ -25,10 +29,14 @@ try {
         stdio: ["ignore", "pipe", "ignore"],
         timeout: 60000,
       });
+      if (!out || !out.trim()) {
+        process.stdout.write(JSON.stringify({ error: "export_failed" }) + "\n");
+        process.exit(1);
+      }
       writeFileSync(tmpFile, out);
       raw = readFileSync(tmpFile, "utf-8");
     } finally {
-      try { unlinkSync(tmpFile); } catch { /* ignore */ }
+      try { unlinkSync(tmpFile); } catch { }
     }
   }
 } catch {
@@ -77,6 +85,7 @@ for (const msg of messages) {
   const ts = msg.info && msg.info.time && typeof msg.info.time.created === "number"
     ? msg.info.time.created : null;
   if (!role || ts === null) continue;
+  if (role !== "user" && role !== "assistant") continue;
 
   const parts = Array.isArray(msg.parts) ? msg.parts : [];
   const toolParts = parts.filter(p => typeof p === "object" && p.type === "tool");
@@ -160,17 +169,20 @@ for (const msg of messages) {
   }
 
   if (toolStates.length) {
-    const span = latestEnd - earliestStart;
-    infMs = Math.max(0, span - toolMs);
-    inferenceMs += infMs;
-    for (let i = 1; i < toolStates.length; i++) {
-      const prevEnd = toolStates[i - 1].time && typeof toolStates[i - 1].time.end === "number"
-        ? toolStates[i - 1].time.end : 0;
-      const currStart = toolStates[i].time && typeof toolStates[i].time.start === "number"
-        ? toolStates[i].time.start : 0;
-      const gap = currStart - prevEnd;
-      if (gap > 5000) {
-        gaps.push({ type: "inference", ms: gap, afterTs: prevEnd, beforeTs: currStart });
+    const complete = toolStates.filter(s => typeof s.time?.start === "number" && typeof s.time?.end === "number");
+    if (complete.length) {
+      const earliestStart = Math.min(...complete.map(s => s.time.start));
+      const latestEnd = Math.max(...complete.map(s => s.time.end));
+      const span = latestEnd - earliestStart;
+      infMs = Math.max(0, span - toolMs);
+      inferenceMs += infMs;
+      for (let i = 1; i < complete.length; i++) {
+        const prevEnd = complete[i - 1].time.end;
+        const currStart = complete[i].time.start;
+        const gap = currStart - prevEnd;
+        if (gap > 5000) {
+          gaps.push({ type: "inference", ms: gap, afterTs: prevEnd, beforeTs: currStart });
+        }
       }
     }
   }
@@ -178,9 +190,8 @@ for (const msg of messages) {
   timeline.push({ kind: "assistant", ts, nTools, toolMs, inferenceMs: infMs });
 }
 
-topOps.sort((a, b) => b.durationMs - a.durationMs).slice(0, 10);
-gaps.sort((a, b) => b.ms - a.ms).slice(0, 5);
-const userWaitGaps = gaps.filter(g => g.type === "user_wait");
+const topOpsResult = topOps.sort((a, b) => b.durationMs - a.durationMs).slice(0, 10);
+const gapsResult = gaps.sort((a, b) => b.ms - a.ms).slice(0, 5);
 
 for (const [key, val] of Object.entries(agents)) {
   agents[key] = { count: val.count, totalMs: val.totalMs, maxMs: val.maxMs };
@@ -216,8 +227,8 @@ const result = {
   agents: Object.fromEntries(sortedAgents),
   tools: Object.fromEntries(sortedTools),
   bash: Object.fromEntries(sortedBash),
-  top_ops: topOps,
-  gaps: gaps,
+  top_ops: topOpsResult,
+  gaps: gapsResult,
   timeline,
 };
 

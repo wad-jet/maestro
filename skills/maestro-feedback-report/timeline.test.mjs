@@ -8,6 +8,8 @@ import { join } from "node:path";
 const scriptPath = join(process.cwd(), "skills", "maestro-feedback-report", "timeline.mjs");
 const tmpDir = mkdtempSync(join(tmpdir(), "timeline-test-"));
 
+process.on("exit", () => { rmSync(tmpDir, { recursive: true, force: true }); });
+
 function runFixture(data, name) {
   const path = join(tmpDir, `${name}.json`);
   writeFileSync(path, JSON.stringify(data));
@@ -265,6 +267,85 @@ test("empty export", () => {
   assert.deepEqual(data, expectedEmpty);
 });
 
-test("cleanup", { skip: true }, () => {
-  // Cleanup is manual — tmpDir stays for debugging if tests fail
+test("top_ops limited to 10", () => {
+  const ops = [];
+  for (let i = 0; i < 12; i++) {
+    ops.push({
+      type: "tool", tool: i < 4 ? "bash" : i < 8 ? "read" : "task", callID: `t${i}`,
+      state: {
+        status: "completed",
+        input: i < 4 ? { command: `cmd ${i}` } : i < 8 ? { filePath: `/f${i}` } : { subagent_type: "sonnet", description: `d${i}` },
+        output: "ok",
+        time: { start: i * 2000 + 300, end: i * 2000 + 300 + (i + 1) * 1000 },
+      },
+      id: `t${i}`, sessionID: "ses_top10", messageID: "a1",
+    });
+  }
+  const fixture = {
+    info: { id: "ses_top10", model: "openai/gpt-4", time: { created: 100, end: 100 } },
+    messages: [
+      {
+        info: { role: "user", time: { created: 100 }, id: "u1", sessionID: "ses_top10" },
+        parts: [{ type: "text", text: "go" }],
+      },
+      {
+        info: { role: "assistant", time: { created: 200 }, agent: "haiku", id: "a1", sessionID: "ses_top10" },
+        parts: [{ type: "text", text: "ok" }, ...ops],
+      },
+    ],
+  };
+  const data = runFixture(fixture, "top10");
+  assert.equal(data.top_ops.length, 10, "top_ops must be limited to 10");
+  // durations: (i+1)*1000 → [1000,2000,...,12000]; sorted desc → top[0]=12000(11), top[9]=3000(2)
+  assert.equal(data.top_ops[0].durationMs, 12000);
+  assert.equal(data.top_ops[9].durationMs, 3000);
+});
+
+test("gaps limited to 5", () => {
+  const messages = [];
+  // 7 messages: user1, assistant1(with inference gap), user2, assistant2, user3, assistant3, user4
+  // This creates user_wait gaps: user2-user1, user3-user2, user4-user3 = 3 user_wait
+  // Plus inference gaps inside assistant blocks
+  // Let's create 8 user_wait gaps to exceed 5
+  for (let i = 0; i < 8; i++) {
+    const ts = (i + 1) * 10000;
+    messages.push({
+      info: { role: "user", time: { created: ts }, id: `u${i}`, sessionID: "ses_gaps" },
+      parts: [{ type: "text", text: `msg ${i}` }],
+    });
+  }
+  // Add assistant messages between each user to get user_wait gaps
+  const fullMessages = [];
+  for (let i = 0; i < 8; i++) {
+    fullMessages.push(messages[i]);
+    if (i < 7) {
+      fullMessages.push({
+        info: { role: "assistant", time: { created: (i + 1) * 10000 + 100 }, agent: "haiku", id: `a${i}`, sessionID: "ses_gaps" },
+        parts: [{ type: "text", text: "ok" }],
+      });
+    }
+  }
+  const fixture = {
+    info: { id: "ses_gaps", model: "openai/gpt-4", time: { created: 100, end: 100 } },
+    messages: fullMessages,
+  };
+  const data = runFixture(fixture, "gaps5");
+  const userWaitGaps = data.gaps.filter(g => g.type === "user_wait");
+  assert.ok(userWaitGaps.length <= 5, `gaps limited to 5, got ${userWaitGaps.length}`);
+});
+
+test("empty file yields export_failed", () => {
+  const path = join(tmpDir, "empty.json");
+  writeFileSync(path, "");
+  try {
+    execFileSync(process.execPath, [scriptPath, "ses_empty", path], {
+      encoding: "utf-8",
+      timeout: 30000,
+    });
+    assert.fail("should have thrown");
+  } catch (e) {
+    const data = JSON.parse(e.stdout.trim());
+    assert.equal(data.error, "export_failed");
+    assert.equal(e.status, 1);
+  }
 });
