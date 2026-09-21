@@ -86,7 +86,7 @@
 - Task 6 → `docs: spec/plan update — feedback-report section + call logging`
 - Task 7 → `docs(maestro): feedback-report — раздел "Memory layer usage"`
 - Task 8 → `docs: manual_docs sync — feedback-report memory section, agents, changelog`
-- Task 9 → `docs(maestro): M1 wording — design-question clarification`
+- Task 9 → `docs(maestro): M1 wording — design-question + call logging в каноне`
 
 ## Верификация
 
