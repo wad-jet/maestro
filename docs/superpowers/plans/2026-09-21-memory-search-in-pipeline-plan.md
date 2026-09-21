@@ -50,9 +50,31 @@
 
 5. **`manual_docs/`** (синхронизация, обязательная по AGENTS.md):
    - `reference/memory.md` — секция «Использование в pipeline»: 5 точек,
-     обязательность, guard, семантика;
-   - `explanation/pipeline-overview.md` — 1–2 предложения в описании Plan-фазы;
-   - `reference/commands.md` — строка в описании `@maestro-init`.
+     обязательность, guard, семантика, лог-записи, feedback report;
+   - `explanation/pipeline-overview.md` — 1–2 предложения в описании шага 0 и D1;
+   - `reference/commands.md` — строка в описании `@maestro-init` + строка в
+     описании `@maestro-feedback-report` (новый раздел отчёта);
+   - `explanation/agents-and-trust.md` — 1 строка: поведение sonnet/opus по
+     `memory_search` (закрытие M4 финального ревью);
+   - `overview/changelog.md` — запись в `[Unreleased]`.
+
+6. **`skills/maestro-feedback-report/SKILL.md`** (расширение фичи, 2026-09-21):
+   - Шаг 2 (фактура из диалога): собрать `memory_search`-log-записи
+     (`memory_search: <точка> → <N> найдено; <оценка>`) и достигнутые
+     обязательные точки (старт Plan-фазы, ресеч bugfix D1–D2).
+   - Шаблон отчёта: новый раздел **«Memory layer usage»**: память подключена/
+     нет (причина при «нет»); список обращений с оценкой эффективности;
+     **пропуски обязательного поиска** по каждой достигнутой обязательной
+     точке без обращения + причина («memory layer не подключен» / «точка не
+     достигнута» / «пересмотр»); агрегаты эффективности. SEC-4b — только
+     агрегаты.
+
+7. **Мелкие фиксы по финальному ревью** (M1, M4):
+   - M1: формулировка «до первого вопроса пользователю» → «до первого
+     дизайн-вопроса пользователю» (SKILL.md канон т.1 + шаг 0,
+     pipeline-overview.md, memory.md);
+   - M4: строка про sonnet/opus memory_search в agents-and-trust.md (входит в
+     Task 5).
 
 ## Коммиты
 
@@ -61,6 +83,10 @@
 - Task 3 → `docs(maestro): maestro-init + agents sonnet/opus — правило memory_search`
 - Task 4 → `docs(maestro): spec-review-prompt — memory check перед вердиктом`
 - Task 5 → `docs: manual_docs sync — memory_search в pipeline`
+- Task 6 → `docs: spec/plan update — feedback-report section + call logging`
+- Task 7 → `docs(maestro): feedback-report — раздел "Memory layer usage"`
+- Task 8 → `docs: manual_docs sync — feedback-report memory section, agents, changelog`
+- Task 9 → `docs(maestro): M1 wording — design-question clarification`
 
 ## Верификация
 
@@ -74,6 +100,11 @@
   файлах — только ссылки/короткие упоминания.
 - Язык: русский (кроме spec-review-prompt.md — английский).
 - Diff-сверка: каждое изменение skills/commands/agents покрыто manual_docs.
+- `rg "Memory layer usage" skills/maestro-feedback-report/SKILL.md` — раздел
+  в шаблоне отчёта есть; причина «memory layer не подключен» присутствует.
+- Формат log-записи `memory_search: <точка> → <N> найдено` — в каноне SKILL.md
+  и в feedback-report (шаг 2 + шаблон).
+- Changelog: запись в `[Unreleased]` содержит фичу + feedback-report-раздел.
 
 ## Завершение
 
