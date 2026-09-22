@@ -49,6 +49,7 @@ primary-сессии.
 - [Всё: pipeline — Feature и Bugfix](explanation/pipeline-overview.md) — полный flow: Feature 0→18 и Bugfix D1→D7
 - [Агенты и модель доверия](explanation/agents-and-trust.md) — trust, sanitizer, роли
 - [Project Context (14 категорий)](explanation/project-context.md) — формат `docs/project-context.md`
+- [Простой язык: как это работает](explanation/plain-language.md) — механика режима `communication` / `--plain`
 
 ## Примеры
 

@@ -25,6 +25,7 @@ import path from "node:path";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { classifyMemoryConfig } from "./memory/config.js";
+import { registerCommunicationHooks } from "./communication.js";
 
 const LOG_LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
 
@@ -364,6 +365,25 @@ export function loadMaestroConfig(file, dir) {
 export function loadWhitelist(config) {
   const section = config?.sanitizer_whitelist;
   return section && typeof section === "object" ? section : {};
+}
+
+const COMMUNICATION_MODES = new Set(["plain", "professional"]);
+
+/**
+ * Разбор `communication` из maestro.json — режим «простой язык» для HITL-диалога.
+ * Ключ отсутствует → "plain" (дефолт). Невалидное значение → soft fallback в
+ * дефолт + invalid: true (философия memory:config_fallback: warn, без значения).
+ * @param {object} [config]  Parsed `maestro.json` (from loadMaestroConfig).
+ * @returns {{ mode: "plain"|"professional", explicit: boolean, invalid: boolean }}
+ */
+export function loadCommunicationConfig(config) {
+  const value =
+    config && typeof config === "object" ? config.communication : undefined;
+  if (value === undefined) return { mode: "plain", explicit: false, invalid: false };
+  if (typeof value === "string" && COMMUNICATION_MODES.has(value)) {
+    return { mode: value, explicit: true, invalid: false };
+  }
+  return { mode: "plain", explicit: false, invalid: true };
 }
 
 /**
@@ -1091,9 +1111,26 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
   } else if (config?.memory && memClass.disabled_reason) {
     log.info("memory: disabled", { reason: memClass.disabled_reason });
   }
+  // Communication (plain language): активен всегда (standalone-ключ enabled
+  // нет; дефолт communication — "plain"). Fail-soft, как memory.
+  let commHooks = {};
+  try {
+    commHooks = await registerCommunicationHooks({ client, config, log });
+  } catch (err) {
+    log.error("communication: init failed", { error: err instanceof Error ? err.message : String(err) });
+  }
   plugin.tool = { ...(memoryHooks.tool ?? {}) };
-  plugin["chat.message"] = memoryHooks["chat.message"];
-  plugin["experimental.chat.system.transform"] = memoryHooks["experimental.chat.system.transform"];
+  const chainHooks = (name) => {
+    const a = commHooks[name];
+    const b = memoryHooks[name];
+    if (!a && !b) return;
+    plugin[name] = async (input, out) => {
+      if (a) { try { await a(input, out); } catch {} }
+      if (b) { try { await b(input, out); } catch {} }
+    };
+  };
+  chainHooks("chat.message");
+  chainHooks("experimental.chat.system.transform");
   // Расширяем event: сначала существующая логика (session.error/retry), затем memory.
   const baseEvent = plugin.event;
   plugin.event = async (input) => {

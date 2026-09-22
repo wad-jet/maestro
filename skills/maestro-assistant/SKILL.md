@@ -266,6 +266,21 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
   в system prompt. Полная инструкция — `manual_docs/how-to/enable-memory.md`.
   После правки `memory` — **OP-1** (перезапуск opencode).
 
+### Ключ `communication` (простой язык)
+
+- Значения: `"plain"` (дефолт — простой язык в диалогах) | `"professional"`
+  (технический язык). Невалидное → плагин делает soft fallback в `plain`
+  + warn в лог (`communication:config_fallback`).
+- Область: только диалог с пользователем (все top-level primary-сессии);
+  артефакты (спецы/планы/код/доки) и субагенты не затрагиваются. Флаг
+  `@maestro-init --plain` — per-run, приоритетнее конфига (даже
+  `professional`).
+- **Процедура смены режима:** чтение `maestro.json` — через bash (нативный
+  read-deny), правка — `edit` (нативный ask → HITL-подтверждение), затем
+  **обязательно сообщить о перезапуске opencode** (конфиг плагина читается
+  один раз при init — без рестарта эффект не наступит). Объяснить
+  последствия: дефолт `plain`, приоритет флага, область действия.
+
 ## Канон нативных permissions OpenCode (R6)
 
 Второй слой защиты — **нативные permissions OpenCode** в merge-config

@@ -36,8 +36,11 @@
 2. **Сбор контекста** — интерактивный опрос по 14 категориям → создаёт
    `docs/project-context.md`. Обязательные секции: 1, 2, 3, 4, 9, 14.
 3. **Конфигурация** — генерирует (по канону скилла `maestro-assistant`):
-   - `maestro.json` — `trust` (custodian, sanitizer), `confidential`,
-     `sanitizer_whitelist`;
+    - `maestro.json` — `trust` (custodian, sanitizer), `confidential`,
+      `sanitizer_whitelist`;
+    - `/maestro-setup` задаёт вопрос режима коммуникации (`plain` — простой язык,
+      дефолт; `professional` — технический язык) — результат пишется в ключ
+      `communication` в `maestro.json`.
    - плагин `maestro-bootstrap` + модели агентов — в `.opencode/opencode.json`
      (реком.) или глобальном конфиге;
    - `.gitignore` — весь `.maestro/` и `.opencode/`;

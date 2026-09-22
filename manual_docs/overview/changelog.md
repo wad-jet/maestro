@@ -9,6 +9,18 @@
 
 ## [Unreleased]
 
+### Добавлено
+
+- **Режим «простой язык» (plain language):** ключ `communication`
+  (`"plain" | "professional"`, **дефолт `plain`** — изменение поведения для
+  существующих проектов: простой язык включён во всех primary-сессиях;
+  откат — `"professional"`) + флаг `@maestro-init --plain` (per-run,
+  приоритетнее конфига). Плагин инжектит директиву в top-level
+  primary-сессии (guard: parentID + `[maestro-memory]`); канон — SKILL.md
+  «Простой язык»; `/maestro-setup` спрашивает режим при генерации конфига;
+  `/maestro-assistant` — смена режима (обязателен перезапуск opencode).
+  Regression: `regression/entries/2026-09-22-plain-language-mode.md`.
+
 ### Изменено
 
 - **Канон: утверждение короткого дизайна (Bounded) — явный HITL-гейт 7b**

@@ -23,6 +23,10 @@
 
 Плагин **глобальный** — не фильтрует по агенту, работает во всех сессиях.
 
+Хуки `chat.message` / `experimental.chat.system.transform` регистрируются всегда
+(communication-модуль; до 4.6.0 — только при `memory.enabled` + `auto_recall`).
+`experimental.chat.messages.transform` никогда не присваивается (инвариант).
+
 ## Санитайзинг промптов (sanitize)
 
 Правила детекта — Context Sanitizer (см. `skills/maestro/SKILL.md`):
@@ -147,6 +151,14 @@ Security-фактура по доступу пишется в **отдельны
 
 - **`trust`** — trusted-агенты (`true` = trusted). Остальные — untrusted.
 - **`sanitizer_whitelist`** — правила sanitizer (см. раздел выше).
+- **`communication`** — режим «простой язык» для HITL-диалога: `"plain"`
+  (дефолт, ключ можно не указывать) | `"professional"` (упрощение выключено).
+  Невалидное значение → soft fallback в `plain` + warn `communication:config_fallback`
+  в лог плагина. Хуки: `chat.message` (детект `--plain` в `@maestro-init`) и
+  `experimental.chat.system.transform` (инъекция короткой директивы только в
+  top-level primary-сессии; guard: parentID + title-префикс `[maestro-memory]`).
+  Лог-события: `communication:flag_plain` (info), `communication:config_fallback`
+  (warn), `communication:directive_injected` (debug).
 
 ### Разрешение конфигов (resolution order)
 
@@ -330,6 +342,9 @@ logs/, feedback-reports/, plugin-version); конфиг проекта — `maes
 - `session.error` — ошибка/прерывание модели (warn)
 - `session.status.retry` — перезапрос модели (warn)
 - `sanitizer.redacted` — замаскировано N чувствительных элементов в промпте task (warn)
+- `communication:flag_plain` — детект `--plain`-флага в `@maestro-init` (info)
+- `communication:config_fallback` — невалидное значение `communication`, fallback в `plain` (warn)
+- `communication:directive_injected` — директива простого языка инжектирована в system (debug)
 
 Memory layer (при `memory.enabled: true`):
 
