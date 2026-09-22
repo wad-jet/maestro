@@ -22,7 +22,12 @@
 /maestro-init --auto-answer "задача"          # auto-answer (-aa): полный флоу, рекомендации на рутинных гейтах — авто
 /maestro-init --auto-ai "задача"              # auto-ai (-ai): ИИ решает сам с доп. анализом (ralph loop)
 /maestro-init --no-auto "задача"              # явный manual
+/maestro-init --plain "задача"                # простой язык на этот запуск (не режим; комбинируется: --auto-answer --plain)
 ```
+
+**`--plain`:** не режим запуска (ортогонален флагам режимов). Включает простой
+язык на этот запуск; флаг > конфиг `maestro.json` (`communication`).
+Канон — SKILL.md, секция «Простой язык»; ключ — [Конфигурация](config.md).
 
 Подробнее о поведении гейтов по режимам — [HITL-гейты](hitl-gates.md).
 
