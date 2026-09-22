@@ -4,7 +4,12 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { MaestroBootstrapPlugin, createBootstrapAdapter, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile, loadCommunicationConfig } from "./core.js";
-import { detectPlainFlag } from "./communication.js";
+import {
+  detectPlainFlag,
+  SOURCE_LABELS,
+  resolveDirectiveLabel,
+  directiveText,
+} from "./communication.js";
 import opencodePlugin from "./index.js";
 
 function readLogs(dir, filePrefix = "maestro-bootstrap") {
@@ -2211,5 +2216,38 @@ describe("communication flag (detectPlainFlag)", () => {
   it("не-строка → false", () => {
     assert.equal(detectPlainFlag(undefined), false);
     assert.equal(detectPlainFlag(42), false);
+  });
+});
+
+describe("communication labels (resolveDirectiveLabel)", () => {
+  const P = { mode: "professional", explicit: true, invalid: false };
+  const C = { mode: "plain", explicit: true, invalid: false };
+  const D = { mode: "plain", explicit: false, invalid: false };
+  const DI = { mode: "plain", explicit: false, invalid: true };
+
+  it("флаг + professional → лейбл переопределения", () => {
+    assert.equal(resolveDirectiveLabel({ flagMarked: true, communication: P }), SOURCE_LABELS.flag_override);
+  });
+  it("флаг + plain (explicit) → лейбл флага (без «переопределяет»)", () => {
+    assert.equal(resolveDirectiveLabel({ flagMarked: true, communication: C }), SOURCE_LABELS.flag);
+  });
+  it("флаг + plain (дефолт) → лейбл флага", () => {
+    assert.equal(resolveDirectiveLabel({ flagMarked: true, communication: D }), SOURCE_LABELS.flag);
+  });
+  it("без флага, plain explicit → лейбл maestro.json", () => {
+    assert.equal(resolveDirectiveLabel({ flagMarked: false, communication: C }), SOURCE_LABELS.config_plain);
+  });
+  it("без флага, дефолт/invalid → лейбл дефолта", () => {
+    assert.equal(resolveDirectiveLabel({ flagMarked: false, communication: D }), SOURCE_LABELS.default);
+    assert.equal(resolveDirectiveLabel({ flagMarked: false, communication: DI }), SOURCE_LABELS.default);
+  });
+});
+
+describe("communication directive (directiveText)", () => {
+  it("содержит лейбл источника и security-carve-out", () => {
+    const t = directiveText(SOURCE_LABELS.flag_override);
+    assert.ok(t.includes(SOURCE_LABELS.flag_override));
+    assert.ok(t.includes("Security-находки"));
+    assert.ok(t.includes("субагентов"));
   });
 });
