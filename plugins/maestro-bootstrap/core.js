@@ -25,6 +25,7 @@ import path from "node:path";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { classifyMemoryConfig } from "./memory/config.js";
+import { registerCommunicationHooks } from "./communication.js";
 
 const LOG_LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
 
@@ -1110,9 +1111,26 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
   } else if (config?.memory && memClass.disabled_reason) {
     log.info("memory: disabled", { reason: memClass.disabled_reason });
   }
+  // Communication (plain language): активен всегда (standalone-ключ enabled
+  // нет; дефолт communication — "plain"). Fail-soft, как memory.
+  let commHooks = {};
+  try {
+    commHooks = await registerCommunicationHooks({ client, config, log });
+  } catch (err) {
+    log.error("communication: init failed", { error: err instanceof Error ? err.message : String(err) });
+  }
   plugin.tool = { ...(memoryHooks.tool ?? {}) };
-  plugin["chat.message"] = memoryHooks["chat.message"];
-  plugin["experimental.chat.system.transform"] = memoryHooks["experimental.chat.system.transform"];
+  const chainHooks = (name) => {
+    const a = commHooks[name];
+    const b = memoryHooks[name];
+    if (!a && !b) return;
+    plugin[name] = async (input, out) => {
+      if (a) { try { await a(input, out); } catch {} }
+      if (b) { try { await b(input, out); } catch {} }
+    };
+  };
+  chainHooks("chat.message");
+  chainHooks("experimental.chat.system.transform");
   // Расширяем event: сначала существующая логика (session.error/retry), затем memory.
   const baseEvent = plugin.event;
   plugin.event = async (input) => {

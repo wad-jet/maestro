@@ -2408,3 +2408,38 @@ describe("communication hooks (system.transform matrix)", () => {
     assert.ok(sys[0].includes("источник: дефолт (plain)"));
   });
 });
+
+describe("communication wiring (MaestroBootstrapPlugin)", () => {
+  let dir;
+  before(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-comm-")); });
+  after(() => { fs.rmSync(dir, { recursive: true, force: true }); });
+
+  it("communication-хуки зарегистрированы (chat.message + system.transform); messages.transform === undefined", async () => {
+    fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({ communication: "plain" }));
+    const hooks = await MaestroBootstrapPlugin({ directory: dir });
+    assert.equal(typeof hooks["chat.message"], "function");
+    assert.equal(typeof hooks["experimental.chat.system.transform"], "function");
+    assert.equal(hooks["experimental.chat.messages.transform"], undefined);
+  });
+  it("без maestro.json — хуки тоже (дефолт plain), fail-soft без client", async () => {
+    const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), "fab-comm2-"));
+    const hooks = await MaestroBootstrapPlugin({ directory: dir2 });
+    assert.equal(typeof hooks["experimental.chat.system.transform"], "function");
+    const out = { system: [] };
+    await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, out);
+    assert.equal(out.system.length, 0);
+    fs.rmSync(dir2, { recursive: true, force: true });
+  });
+  it("enum-синхронизация: invalid-детект loadCommunicationConfig и registerCommunicationHooks совпадают", async () => {
+    const { loadCommunicationConfig } = await import("./core.js");
+    for (const v of ["plain", "professional", "simple", 42, null, "PLAIN", ""]) {
+      const coreInvalid = loadCommunicationConfig({ communication: v }).invalid;
+      const log = { calls: [], warn: (m) => log.calls.push(m), info: () => {}, error: () => {}, debug: () => {} };
+      await registerCommunicationHooks({
+        client: { session: { get: async () => { throw new Error("x"); } } },
+        config: { communication: v }, log });
+      const hookInvalid = log.calls.includes("communication:config_fallback");
+      assert.equal(hookInvalid, coreInvalid, `desync для значения ${JSON.stringify(v)}`);
+    }
+  });
+});
