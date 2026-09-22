@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MaestroBootstrapPlugin, createBootstrapAdapter, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile } from "./core.js";
+import { MaestroBootstrapPlugin, createBootstrapAdapter, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile, loadCommunicationConfig } from "./core.js";
 import opencodePlugin from "./index.js";
 
 function readLogs(dir, filePrefix = "maestro-bootstrap") {
@@ -2167,5 +2167,26 @@ describe("maestro-bootstrap adapter forwarding core hooks", () => {
     assert.equal(Object.hasOwn(out, "tool"), true);
     assert.equal(Object.hasOwn(out, "chat.message"), true);
     assert.equal(Object.hasOwn(out, "experimental.chat.system.transform"), true);
+  });
+});
+
+describe("communication config (loadCommunicationConfig)", () => {
+  it("отсутствует ключ → дефолт plain, explicit: false", () => {
+    assert.deepEqual(loadCommunicationConfig({}), { mode: "plain", explicit: false, invalid: false });
+  });
+  it("config undefined → дефолт plain", () => {
+    assert.deepEqual(loadCommunicationConfig(undefined), { mode: "plain", explicit: false, invalid: false });
+  });
+  it("явный plain → explicit: true", () => {
+    assert.deepEqual(loadCommunicationConfig({ communication: "plain" }), { mode: "plain", explicit: true, invalid: false });
+  });
+  it("явный professional → explicit: true", () => {
+    assert.deepEqual(loadCommunicationConfig({ communication: "professional" }), { mode: "professional", explicit: true, invalid: false });
+  });
+  it("невалидное (число) → fallback plain + invalid: true", () => {
+    assert.deepEqual(loadCommunicationConfig({ communication: 42 }), { mode: "plain", explicit: false, invalid: true });
+  });
+  it("невалидное (строка вне enum) → fallback plain + invalid: true", () => {
+    assert.deepEqual(loadCommunicationConfig({ communication: "simple" }), { mode: "plain", explicit: false, invalid: true });
   });
 });

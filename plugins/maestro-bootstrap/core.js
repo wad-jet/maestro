@@ -366,6 +366,25 @@ export function loadWhitelist(config) {
   return section && typeof section === "object" ? section : {};
 }
 
+const COMMUNICATION_MODES = new Set(["plain", "professional"]);
+
+/**
+ * Разбор `communication` из maestro.json — режим «простой язык» для HITL-диалога.
+ * Ключ отсутствует → "plain" (дефолт). Невалидное значение → soft fallback в
+ * дефолт + invalid: true (философия memory:config_fallback: warn, без значения).
+ * @param {object} [config]  Parsed `maestro.json` (from loadMaestroConfig).
+ * @returns {{ mode: "plain"|"professional", explicit: boolean, invalid: boolean }}
+ */
+export function loadCommunicationConfig(config) {
+  const value =
+    config && typeof config === "object" ? config.communication : undefined;
+  if (value === undefined) return { mode: "plain", explicit: false, invalid: false };
+  if (typeof value === "string" && COMMUNICATION_MODES.has(value)) {
+    return { mode: value, explicit: true, invalid: false };
+  }
+  return { mode: "plain", explicit: false, invalid: true };
+}
+
 /**
  * Resolve effective options for a subagent: rules (respect by_agent) + patterns.
  * @param {object} whitelist  Parsed whitelist.
