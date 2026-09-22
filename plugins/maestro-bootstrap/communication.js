@@ -7,7 +7,7 @@ const COMMAND_RE = /(?:@|\/)maestro-init\b/;
 const FLAG_RE = /(?:^|\s)--plain(?=\s|$)/;
 
 /**
- * Флаг `--plain` в тексте сообщения: команда @maestro-init//maestro-init
+ * Флаг `--plain` в тексте сообщения: команда @maestro-init / /maestro-init
  * И флаг --plain (целое слово). Known limitation (принятый прецедент, как у
  * --auto-answer): текст задачи, содержащий оба литерала, даёт ложную
  * маркировку — принимается как допустимый риск.
