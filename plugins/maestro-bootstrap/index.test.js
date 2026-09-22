@@ -2322,3 +2322,89 @@ describe("communication hooks (chat.message mark)", () => {
     assert.ok(log.calls.some((c) => c.msg === "communication:config_fallback" && c.extra.error_class === "invalid_value"));
   });
 });
+
+describe("communication hooks (system.transform matrix)", () => {
+  function fakeClient(overrides = {}) {
+    const sessions = new Map([["s1", { parentID: null, title: "primary" }]]);
+    for (const [id, s] of Object.entries(overrides)) sessions.set(id, s);
+    return {
+      session: {
+        get: async ({ path: { id } }) => {
+          const s = sessions.get(id);
+          if (!s) throw new Error("no session");
+          return s;
+        },
+      },
+    };
+  }
+  function fakeLog() {
+    const calls = [];
+    const fn = (level) => (msg, extra) => calls.push({ level, msg, extra });
+    return { calls, info: fn("info"), warn: fn("warn"), error: fn("error"), debug: fn("debug") };
+  }
+  const userMsg = (text) => ({ message: { parts: [{ type: "text", text }] } });
+  const mark = async (hooks) => {
+    await hooks["chat.message"]({ sessionID: "s1" }, userMsg('@maestro-init --plain "x"'));
+  };
+  const transform = async (hooks, out) => {
+    await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, out);
+    return out.system;
+  };
+
+  it("config plain explicit → лейбл maestro.json", async () => {
+    const hooks = await registerCommunicationHooks({
+      client: fakeClient(), config: { communication: "plain" }, log: fakeLog() });
+    const sys = await transform(hooks, { system: [] });
+    assert.equal(sys.length, 1);
+    assert.ok(sys[0].includes("maestro.json (communication: plain)"));
+  });
+  it("config отсутствует (дефолт) → лейбл «дефолт (plain)»", async () => {
+    const hooks = await registerCommunicationHooks({ client: fakeClient(), config: {}, log: fakeLog() });
+    const sys = await transform(hooks, { system: [] });
+    assert.equal(sys.length, 1);
+    assert.ok(sys[0].includes("источник: дефолт (plain)"));
+  });
+  it("config professional, без флага → без инъекции", async () => {
+    const hooks = await registerCommunicationHooks({
+      client: fakeClient(), config: { communication: "professional" }, log: fakeLog() });
+    const sys = await transform(hooks, { system: [] });
+    assert.equal(sys.length, 0);
+  });
+  it("флаг + professional → лейбл переопределения", async () => {
+    const hooks = await registerCommunicationHooks({
+      client: fakeClient(), config: { communication: "professional" }, log: fakeLog() });
+    await mark(hooks);
+    const sys = await transform(hooks, { system: [] });
+    assert.equal(sys.length, 1);
+    assert.ok(sys[0].includes("переопределяет maestro.json professional"));
+  });
+  it("флаг + plain (дефолт) → лейбл флага БЕЗ «переопределяет»", async () => {
+    const hooks = await registerCommunicationHooks({ client: fakeClient(), config: {}, log: fakeLog() });
+    await mark(hooks);
+    const sys = await transform(hooks, { system: [] });
+    assert.equal(sys.length, 1);
+    assert.ok(sys[0].includes("источник: флаг --plain"));
+    assert.ok(!sys[0].includes("переопределяет"));
+  });
+  it("task-сессия (parentID) → без инъекции ни по какой ветке", async () => {
+    const hooks = await registerCommunicationHooks({
+      client: fakeClient({ s1: { parentID: "s0", title: "sub" } }),
+      config: { communication: "plain" }, log: fakeLog() });
+    const sys = await transform(hooks, { system: [] });
+    assert.equal(sys.length, 0);
+  });
+  it("сервис-сессия [maestro-memory] (parentID пуст) → без инъекции", async () => {
+    const hooks = await registerCommunicationHooks({
+      client: fakeClient({ s1: { parentID: null, title: "[maestro-memory] summarize" } }),
+      config: { communication: "plain" }, log: fakeLog() });
+    const sys = await transform(hooks, { system: [] });
+    assert.equal(sys.length, 0);
+  });
+  it("invalid-fallback → инъекция с лейблом «дефолт»", async () => {
+    const hooks = await registerCommunicationHooks({
+      client: fakeClient(), config: { communication: 42 }, log: fakeLog() });
+    const sys = await transform(hooks, { system: [] });
+    assert.equal(sys.length, 1);
+    assert.ok(sys[0].includes("источник: дефолт (plain)"));
+  });
+});
