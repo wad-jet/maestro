@@ -9,6 +9,13 @@
 
 ## [Unreleased]
 
+## [2026-09-22]
+
+> **Версия 4.6.0** — Minor-релиз: режим «простой язык» (plain language):
+> `communication`-ключ в `maestro.json` (дефолт `plain`) + флаг
+> `@maestro-init --plain` (per-run, приоритетнее конфига) + инъекция короткой
+> директивы плагина в top-level primary-сессии.
+
 ### Добавлено
 
 - **Режим «простой язык» (plain language):** ключ `communication`
