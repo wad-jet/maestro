@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { MaestroBootstrapPlugin, createBootstrapAdapter, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile, loadCommunicationConfig } from "./core.js";
+import { detectPlainFlag } from "./communication.js";
 import opencodePlugin from "./index.js";
 
 function readLogs(dir, filePrefix = "maestro-bootstrap") {
@@ -2188,5 +2189,27 @@ describe("communication config (loadCommunicationConfig)", () => {
   });
   it("невалидное (строка вне enum) → fallback plain + invalid: true", () => {
     assert.deepEqual(loadCommunicationConfig({ communication: "simple" }), { mode: "plain", explicit: false, invalid: true });
+  });
+});
+
+describe("communication flag (detectPlainFlag)", () => {
+  it("@maestro-init --plain → true", () => {
+    assert.equal(detectPlainFlag('@maestro-init --plain "задача"'), true);
+  });
+  it("/maestro-init с режим-флагом перед --plain → true", () => {
+    assert.equal(detectPlainFlag('/maestro-init -aa --plain "задача"'), true);
+  });
+  it("команда без флага → false", () => {
+    assert.equal(detectPlainFlag('@maestro-init "задача"'), false);
+  });
+  it("флаг без команды → false", () => {
+    assert.equal(detectPlainFlag('используй --plain в тексте'), false);
+  });
+  it("--plainly не матчит (word boundary) → false", () => {
+    assert.equal(detectPlainFlag('@maestro-init --plainly "x"'), false);
+  });
+  it("не-строка → false", () => {
+    assert.equal(detectPlainFlag(undefined), false);
+    assert.equal(detectPlainFlag(42), false);
   });
 });
