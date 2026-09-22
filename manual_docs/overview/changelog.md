@@ -11,6 +11,17 @@
 
 ## [2026-09-22]
 
+> **Версия 4.6.1** — Patch-релиз: `communication: "professional"` в
+> `maestro.json` authoring-репо (dogfood) — HITL-диалоги техническим языком.
+
+### Изменено
+
+- Конфиг dogfood (`maestro.json` authoring-репо): `communication:
+  "professional"` (замена дефолта `plain` явным значением); перезапуск
+  opencode, валидация по лог-событиям плагина (`config_fallback` — нет).
+
+## [2026-09-22]
+
 > **Версия 4.6.0** — Minor-релиз: режим «простой язык» (plain language):
 > `communication`-ключ в `maestro.json` (дефолт `plain`) + флаг
 > `@maestro-init --plain` (per-run, приоритетнее конфига) + инъекция короткой
