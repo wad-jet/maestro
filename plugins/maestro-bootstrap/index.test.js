@@ -9,6 +9,7 @@ import {
   SOURCE_LABELS,
   resolveDirectiveLabel,
   directiveText,
+  registerCommunicationHooks,
 } from "./communication.js";
 import opencodePlugin from "./index.js";
 
@@ -2249,5 +2250,68 @@ describe("communication directive (directiveText)", () => {
     assert.ok(t.includes(SOURCE_LABELS.flag_override));
     assert.ok(t.includes("Security-находки"));
     assert.ok(t.includes("субагентов"));
+  });
+});
+
+describe("communication hooks (chat.message mark)", () => {
+  function fakeClient(overrides = {}) {
+    const sessions = new Map([["s1", { parentID: null, title: "primary" }]]);
+    for (const [id, s] of Object.entries(overrides)) sessions.set(id, s);
+    return {
+      session: {
+        get: async ({ path: { id } }) => {
+          const s = sessions.get(id);
+          if (!s) throw new Error("no session");
+          return s;
+        },
+      },
+    };
+  }
+  function fakeLog() {
+    const calls = [];
+    const fn = (level) => (msg, extra) => calls.push({ level, msg, extra });
+    return { calls, info: fn("info"), warn: fn("warn"), error: fn("error"), debug: fn("debug") };
+  }
+  const userMsg = (text) => ({ message: { parts: [{ type: "text", text }] } });
+
+  it("флаг + eligible primary → маркировка + log communication:flag_plain", async () => {
+    const log = fakeLog();
+    const hooks = await registerCommunicationHooks({ client: fakeClient(), config: {}, log });
+    await hooks["chat.message"]({ sessionID: "s1" }, userMsg('@maestro-init --plain "x"'));
+    assert.ok(log.calls.some((c) => c.msg === "communication:flag_plain" && c.extra.sessionID === "s1"));
+  });
+  it("тот же флаг повторно → idempotent (один log)", async () => {
+    const log = fakeLog();
+    const hooks = await registerCommunicationHooks({ client: fakeClient(), config: {}, log });
+    const msg = userMsg('@maestro-init --plain "x"');
+    await hooks["chat.message"]({ sessionID: "s1" }, msg);
+    await hooks["chat.message"]({ sessionID: "s1" }, msg);
+    assert.equal(log.calls.filter((c) => c.msg === "communication:flag_plain").length, 1);
+  });
+  it("task-сессия (parentID задан) → без маркировки", async () => {
+    const log = fakeLog();
+    const hooks = await registerCommunicationHooks({
+      client: fakeClient({ s1: { parentID: "s0", title: "sub" } }), config: {}, log });
+    await hooks["chat.message"]({ sessionID: "s1" }, userMsg('@maestro-init --plain "x"'));
+    assert.ok(!log.calls.some((c) => c.msg === "communication:flag_plain"));
+  });
+  it("сервис-сессия [maestro-memory] (parentID пуст) → без маркировки (FU-1)", async () => {
+    const log = fakeLog();
+    const hooks = await registerCommunicationHooks({
+      client: fakeClient({ s1: { parentID: null, title: "[maestro-memory] summarize s1" } }),
+      config: {}, log });
+    await hooks["chat.message"]({ sessionID: "s1" }, userMsg('@maestro-init --plain "x"'));
+    assert.ok(!log.calls.some((c) => c.msg === "communication:flag_plain"));
+  });
+  it("ошибка client.session.get → без маркировки (fail-soft, консервативно)", async () => {
+    const log = fakeLog();
+    const hooks = await registerCommunicationHooks({ client: fakeClient(), config: {}, log });
+    await hooks["chat.message"]({ sessionID: "unknown" }, userMsg('@maestro-init --plain "x"'));
+    assert.ok(!log.calls.some((c) => c.msg === "communication:flag_plain"));
+  });
+  it("невалидный communication-ключ → warn communication:config_fallback", async () => {
+    const log = fakeLog();
+    await registerCommunicationHooks({ client: fakeClient(), config: { communication: "nope" }, log });
+    assert.ok(log.calls.some((c) => c.msg === "communication:config_fallback" && c.extra.error_class === "invalid_value"));
   });
 });
