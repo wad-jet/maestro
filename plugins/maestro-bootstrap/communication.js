@@ -98,7 +98,10 @@ export async function registerCommunicationHooks({ client, config, log }) {
     if (eligibleCache.has(sessionID)) return eligibleCache.get(sessionID);
     let ok = false;
     try {
-      const data = await client?.session?.get({ path: { id: sessionID } });
+      const resp = await client?.session?.get({ path: { id: sessionID } });
+      // Реальный SDK может вернуть обёртку { data: {...} } (прецедент
+      // core.js resolveIsTrustedSubagent: resp?.data ?? resp).
+      const data = resp?.data ?? resp;
       // task-сессии субагентов и сервис-сессии плагина ([maestro-memory] —
       // саммаризатор/git-backfill, top-level без parent) исключены.
       ok = Boolean(data) && !data.parentID &&

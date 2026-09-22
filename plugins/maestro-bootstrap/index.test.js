@@ -2295,6 +2295,13 @@ describe("communication hooks (chat.message mark)", () => {
     await hooks["chat.message"]({ sessionID: "s1" }, userMsg('@maestro-init --plain "x"'));
     assert.ok(!log.calls.some((c) => c.msg === "communication:flag_plain"));
   });
+  it("session.get с обёрткой {data} — guard работает (parentID в data)", async () => {
+    const log = fakeLog();
+    const client = { session: { get: async () => ({ data: { parentID: "s0", title: "sub" } }) } };
+    const hooks = await registerCommunicationHooks({ client, config: {}, log });
+    await hooks["chat.message"]({ sessionID: "s1" }, userMsg('@maestro-init --plain "x"'));
+    assert.ok(!log.calls.some((c) => c.msg === "communication:flag_plain"));
+  });
   it("сервис-сессия [maestro-memory] (parentID пуст) → без маркировки (FU-1)", async () => {
     const log = fakeLog();
     const hooks = await registerCommunicationHooks({
