@@ -137,6 +137,9 @@ test("#77: clearSkip resets skip/fails/lastAttempt (C1)", async () => {
   assert.equal(await st.isSkipped("s1"), false);
   assert.equal(await st.getLastAttempt("s1"), null, "lastAttempt сброшен в null (C1: throttle не блокирует повтор)");
   assert.equal((await st.unindexed()).length, 0);
+  assert.equal(await st.getFails("s1"), 0, "fails сброшен в 0 после clearSkip");
+  await st.recordFail("s1");
+  assert.equal(await st.isSkipped("s1"), false, "fails сброшен в 0 (один новый страйк не ставит skip)");
   await st.clearSkip("nope"); // no-op, без броска
   rmSync(dir, { recursive: true, force: true });
 });

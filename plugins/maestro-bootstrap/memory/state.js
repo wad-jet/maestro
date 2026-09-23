@@ -63,6 +63,9 @@ export function createState(path, { log } = {}) {
     async getLastAttempt(id) {
       return data.sessions[id]?.lastAttempt ?? null;
     },
+    async getFails(id) {
+      return data.sessions[id]?.fails ?? 0;
+    },
     async getFirstRun() {
       return data.firstRun;
     },
