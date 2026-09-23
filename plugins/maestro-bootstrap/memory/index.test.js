@@ -4756,8 +4756,12 @@ test("memory_reindex run sessions: явные session_ids (снапшот не �
     mkdirSync(join(dir, "docs/superpowers/specs"), { recursive: true });
     writeFileSync(join(dir, "docs/superpowers/specs/x-design.md"), "# X\n");
     const upserts = [];
+    // #77 T6: N1-диспатч — актуальные записи (storage.get, state без fails)
+    // идут через artifacts top-up (0 LLM) — прежний контракт явных ID.
+    const recs = [mkSessionRecord("s1"), mkSessionRecord("s2")];
     const storage = mkMockStorage();
-    storage.scan = async () => [mkSessionRecord("s1"), mkSessionRecord("s2")];
+    storage.scan = async () => recs;
+    storage.get = async (sid) => recs.find((r) => r.session_id === sid) ?? null;
     storage.upsert = async (entries) => { upserts.push(entries); };
     const client = mkClient({
       session: {
@@ -4816,8 +4820,12 @@ test("memory_reindex run sessions: cap max — первые max, пометка 
     mkdirSync(join(dir, "docs/superpowers/specs"), { recursive: true });
     writeFileSync(join(dir, "docs/superpowers/specs/x-design.md"), "# X\n");
     const upserts = [];
+    // #77 T6: актуальные записи в storage.get — явные ID идут через
+    // artifacts top-up (0 LLM), cap-семантика прежняя.
+    const recs = [mkSessionRecord("s1"), mkSessionRecord("s2"), mkSessionRecord("s3")];
     const storage = mkMockStorage();
-    storage.scan = async () => [mkSessionRecord("s1"), mkSessionRecord("s2"), mkSessionRecord("s3")];
+    storage.scan = async () => recs;
+    storage.get = async (sid) => recs.find((r) => r.session_id === sid) ?? null;
     storage.upsert = async (entries) => { upserts.push(entries); };
     const client = mkClient({
       session: {
@@ -5507,5 +5515,220 @@ test("#77 T5-9: статические off-пути → сокращённый �
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
     rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── #77 Task 6: memory_reindex full-reindex (диспатч явных ID по N1) ──
+
+// #77 T6: фикстура диспатча по явным session_ids.
+// Адаптация плана: (1) state — реальный file-based (createState читает
+// <XDG>/maestro/memory/state.json при init; deps.state не существует) —
+// сетап ПЕРЕД init (setState пишет файл), ассерты — чтение файла после run;
+// (2) client дополнен create/delete (контракт summarizeSession) и
+// assistant-сообщением с providerID/modelID + свежими таймстемпами
+// (резолв модели в _pipeline + min_new_messages при ресаммаризации —
+// паттерн noticeFixture); (3) запись через mkSessionRecord (SCAN_FIELDS).
+function reindexFixture(overrides = {}) {
+  const dir = mkdtempSync(join(tmpdir(), "mem-reidx-"));
+  execSync("git init -q -b main", { cwd: dir, stdio: "ignore" });
+  execSync("git -c user.email=t@t.local -c user.name=t commit -q --allow-empty -m x", { cwd: dir, stdio: "ignore" });
+  const records = new Map(); // session_id → record
+  const storage = {
+    ...mkMockStorage(),
+    scan: async () => [...records.values()],
+    get: async (sid) => records.get(sid) ?? null,
+    upsert: async (es) => { for (const e of es) records.set(e.session_id, e); },
+  };
+  const client = {
+    session: {
+      get: async ({ path }) => (overrides.missing ? null : { data: { id: path.id, parentID: overrides.parentIDs?.has(path.id) ? "p1" : null, title: "st", time: { created: 1, updated: 100 } } }),
+      messages: async () => ({ data: overrides.emptyMessages ? [] : [
+        { info: { role: "user", time: { created: Date.now() } }, parts: [{ type: "text", text: "hello world" }] },
+        { info: { role: "assistant", providerID: "prov", modelID: "mod", time: { created: Date.now() } }, parts: [{ type: "text", text: "world" }] },
+      ] }),
+      list: async () => ({ data: [] }),
+      create: async () => ({ data: { id: "summ-t6" } }),
+      prompt: async () => ({ data: { parts: [{ type: "text", text: JSON.stringify({ title: "t", summary: "s", decisions: [] }) }] } }),
+      delete: async () => ({ data: {} }),
+    },
+  };
+  const statePath = join(dir, "maestro", "memory", "state.json");
+  const readState = () => {
+    try { return JSON.parse(readFileSync(statePath, "utf8")); } catch { return { sessions: {} }; }
+  };
+  const setState = (id, fields) => {
+    const data = readState();
+    data.sessions[id] = { ...(data.sessions[id] ?? {}), ...fields };
+    mkdirSync(dirname(statePath), { recursive: true });
+    writeFileSync(statePath, JSON.stringify(data), "utf8");
+  };
+  let hooks;
+  const init = async () => {
+    hooks = await registerMemoryHooks({
+      client, config: mkConfig(dir), log: silentLog,
+      root: dir, deps: { embeddings: mkMockEmbeddings(), storage },
+    });
+    return hooks;
+  };
+  const run = async (args) => hooks.tool.memory_reindex.execute(args, { sessionID: "top" });
+  return { dir, records, storage, client, init, run, setState, readState, hooks: () => hooks };
+}
+
+test("#77 T6-1: отсутствующая запись + fresh lastAttempt → full re-index → indexed (post-fact)", async () => {
+  const f = reindexFixture();
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = f.dir;
+  try {
+    f.setState("s1", { lastAttempt: Date.now() }); // C1: только что страйк, throttle активен
+    await f.init();
+    const out = await f.run({ action: "run", source: "sessions", session_ids: "s1" });
+    assert.ok(out.includes("s1: indexed"), `indexed в ответе: ${out}`);
+    assert.ok(f.records.has("s1"), "запись создана в storage (post-fact)");
+    const st = f.readState();
+    assert.equal(st.sessions.s1?.lastAttempt, null, "clearSkip: lastAttempt сброшен");
+    await f.hooks().dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T6-2: skip=true + запись существует → full re-index, skip сброшен", async () => {
+  const f = reindexFixture();
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = f.dir;
+  try {
+    f.records.set("s2", mkSessionRecord("s2", { head: "b".repeat(40), branch: "main", version: 1 }));
+    f.setState("s2", { skip: true, fails: 2, lastAttempt: Date.now() });
+    await f.init();
+    const out = await f.run({ action: "run", source: "sessions", session_ids: "s2" });
+    assert.ok(out.includes("s2: indexed"), `indexed: ${out}`);
+    const st = f.readState();
+    assert.equal(st.sessions.s2?.skip, false, "skip сброшен");
+    assert.equal(st.sessions.s2?.lastAttempt, null, "lastAttempt сброшен (C1)");
+    await f.hooks().dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T6-3: stale-record (F1): запись существует, lastAttempt > lastSummarized → full re-index (не artifacts top-up)", async () => {
+  const f = reindexFixture();
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = f.dir;
+  try {
+    f.records.set("s3", mkSessionRecord("s3", { head: "c".repeat(40), branch: "main", version: 1, model_id: "m" }));
+    const now = Date.now();
+    f.setState("s3", { lastSummarized: now - 1000, lastAttempt: now }); // stale: attempt после summarized
+    await f.init();
+    const out = await f.run({ action: "run", source: "sessions", session_ids: "s3" });
+    assert.ok(out.includes("s3: indexed"), `full-reindex, не updated: ${out}`);
+    assert.ok(f.records.get("s3").version >= 2, "запись пересаммаризирована (version bump)");
+    await f.hooks().dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T6-4: актуальная запись → artifacts top-up, 0 LLM (регрессия п.1)", async () => {
+  const f = reindexFixture();
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = f.dir;
+  try {
+    f.records.set("s4", mkSessionRecord("s4", { head: "d".repeat(40), branch: "main", artifacts: [] }));
+    await f.init();
+    const out = await f.run({ action: "run", source: "sessions", session_ids: "s4" });
+    assert.ok(/s4: (updated|no_change|skip_\w+)/.test(out), `artifacts-статус: ${out}`);
+    assert.ok(!out.includes("s4: indexed"), "не full-reindex");
+    await f.hooks().dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T6-5: пустой транскрипт → no_new_messages (edge: запись удалена memory_forget)", async () => {
+  const f = reindexFixture({ emptyMessages: true });
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = f.dir;
+  try {
+    await f.init();
+    const out = await f.run({ action: "run", source: "sessions", session_ids: "s5" });
+    assert.ok(out.includes("s5: no_new_messages"), `no_new_messages: ${out}`);
+    assert.ok(!f.records.has("s5"), "запись не создана");
+    await f.hooks().dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T6-6: сессия не найдена → not_found, без броска", async () => {
+  const f = reindexFixture({ missing: true });
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = f.dir;
+  try {
+    await f.init();
+    const out = await f.run({ action: "run", source: "sessions", session_ids: "ghost" });
+    assert.ok(out.includes("ghost: not_found"), `not_found: ${out}`);
+    await f.hooks().dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T6-7: task-сессия (parentID) → skip_service (F3)", async () => {
+  const f = reindexFixture({ parentIDs: new Set(["task1"]) });
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = f.dir;
+  try {
+    await f.init();
+    const out = await f.run({ action: "run", source: "sessions", session_ids: "task1" });
+    assert.ok(out.includes("task1: skip_service"), `skip_service: ${out}`);
+    await f.hooks().dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T6-8: хранилище лежит при full-reindex → failed: storage_error + повторный recordFail (счётчик с 0)", async () => {
+  const f = reindexFixture();
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = f.dir;
+  try {
+    f.storage.upsert = async () => { throw new Error("db down"); };
+    f.setState("s9", { skip: true, fails: 2 });
+    await f.init();
+    const out = await f.run({ action: "run", source: "sessions", session_ids: "s9" });
+    assert.ok(out.includes("s9: failed: storage_error"), `failed: ${out}`);
+    const st = f.readState();
+    assert.ok(st.sessions.s9?.lastAttempt, "recordFail вызван (счётчик с 0 после clearSkip)");
+    assert.equal(st.sessions.s9?.lastErrorClass, "storage_error", "errorClass сохранён");
+    await f.hooks().dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T6-9: cap 20 — 25 явных ID → обработано 20, cap-пометка в ответе", async () => {
+  const f = reindexFixture({ missing: true });
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = f.dir;
+  try {
+    await f.init();
+    const ids = Array.from({ length: 25 }, (_, i) => `s${i}`).join(",");
+    const out = await f.run({ action: "run", source: "sessions", session_ids: ids });
+    const processed = (out.match(/s\d+: /g) ?? []).length;
+    assert.equal(processed, 20, `cap 20: ${processed}`);
+    assert.ok(out.includes("cap"), "cap-пометка в ответе");
+    await f.hooks().dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(f.dir, { recursive: true, force: true });
   }
 });

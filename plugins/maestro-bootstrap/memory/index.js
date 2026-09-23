@@ -1157,7 +1157,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       }),
       memory_reindex: tool({
         description:
-          "HITL-бэкфилл памяти: dry-run листинг на индексацию (sessions + git-история) → run по явным ID или всё по снапшоту, cap 20/вызов (permission: ask).",
+          "HITL-бэкфилл памяти: dry-run листинг на индексацию (sessions + git-история) → run по явным ID или всё по снапшоту, cap 20/вызов (permission: ask); явные session_ids с отсутствующей/stale-записью — полный re-index (LLM, сброс skip).",
         args: {
           action: tool.schema.string().describe("list | run"),
           source: tool.schema.string().optional().describe("sessions | git (для run)"),
@@ -1276,35 +1276,99 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             if (!args.source) return "memory_reindex: для run укажите source (sessions | git)";
 
             if (args.source === "sessions") {
-              // Явные session_ids (снапшот не нужен) ∪ all_empty (строго по
-              // снапшоту листинга) → cap max → reindexSessionArtifacts на
-              // каждый; fail-soft по элементу (RI-9).
-              let ids = args.session_ids ? args.session_ids.split(",").map((s) => s.trim()).filter(Boolean) : [];
+              // #77 (spec §5.1): явные session_ids — диспатч по временному
+              // критерию N1 (тот же, что у state.unindexed()): запись
+              // существует И актуальна → artifacts top-up (0 LLM); иначе
+              // (нет / skip / lastAttempt > lastSummarized) → полный
+              // re-index (LLM, сброс skip C1). all_empty (снапшот) — legacy:
+              // только artifacts top-up. Cap max общий; fail-soft по элементу.
+              const explicit = args.session_ids
+                ? args.session_ids.split(",").map((s) => s.trim()).filter(Boolean)
+                : [];
+              let snapshotIds = [];
               if (args.all_empty) {
                 if (reindexSnapshot === null) {
                   return "memory_reindex: сначала выполните list (action: \"list\"), затем run с all_empty — выбор по снапшоту листинга";
                 }
-                ids = [...reindexSnapshot.sessions.keys()];
+                snapshotIds = [...reindexSnapshot.sessions.keys()];
               }
-              const unique = [...new Set(ids)];
-              const capped = unique.length > max;
-              const selected = unique.slice(0, max);
+              const uniqueExplicit = [...new Set(explicit)];
+              const uniqueAll = [...new Set(snapshotIds)];
+              const capped = uniqueExplicit.length > max || uniqueAll.length > max;
+              const selExplicit = uniqueExplicit.slice(0, max);
+              const selAll = uniqueAll.slice(0, max).filter((id) => !selExplicit.includes(id));
+              const selected = [...selExplicit, ...selAll];
               if (!selected.length) return "memory_reindex: ничего не выбрано для индексации (sessions).";
-              const agg = { selected: selected.length, updated: 0, no_change: 0, already_indexed: 0, skipped: {} };
+              const agg = {
+                selected: selected.length, updated: 0, no_change: 0, already_indexed: 0,
+                // #77 (spec §5.1): full-reindex-счётчики (агрегаты, SEC-4b).
+                indexed: 0, full_index: 0, not_found: 0, skip_service: 0,
+                unattributed: 0, no_new_messages: 0, failed: 0,
+                skipped: {},
+              };
               const lines = [];
+              const artifactsDeps = {
+                client, storage, root, key: effectiveKey,
+                artifactGlobs: config.artifact_globs,
+                artifactConfidentialPatterns,
+                confidentialPatterns: confidentialPaths,
+                embedModelId: embeddings.modelId,
+              };
               for (const sid of selected) {
                 try {
-                  const r = await reindexSessionArtifacts({
-                    client, storage, root, key: effectiveKey,
-                    artifactGlobs: config.artifact_globs,
-                    artifactConfidentialPatterns,
-                    confidentialPatterns: confidentialPaths,
-                    embedModelId: embeddings.modelId,
-                  }, sid);
-                  if (r.status === "updated") agg.updated++;
-                  else if (r.status === "no_change") agg.no_change++;
-                  else agg.skipped[r.status] = (agg.skipped[r.status] ?? 0) + 1;
-                  lines.push(`- ${sid}: ${r.status}`);
+                  let status;
+                  if (selExplicit.includes(sid)) {
+                    // R2: pre-check ДО full re-index — not_found / skip_service
+                    // (0 LLM, без побочных эффектов reindexSession).
+                    let sess = null;
+                    try {
+                      const resp = await client.session.get({ path: { id: sid } });
+                      sess = resp?.data ?? resp;
+                    } catch { /* sess = null → not_found */ }
+                    if (!sess || typeof sess !== "object") {
+                      status = "not_found";
+                    } else if (sess.parentID || SESSIONS.has(sid)) {
+                      status = "skip_service";
+                    } else {
+                      const rec = await storage.get(sid);
+                      const lastSum = await state.getLastSummarized(sid);
+                      const lastAtt = await state.getLastAttempt(sid);
+                      const isSkip = await state.isSkipped(sid);
+                      // N1: актуальность = запись есть И !stale.
+                      const stale = isSkip || (lastAtt != null && (lastSum == null || lastAtt > lastSum));
+                      if (rec && !stale) {
+                        // Актуальная запись — light-путь (0 LLM).
+                        status = (await reindexSessionArtifacts(artifactsDeps, sid)).status;
+                      } else {
+                        // Нет/skip/stale — полный re-index (LLM, сброс skip).
+                        agg.full_index++;
+                        const r = await indexer.reindexSession(sid);
+                        if (r.status === "ok") {
+                          // C2: post-fact-арбитр — запись обязана появиться.
+                          const post = await storage.get(sid);
+                          status = post ? "indexed" : "failed: index_error";
+                        } else if (r.status.startsWith("failed:")) {
+                          status = `failed: ${r.status.slice("failed:".length)}`;
+                        } else {
+                          // unattributed | no_new_messages | skip_service
+                          status = r.status;
+                        }
+                      }
+                    }
+                  } else {
+                    // legacy (all_empty): artifacts top-up, 0 LLM.
+                    status = (await reindexSessionArtifacts(artifactsDeps, sid)).status;
+                  }
+                  if (status === "updated") agg.updated++;
+                  else if (status === "no_change") agg.no_change++;
+                  else if (status === "indexed") agg.indexed++;
+                  else if (status === "not_found") agg.not_found++;
+                  else if (status === "skip_service") agg.skip_service++;
+                  else if (status === "unattributed") agg.unattributed++;
+                  else if (status === "no_new_messages") agg.no_new_messages++;
+                  else if (status.startsWith("failed:")) agg.failed++;
+                  else agg.skipped[status] = (agg.skipped[status] ?? 0) + 1;
+                  lines.push(`- ${sid}: ${status}`);
                 } catch (err) {
                   agg.skipped.error = (agg.skipped.error ?? 0) + 1;
                   lines.push(`- ${sid}: error`);
@@ -1314,10 +1378,14 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
               // без путей/текста/session_id.
               logInfo("memory:reindex.sessions", {
                 selected: agg.selected, updated: agg.updated, no_change: agg.no_change,
-                already_indexed: agg.already_indexed, skipped: agg.skipped,
+                already_indexed: agg.already_indexed,
+                full_index: agg.full_index, indexed: agg.indexed,
+                not_found: agg.not_found, skip_service: agg.skip_service,
+                unattributed: agg.unattributed, no_new_messages: agg.no_new_messages,
+                failed: agg.failed, skipped: agg.skipped,
               });
               const capNote = capped ? ` (cap: взяты первые ${max})` : "";
-              return `memory_reindex (sessions): selected=${agg.selected}, updated=${agg.updated}, no_change=${agg.no_change}, already_indexed=${agg.already_indexed}, skipped=${JSON.stringify(agg.skipped)}${capNote}\n` + lines.join("\n");
+              return `memory_reindex (sessions): selected=${agg.selected}, updated=${agg.updated}, no_change=${agg.no_change}, indexed=${agg.indexed}, full_index=${agg.full_index}, failed=${agg.failed}, skipped=${JSON.stringify(agg.skipped)}${capNote}\n` + lines.join("\n");
             }
 
             if (args.source === "git") {

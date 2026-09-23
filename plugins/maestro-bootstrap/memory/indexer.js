@@ -486,7 +486,9 @@ export class Indexer {
    * данные безопасны (upsert по session_id), guard не добавляется (YAGNI).
    * @param {string} sessionID
    * @returns {Promise<{ status: string }>} "ok" | "unattributed" |
-   *   "no_new_messages" | "failed:<class>"
+   *   "no_new_messages" | "skip_service" | "failed:<class>"
+   *   (passthrough _pipeline: parentID-сессия → skip_service; not_found
+   *   пре-чекает tool — в enum не входит)
    */
   async reindexSession(sessionID) {
     // C1: сброс permanent-skip + throttle-якоря (lastAttempt → null);
