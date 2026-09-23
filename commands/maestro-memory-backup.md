@@ -10,7 +10,8 @@ description: HITL-бэкап и восстановление данных memory
 
 ## Шаг 1. Доступность
 
-Если `memory_backup` tool недоступен (память не включена) — сообщить и завершить.
+Если `memory_backup` tool недоступен (память не включена) — сообщить и завершить
+(см. `@maestro-memory`).
 
 ## Шаг 2. Листинг
 
@@ -35,4 +36,4 @@ node <путь к плагину maestro-bootstrap>/memory/backup-cli.js list
 node <путь к плагину maestro-bootstrap>/memory/backup-cli.js restore --file <путь> [--replace]
 ```
 
-(путь к плагину — из merge-конфига `plugins`; replace — только из интерактивного терминала.)
+(путь — к установленному пакету плагина: package-кэш opencode; при разработке — каталог репо плагина); replace — только из интерактивного терминала.)
