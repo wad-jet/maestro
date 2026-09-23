@@ -1,5 +1,5 @@
 import os, { hostname } from "node:os";
-import { join, dirname } from "node:path";
+import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
@@ -21,6 +21,7 @@ import { extractArtifacts } from "./artifacts.js";
 import { reindexSessionArtifacts, scanHistory, synthesizeGitEntry } from "./backfill.js";
 import { resolveSummarizerModel } from "./resolve-model.js";
 import { validateImportEntry } from "./validation.js";
+import { runBackup, runRestore, listBackups, resolveBackupDir } from "./backup.js";
 
 // `@opencode-ai/plugin` не установлен в node_modules этого репо (zero-dep
 // дефолт). `tool()` — identity-функция (возвращает вход как есть), а
@@ -1719,6 +1720,40 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             return out.join("\n");
           } catch (err) {
             return `memory_stats_detail failed: ${err instanceof Error ? err.message : String(err)}`;
+          }
+        },
+      }),
+      memory_backup: tool({
+        description:
+          "Бэкап/восстановление данных memory layer (v1, sqlite). action: backup (double-masking, gitignore-warn, retention) | restore (merge по умолчанию; replace — только с явным replace: true) | list (бэкапы в memory.backup.path).",
+        args: {
+          action: tool.schema.string().describe("backup | restore | list"),
+          file: tool.schema.string().optional().describe("restore: путь к JSONL из list (только внутри memory.backup.path)"),
+          replace: tool.schema.boolean().optional().describe("restore: true — очистить активный key (аварийно; только явное подтверждение)"),
+        },
+        execute: async (args, ctx) => {
+          try {
+            if (SESSIONS.has(ctx?.sessionID)) return "memory_backup недоступен для служебных сессий.";
+            if (!args?.action) return "memory_backup: укажите action (backup | restore | list)";
+            const backupCfg = resolveBackupConfig(maestroConfig?.memory);
+            const dir = resolveBackupDir(backupCfg.path, root);
+            if (args.action === "list") {
+              const rows = listBackups(dir, effectiveKey);
+              if (!rows.length) return "memory_backup: бэкапов нет";
+              return rows.map((r) => `${r.file}  ts=${r.ts}  size=${r.size}B  manifest=${r.manifest_ok ? "ok" : "MISSING"}`).join("\n");
+            }
+            if (args.action === "backup") {
+              const r = await runBackup({ storage, backupCfg, effectiveKey, storageType: config.storage.type, modelId: storage.modelId, dim: storage.dim, pluginVersion: version, maskPatterns: { confidential: confidentialPaths, artifacts: artifactConfidentialPatterns }, log: logInfo, gitRoot: root });
+              return `OK: ${r.file}\nзаписей: ${r.count}${r.warn ? `\nWARN: ${r.warn} — каталог бэкапа НЕ в .gitignore` : ""}`;
+            }
+            if (args.action === "restore") {
+              if (!args.file) return "memory_backup: restore требует file (уточните через action: \"list\")";
+              const r = await runRestore({ storage, backupCfg, effectiveKey, storageType: config.storage.type, modelId: storage.modelId, dim: storage.dim, file: resolve(args.file), replace: args.replace === true, channel: "tool", pluginVersion: version, maskPatterns: { confidential: confidentialPaths, artifacts: artifactConfidentialPatterns }, log: logInfo, gitRoot: root });
+              return `OK: restore (${r.mode}), записей: ${r.count}, перезаписано: ${r.overwritten}, добавлено: ${r.added}${r.warn ? `\nWARN: ${r.warn}` : ""}`;
+            }
+            return "memory_backup: неизвестный action (backup | restore | list)";
+          } catch (err) {
+            return `memory_backup failed: ${err instanceof Error ? err.message : String(err)}`;
           }
         },
       }),

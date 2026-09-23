@@ -2632,13 +2632,83 @@ test("write-tools registered for permission enforcement (ask-gate contract)", as
       root: dir,
       deps: { embeddings: mkMockEmbeddings() },
     });
-    // memory_forget, memory_export, memory_import — write-tools covered by the
-    // merge-config permission rule (permission: "ask").  Assert their presence so
-    // that a future refactor cannot silently drop a write-tool registration.
+    // memory_forget, memory_export, memory_import, memory_backup — write-tools
+    // covered by the merge-config permission rule (permission: "ask").  Assert
+    // their presence so that a future refactor cannot silently drop a
+    // write-tool registration.
     assert.ok(hooks.tool && hooks.tool.memory_forget, "memory_forget must be registered");
     assert.ok(hooks.tool && hooks.tool.memory_export, "memory_export must be registered");
     assert.ok(hooks.tool && hooks.tool.memory_import, "memory_import must be registered");
+    assert.ok(hooks.tool && hooks.tool.memory_backup, "memory_backup must be registered");
     assert.ok(hooks.tool && hooks.tool.memory_prune, "memory_prune must be registered");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── Task 7: memory_backup tool ─────────────────────────────────────────
+
+test("memory_backup action=list on empty dir → 'бэкапов нет'", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-backup-list-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { embeddings: mkMockEmbeddings() },
+    });
+    const res = await hooks.tool.memory_backup.execute({ action: "list" }, { sessionID: "s1" });
+    assert.match(res, /бэкапов нет/, "empty backup dir → 'бэкапов нет'");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_backup without action → error", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-backup-noaction-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { embeddings: mkMockEmbeddings() },
+    });
+    const res = await hooks.tool.memory_backup.execute({}, { sessionID: "s1" });
+    assert.match(res, /укажите action/, "missing action → error");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_backup action=restore without file → error", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-backup-restore-no-file-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { embeddings: mkMockEmbeddings() },
+    });
+    const res = await hooks.tool.memory_backup.execute({ action: "restore" }, { sessionID: "s1" });
+    assert.match(res, /restore требует file/, "restore without file → error");
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
