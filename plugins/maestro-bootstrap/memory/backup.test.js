@@ -387,6 +387,27 @@ test("runRestore merge: upsert; счёт overwritten/added", async () => {
   }
 });
 
+test("runRestore: embedding → Float32Array перед upsert (parity memory_import; sqlite BLOB)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mr-f32-"));
+  try {
+    // Реальный sqlite upsert читает e.embedding.buffer/byteOffset (TypedArray);
+    // plain number[] из JSONL → Buffer.from(undefined) → crash.
+    const storage = mkMockStorage([]);
+    const file = writeBackupPair(dir, { entries: [mkEntry(1)] });
+    await runRestore({
+      storage, backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
+      storageType: "sqlite", modelId: "mm", dim: 8, file,
+      replace: false, channel: "tool",
+      maskPatterns: { confidential: [], artifacts: [] },
+    });
+    const up = storage.upserts[0][0];
+    assert.ok(up.embedding instanceof Float32Array, "embedding перед upsert — Float32Array");
+    assert.deepEqual(Array.from(up.embedding), [1, 2, 3, 4, 5, 6, 7, 8]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("runRestore merge: maskEntry — confidential маскирует summary", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mr-mask-"));
   try {
@@ -869,4 +890,99 @@ test("runBackup: storage.type != sqlite → отказ (sqlite-only guard)", asy
     }),
     /sqlite/
   );
+});
+
+// ── runBackup: форма embedding реального бэкенда (regression: smoke CLI E2E) ──
+// Реальный sqlite отдаёт BLOB как Buffer (Node) / Uint8Array (bun-шим) из
+// float32 LE-байтов. Без нормализации JSON.stringify пишет
+// {"type":"Buffer","data":[]}, и runRestore (validateImportEntry) отклоняет
+// каждую строку — бэкап unrestorable.
+
+function mkFullRow(i, embedding) {
+  return {
+    session_id: `s${i}`,
+    key: "test-ns",
+    origin_project_hash: "abc123",
+    title: `t${i}`,
+    summary: `sum${i}`,
+    decisions: [],
+    artifacts: [],
+    author: "test",
+    time_first: 1000,
+    time_last: 2000,
+    version: 1,
+    model_id: "mm",
+    embedding,
+  };
+}
+
+test("runBackup: sqlite-Buffer embedding → JSONL number[] + roundtrip runRestore", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mb-buf-"));
+  try {
+    const f32 = new Float32Array([1, 2, 3, 4, 5, 6, 7, 8]);
+    const buf = Buffer.from(f32.buffer, f32.byteOffset, f32.byteLength);
+    const r = await runBackup({
+      storage: mkMockStorage([mkFullRow(1, buf)]),
+      backupCfg: { path: dir, retention: 0 },
+      effectiveKey: "test-ns",
+      storageType: "sqlite",
+      modelId: "mm",
+      dim: 8,
+      pluginVersion: "4.7.0",
+      maskPatterns: { confidential: [], artifacts: [] },
+      gitRoot: null,
+      now: () => 123,
+    });
+    // JSONL — чистый JSON: embedding — массив чисел (spec §4)
+    const line = JSON.parse(readFileSync(join(dir, "backup-test-ns-123.jsonl"), "utf8"));
+    assert.ok(Array.isArray(line.embedding), "embedding в JSONL — массив");
+    assert.deepEqual(line.embedding, [1, 2, 3, 4, 5, 6, 7, 8]);
+    // Roundtrip: бэкап восстанавливается; upsert получает number[]
+    const restoreStorage = mkMockStorage([]);
+    const rr = await runRestore({
+      storage: restoreStorage,
+      backupCfg: { path: dir },
+      effectiveKey: "test-ns",
+      storageType: "sqlite",
+      modelId: "mm",
+      dim: 8,
+      file: r.file,
+      replace: false,
+      channel: "cli",
+      isTty: true,
+      maskPatterns: { confidential: [], artifacts: [] },
+    });
+    assert.equal(rr.count, 1);
+    assert.equal(rr.added, 1);
+    const upEmb = restoreStorage.upserts[0][0].embedding;
+    assert.ok(upEmb instanceof Float32Array, "upsert-embedding — Float32Array (parity memory_import)");
+    assert.deepEqual(Array.from(upEmb), [1, 2, 3, 4, 5, 6, 7, 8]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runBackup: Uint8Array embedding (bun-шим) → JSONL number[]", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mb-u8-"));
+  try {
+    const f32 = new Float32Array([0.5, -0.25, 1, 2, 3, 4, 5, 6]);
+    const u8 = new Uint8Array(f32.buffer, f32.byteOffset, f32.byteLength);
+    await runBackup({
+      storage: mkMockStorage([mkFullRow(1, u8)]),
+      backupCfg: { path: dir, retention: 0 },
+      effectiveKey: "test-ns",
+      storageType: "sqlite",
+      modelId: "mm",
+      dim: 8,
+      pluginVersion: "4.7.0",
+      maskPatterns: { confidential: [], artifacts: [] },
+      gitRoot: null,
+      now: () => 1,
+    });
+    const line = JSON.parse(readFileSync(join(dir, "backup-test-ns-1.jsonl"), "utf8"));
+    assert.ok(Array.isArray(line.embedding), "embedding в JSONL — массив");
+    assert.deepEqual(line.embedding, [0.5, -0.25, 1, 2, 3, 4, 5, 6]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
 });

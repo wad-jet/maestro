@@ -197,6 +197,28 @@ export function listBackups(dir, key) {
 }
 
 /**
+ * Нормализация embedding в JSON-совместимый number[] (spec §4: JSONL — чистый
+ * JSON схемы v3, совместимый с memory_import). Реальный sqlite-бэкенд отдаёт
+ * BLOB как Buffer (Node) / Uint8Array (bun-шим) из float32 LE-байтов;
+ * mocks/прочие формы — Array/Float32Array. Без нормализации JSON.stringify
+ * сериализует Buffer как {"type":"Buffer","data":[]}, и runRestore
+ * (validateImportEntry) отклоняет каждую строку — бэкап unrestorable
+ * (regression: обнаружено manual smoke CLI E2E, Task 6).
+ * @param {unknown} v — значение embedding из scan.
+ * @returns {unknown} number[] при распознанной числовой форме; иначе — как есть
+ *   (restore fail-closed отклонит строку с понятной причиной).
+ */
+export function normalizeEmbedding(v) {
+  if (Array.isArray(v)) return v;
+  if (v instanceof Float32Array) return Array.from(v);
+  // Buffer — подкласс Uint8Array: покрывается одним условием.
+  if (v instanceof Uint8Array && v.byteLength % 4 === 0) {
+    return Array.from(new Float32Array(v.buffer, v.byteOffset, v.byteLength / 4));
+  }
+  return v;
+}
+
+/**
  * gitignore-проверка: только детерминированно (LLM warn не считает).
  *
  * @param {string} dir — путь (абсолютный или cwd-relative); нормализуется
@@ -260,8 +282,13 @@ export async function runBackup({ storage, backupCfg, effectiveKey, storageType,
   const rows = await storage.scan({ key: effectiveKey, fields: SCAN_FIELDS });
   if (!rows.length) throw new Error("memory_backup: нет записей для бэкапа");
 
+  // normalizeEmbedding ДО serialisation: sqlite отдаёт BLOB как Buffer/
+  // Uint8Array — JSON-массив чисел обязателен для roundtrip (см. функцию).
   const entries = rows.map((r) =>
-    maskEntry(r, { confidentialPatterns: maskPatterns.confidential, artifactConfidentialPatterns: maskPatterns.artifacts })
+    maskEntry(
+      { ...r, embedding: normalizeEmbedding(r.embedding) },
+      { confidentialPatterns: maskPatterns.confidential, artifactConfidentialPatterns: maskPatterns.artifacts }
+    )
   );
 
   const ts = now();
@@ -370,9 +397,14 @@ export async function runRestore({ storage, backupCfg, effectiveKey, storageType
 
   const existing = new Set((await storage.scan({ key: effectiveKey, fields: ["session_id"] })).map((r) => r.session_id));
   const masked = entries.map((e) => maskEntry(e, { confidentialPatterns: maskPatterns.confidential, artifactConfidentialPatterns: maskPatterns.artifacts }));
-  await storage.upsert(masked);
-  const added = masked.filter((e) => !existing.has(e.session_id)).length;
-  const overwritten = masked.length - added;
-  log?.("memory:restore", { file, count: masked.length, mode: replace ? "replace" : "merge", overwritten, added, sha256: meta.sha256, warn: versionWarn });
-  return { count: masked.length, mode: replace ? "replace" : "merge", overwritten, added, warn: versionWarn };
+  // sqlite upsert читает e.embedding.buffer/byteOffset (TypedArray → BLOB);
+  // из JSONL embedding — plain number[] → без конверсии Buffer.from(undefined)
+  // crash. Паритет с memory_import (index.js: `new Float32Array(e.embedding)`
+  // перед upsert). Regressions: обнаружено manual smoke CLI E2E (Task 6).
+  const upserts = masked.map((e) => ({ ...e, embedding: new Float32Array(e.embedding) }));
+  await storage.upsert(upserts);
+  const added = upserts.filter((e) => !existing.has(e.session_id)).length;
+  const overwritten = upserts.length - added;
+  log?.("memory:restore", { file, count: upserts.length, mode: replace ? "replace" : "merge", overwritten, added, sha256: meta.sha256, warn: versionWarn });
+  return { count: upserts.length, mode: replace ? "replace" : "merge", overwritten, added, warn: versionWarn };
 }
