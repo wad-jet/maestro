@@ -3,7 +3,7 @@ import { join, dirname } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
-import { makeBoundedMap, readPluginVersion, getGitConfig, loadConfidentialConfig, confGlobMatch } from "../core.js";
+import { makeBoundedMap, readPluginVersion, getGitConfig, loadConfidentialConfig } from "../core.js";
 import { loadMemoryConfig, resolveEffectiveKey, resolveIdentity, resolveEffectiveTextConfig, sanitizeDirName, resolveHistoryGlobs } from "./config.js";
 import { maskEntry, maskTranscript } from "./mask.js";
 import { ensureModule } from "./provision.js";
@@ -20,6 +20,7 @@ import { applyBranchScope, computeBranchSets } from "./membership.js";
 import { extractArtifacts } from "./artifacts.js";
 import { reindexSessionArtifacts, scanHistory, synthesizeGitEntry } from "./backfill.js";
 import { resolveSummarizerModel } from "./resolve-model.js";
+import { validateImportEntry } from "./validation.js";
 
 // `@opencode-ai/plugin` не установлен в node_modules этого репо (zero-dep
 // дефолт). `tool()` — identity-функция (возвращает вход как есть), а
@@ -119,10 +120,6 @@ export function defaultDataDir() {
   if (process.platform === "darwin") return join(os.homedir(), "Library", "Application Support");
   return join(os.homedir(), ".local", "share");
 }
-
-// Schema-v3 fields required for import — shared with validation module.
-// git-метаданные branch/head/merged — опциональны при импорте (не входят в IMPORT_REQUIRED).
-export { IMPORT_REQUIRED } from "./validation.js";
 
 /**
  * Normalize an embedding value from any backend into a Float32Array.
@@ -361,10 +358,6 @@ function nodeTier(node, tierBySession) {
   }
   return tier;
 }
-
-// Imported from validation module — shared with backup/restore.
-import { validateImportEntry } from "./validation.js";
-export { validateImportEntry } from "./validation.js";
 
 /**
  * Lazy-import a heavy dependency, resolving it from `moduleDir/node_modules`

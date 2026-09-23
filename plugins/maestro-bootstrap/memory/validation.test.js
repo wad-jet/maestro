@@ -111,3 +111,25 @@ test("validateImportEntry: artifacts опционален → без artifacts n
   const e = baseEntry({ artifacts: undefined });
   assert.equal(validateImportEntry(e, storage8, "k1"), null);
 });
+
+// ── CR-3: confidential artifact drop (mutation) ────────────────────────────
+
+test("validateImportEntry: CR-3 — confidential artifact дропается, запись null", () => {
+  const e = baseEntry({ artifacts: ["docs/confidential/x.md"] });
+  const patterns = ["docs/confidential/**"];
+  const reason = validateImportEntry(e, storage8, "k1", patterns);
+  assert.equal(reason, null, "запись должна пройти валидацию");
+  assert.deepStrictEqual(e.artifacts, [], "confidential артефакт дропнут");
+});
+
+// ── Mutation contract: absent artifacts → empty array ──────────────────────
+
+test("validateImportEntry: без artifacts → после вызова Array.isArray(e.artifacts) && length === 0", () => {
+  const e = baseEntry();
+  delete e.artifacts;
+  const reason = validateImportEntry(e, storage8, "k1");
+  assert.equal(reason, null);
+  assert.ok(Array.isArray(e.artifacts), "e.artifacts должен быть массивом");
+  assert.equal(e.artifacts.length, 0, "e.artifacts должен быть пустым");
+});
+
