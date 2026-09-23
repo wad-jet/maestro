@@ -387,7 +387,12 @@ test("M2: auto_recall false → no chat.message/system.transform hooks", async (
     });
     assert.ok(hooks.tool && hooks.tool.memory_search, "tool still present");
     assert.equal(hooks["chat.message"], undefined);
-    assert.equal(hooks["experimental.chat.system.transform"], undefined);
+    // #77 (I1): transform-хук живёт независимо от auto_recall (notice-слой);
+    // recall-инъекция внутри хука выключена.
+    assert.equal(typeof hooks["experimental.chat.system.transform"], "function");
+    const out = { system: [] };
+    await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, out);
+    assert.equal(out.system.length, 0, "auto_recall false → recall-блоков нет");
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
@@ -3216,6 +3221,7 @@ test("startup probe hard fail → memory off (memory_probe only, no tool hooks)"
     assert.equal(hooks.memory_search, undefined, "no top-level memory_search on hard fail");
     assert.equal(hooks.tool.memory_search, undefined, "no regular tool hooks on hard fail");
     assert.equal(hooks["chat.message"], undefined, "no chat.message on hard fail");
+    assert.equal(typeof hooks["experimental.chat.system.transform"], "function", "#77: process-notice на hard-fail");
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
@@ -3587,7 +3593,9 @@ test("storage_mismatch logs model/dim on init mismatch", async () => {
       root: dir,
       deps: { embeddings: mkMockEmbeddings() },
     });
-    assert.deepEqual(hooks, {}, "init failed → memory off");
+    // #77: init-fail → сокращённый набор (process-notice, без tools) вместо {}.
+    assert.equal(hooks.tool, undefined, "init failed → нет tools");
+    assert.equal(typeof hooks["experimental.chat.system.transform"], "function", "#77: process-notice на init-fail");
     const ev = errors.find(([m]) => m === "memory:storage_mismatch");
     assert.ok(ev, "must emit memory:storage_mismatch");
     assert.equal(ev[1].type, "sqlite");
@@ -5209,6 +5217,295 @@ test("memory_reindex: git-адаптер end-to-end — реальный tmp git
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── #77 Task 5: notice-хуки (per-session + process-level) ──
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function noticeFixture(overrides = {}) {
+  // git repo с head — write-gate проходит, _run доходит до upsert.
+  // Адаптация плана: client дополнен create/prompt/delete (mock-LLM) и
+  // assistant-сообщением с providerID/modelID — без них summarize-стадия
+  // _pipeline не резолвит модель и не доходит до upsert (reason стал бы
+  // index_error, а не storage_error).
+  const dir = mkdtempSync(join(tmpdir(), "mem-notice-"));
+  execSync("git init -q -b main", { cwd: dir, stdio: "ignore" });
+  execSync("git -c user.email=t@t.local -c user.name=t commit -q --allow-empty -m x", { cwd: dir, stdio: "ignore" });
+  let upsertImpl = null;
+  const storage = {
+    ...mkMockStorage(),
+    upsert: async (es) => { if (upsertImpl) await upsertImpl(es); },
+    get: async () => null,
+  };
+  const client = {
+    session: {
+      get: async ({ path }) => ({ data: { id: path.id, parentID: null, title: "st", time: { created: 1, updated: 100 } } }),
+      // Свежие таймстемпы на каждое чтение: после успешного re-index
+      // (setSummarized) повторный run проходит min_new_messages (T5-8
+      // re-entry) — статичные 1970-е даты дали бы no_new_messages.
+      messages: async () => ({ data: [
+        { info: { role: "user", time: { created: Date.now() } }, parts: [{ type: "text", text: "hello" }] },
+        { info: { role: "assistant", providerID: "prov", modelID: "mod", time: { created: Date.now() } }, parts: [{ type: "text", text: "world" }] },
+      ] }),
+      list: async () => ({ data: [] }),
+      create: async () => ({ data: { id: "summ-mock" } }),
+      prompt: async () => ({ data: { parts: [{ type: "text", text: '{"title":"t","summary":"s","decisions":[]}' }] } }),
+      delete: async () => ({ data: {} }),
+    },
+  };
+  const events = [];
+  const log = { debug: () => {}, info: () => {}, warn() {}, error() {} };
+  for (const k of ["debug", "info", "warn", "error"]) {
+    log[k] = (m, extra) => { events.push([k, m, extra]); };
+  }
+  const cfg = mkConfig(dir, {
+    idle_debounce_min: 0.001,   // 60ms — _run в тестах
+    retry_interval_min: 0,       // без throttle-блокировки повторов
+    min_new_messages: 1,
+    ...overrides.config,
+  });
+  const setUpsertFail = (fail) => { upsertImpl = fail ? async () => { throw new Error("db down"); } : null; };
+  return {
+    dir, storage, client, log, events, cfg, setUpsertFail,
+    init: async (depsOverrides = {}) => registerMemoryHooks({ client, config: cfg, log, root: dir, deps: { embeddings: mkMockEmbeddings(), storage, ...depsOverrides } }),
+  };
+}
+
+test("#77 T5-1: upsert-fail → unsaved-флаг → transform инжектит notice; после успешного re-index — снят", async () => {
+  const f = noticeFixture();
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = f.dir;
+  try {
+    f.setUpsertFail(true);
+    const hooks = await f.init();
+    const idle = () => hooks.event({ event: { type: "session.idle", properties: { sessionID: "s1" } } });
+    idle();
+    await sleep(300);
+    const notice = f.events.find(([lvl, m]) => m === "memory:unsaved_notice");
+    assert.ok(notice, "unsaved_notice в логе");
+    assert.equal(notice[2].reason, "storage_error");
+    let out = { system: [] };
+    await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, out);
+    assert.ok(out.system.some((s) => s.includes("НЕ сохранены")), "notice инжектится");
+    assert.ok(out.system.some((s) => s.includes("@maestro-memory-reindex")), "маркер команды восстановления");
+    // восстановление: upsert ожил → повторный idle → успех → флаг снят
+    f.setUpsertFail(false);
+    idle();
+    await sleep(300);
+    assert.ok(f.events.some(([lvl, m]) => m === "memory:unsaved_cleared"), "unsaved_cleared в логе");
+    out = { system: [] };
+    await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, out);
+    assert.equal(out.system.filter((s) => s.includes("НЕ сохранены")).length, 0, "notice снят");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T5-2: guard — task-сессия (parentID) без инъекции (паритет communication-guard)", async () => {
+  const f = noticeFixture();
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = f.dir;
+  try {
+    const hooks = await f.init();
+    f.client.session.get = async ({ path }) => ({ data: { id: path.id, parentID: "p1", title: "st" } });
+    const out = { system: [] };
+    await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, out);
+    assert.equal(out.system.filter((s) => s.includes("НЕ сохранены")).length, 0, "task-сессия — без notice");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T5-3: retryable embed-ошибка → unsaved-флага НЕТ (регрессия)", async () => {
+  const f = noticeFixture();
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = f.dir;
+  try {
+    const hooks = await f.init({ embeddings: { embed: async () => { const e = new Error("network"); e.retryable = true; throw e; }, dim: 3, modelId: "m" } });
+    hooks.event({ event: { type: "session.idle", properties: { sessionID: "s1" } } });
+    await sleep(300);
+    assert.ok(!f.events.some(([lvl, m]) => m === "memory:unsaved_notice"), "retryable не ставит флаг");
+    assert.ok(f.events.some(([lvl, m]) => m === "memory:index_retryable"), "retryable-аудит на месте");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T5-4: init-fail (storage.init throw) → сокращённый набор (notice, БЕЗ tools), reason init_failed", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-initfail-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    // Адаптация плана: injected deps.storage bypass'ит storage.init() в
+    // registerMemoryHooks — init-fail провоцируем реальным sqlite (meta dim
+    // mismatch → storage.init() бросает, как в тесте storage_mismatch выше).
+    const dbPath = dbPathFor(dir, dir);
+    mkdirSync(dirname(dbPath), { recursive: true });
+    const { default: Database } = await import("better-sqlite3");
+    const db = new Database(dbPath);
+    db.exec("CREATE TABLE meta (name TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    db.prepare("INSERT INTO meta (name, value) VALUES ('model_id', 'x')").run();
+    db.prepare("INSERT INTO meta (name, value) VALUES ('dim', '999')").run();
+    db.close();
+    const events = [];
+    const log = { debug: () => {}, info: () => {}, warn() {}, error() {} };
+    for (const k of ["debug", "info", "warn", "error"]) log[k] = (m, e) => { events.push([k, m, e]); };
+    const hooks = await registerMemoryHooks({ client: mkClient(), config: mkConfig(dir), log, root: dir, deps: { embeddings: mkMockEmbeddings() } });
+    assert.equal(hooks.tool, undefined, "tools отсутствуют (fail → нет memory-поверхности)");
+    assert.equal(typeof hooks["experimental.chat.system.transform"], "function", "notice-хук зарегистрирован");
+    assert.ok(events.some(([lvl, m]) => m === "memory: init failed"), "bootstrap-лог «memory: init failed» без изменений");
+    assert.ok(events.some(([lvl, m, e]) => m === "memory:unsaved_notice" && e.scope === "process" && e.reason === "init_failed"));
+    const out = { system: [] };
+    await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, out);
+    assert.ok(out.system[0].includes("не работает в этом процессе"), "process-notice");
+    assert.ok(out.system[0].includes("init_failed"), "reason в notice");
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T5-5: auto_recall false + init-fail → notice-хук ВСЁ РАВНО зарегистрирован (I1)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-recall-off-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    // Иниф-фил реальным sqlite (meta dim mismatch) — см. T5-4.
+    const dbPath = dbPathFor(dir, dir);
+    mkdirSync(dirname(dbPath), { recursive: true });
+    const { default: Database } = await import("better-sqlite3");
+    const db = new Database(dbPath);
+    db.exec("CREATE TABLE meta (name TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    db.prepare("INSERT INTO meta (name, value) VALUES ('model_id', 'x')").run();
+    db.prepare("INSERT INTO meta (name, value) VALUES ('dim', '999')").run();
+    db.close();
+    const hooks = await registerMemoryHooks({
+      client: mkClient(), config: mkConfig(dir, { auto_recall: false }), log: { debug() {}, info() {}, warn() {}, error() {} },
+      root: dir, deps: { embeddings: mkMockEmbeddings() },
+    });
+    assert.equal(typeof hooks["experimental.chat.system.transform"], "function", "I1: notice вне auto_recall-условия");
+    assert.equal(hooks["chat.message"], undefined, "chat.message (recall) при auto_recall false — отсутствует");
+    const out = { system: [] };
+    await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, out);
+    assert.equal(out.system.length, 1, "process-notice инжектится");
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T5-6: probe_hard_fail → { tool: { memory_probe }, transform } — memory_probe на месте (I2)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-probe-notice-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const hooks = await registerMemoryHooks({
+      client: mkClient(), config: mkConfig(dir), log: { debug() {}, info() {}, warn() {}, error() {} },
+      root: dir,
+      deps: { storage: mkMockStorage(), embeddings: { probe: async () => ({ ok: false, hard: true, detail: "dim mismatch" }), dim: 3, modelId: "m" } },
+    });
+    assert.ok(hooks.tool.memory_probe, "memory_probe сохранён (I2)");
+    assert.equal(hooks.tool.memory_search, undefined, "остальные tools отсутствуют");
+    assert.equal(typeof hooks["experimental.chat.system.transform"], "function");
+    const out = { system: [] };
+    await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, out);
+    assert.ok(out.system[0].includes("probe_hard_fail"), "reason в notice");
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T5-7: notice fail-soft — session.get throw в guard → без инъекции, без броска", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-notice-fs-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    // init-fail реальным sqlite (meta dim mismatch) → process-notice-путь.
+    const dbPath = dbPathFor(dir, dir);
+    mkdirSync(dirname(dbPath), { recursive: true });
+    const { default: Database } = await import("better-sqlite3");
+    const db = new Database(dbPath);
+    db.exec("CREATE TABLE meta (name TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    db.prepare("INSERT INTO meta (name, value) VALUES ('model_id', 'x')").run();
+    db.prepare("INSERT INTO meta (name, value) VALUES ('dim', '999')").run();
+    db.close();
+    const client = { session: { get: async () => { throw new Error("opencode down"); }, list: async () => ({ data: [] }) } };
+    const hooks = await registerMemoryHooks({ client, config: mkConfig(dir), log: { debug() {}, info() {}, warn() {}, error() {} }, root: dir, deps: { embeddings: mkMockEmbeddings() } });
+    const out = { system: [] };
+    await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, out); // не бросает
+    assert.equal(out.system.length, 0);
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T5-8: re-entry — fail → clear → fail → ВТОРОЙ unsaved_notice (1× на установку флага)", async () => {
+  const f = noticeFixture();
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = f.dir;
+  try {
+    f.setUpsertFail(true);
+    const hooks = await f.init();
+    const idle = () => hooks.event({ event: { type: "session.idle", properties: { sessionID: "s1" } } });
+    idle(); await sleep(300);
+    f.setUpsertFail(false);
+    idle(); await sleep(300); // clear
+    f.setUpsertFail(true);
+    idle(); await sleep(300); // новый fail
+    const notices = f.events.filter(([lvl, m]) => m === "memory:unsaved_notice");
+    assert.equal(notices.length, 2, "re-entry: второй event после clear + новый fail");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T5-9: статические off-пути → сокращённый набор + reason по таблице §4.4", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-staticoff-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const mkLog = () => {
+      const events = [];
+      const log = { debug: () => {}, info: () => {}, warn() {}, error() {} };
+      for (const k of ["debug", "info", "warn", "error"]) log[k] = (m, e) => { events.push([k, m, e]); };
+      return { log, events };
+    };
+    // qdrant_config_invalid (identity обязателен на централизованных бэкендах).
+    {
+      const { log, events } = mkLog();
+      const hooks = await registerMemoryHooks({ client: mkClient(), config: mkConfig(dir, { storage: { type: "qdrant" }, identity: "x" }), log, root: dir, deps: { embeddings: mkMockEmbeddings() } });
+      assert.equal(hooks.tool, undefined);
+      assert.equal(typeof hooks["experimental.chat.system.transform"], "function");
+      assert.ok(events.some(([l, m, e]) => m === "memory:unsaved_notice" && e.reason === "config_invalid"));
+    }
+    // api_key_env_missing (openai без env).
+    {
+      const { log, events } = mkLog();
+      const savedKey = process.env.T59_KEY_UNSET;
+      delete process.env.T59_KEY_UNSET;
+      try {
+        const hooks = await registerMemoryHooks({ client: mkClient(), config: mkConfig(dir, { embedding: { provider: "openai", model: "x", base_url: "https://x", api_key_env: "T59_KEY_UNSET", dim: 3 } }), log, root: dir, deps: { embeddings: mkMockEmbeddings() } });
+        assert.equal(hooks.tool, undefined);
+        assert.ok(events.some(([l, m, e]) => m === "memory:unsaved_notice" && e.reason === "api_key_env_missing"));
+      } finally {
+        if (savedKey !== undefined) process.env.T59_KEY_UNSET = savedKey;
+      }
+    }
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
     rmSync(dir, { recursive: true, force: true });
   }
 });
