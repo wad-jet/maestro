@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, existsSync, rmSync } from "node:fs";
@@ -73,7 +74,7 @@ test("buildManifestMeta: пустые записи → sha256 от empty string"
   assert.equal(m.count, 0);
   assert.equal(m.storage_type, "qdrant");
   assert.equal(m.dim, 1536);
-  assert.match(m.sha256, /^[a-f0-9]{64}$/);
+  assert.equal(m.sha256, createHash("sha256").update("").digest("hex"));
 });
 
 test("buildManifestMeta: sha256 детерминирован", () => {
@@ -134,14 +135,19 @@ test("applyRetention: меньше retention пар → ничего не уда
   }
 });
 
-test("applyRetention: удаление только парных файлов (если .jsonl есть, .manifest.json тоже удаляется и наоборот)", () => {
+test("applyRetention: удаляет orphan .jsonl-пару при retention=1, полная пара сохраняется", () => {
   const dir = tmp();
   try {
+    // orphan: .jsonl без .manifest.json (ts=1)
     writeFileSync(join(dir, `backup-${KEY}-1.jsonl`), "x");
-    // .manifest.json нет — ok
-    const stale = applyRetention(dir, KEY, 0);
-    assert.deepEqual(stale, []);
-    assert.ok(existsSync(join(dir, `backup-${KEY}-1.jsonl`)));
+    // полная пара (ts=2)
+    writeFileSync(join(dir, `backup-${KEY}-2.jsonl`), "x");
+    writeFileSync(join(dir, `backup-${KEY}-2.manifest.json`), "{}");
+    const stale = applyRetention(dir, KEY, 1);
+    assert.deepEqual(stale.sort(), [`backup-${KEY}-1`]);
+    assert.ok(!existsSync(join(dir, `backup-${KEY}-1.jsonl`)));
+    assert.ok(existsSync(join(dir, `backup-${KEY}-2.jsonl`)));
+    assert.ok(existsSync(join(dir, `backup-${KEY}-2.manifest.json`)));
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -220,17 +226,17 @@ test("listBackups: фильтрует файлы не от нашего key", ()
 });
 
 test("listBackups: сортировка по убыванию ts при большом наборе", () => {
-    const dir = tmp();
-    try {
-      for (const ts of [10, 3, 7, 1, 5]) {
-        for (const s of [".jsonl", ".manifest.json"]) writeFileSync(join(dir, `backup-${KEY}-${ts}${s}`), "x");
-      }
-      const list = listBackups(dir, KEY);
-      assert.deepEqual(list.map((r) => r.ts), [10, 7, 5, 3, 1]);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
+  const dir = tmp();
+  try {
+    for (const ts of [10, 3, 7, 1, 5]) {
+      for (const s of [".jsonl", ".manifest.json"]) writeFileSync(join(dir, `backup-${KEY}-${ts}${s}`), "x");
     }
-  });
+    const list = listBackups(dir, KEY);
+    assert.deepEqual(list.map((r) => r.ts), [10, 7, 5, 3, 1]);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
 
 // ── resolveBackupDir ──
 

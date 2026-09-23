@@ -38,6 +38,9 @@ export function buildJsonl(entries) {
   return entries.map((e) => JSON.stringify(e)).join("\n") + "\n";
 }
 
+/** Формат манифеста backup. */
+export const BACKUP_FORMAT = "maestro-memory-backup/v1";
+
 /**
  * Формирует мета-объект манифеста backup.
  *
@@ -61,7 +64,7 @@ export function buildManifestMeta({
   ts,
 }) {
   return {
-    format: "maestro-memory-backup/v1",
+    format: BACKUP_FORMAT,
     plugin_version: pluginVersion,
     schema_fields: [...SCAN_FIELDS],
     model_id: modelId,
@@ -88,6 +91,9 @@ export function resolveBackupDir(relPath, gitRoot) {
 /**
  * Применяет политику ретенши: удаляет старейшие пары .jsonl/.manifest.json,
  * сохраняя последние `retention` пар. Чужие файлы не трогает.
+ *
+ * Отрицательные retention — поведение не определено; валидация (целое ≥ 0) —
+ * на вызывающем (resolveBackupConfig).
  *
  * @param {string} dir — путь к каталогу.
  * @param {string} key — namespace/key (фильтр имён).
@@ -138,10 +144,12 @@ export function listBackups(dir, key) {
   const map = new Map();
 
   const get = (base) => {
+    const tsPart = base.slice(prefix.length);
+    if (!/^\d+$/.test(tsPart)) return null;
     if (!map.has(base)) {
       map.set(base, {
         base,
-        ts: Number(base.slice(prefix.length)),
+        ts: Number(tsPart),
         jsonl: false,
         manifest: false,
         size: 0,
@@ -154,28 +162,30 @@ export function listBackups(dir, key) {
     if (!f.startsWith(prefix)) continue;
 
     if (f.endsWith(".jsonl")) {
-      const r = get(f.slice(0, -".jsonl".length));
-      r.jsonl = true;
-      try {
-        const st = statSync(join(dir, f));
-        r.size = st.size;
-      } catch {
-        /* ok */
+      const base = f.slice(0, -".jsonl".length);
+      const r = get(base);
+      if (r) {
+        r.jsonl = true;
+        try {
+          const st = statSync(join(dir, f));
+          r.size = st.size;
+        } catch {
+          /* ok */
+        }
       }
     } else if (f.endsWith(".manifest.json")) {
-      get(f.slice(0, -".manifest.json".length)).manifest = true;
+      const base = f.slice(0, -".manifest.json".length);
+      const r = get(base);
+      if (r) r.manifest = true;
     }
   }
 
-  return [...map.values()]
-    .filter((r) => Number.isInteger(r.ts))
-    .sort((a, b) => b.ts - a.ts)
-    .map((r) => ({
-      file: join(dir, `${r.base}.jsonl`),
-      manifest: join(dir, `${r.base}.manifest.json`),
-      ts: r.ts,
-      jsonl: r.jsonl,
-      manifest_ok: r.manifest,
-      size: r.size,
-    }));
+  return [...map.values()].sort((a, b) => b.ts - a.ts).map((r) => ({
+    file: join(dir, `${r.base}.jsonl`),
+    manifest: join(dir, `${r.base}.manifest.json`),
+    ts: r.ts,
+    jsonl: r.jsonl,
+    manifest_ok: r.manifest,
+    size: r.size,
+  }));
 }
