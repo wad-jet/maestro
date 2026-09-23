@@ -21,6 +21,11 @@ N5 (полный process-enum в §7).
 F4 (default-класс неклассифицированных ошибок), F5 (сброс зеркала
 `indexer._fails` в `clearSkip`), F6 (пайплайн стадий в обход гардов),
 F7 (порядок §4.3/§4.4, формулировка §7).
+**Rev. 5 (2026-09-23):** pinpoint-ревью opus — F1–F7 подтверждены закрытыми;
+закрыт R1 (тест 9 синхронизирован с §7: 1× на установку флага + re-entry
+event) и nano R2 (guard-пре-чек tool'ом), R3 (`skip_no_record` race-only),
+R4 (тест 8 — default-класс), R5 (тест 16 — отсутствие преждевременного
+`memory:index_skipped`), полный порядок стадий §8.
 
 ## 1. Контекст и проблема
 
@@ -245,7 +250,10 @@ full-reindex с повторным страйком warn сработает пр
 - **Early-exit-outcomes (N3):** `reindexSession` возвращает исход ранних
   выходов стадии (`unattributed` / `no_new_messages`) — они **не выводятся**
   из post-fact «записи нет» (он их не различает); post-fact + outcome
-  вместе дают честный статус.
+  вместе дают честный статус. **Guard-исходы (`not_found`, `skip_service`)
+  пре-чекает tool до вызова `reindexSession`** (R2: `client.session.get`
+  для `not_found` вызывается всё равно — `parentID`/`SESSIONS` читаются из
+  того же результата); `reindexSession` гарды повторно не проверяет.
 - **Стадии и классификация** — те же, что у `_run` (§4.1); ошибки стадий →
   `failed: <класс>` + `recordFail` (повторный страйк после clearSkip —
   осознанно: хранилище всё ещё лежит → сессия честно уходит в skip-цикл).
@@ -268,7 +276,8 @@ full-reindex с повторным страйком warn сработает пр
 | `failed: <класс>` | ошибка стадии (§4.1) |
 | (artifacts-статусы) | п.1 диспатча возвращает **без изменений** статусы существующего
   artifacts-пути (`no_change`, `skip_model_mismatch`, `skip_messages_unavailable`,
-  `skip_no_embedding`, `skip_service` — `backfill.js:50-51`), F2 |
+  `skip_no_embedding`, `skip_service`; `skip_no_record` — race-only при новом
+  диспатче — `backfill.js:50-51`), F2/R3 |
 
 Аудит: существующие события `memory:reindex*` + новый результат `full_index`
 в enum (попытка), финальный статус — в ответе tool'а (HITL-вывод).
@@ -315,7 +324,8 @@ SEC-4b: session_id + enum/числа — допустимо (паритет су
 - Full-reindex — HITL (permission `ask`), по явным ID; auto-paths не
   получают новых прав.
 - Masking: full-reindex переиспользует **пайплайн стадий `_run`**
-  (summarize → `maskEntry` → embed → upsert) через `reindexSession` —
+  (transcript → `maskTranscript` → summarize → `maskEntry` → embed → upsert)
+  через `reindexSession` —
   в обход running/queue/throttle-гардов (§5.1.1, F6), но стадийная
   логика и маскирование идентичны штатному `_run`: `maskEntry` применяет
   текущий confidential-набор (расширение `confidential.paths` постфактум
@@ -342,9 +352,12 @@ SEC-4b: session_id + enum/числа — допустимо (паритет су
 7. Notice fail-soft: бросок в guard (session.get throw) → без инъекции,
    без броска наружу.
 8. Маппинг §4.1: summarize-ошибка → `index_error`; non-retryable embed →
-   `embedder_error`; upsert → `storage_error` (по одному тесту на стадию).
-9. Log-события: `memory:unsaved_notice` (1× per session per process, поля
-   enum) при установке; `memory:unsaved_cleared` при снятии.
+   `embedder_error`; upsert → `storage_error` (по одному тесту на стадию);
+   ошибки `client.session.get/messages` (default-класс, F4) → `index_error`.
+9. Log-события: `memory:unsaved_notice` (**1× на установку флага; повторная
+   установка после clear + новый fail — новый event**, §7; поля enum) при
+   установке; `memory:unsaved_cleared` при снятии. Рe-entry: fail → clear →
+   fail → второй `memory:unsaved_notice` (в пределах одного процесса).
 10. Память disabled по конфигу (`no_memory_section`/`explicitly_disabled`) →
     хуки не регистрируются, инъекций нет (регрессия).
 11. Статические off-пути (config_invalid / api_key_env_missing /
@@ -366,7 +379,9 @@ SEC-4b: session_id + enum/числа — допустимо (паритет су
     запись удалена `memory_forget` — **state при этом не чистится**,
     `lastSummarized` сохранён, в сессии мало нового — M4/N2).
 16. Хранилище **всё ещё лежит** при full-reindex → `failed: storage_error` +
-    повторный `recordFail` (счётчик идёт с 0 после clearSkip).
+    повторный `recordFail` (счётчик идёт с 0 после clearSkip); **после
+    clearSkip + ровно одного нового страйка `memory:index_skipped` НЕ
+    возникает** (зеркало `indexer._fails` сброшено, F5/R5).
 17. Сессия не найдена в opencode → `not_found`, без броска.
 18. Cap: >20 session_ids → cap 20/вызов (M2), остаток — в ответе.
 19. Регрессия: существующая запись → artifacts top-up (0 LLM), `updated`
