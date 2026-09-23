@@ -244,14 +244,18 @@ export function normalizeEmbedding(v) {
  * @param {string} dir — путь (абсолютный или cwd-relative); нормализуется
  *   `relative(gitRoot, …)`. Реальный вызывающий (runBackup) передаёт абсолютный dir.
  * @param {string?} gitRoot — корень git-репозитория.
- * @returns {{ ignored: boolean, reason: string|null }}
+ * @returns {{ ignored: boolean, reason: "not_a_git_repo" | "not_ignored" | "not_ignored_fallback" | "git_unavailable" | null }}
  */
 export function gitIgnoreWarn(dir, gitRoot) {
   if (!gitRoot) return { ignored: false, reason: "not_a_git_repo" };
   // Относительный путь корректнее для `git -C root check-ignore`.
   const p = relative(gitRoot, dir);
   const r = spawnSync("git", ["-C", gitRoot, "check-ignore", "-q", "--", p], { encoding: "utf8" });
-  if (r.error || r.status === 127 || r.status === 128) return gitIgnoreFallback(p, gitRoot);
+  if (r.error) return gitIgnoreFallback(p, gitRoot);
+  // git status 128 — не git-репо (fatal: not a git repository);
+  // НЕ передавать на fallback — .gitignore вне git-контроля не имеет смысла.
+  if (r.status === 128) return { ignored: false, reason: "not_a_git_repo" };
+  if (r.status === 127) return gitIgnoreFallback(p, gitRoot);
   return r.status === 0 ? { ignored: true, reason: null } : { ignored: false, reason: "not_ignored" };
 }
 

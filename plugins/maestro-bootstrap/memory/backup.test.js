@@ -1,9 +1,10 @@
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, existsSync, rmSync, readFileSync, readdirSync } from "node:fs";
+import { mkdtempSync, writeFileSync, existsSync, rmSync, readFileSync, readdirSync, mkdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, relative, isAbsolute } from "node:path";
+import { spawnSync } from "node:child_process";
 import { backupBaseName, buildJsonl, buildManifestMeta, applyRetention, listBackups, resolveBackupDir, gitIgnoreWarn, gitIgnoreFallback, runBackup, runRestore, BACKUP_FORMAT } from "./backup.js";
 import { SCAN_FIELDS } from "./backfill.js";
 
@@ -318,6 +319,18 @@ test("gitIgnoreFallback: путь не матчится → not_ignored_fallback
     assert.equal(r.reason, "not_ignored_fallback");
   } finally {
     rmSync(baseDir, { recursive: true, force: true });
+  }
+});
+
+// — не-git-каталог — status 128 → not_a_git_repo (не fallback)
+test("gitIgnoreWarn: git-root без git-репо → not_a_git_repo (status 128)", () => {
+  const nonGitDir = mkdtempSync(join(tmpdir(), "gitw-ng-"));
+  try {
+    const r = gitIgnoreWarn("some/path", nonGitDir);
+    assert.equal(r.ignored, false);
+    assert.equal(r.reason, "not_a_git_repo");
+  } finally {
+    rmSync(nonGitDir, { recursive: true, force: true });
   }
 });
 
@@ -816,17 +829,18 @@ test("runBackup: scan вызывается с fields = SCAN_FIELDS (полнот
 // ── runBackup ──
 
 test("runBackup: scan → maskEntry → JSONL+манифест → warn → retention → audit", async () => {
-  const baseDir = mkdtempSync(join(tmpdir(), "mb-run-"));
+  // Используем process.cwd() как gitRoot (точно git-репо)
+  const relBackup = "mb-run-audit";
+  const backupDir = join(process.cwd(), relBackup);
+  mkdirSync(backupDir, { recursive: true });
   try {
-    // .gitignore → fallback
-    writeFileSync(join(baseDir, ".gitignore"), "backup\n");
     const logs = [];
     const r = await runBackup({
       storage: mkMockStorage([{
         ...ROW,
         summary: "prefix\nexact-secret-value\nsuffix",
       }]),
-      backupCfg: { path: ".", retention: 0 },
+      backupCfg: { path: relBackup, retention: 0 },
       effectiveKey: "k1",
       storageType: "sqlite",
       modelId: "mm",
@@ -834,22 +848,23 @@ test("runBackup: scan → maskEntry → JSONL+манифест → warn → rete
       pluginVersion: "4.7.0",
       maskPatterns: { confidential: ["exact-secret-value"], artifacts: [] },
       log: (msg, extra) => logs.push({ msg, extra }),
-      gitRoot: baseDir,
+      gitRoot: process.cwd(),
       now: () => 123,
     });
-    // resolveBackupDir(".", baseDir) = baseDir
-    assert.ok(existsSync(join(baseDir, "backup-k1-123.jsonl")));
-    assert.ok(existsSync(join(baseDir, "backup-k1-123.manifest.json")));
-    const body = JSON.parse(readFileSync(join(baseDir, "backup-k1-123.jsonl"), "utf8"));
+    // resolveBackupDir("mb-run-audit", process.cwd()) = backupDir
+    assert.ok(existsSync(join(backupDir, "backup-k1-123.jsonl")));
+    assert.ok(existsSync(join(backupDir, "backup-k1-123.manifest.json")));
+    const body = JSON.parse(readFileSync(join(backupDir, "backup-k1-123.jsonl"), "utf8"));
     // maskEntry заменяет confidential line на "[confidential]"
     assert.ok(!String(body.summary).includes("exact-secret-value"), "maskEntry обязателен");
     assert.ok(String(body.summary).includes("[confidential]"), "формат маски — [confidential]");
-    const meta = JSON.parse(readFileSync(join(baseDir, "backup-k1-123.manifest.json"), "utf8"));
+    const meta = JSON.parse(readFileSync(join(backupDir, "backup-k1-123.manifest.json"), "utf8"));
     assert.equal(meta.count, 1);
-    assert.equal(r.warn, "not_ignored_fallback");
+    // path "mb-run-audit" не в .gitignore → not_ignored
+    assert.equal(r.warn, "not_ignored");
     assert.ok(logs.some((l) => l.msg === "memory:backup" && l.extra.count === 1));
   } finally {
-    rmSync(baseDir, { recursive: true, force: true });
+    rmSync(backupDir, { recursive: true, force: true });
   }
 });
 
