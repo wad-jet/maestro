@@ -159,6 +159,18 @@ HITL-бэкфилл памяти (v3.5.0): листинг кандидатов �
 отчёт (SEC-4b). Рекомендованный порядок: сначала sessions, затем git.
 Permission `ask`. Подробнее — [Память](../reference/memory.md).
 
+### `@maestro-memory-backup`
+
+HITL-бэкап и восстановление данных memory layer (v1, sqlite): `memory_backup`
+`list` → показ списка (файл, ts, size, статус jsonl/манифеста) → HITL-выбор:
+backup / restore (merge, дефолт) / restore --replace (аварийно: явное
+предупреждение + отдельное HITL-подтверждение; удаление всей памяти — только
+после успешной fail-closed-валидации бэкапа) / отмена. Команда не вызывает
+CLI через bash — при запросе восстановления без opencode показывает
+инструкцию ручного запуска (`backup-cli.js`). Permission `ask`. Подробнее —
+[Память](../reference/memory.md) и
+[Бэкап и восстановление памяти](../how-to/memory-backup-restore.md).
+
 ## 💡 Примечания
 
 - Все HITL-вопросы и сообщения пользователю — только на русском.

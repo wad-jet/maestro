@@ -9,6 +9,37 @@
 
 ## [Unreleased]
 
+## [2026-09-23]
+
+> **Версия 4.7.0** — Minor-релиз: backup/restore memory layer (sqlite) —
+> tool `memory_backup` + команда `@maestro-memory-backup` + аварийный CLI +
+> конфиг `memory.backup.*`.
+
+### Добавлено
+
+- **Backup/restore memory layer (v1, sqlite):** tool `memory_backup`
+  (action `backup`/`restore`/`list`, permission `ask`) + команда
+  `@maestro-memory-backup` (HITL: list → выбор → backup/restore/replace) +
+  аварийный CLI `plugins/maestro-bootstrap/memory/backup-cli.js` (ручной
+  запуск без opencode; `--replace` — только TTY + ввод namespace). Формат:
+  `backup-<key>-<ts>.jsonl` (полная схема v3) + `.manifest.json`
+  (`sha256` тела, `schema_fields`, `model_id`/`dim`, `plugin_version`);
+  double-masking (`maskEntry`) при бэкапе и restore; fail-closed-валидация
+  манифеста (без partial restore); merge (дефолт, wins restore, счёт
+  перезаписано/добавлено) / replace (двойной гейт; очистка — только после
+  успешной валидации); gitignore-warn при каждом бэкапе (`git check-ignore`,
+  детерминированно); retention (default `3` пары; `0` = off). Конфиг
+  `memory.backup.{path,retention}` (default `.maestro/memory/backup` / `3`;
+  невалидная секция → soft fallback + warn `memory:config_fallback`, память
+  не отключается). Бэкапы — только в приватные репо (C3); дефолтный путь —
+  machine-local (gitignored). Docs: новый how-to
+  `manual_docs/how-to/memory-backup-restore.md`; синк — `SECURITY.md` §5a,
+  `AGENTS.md`, `manual_docs/{reference/memory.md, reference/config.md,
+  reference/commands.md, how-to/enable-memory.md,
+  explanation/agents-and-trust.md, reference/model-selection.md}`,
+  `plugins/maestro-bootstrap/README.md`, канон `maestro-assistant`.
+  Regression: `regression/entries/2026-09-22-memory-backup-restore.md`.
+
 ## [2026-09-22]
 
 > **Версия 4.6.1** — Patch-релиз: `communication: "professional"` в

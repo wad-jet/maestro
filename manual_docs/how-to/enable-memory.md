@@ -107,8 +107,8 @@
 4. При включении памяти ассистент **автоматически** добавит в merge-config
    нативное правило `permission: { memory_forget: "ask", memory_export: "ask",
    memory_import: "ask", memory_migrate: "ask", memory_prune: "ask",
-   memory_reindex: "ask" }` (opencode default для новых
-   инструментов — allow, поэтому правило обязательно).
+   memory_reindex: "ask", memory_backup: "ask" }` (opencode default для
+   новых инструментов — allow, поэтому правило обязательно).
 5. После правки — напоминание про **онбординг**: рестарт opencode (OP-1) →
    self-provision `module_dir` → `npm install` в `module_dir` → рестарт №2 →
    верификация (`@maestro-memory`, блок «Контекст из памяти maestro»).

@@ -271,8 +271,9 @@ untrusted, дефолтные sanitizer-правила.
 - **`report.preview`:** `true` (default) — `@maestro-memory-report` сам запускает
   локальный preview-сервер (bind `127.0.0.1`, TTL 60 мин); `false` — только HTML-файл.
 - **Хуки:** `tool` (`memory_search`, `memory_forget`, `memory_export`,
-  `memory_import`, `memory_recall_preview`, `memory_stats_detail`,
-  `memory_prune`), `chat.message`,
+  `memory_import`, `memory_migrate`, `memory_recall_preview`,
+  `memory_stats_detail`, `memory_prune`, `memory_reindex`, `memory_probe`,
+  `memory_backup`), `chat.message`,
   `experimental.chat.system.transform`, `event` (`session.idle`/`session.deleted`),
   расширенный `dispose`. Инвариант: `experimental.chat.messages.transform` НЕ
   присваивается. **Адаптер вынесен в core.js — `createBootstrapAdapter(factory)`**
@@ -291,10 +292,19 @@ untrusted, дефолтные sanitizer-правила.
   `project` (кросс-проектный opt-in, **все бэкенды**; sqlite — read-only соседняя
   БД с fail-soft, qdrant/pg — key-filter).
 - **Permission (обязательное правило):** `memory_forget`/`memory_export`/
-  `memory_import`/`memory_prune`/`memory_migrate` — write/boundary-tools; в
-  merge-config пишется
+  `memory_import`/`memory_prune`/`memory_migrate`/`memory_reindex`/
+  `memory_backup` — write/boundary-tools; в merge-config пишется
   `permission: { memory_forget: "ask", memory_export: "ask", memory_import: "ask",
-  memory_prune: "ask", memory_migrate: "ask" }`.
+  memory_prune: "ask", memory_migrate: "ask", memory_reindex: "ask",
+  memory_backup: "ask" }`.
+- **Backup/restore (4.7.0, v1 — sqlite):** tool `memory_backup`
+  (backup|restore|list) + аварийный CLI `memory/backup-cli.js`
+  (запуск — из каталога плагина, где рядом с `memory/` лежит `core.js`; из
+  `module_dir` не работает). Double-masking (`maskEntry`) при бэкапе и
+  restore; restore-файл — недоверенный ввод (fail-closed-манифест,
+  `replace` — двойной гейт); бэкапы — в `memory.backup.path`
+  (default `.maestro/memory/backup`, retention default `3`, `0` = off) —
+  только в приватные репо (C3); gitignore-warn при каждом бэкапе.
 - **Self-provisioning:** при `enabled: true` плагин создаёт `module_dir`
   (`<data-dir>/maestro/memory/module/`), пишет `package.json` (single-writer,
   `"type": "module"`) и копирует исходники модуля; пользователь выполняет
@@ -302,7 +312,9 @@ untrusted, дефолтные sanitizer-правила.
   `node_modules` и данные переживают `maestro-update.sh`.
 - **Данные:** `<data-dir>/maestro/memory/` — per-key БД, `state.json`
   (retry/skip/first-run), кэш модели эмбеддингов, экспорт `memory_export`
-  (`export-<key16hex>-<ts>.jsonl`). Вне git.
+  (`export-<key16hex>-<ts>.jsonl`). Вне git. Бэкапы `memory_backup` — в
+  каталоге проекта `memory.backup.path` (default `.maestro/memory/backup`),
+  **не в `module_dir`** (module_dir — только код, стирается при resync).
 - **Установка:** `maestro-install.sh` — опциональный шаг (y/N) ставит маркер
   `<data-dir>/maestro/memory/enabled.flag` + preflight npm/bun (зависимости
   ставит плагин, не install.sh).
@@ -358,6 +370,8 @@ Memory layer (при `memory.enabled: true`):
 - `memory: init failed` — ошибка инициализации (error; сессии работают)
 - `memory:index_error` — ошибка индексации сессии (error, с `sessionID` + `error_class` enum)
 - `memory:retention_pruned` — retention удалил записи при старте (info, с `count` + `older_than_days`)
+- `memory:backup` — создан бэкап памяти (info; count, sha256, warn gitignore-check, removed; вызовы CLI — в bootstrap-лог)
+- `memory:restore` — восстановление из бэкапа (info; count, mode merge/replace, overwritten/added, sha256; вызовы CLI — в bootstrap-лог)
 
 > **Смешанный список:** `memory: disabled` и `memory: init failed` — carve-out,
 > пишутся в **bootstrap-лог** (видимость HITL-гейта «плагин работает»); остальные

@@ -63,6 +63,7 @@
     "probe_cooldown_min": 30,
     "artifact_globs": ["docs/superpowers/specs/**", "docs/superpowers/plans/**"],
     "history_globs": null,
+    "backup": { "path": ".maestro/memory/backup", "retention": 3 },
     "storage": {
       "type": "sqlite",
       "qdrant": { "url": "https://qdrant.internal:6333", "api_key_env": "MAESTRO_MEMORY_QDRANT_KEY", "collection": "maestro_memory" },
@@ -87,6 +88,8 @@
 | `probe_cooldown_min` | `number` | `30` | Интервал в минутах между live-probe модели на старте (кэш результата в `state.json`); число > 0 |
 | `artifact_globs` | `string[]` | `["docs/superpowers/specs/**", "docs/superpowers/plans/**"]` | Allowlist-глобы артефактов (спеки/планы, v5.2): repo-relative пути из `write`/`edit` сессии, матчащие глобы, попадают в поле записи `artifacts[]`. `[]` — явный off. ≤16 непустых строк; невалиден → память disabled (`artifact_globs_invalid`) |
 | `history_globs` | `string[]` \| `null` | `null` (inherit `artifact_globs`) | Allowlist-глобы для **git-history backfill** (`memory_reindex`, v3.5.0): repo-relative пути спек в git-истории — кандидаты на синтез записей. `null`/absent → **inherit** `artifact_globs` (резолв на use-site); `[]` — явный off (кандидатов нет). Валидный массив: ≤16 непустых строк (trim + unique). Невалидное (non-array / не-строки / >16) → **soft fallback** на `artifact_globs` + warn `memory:config_fallback` — память НЕ отключается, нового `disabled_reason` нет |
+| `backup.path` | `string` | `.maestro/memory/backup` | Каталог бэкапов (`memory_backup`, 4.7.0; v1 — sqlite): repo-relative, резолвится от git-корня (абсолютный путь допустим). Дефолт — под `.maestro/` (в `.gitignore`) → бэкапы **не коммитятся** по умолчанию (модель «коммит = осознанная настройка» — в [Бэкап и восстановление](../how-to/memory-backup-restore.md)) |
+| `backup.retention` | `number` | `3` | Сколько последних пар бэкапов (`.jsonl` + `.manifest.json`) хранить; `0` = без ограничений (off). Невалидная секция `backup` → **soft fallback** на дефолты + warn `memory:config_fallback` (память НЕ отключается, нового `disabled_reason` нет) |
 
 | `identity` | `string` \| `null` | `null` | Явный override identity (напр. сервисный аккаунт). Обычно identity берётся из `identity_env` → git `user.name` |
 | `identity_env` | `string` \| `null` | `null` | Имя env-переменной с identity (per-machine, не в общем `maestro.json`) |
@@ -155,6 +158,10 @@
   > 16 элементов) → **soft fallback** на `artifact_globs` + warn
   `memory:config_fallback` — память НЕ отключается, нового `disabled_reason`
   нет (в отличие от `artifact_globs_invalid`).
+- Некорректная секция `backup` (не объект; `path` — не непустая строка;
+  `retention` — не целое ≥ 0) → **soft fallback** на дефолты
+  (`.maestro/memory/backup`, `3`) + warn `memory:config_fallback` — память
+  НЕ отключается, нового `disabled_reason` нет (как `history_globs`).
 - Для `embedding.provider: openai` отсутствие `process.env[embedding.api_key_env]`
   → память off + лог (`embedding_api_key_env_missing`).
 - Стартовый probe hard-fail (ключ/модель/размерность) → память off + лог
@@ -498,8 +505,8 @@ Guard: если tool `memory_search` недоступен (память не в�
 Все инструменты — хуки `tool`, доступны агентам в сессиях; **недоступны
 plugin-созданным сессиям `[maestro-memory]`** (как `memory_search`).
 `memory_forget`/`memory_export`/`memory_import`/`memory_migrate`/
-`memory_prune`/`memory_reindex` — **write/boundary-tools**: требуют нативного
-permission-правила `"ask"` в merge-config (см. ниже).
+`memory_prune`/`memory_reindex`/`memory_backup` — **write/boundary-tools**:
+требуют нативного permission-правила `"ask"` в merge-config (см. ниже).
 
 ### `memory_forget`
 
@@ -633,6 +640,76 @@ memory_migrate({from: "auto" | "namespace" | "hash", delete_source?}) → «Пе
   `false`).
 - **Permission:** `memory_migrate: "ask"` в merge-config (обязательное правило).
 
+### `memory_backup` (4.7.0)
+
+```
+memory_backup({action: "backup" | "restore" | "list", file?, replace?}) → бэкап/восстановление/листинг
+```
+
+- **Бэкап/восстановление данных памяти** (v1 — только `storage.type:
+  sqlite`; qdrant/pgvector → отказ с понятной ошибкой, без записей).
+- **`action: "backup"`** — все записи активного `key` → **повторное
+  маскирование** каждой по текущему confidential-набору (`maskEntry` — тот же
+  double-masking, что в индексаторе/импорте; расширение `confidential.paths`
+  постфактум отражается в новом бэкапе, в отличие от `memory_export`) →
+  пара файлов `backup-<key>-<ts>.jsonl` (JSONL полной схемы v3, `embedding` —
+  массив чисел) + `backup-<key>-<ts>.manifest.json` (`plugin_version`,
+  `schema_fields[]`, `model_id`, `dim`, `key`, `ts`, `count`, `sha256`
+  JSONL-тела, `storage_type`). 0 записей → отказ («нет записей для бэкапа»),
+  файлы не создаются. **Gitignore-check** (`git check-ignore`, детерминированно
+  — не LLM) — **при каждом бэкапе**: каталог не в `.gitignore` → WARN в выводе
+  и в аудит-логе (дефолтный путь — под `.maestro/`, уже gitignored — warn нет).
+  После успешной записи — **retention**: удаление старых пар строго по
+  паттерну `backup-<key>-*` (чужие файлы не трогает; `backup.retention`).
+- **`action: "restore"`** — восстановление из бэкапа (`file` — путь из
+  `list`, **только внутри каталога бэкапов** `memory.backup.path`). До любых
+  изменений — **fail-closed-валидация**: `sha256` JSONL-тела; манифест —
+  `storage_type`, `key`, `model_id`, `dim`, `schema_fields` (совпадение с
+  текущей схемой); `count`; **все строки** (схема v3 + `model_id`/dim —
+  паритет `memory_import`). Любое несовпадение → отказ, без partial restore,
+  БД не изменяется. `plugin_version` — warn-only (аварийный restore после
+  апгрейда плагина — основной сценарий). Режим **merge (дефолт)**: upsert по
+  `session_id`, `maskEntry` перед записью, конфликт по ключу — **wins
+  restore** (осознанная перезапись, без сравнения `time_last`); записей,
+  отсутствующих в файле, не трогает. Вывод — счёт: N перезаписано / M
+  добавлено. Режим **replace** (`replace: true`): удаление **всего** активного
+  `key`, затем восстановление — только **после** успешной валидации;
+  деструктивная аварийная операция (двойной гейт, см. ниже).
+- **`action: "list"`** — список бэкапов (файл, `ts`, размер, статус
+  jsonl/манифеста) по убыванию `ts`; каталога нет → «бэкапов нет».
+- **Гейты:** нативный `permission: ask` (обязательное правило ниже);
+  replace — дополнительно явный `replace: true`. Штатный путь — команда
+  `@maestro-memory-backup` (list → HITL-выбор → backup/restore).
+- **Permission:** `memory_backup: "ask"` в merge-config (обязательное
+  правило). Пошаговые сценарии — [Бэкап и восстановление памяти](../how-to/memory-backup-restore.md).
+
+### Аварийный CLI (без opencode, 4.7.0)
+
+Ручной запуск backup/restore из терминала (opencode недоступен):
+
+```bash
+node <путь-к-плагину>/memory/backup-cli.js list
+node <путь-к-плагину>/memory/backup-cli.js backup
+node <путь-к-плагину>/memory/backup-cli.js restore --file <путь> [--replace]
+```
+
+- `<путь-к-плагину>` — каталог установленного плагина `maestro-bootstrap`,
+  где рядом с `memory/` лежит `core.js` (в целевом приложении — package-кэш
+  OpenCode; при разработке — каталог репо плагина). **Не `module_dir`**: там
+  копия `memory/` без `core.js` — CLI оттуда не работает.
+- Запуск — из корня (или подкаталога) git-репозитория проекта с
+  `maestro.json`, где включена память (`storage.type: sqlite` — v1).
+  Тот же конфиг (`memory.backup.*`), те же данные (`memory.db` в
+  `<data-dir>`) и те же confidential-наборы, что у плагина.
+- sqlite-драйвер загружается из `module_dir` — там выполнен `npm install`
+  (штатный онбординг). Аудит — bootstrap-лог
+  `.maestro/logs/maestro-bootstrap-<дата>.log` (события `memory:backup` /
+  `memory:restore`).
+- `--replace` — только из интерактивного терминала (TTY): CLI запрашивает
+  ввод namespace; не-tty (скрипт/CI) → отказ.
+- Пошаговая последовательность (в т.ч. с другой машины) —
+  [Бэкап и восстановление памяти](../how-to/memory-backup-restore.md).
+
 ### `memory_recall_preview`
 
 ```
@@ -674,9 +751,9 @@ memory_stats_detail() → агрегаты (без summary-текста)
 ### Permission-правило (write/boundary-tools)
 
 `memory_forget`/`memory_export`/`memory_import`/`memory_migrate`/`memory_prune`/
-`memory_reindex` — операции, пересекающие границу (удаление, запись файла,
-запись в память, пере-keying, бэкфилл/синтез записей). OpenCode по умолчанию
-разрешает новые тулы, поэтому
+`memory_reindex`/`memory_backup` — операции, пересекающие границу (удаление,
+запись файла, запись в память, пере-keying, бэкфилл/синтез записей,
+бэкап/восстановление). OpenCode по умолчанию разрешает новые тулы, поэтому
 **обязательное правило** в merge-config
 (`.opencode/opencode.json` или global):
 
@@ -688,7 +765,8 @@ memory_stats_detail() → агрегаты (без summary-текста)
     "memory_import": "ask",
     "memory_migrate": "ask",
     "memory_prune": "ask",
-    "memory_reindex": "ask"
+    "memory_reindex": "ask",
+    "memory_backup": "ask"
   }
 }
 ```
@@ -756,6 +834,17 @@ opt-in на вставку замаскированных заголовков/s
 > формат `.maestro/memory-report-<YYYYMMDD-HHMMSS>.html` (без key в имени, чтобы
 > не раскрывать key в имени файла и не зависеть от его длины). Поведение
 > сохранено как есть; документируется здесь как осознанное отклонение.
+
+### `@maestro-memory-backup`
+
+HITL-бэкап и восстановление данных памяти (v1, sqlite): `memory_backup`
+`list` → показ списка → HITL-выбор: backup / restore (merge, дефолт) /
+restore --replace (аварийно: явное предупреждение + отдельное
+HITL-подтверждение; нативный `ask` срабатывает дополнительно) / отмена.
+Команда **не вызывает** CLI через bash — при запросе восстановления без
+opencode показывает инструкцию ручного запуска
+(`backup-cli.js`). Подробнее —
+[Бэкап и восстановление памяти](../how-to/memory-backup-restore.md).
 
 ## 🔁 Авто-вспоминание (auto-recall)
 
@@ -876,6 +965,7 @@ sessions → возможна пара (реальная + синтетичес�
 | `<data-dir>/maestro/memory/<hash>/memory.db` | sqlite-БД по эффективному ключу `key` (sha256, первые 16 hex) | Нет |
 | `<data-dir>/maestro/memory/state.json` | Retry/skip/first-run состояние индексатора | Нет |
 | `<data-dir>/maestro/memory/export-<key16hex>-<ts>.jsonl` | Экспорт `memory_export` (по умолчанию; путь можно задать явно) | Нет |
+| `<git-root>/<memory.backup.path>` (default `.maestro/memory/backup/`) | Пары бэкапов `backup-<key>-<ts>.jsonl` + `.manifest.json` (`memory_backup`, 4.7.0) | Нет по умолчанию (`.maestro/` в `.gitignore`; осознанный коммит — только в приватные репо, WARN при каждом бэкапе, если каталог не gitignored) |
 | `<data-dir>/maestro/memory/` | Кэш модели эмбеддингов (transformers.js) | Нет |
 | `<data-dir>/maestro/memory/enabled.flag` | Маркер `maestro-install.sh` (читается `/maestro-setup`) | Нет |
 
@@ -939,6 +1029,9 @@ sessions → возможна пара (реальная + синтетичес�
 | `memory_search` с `project` на sqlite | Чтение соседней БД read-only; при недоступности/несовпадении `model_id`/dim — fail-soft пропуск + лог (не падение) |
 | Экспорт: нет записей | «нет записей для экспорта», файл не пишется |
 | Импорт: невалидный JSONL / несовпадение model_id/dim / чужой key | Ошибка с указанием строки; **ничего не импортируется** (атомарно по файлу) |
+| Бэкап/restore: `storage.type` ≠ `sqlite` | Отказ с понятной ошибкой (v1 — sqlite-only), без записей |
+| Бэкап: 0 записей | Отказ («нет записей для бэкапа»), файлы не создаются |
+| Restore: несовпадение sha256 / `storage_type` / `key` / `model_id` / `dim` / `schema_fields`, невалидная строка, файл вне каталога бэкапов | Отказ, **без partial restore**, БД не изменена (fail-closed); при повреждённой БД — actionable-ошибка (путь к БД, CLI: переименовать/удалить `memory.db` (+`-wal`, `-shm`) и повторить) |
 | Prune (retention): бэкенд недоступен | Лог, без тихого пропуска |
 | Кластеры: мало записей (<2) | Каждая запись образует singleton-кластер («размер 1»); граф — 0 рёбер |
 | `messages.transform` (запрещён) | НЕ используется — инвариант + тест |
@@ -995,6 +1088,8 @@ sessions → возможна пара (реальная + синтетичес�
 | `memory:backfill.done` | duration_ms |
 | `memory:retention_pruned` | count, older_than_days |
 | `memory:retention_prune_failed` (error) | error_class |
+| `memory:backup` | path, count, sha256, warn (enum gitignore-check: `not_ignored`/`not_ignored_fallback`/`not_a_git_repo`/`git_unavailable`), removed |
+| `memory:restore` | file, count, mode (merge/replace), overwritten, added, sha256, warn (plugin_version бэкапа, warn-only) |
 | `memory:promoted` | count, branches (нормализованные), mainline (нормализованный) |
 | `memory:promotion_failed` (error) | error_class |
 | `memory:mainline_resolved` / `memory:mainline_unresolved` (warn) | branch (нормализованный) |
@@ -1083,8 +1178,9 @@ sessions → возможна пара (реальная + синтетичес�
 ## 🔗 Связанные разделы
 
 - [Как включить память](../how-to/enable-memory.md) — пошаговые инструкции
+- [Бэкап и восстановление памяти](../how-to/memory-backup-restore.md) — штатный бэкап/restore, аварийный CLI, приватные репо
 - [Конфигурация](config.md) — секция `memory` в схеме maestro.json + permission-правило
-- [Команды](commands.md) — `@maestro-memory`, `@maestro-memory-report`, `@maestro-memory-prune`, `@maestro-memory-reindex`
+- [Команды](commands.md) — `@maestro-memory`, `@maestro-memory-report`, `@maestro-memory-prune`, `@maestro-memory-reindex`, `@maestro-memory-backup`
 - [Агенты и модель доверия](../explanation/agents-and-trust.md) — memory и confidential
 - [Выбор моделей](model-selection.md) — модели памяти вне agent-tier
 - [Требования и оценка ИБ (SECURITY.md)](../../SECURITY.md) — правила §5

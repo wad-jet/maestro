@@ -86,6 +86,7 @@ description: Use when the user asks for help configuring maestro, organizing pro
     "probe_cooldown_min": 30,
     "artifact_globs": ["docs/superpowers/specs/**", "docs/superpowers/plans/**"],
     "history_globs": null,
+    "backup": { "path": ".maestro/memory/backup", "retention": 3 },
     "storage": {
       "type": "sqlite",
       "qdrant": { "url": "https://qdrant.internal:6333", "api_key_env": "MAESTRO_MEMORY_QDRANT_KEY", "collection": "maestro_memory" },
@@ -176,6 +177,18 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
   `artifact_globs` + однократный warn `memory:config_fallback` — память НЕ
   отключается, нового `disabled_reason` нет (в отличие от
   `artifact_globs_invalid`). После правки — OP-1 (перезапуск opencode).
+- **`backup`** — бэкап/restore памяти (4.7.0; v1 — только sqlite; tool
+  `memory_backup` + команда `@maestro-memory-backup`):
+  - `backup.path` — каталог бэкапов, default `.maestro/memory/backup`
+    (repo-relative, от git-корня; абсолютный допустим). Дефолт — под
+    `.maestro/` (gitignored): бэкапы не коммитятся; коммит — только осознанно
+    (override пути / gitignore-исключение) и **только в приватные репо**
+    (C3). WARN при каждом бэкапе, пока каталог не gitignored.
+  - `backup.retention` — сколько последних пар хранить, default `3`;
+    `0` = без ограничений (off).
+  - Невалидная секция (path — не строка; retention — не целое ≥ 0) →
+    **soft fallback** на дефолты + warn `memory:config_fallback` — память
+    НЕ отключается (как `history_globs`). После правки — OP-1.
 - **Модель саммаризации (4.0.0, zero-key)** — ключа `summarizer_model`
   нет; резолв из opencode-конфига: `small_model` → `model` →
   `agent.maestro.model` → `agent.build.model`; sessions-путь — fallback

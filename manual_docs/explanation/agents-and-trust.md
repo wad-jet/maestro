@@ -336,9 +336,18 @@ untrusted работают по очищенным артефактам, а до
   **повторно маскируется** перед записью (тот же double-masking, что в
   индексаторе) + **permission `ask`** (защита от poison-JSONL в shared-бэкенд:
   injection-текст в summary не попадает в system-prompt сокомандников).
+- **Бэкап/restore — третий write-path (4.7.0, v1: только sqlite).**
+  `memory_backup`: бэкап — **повторное маскирование** каждой записи
+  (`maskEntry`) до записи JSONL; restore-файл — **недоверенный ввод**:
+  fail-closed-валидация (sha256, манифест `storage_type`/`key`/`model_id`/
+  `dim`/`schema_fields`, все строки) + повторное маскирование до записи;
+  `restore --replace` — двойной гейт (нативный `ask` + явный `replace: true`;
+  CLI — TTY + ввод namespace). Бэкапы — только в **приватные репо** (C3).
+  См. [`SECURITY.md`](../../SECURITY.md) → §5a.
 - **Write/boundary-tools → permission `ask` (канон).** `memory_forget`,
-  `memory_export`, `memory_import`, `memory_prune`, `memory_migrate` и
-  `memory_reindex` (v3.5.0: бэкфилл/синтез записей) требуют нативного правила
+  `memory_export`, `memory_import`, `memory_prune`, `memory_migrate`,
+  `memory_reindex` (v3.5.0: бэкфилл/синтез записей) и `memory_backup` (4.7.0:
+  бэкап/восстановление памяти) требуют нативного правила
   `"ask"` в merge-config (обязательный шаг включения памяти v2). Правило для
   будущих тулов: **новые write/boundary-tools → permission `ask`**.
 - **Отчёт — только агрегаты (SEC-4b).** `@maestro-memory-report` пишет

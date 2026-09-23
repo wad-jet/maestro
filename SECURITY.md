@@ -199,10 +199,27 @@
   файле). Экспорт пересекает локальную границу данных — по инварианту выше
   контент записей замаскирован (raw-confidential не покидает машину), но путь
   наружу остаётся осознанным выбором пользователя.
+- **`memory_backup`/restore — третий write-path (4.7.0, v1: только sqlite).**
+  Бэкап: **повторное маскирование** каждой записи текущим confidential-набором
+  до записи JSONL (`maskEntry` — тот же double-masking, что в
+  индексаторе/импорте; отличие от `memory_export`: расширение
+  `confidential.paths` постфактум отражается в новом бэкапе). **Restore-файл —
+  недоверенный ввод (инъекционный контур):** до любых изменений —
+  fail-closed-валидация (sha256 JSONL-тела; манифест — `storage_type`, `key`,
+  `model_id`, `dim`, `schema_fields` — несовпадение → отказ, без partial
+  restore; **все строки** по схеме v3) + **повторное маскирование** каждой
+  записи (`maskEntry`) до записи. `restore --replace` — деструктивная
+  boundary-операция: двойной гейт (tool: нативный `ask` + явный
+  `replace: true`; CLI: TTY + ввод namespace, не-tty → отказ); очистка
+  бакета — только после успешной валидации. sha256 — детекция порчи, не
+  защита от подделки (не подписан). Бэкапы — только в **приватные репо**
+  (C3); gitignore-warn детерминированный (`git check-ignore`), при каждом
+  бэкапе.
 - **Write/boundary-tools → permission `ask` (канон, v2).** `memory_forget`,
   `memory_export`, `memory_import`, `memory_prune`, `memory_migrate` (v5.1:
-  пере-keying записей между namespace-бакетами) и `memory_reindex` (v3.5.0:
-  бэкфилл/синтез записей) требуют нативного правила
+  пере-keying записей между namespace-бакетами), `memory_reindex` (v3.5.0:
+  бэкфилл/синтез записей) и `memory_backup` (4.7.0: бэкап/восстановление
+  памяти) требуют нативного правила
   `"ask"` в merge-config (обязательный шаг включения памяти v2). Правило для
   будущих тулов: **новые write/boundary-tools → permission `ask`**.
 - **Отчёт — только агрегаты (SEC-4b, v2).** `@maestro-memory-report` пишет
