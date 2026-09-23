@@ -444,7 +444,7 @@ test("resolveBackupConfig: null retention → default", () => {
   assert.deepEqual(resolveBackupConfig({ backup: { retention: null } }), { path: ".maestro/memory/backup", retention: 3, warn: false });
 });
 
-test("resolveBackupConfig: path null in object → uses default path", () => {
+test("resolveBackupConfig: path absent in object → uses default path", () => {
   assert.deepEqual(resolveBackupConfig({ backup: { retention: 5 } }), { path: ".maestro/memory/backup", retention: 5, warn: false });
 });
 

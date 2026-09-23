@@ -294,15 +294,6 @@ export function sanitizeDirName(s) {
   return createHash("sha256").update(s).digest("hex").slice(0, 16);
 }
 
-/**
- * resolveHistoryGlobs: возвращает нормализованные history_globs.
- * Если history_globs absent/null → inherit на artifact_globs (fallback=false).
- * Валидный array → trim + unique (fallback=false); [] → [] (off, fallback=false).
- * Не-валидный input (non-array, non-string элементы, >16) → soft fallback на
- * artifact_globs (memory НЕ отключается, fallback=true).
- * @param {object} config  Merged memory config (loadMemoryConfig output).
- * @returns {{ value: string[], fallback: boolean }}
- */
 export const BACKUP_DEFAULTS = { path: ".maestro/memory/backup", retention: 3 };
 
 /**
@@ -322,6 +313,15 @@ export function resolveBackupConfig(m) {
   return { path, retention, warn: !valid };
 }
 
+/**
+ * resolveHistoryGlobs: возвращает нормализованные history_globs.
+ * Если history_globs absent/null → inherit на artifact_globs (fallback=false).
+ * Валидный array → trim + unique (fallback=false); [] → [] (off, fallback=false).
+ * Не-валидный input (non-array, non-string элементы, >16) → soft fallback на
+ * artifact_globs (memory НЕ отключается, fallback=true).
+ * @param {object} config  Merged memory config (loadMemoryConfig output).
+ * @returns {{ value: string[], fallback: boolean }}
+ */
 export function resolveHistoryGlobs(config) {
   const hg = config?.history_globs;
   const default_globs = config?.artifact_globs ?? DEFAULTS.artifact_globs;
