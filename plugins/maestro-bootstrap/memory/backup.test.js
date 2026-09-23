@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, existsSync, rmSync } from "node:fs";
+import { mkdtempSync, writeFileSync, existsSync, rmSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { backupBaseName, buildJsonl, buildManifestMeta, applyRetention, listBackups, resolveBackupDir } from "./backup.js";
+import { backupBaseName, buildJsonl, buildManifestMeta, applyRetention, listBackups, resolveBackupDir, gitIgnoreWarn, runBackup } from "./backup.js";
 
 const KEY = "test-ns";
 const tmp = () => mkdtempSync(join(tmpdir(), "maestro-backup-"));
@@ -247,4 +247,122 @@ test("resolveBackupDir: gitRoot + relPath → абсолютный путь", ()
 test("resolveBackupDir: gitRoot=null → cwd + relPath", () => {
   const expected = join(process.cwd(), "a/b");
   assert.equal(resolveBackupDir("a/b", null), expected);
+});
+
+// ── gitIgnoreWarn ──
+
+test("gitIgnoreWarn: не-git-репо → not_a_git_repo", () => {
+  const r = gitIgnoreWarn("/tmp/whatever", null);
+  assert.equal(r.ignored, false);
+  assert.equal(r.reason, "not_a_git_repo");
+});
+
+test("gitIgnoreWarn: gitignored-путь в реальном репо → ignored", () => {
+  const r = gitIgnoreWarn(".maestro/memory/backup", process.cwd());
+  assert.equal(r.ignored, true);
+});
+
+test("gitIgnoreWarn: не-gitignored-путь → not_ignored", () => {
+  const r = gitIgnoreWarn("some/random/path", process.cwd());
+  assert.equal(r.ignored, false);
+  assert.equal(r.reason, "not_ignored");
+});
+
+// ── runBackup ──
+
+function mkMockStorage(rows) {
+  const upserts = [];
+  return {
+    upserts,
+    async scan({ fields }) { return rows; },
+    async upsert(entries) { upserts.push(entries); return entries.length; },
+    async deleteByFilter() { return 0; },
+    dim: 8, modelId: "mm",
+  };
+}
+
+const ROW = {
+  session_id: "s1",
+  key: "test-ns",
+  title: "test title",
+  summary: "raw secret value here",
+  embedding: [1, 2, 3, 4, 5, 6, 7, 8],
+  model_id: "mm",
+};
+
+test("runBackup: scan → maskEntry → JSONL+манифест → warn → retention → audit", async () => {
+  const baseDir = mkdtempSync(join(tmpdir(), "mb-run-"));
+  try {
+    // .gitignore → fallback
+    writeFileSync(join(baseDir, ".gitignore"), "backup\n");
+    const logs = [];
+    const r = await runBackup({
+      storage: mkMockStorage([{
+        ...ROW,
+        summary: "prefix\nexact-secret-value\nsuffix",
+      }]),
+      backupCfg: { path: ".", retention: 0 },
+      effectiveKey: "k1",
+      storageType: "sqlite",
+      modelId: "mm",
+      dim: 8,
+      pluginVersion: "4.7.0",
+      maskPatterns: { confidential: ["exact-secret-value"], artifacts: [] },
+      log: (msg, extra) => logs.push({ msg, extra }),
+      gitRoot: baseDir,
+      now: () => 123,
+    });
+    // resolveBackupDir(".", baseDir) = baseDir
+    assert.ok(existsSync(join(baseDir, "backup-k1-123.jsonl")));
+    assert.ok(existsSync(join(baseDir, "backup-k1-123.manifest.json")));
+    const body = JSON.parse(readFileSync(join(baseDir, "backup-k1-123.jsonl"), "utf8"));
+    // maskEntry заменяет confidential line на "[confidential]"
+    assert.ok(!String(body.summary).includes("exact-secret-value"), "maskEntry обязателен");
+    assert.ok(String(body.summary).includes("[confidential]"), "формат маски — [confidential]");
+    const meta = JSON.parse(readFileSync(join(baseDir, "backup-k1-123.manifest.json"), "utf8"));
+    assert.equal(meta.count, 1);
+    assert.equal(r.warn, "not_ignored_fallback");
+    assert.ok(logs.some((l) => l.msg === "memory:backup" && l.extra.count === 1));
+  } finally {
+    rmSync(baseDir, { recursive: true, force: true });
+  }
+});
+
+test("runBackup: 0 записей → отказ, файлы не создаются", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mb-empty-"));
+  try {
+    await assert.rejects(
+      () => runBackup({
+        storage: mkMockStorage([]),
+        backupCfg: { path: dir, retention: 0 },
+        effectiveKey: "k1",
+        storageType: "sqlite",
+        modelId: "mm",
+        dim: 8,
+        pluginVersion: "4.7.0",
+        maskPatterns: { confidential: [], artifacts: [] },
+        gitRoot: null,
+      }),
+      /нет записей/
+    );
+    assert.deepEqual(readdirSync(dir), []);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runBackup: storage.type != sqlite → отказ (sqlite-only guard)", async () => {
+  await assert.rejects(
+    () => runBackup({
+      storage: mkMockStorage([ROW]),
+      backupCfg: { path: "/tmp/x", retention: 0 },
+      effectiveKey: "k1",
+      storageType: "qdrant",
+      modelId: "mm",
+      dim: 8,
+      pluginVersion: "4.7.0",
+      maskPatterns: { confidential: [], artifacts: [] },
+    }),
+    /sqlite/
+  );
 });

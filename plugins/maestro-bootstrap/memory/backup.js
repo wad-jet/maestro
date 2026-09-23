@@ -1,7 +1,9 @@
 import { createHash } from "node:crypto";
-import { existsSync, readdirSync, unlinkSync, statSync } from "node:fs";
-import { join } from "node:path";
+import { existsSync, readdirSync, unlinkSync, statSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
+import { join, relative } from "node:path";
+import { spawnSync } from "node:child_process";
 import { SCAN_FIELDS } from "./backfill.js";
+import { maskEntry } from "./mask.js";
 
 /**
  * backup.js — чистые функции для создания/перечня backup-файлов памяти.
@@ -188,4 +190,78 @@ export function listBackups(dir, key) {
     manifest_ok: r.manifest,
     size: r.size,
   }));
+}
+
+/** gitignore-проверка: только детерминированно (LLM warn не считает). */
+export function gitIgnoreWarn(dir, gitRoot) {
+  if (!gitRoot) return { ignored: false, reason: "not_a_git_repo" };
+  // Относительный путь корректнее для `git -C root check-ignore`.
+  const p = relative(gitRoot, dir);
+  const r = spawnSync("git", ["-C", gitRoot, "check-ignore", "-q", "--", p], { encoding: "utf8" });
+  if (r.error || r.status === 127 || r.status === 128) return gitIgnoreFallback(dir, gitRoot);
+  return r.status === 0 ? { ignored: true, reason: null } : { ignored: false, reason: "not_ignored" };
+}
+
+/** Документированный fallback (git недоступен): наивный match по корневому .gitignore. */
+export function gitIgnoreFallback(dir, gitRoot) {
+  try {
+    const lines = readFileSync(join(gitRoot, ".gitignore"), "utf8").split("\n").map((l) => l.trim()).filter(Boolean);
+    const ignored = lines.some((l) => {
+      if (l.startsWith("!")) return false;
+      const p = l.endsWith("/") ? l.slice(0, -1) : l;
+      return dir === p || dir.startsWith(`${p}/`);
+    });
+    return ignored ? { ignored: true, reason: null } : { ignored: false, reason: "not_ignored_fallback" };
+  } catch {
+    return { ignored: false, reason: "git_unavailable" };
+  }
+}
+
+/**
+ * Бэкап (spec §5.1): preflight → scan(SCAN_FIELDS) → maskEntry (текущий
+ * confidential-набор) → JSONL+манифест → gitignore-warn → retention → audit.
+ * Ошибки — throw (обёртки tool/CLI форматируют).
+ *
+ * @param {object} opts
+ * @param {object} opts.storage — хранилище с методами scan/upsert/deleteByFilter
+ * @param {string} opts.storageType — тип хранилища (sqlite-only)
+ * @param {string} opts.effectiveKey — namespace/key для имени файла
+ * @param {string} opts.modelId — модель эмбеддингов
+ * @param {number} opts.dim — размерность эмбеддингов
+ * @param {string} opts.pluginVersion — версия плагина
+ * @param {object} opts.maskPatterns — { confidential: string[], artifacts: string[] }
+ * @param {object} opts.backupCfg — { path: string, retention: number }
+ * @param {(msg: string, extra: object) => void} [opts.log] — опциональный логгер
+ * @param {string?} [opts.gitRoot] — корень git-репозитория
+ * @param {() => number} [opts.now] — детерминированный таймстамп
+ * @returns {{ file: string, manifest: string, count: number, warn: string|null }}
+ */
+export async function runBackup({ storage, backupCfg, effectiveKey, storageType, modelId, dim, pluginVersion, maskPatterns, log, gitRoot, now = () => Date.now() }) {
+  if (storageType !== "sqlite") throw new Error("memory_backup: v1 — только storage.type sqlite");
+
+  const rows = await storage.scan({ key: effectiveKey, fields: SCAN_FIELDS });
+  if (!rows.length) throw new Error("memory_backup: нет записей для бэкапа");
+
+  const entries = rows.map((r) =>
+    maskEntry(r, { confidentialPatterns: maskPatterns.confidential, artifactConfidentialPatterns: maskPatterns.artifacts })
+  );
+
+  const ts = now();
+  const dir = resolveBackupDir(backupCfg.path, gitRoot);
+  mkdirSync(dir, { recursive: true });
+
+  const meta = buildManifestMeta({ entries, key: effectiveKey, storageType, modelId, dim, pluginVersion, ts });
+  const base = backupBaseName(effectiveKey, ts);
+  const jsonlPath = join(dir, `${base}.jsonl`);
+  const manifestPath = join(dir, `${base}.manifest.json`);
+
+  writeFileSync(jsonlPath, buildJsonl(entries), "utf8");
+  writeFileSync(manifestPath, JSON.stringify(meta, null, 2) + "\n", "utf8");
+
+  const gi = gitIgnoreWarn(dir, gitRoot);
+  const removed = applyRetention(dir, effectiveKey, backupCfg.retention);
+
+  log?.("memory:backup", { path: jsonlPath, count: entries.length, sha256: meta.sha256, warn: gi.ignored ? null : gi.reason, removed: removed.length });
+
+  return { file: jsonlPath, manifest: manifestPath, count: entries.length, warn: gi.ignored ? null : gi.reason };
 }
