@@ -25,6 +25,10 @@ export class Indexer {
     // artifactConfidentialPatterns: resolved-набор для artifact-фильтра (Z4);
     // НЕ переиспользуем confidentialPatterns маскирования (I2) — отдельный набор.
     artifactGlobs = [], artifactConfidentialPatterns = [],
+    // #77 (spec §4.2, M1): unsaved-реестр владет index.js; indexer получает
+    // колбэки (default no-op — backward compat). setUnsaved — при hard-fail
+    // (non-retryable), clearUnsaved — при успешном setSummarized.
+    setUnsaved = () => {}, clearUnsaved = () => {},
     // Task 3: аудит-лог-хелперы (spec §2.2) — пишут в memoryLog ?? log;
     // default — заглушки (backward compat: без хелперов события не пишутся).
     logInfo = () => {}, logDebug = () => {}, logWarn = () => {}, logError = () => {},
@@ -50,6 +54,8 @@ export class Indexer {
     this.root = root;
     this.artifactGlobs = artifactGlobs;
     this.artifactConfidentialPatterns = artifactConfidentialPatterns;
+    this.setUnsaved = setUnsaved;
+    this.clearUnsaved = clearUnsaved;
     // Task 4: sticky branch/head per session (resolved once, reused on version++).
     // M-7: bounded Map — FIFO-эвикция старейшего при превышении cap.
     this._branchContext = new Map();
@@ -308,13 +314,19 @@ export class Indexer {
         if (resolved.error) {
           this.logWarn?.("memory:summarizer_unavailable", { reason: resolved.error });
         }
-        const { title, summary, decisions } = await this.summarize({
-          client: this.client,
-          sessionID,
-          transcript: masked,
-          model: modelRef,
-          summarizerModel: resolved.model,
-        });
+        let title, summary, decisions;
+        try {
+          ({ title, summary, decisions } = await this.summarize({
+            client: this.client,
+            sessionID,
+            transcript: masked,
+            model: modelRef,
+            summarizerModel: resolved.model,
+          }));
+        } catch (e) {
+          if (!e?.retryable) e.errorClass = "index_error";
+          throw e;
+        }
         // Task 3: перф-аудит — duration; model — effective-модель саммаризации
         // (resolved, либо модель сессии при fallback); model_source — enum (SEC-4b).
         this.logDebug?.("memory:summarize.duration", {
@@ -378,7 +390,13 @@ export class Indexer {
         });
 
         // I1: embed AFTER mask
-        const vec = await this.embeddings.embed(`${maskedEntry.title}\n${maskedEntry.summary}\n${maskedEntry.decisions.join("\n")}`);
+        let vec;
+        try {
+          vec = await this.embeddings.embed(`${maskedEntry.title}\n${maskedEntry.summary}\n${maskedEntry.decisions.join("\n")}`);
+        } catch (e) {
+          if (!e?.retryable) e.errorClass = "embedder_error";
+          throw e;
+        }
         maskedEntry.embedding = vec;
 
         // G5: version increment — reuse `existing` fetched by the write-gate.
@@ -401,7 +419,12 @@ export class Indexer {
         // Task 5: tombstone race-guard (spec §5) — pre-check перед upsert:
         // если сессия удалена во время summarize, не пишем запись вовсе.
         if (this._tombstones.has(sessionID)) return { status: "no_new_messages" };
-        await this.storage.upsert([maskedEntry]);
+        try {
+          await this.storage.upsert([maskedEntry]);
+        } catch (e) {
+          e.errorClass = "storage_error";
+          throw e;
+        }
         // Task 5: post-upsert recheck — сессия могла быть удалена между
         // pre-check и upsert; тогда удаляем только что записанную запись
         // (не даём «воскреснуть» удалённой сессии).
@@ -411,6 +434,7 @@ export class Indexer {
           return { status: "no_new_messages" };
         }
         await this.state.setSummarized(sessionID);
+        this.clearUnsaved?.(sessionID);
         // Task 3: lifecycle-аудит (spec §4.1) — indexed при первой записи,
         // reindexed при пере-саммаризации повторно посещённой сессии
         // (version > 1, spec §4.4). author — из записи (maskedEntry.author).
@@ -425,24 +449,27 @@ export class Indexer {
 
       return await withTimeout(work, timeoutMs);
     } catch (err) {
-      // Task 3: root-cause-аудит (spec §4.1/§3) — enum-only: тела ошибок
-      // (message/stack) в лог НЕ попадают, только error_class. Заменяет
-      // прежнее «memory: indexer error» с errMsg (нарушало whitelist).
-      const errorClass = err?.retryable ? "retryable" : "storage";
-      this.logError?.("memory:index_error", { sessionID, error_class: errorClass });
+      // #77 (spec §4.1): поимённая классификация — stage-tag (e.errorClass),
+      // поставленный обёртками стадий; default — index_error (F4: ошибки
+      // session.get/messages и fallback withTimeout). enum-only (SEC-4b):
+      // тела ошибок в лог НЕ попадают.
       if (err?.retryable) {
-        // retryable (сеть/timeout/5xx embed) — skip не засчитывается (I3).
+        // retryable (сеть/timeout/5xx embed) — skip не засчитывается (I3),
+        // unsaved-флаг НЕ ставится (spec §4.1: НЕ триггер).
+        this.logError?.("memory:index_error", { sessionID, error_class: "retryable" });
         this.logDebug?.("memory:index_retryable", { sessionID });
-      } else {
-        try { await this.state.recordFail(sessionID); } catch {}
-        // Task 3: локальный счётчик fails (state не отдаёт fails наружу) —
-        // memory:index_skipped ровно в момент перехода в skip (3+ fails).
-        const fails = (this._fails.get(sessionID) ?? 0) + 1;
-        this._fails.set(sessionID, fails);
-        if (fails >= 3) {
-          this.logWarn?.("memory:index_skipped", { sessionID, fails });
-        }
+        return { status: "failed:retryable" };
       }
+      const errorClass = err?.errorClass ?? "index_error";
+      this.logError?.("memory:index_error", { sessionID, error_class: errorClass });
+      try { await this.state.recordFail(sessionID, errorClass); } catch {}
+      // локальный счётчик fails — memory:index_skipped при переходе в skip
+      const fails = (this._fails.get(sessionID) ?? 0) + 1;
+      this._fails.set(sessionID, fails);
+      if (fails >= 3) {
+        this.logWarn?.("memory:index_skipped", { sessionID, fails });
+      }
+      this.setUnsaved?.(sessionID, errorClass);
       return { status: `failed:${errorClass}` };
     }
   }

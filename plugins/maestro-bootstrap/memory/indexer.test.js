@@ -1599,3 +1599,161 @@ test("#77: _run delegates to _pipeline (regression: guards intact)", async () =>
   assert.equal(pipelineCalls, 0, "throttle guard не снят");
   idx.dispose();
 });
+
+// ── #77 Task 3: классификация ошибок + unsaved-триггеры ──
+
+function mkUnsaved() {
+  const set = []; const clear = [];
+  return {
+    set, clear,
+    setUnsaved: (sid, cls) => { set.push([sid, cls]); },
+    clearUnsaved: (sid) => { clear.push(sid); },
+  };
+}
+
+test("#77 T3-1: upsert-ошибка → failed:storage_error + recordFail(class) + setUnsaved", async () => {
+  const client = mkClient();
+  const storage = { ...mkStorage(client), upsert: async () => { throw new Error("db down"); } };
+  const fails = [];
+  const u = mkUnsaved();
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage,
+    state: { ...mkState(), recordFail: async (sid, cls) => { fails.push([sid, cls]); } },
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+    setUnsaved: u.setUnsaved, clearUnsaved: u.clearUnsaved,
+  });
+  const r = await idx._pipeline("s1");
+  assert.equal(r.status, "failed:storage_error");
+  assert.deepEqual(fails, [["s1", "storage_error"]]);
+  assert.deepEqual(u.set, [["s1", "storage_error"]]);
+  assert.deepEqual(u.clear, []);
+  idx.dispose();
+});
+
+test("#77 T3-2: non-retryable embed → failed:embedder_error", async () => {
+  const client = mkClient();
+  const fails = [];
+  const u = mkUnsaved();
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => { throw new Error("local embedder down"); }, dim: 1, modelId: "m" },
+    storage: mkStorage(client),
+    state: { ...mkState(), recordFail: async (sid, cls) => { fails.push([sid, cls]); } },
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+    setUnsaved: u.setUnsaved, clearUnsaved: u.clearUnsaved,
+  });
+  const r = await idx._pipeline("s1");
+  assert.equal(r.status, "failed:embedder_error");
+  assert.deepEqual(fails, [["s1", "embedder_error"]]);
+  assert.deepEqual(u.set, [["s1", "embedder_error"]]);
+  idx.dispose();
+});
+
+test("#77 T3-3: retryable embed → failed:retryable, БЕЗ recordFail и БЕЗ setUnsaved (регрессия)", async () => {
+  const client = mkClient();
+  let failCalled = false;
+  const u = mkUnsaved();
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: {
+      embed: async () => { const e = new Error("network"); e.retryable = true; throw e; },
+      dim: 1, modelId: "m",
+    },
+    storage: mkStorage(client),
+    state: { ...mkState(), recordFail: async () => { failCalled = true; } },
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+    setUnsaved: u.setUnsaved, clearUnsaved: u.clearUnsaved,
+  });
+  const r = await idx._pipeline("s1");
+  assert.equal(r.status, "failed:retryable");
+  assert.equal(failCalled, false, "retryable не съедал страйк");
+  assert.deepEqual(u.set, [], "retryable НЕ ставит unsaved-флаг");
+  idx.dispose();
+});
+
+test("#77 T3-4: summarize-ошибка → failed:index_error", async () => {
+  const client = mkClient();
+  const fails = [];
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client),
+    state: { ...mkState(), recordFail: async (sid, cls) => { fails.push([sid, cls]); } },
+    summarize: async () => { throw new Error("llm down"); },
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+  });
+  const r = await idx._pipeline("s1");
+  assert.equal(r.status, "failed:index_error");
+  assert.deepEqual(fails, [["s1", "index_error"]]);
+  idx.dispose();
+});
+
+test("#77 T3-5: session.get-ошибка (default-класс, F4) → failed:index_error + recordFail", async () => {
+  const client = mkClient();
+  client.session.get = async () => { throw new Error("network"); };
+  const fails = [];
+  const u = mkUnsaved();
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client),
+    state: { ...mkState(), recordFail: async (sid, cls) => { fails.push([sid, cls]); } },
+    summarize: async () => ({}),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    setUnsaved: u.setUnsaved, clearUnsaved: u.clearUnsaved,
+  });
+  const r = await idx._pipeline("s1");
+  assert.equal(r.status, "failed:index_error");
+  assert.deepEqual(fails, [["s1", "index_error"]]);
+  assert.deepEqual(u.set, [["s1", "index_error"]]);
+  idx.dispose();
+});
+
+test("#77 T3-6: успешный индекс → clearUnsaved (G4)", async () => {
+  const client = mkClient();
+  const u = mkUnsaved();
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client), state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+    setUnsaved: u.setUnsaved, clearUnsaved: u.clearUnsaved,
+  });
+  const r = await idx._pipeline("s1");
+  assert.equal(r.status, "ok");
+  assert.deepEqual(u.clear, ["s1"], "clearUnsaved после успешного setSummarized");
+  idx.dispose();
+});
+
+test("#77 T3-7: log memory:index_error несёт стадииный класс (enum-only)", async () => {
+  const cap = { calls: [] };
+  const mk = (lvl) => (m, extra) => cap.calls.push([lvl, m, extra]);
+  const client = mkClient();
+  const storage = { ...mkStorage(client), upsert: async () => { throw new Error("db down"); } };
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+    logInfo: mk("info"), logDebug: mk("debug"), logWarn: mk("warn"), logError: mk("error"),
+  });
+  await idx._pipeline("s1");
+  const err = cap.calls.find(([lvl, m]) => m === "memory:index_error");
+  assert.ok(err);
+  assert.equal(err[2].error_class, "storage_error");
+  assert.ok(!JSON.stringify(err).includes("db down"), "enum-only: сообщение ошибки в лог не попадает");
+  idx.dispose();
+});
