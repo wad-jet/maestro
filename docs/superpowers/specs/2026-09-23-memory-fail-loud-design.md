@@ -252,8 +252,8 @@ full-reindex с повторным страйком warn сработает пр
   из post-fact «записи нет» (он их не различает); post-fact + outcome
   вместе дают честный статус. **Guard-исходы (`not_found`, `skip_service`)
   пре-чекает tool до вызова `reindexSession`** (R2: `client.session.get`
-  для `not_found` вызывается всё равно — `parentID`/`SESSIONS` читаются из
-  того же результата); `reindexSession` гарды повторно не проверяет.
+  для `not_found` вызывается всё равно — `parentID` читается из того же
+  результата, `SESSIONS` — Set-лукап (`indexer.js:196`)); `reindexSession` гарды повторно не проверяет.
 - **Стадии и классификация** — те же, что у `_run` (§4.1); ошибки стадий →
   `failed: <класс>` + `recordFail` (повторный страйк после clearSkip —
   осознанно: хранилище всё ещё лежит → сессия честно уходит в skip-цикл).
@@ -356,7 +356,7 @@ SEC-4b: session_id + enum/числа — допустимо (паритет су
    ошибки `client.session.get/messages` (default-класс, F4) → `index_error`.
 9. Log-события: `memory:unsaved_notice` (**1× на установку флага; повторная
    установка после clear + новый fail — новый event**, §7; поля enum) при
-   установке; `memory:unsaved_cleared` при снятии. Рe-entry: fail → clear →
+   установке; `memory:unsaved_cleared` при снятии. Re-entry: fail → clear →
    fail → второй `memory:unsaved_notice` (в пределах одного процесса).
 10. Память disabled по конфигу (`no_memory_section`/`explicitly_disabled`) →
     хуки не регистрируются, инъекций нет (регрессия).
