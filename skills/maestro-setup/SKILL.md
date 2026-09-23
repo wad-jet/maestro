@@ -200,7 +200,7 @@ silent opt-in).
 добавить нативные permission для write/boundary-tools (обязательное правило,
 канон `maestro-assistant`):
 `permission: { memory_forget: "ask", memory_export: "ask", memory_import: "ask",
-memory_prune: "ask" }`
+memory_migrate: "ask", memory_prune: "ask", memory_reindex: "ask", memory_backup: "ask" }`
 (opencode default для новых тулов — allow, поэтому правило обязательно).
 
 Последовательность включения (канон, см. `manual_docs/how-to/enable-memory.md`):

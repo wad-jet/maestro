@@ -254,7 +254,7 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
   включении памяти в merge-config (`.opencode/opencode.json` или global)
   добавляется нативное правило `permission: { memory_forget: "ask",
   memory_export: "ask", memory_import: "ask", memory_migrate: "ask",
-  memory_prune: "ask", memory_reindex: "ask" }` (opencode
+  memory_prune: "ask", memory_reindex: "ask", memory_backup: "ask" }` (opencode
   default для новых тулов — allow, поэтому правило обязательно). Канон для
   будущих тулов: **новые write/boundary-tools → permission `ask`**.
 - **Онбординг memory (явная последовательность):** после добавления секции
