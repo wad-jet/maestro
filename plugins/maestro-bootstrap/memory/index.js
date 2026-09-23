@@ -1157,7 +1157,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       }),
       memory_reindex: tool({
         description:
-          "HITL-бэкфилл памяти: dry-run листинг на индексацию (sessions + git-история) → run по явным ID или всё по снапшоту, cap 20/вызов (permission: ask); явные session_ids с отсутствующей/stale-записью — полный re-index (LLM, сброс skip).",
+          "HITL-бэкфилл памяти: dry-run листинг на индексацию (sessions + git-история) → run по явным ID или всё по снапшоту, cap 20/источник за вызов (session_ids и all_empty-снапшот считаются отдельно); явные session_ids с отсутствующей/stale-записью — полный re-index (LLM, сброс skip).",
         args: {
           action: tool.schema.string().describe("list | run"),
           source: tool.schema.string().optional().describe("sessions | git (для run)"),

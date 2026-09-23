@@ -373,7 +373,7 @@ test("I3: memory_search unavailable for [maestro-memory] sessions", async () => 
 
 // ── M2: auto_recall off ────────────────────────────────────────────────
 
-test("M2: auto_recall false → no chat.message/system.transform hooks", async () => {
+test("#77 T5-5: auto_recall false → no chat.message; transform-хук живёт (notice-слой)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mem-hooks-"));
   const saved = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = dir;

@@ -11,6 +11,20 @@
 
 ## [2026-09-23]
 
+> **Версия 4.7.1** — Patch-релиз: fail-loud для memory layer — уведомление в сессию при сбое индексирования + full-reindex восстановление через `@maestro-memory-reindex`.
+
+### Добавлено
+
+- **Fail-loud (memory layer, 4.7.1):** «громкий» fail-closed — уведомление
+  в сессию (system-notice) при сбое индексирования (per-session: первая
+  hard-ошибка; process-level: бэкенд down при старте); уведомление снимается
+  после успешного индексирования. `memory_reindex` — полный re-index
+  (full-reindex) отсутствующей/stale записи по явным session_id (LLM-summarize
+  из сессии, сброс permanent-skip). `memory_stats_detail` — блок «Не
+  индексированные сессии: N» (reason-класс, skip, последняя попытка; cap 20).
+  Регресс: `regression/entries/memory-fail-loud.md`. How-to:
+  `manual_docs/how-to/restore-unsaved-session-memory.md`.
+
 > **Версия 4.7.0** — Minor-релиз: backup/restore memory layer (sqlite) —
 > tool `memory_backup` + команда `@maestro-memory-backup` + аварийный CLI +
 > конфиг `memory.backup.*`.
