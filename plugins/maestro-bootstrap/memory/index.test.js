@@ -5800,3 +5800,78 @@ test("#77 T7-2: memory_stats_detail — все проиндексированы 
     rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// ── #77 Task 8: E2E — реальный sqlite + mock-LLM ──
+
+test("#77 E2E: full re-index restores lost sqlite record and resets permanent-skip", async () => {
+  const { createState } = await import("./state.js");
+  const { Indexer } = await import("./indexer.js");
+  const { createStorage } = await import("./storage.js");
+  const { resolveEffectiveKey } = await import("./config.js");
+  const dir = mkdtempSync(join(tmpdir(), "mem-e2e-"));
+  const head = "e".repeat(40);
+  try {
+    const state = createState(join(dir, "state.json"));
+    const embeddings = { embed: async () => new Float32Array([0.1, 0.2, 0.3]), dim: 3, modelId: "m" };
+    const client = {
+      session: {
+        get: async () => ({ data: { id: "s1", parentID: null, title: "st", time: { created: 1, updated: 100 } } }),
+        messages: async () => ({ data: [{ info: { role: "user", time: { created: 50 } }, parts: [{ type: "text", text: "hello e2e" }] }] }),
+        list: async () => ({ data: [] }),
+      },
+    };
+    const summarize = async () => ({ title: "t", summary: "s-e2e", decisions: [] });
+    const cfg = {
+      min_new_messages: 1, idle_debounce_min: 10, backfill_window_days: 30,
+      backfill_max_per_start: 5, retry_interval_min: 0, namespace: null,
+      top_k: 3, min_score: 0.35, author: "test",
+    };
+    const storage = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
+    await storage.init();
+    const origUpsert = storage.upsert.bind(storage);
+    // key = resolveEffectiveKey(projectHash, namespace=null) → projectHash (config.js)
+    const key = resolveEffectiveKey({ projectHash: "khash", namespace: null });
+    assert.equal(key, "khash", "namespace:null → ключ = projectHash");
+    const mkIdx = () => new Indexer({
+      client, config: cfg, embeddings, storage, state, summarize,
+      projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+      git: { resolveBranch: async () => "main", resolveHead: async () => head },
+      logInfo: () => {}, logDebug: () => {}, logWarn: () => {}, logError: () => {},
+    });
+
+    // 1. Бэкенд «падает»: upsert throw × 3 → permanent-skip, записей нет
+    const idx = mkIdx();
+    storage.upsert = async () => { throw new Error("qdrant down"); };
+    for (let i = 0; i < 3; i++) await idx._pipeline("s1");
+    assert.equal(await state.isSkipped("s1"), true, "permanent-skip после 3 страйков");
+    assert.equal((await storage.scan({ key })).length, 0, "потеря данных");
+    idx.dispose();
+
+    // 2. Бэкенд «ожил»: штатный путь НЕ восстанавливает (skip-guard) —
+    // восстановление ТОЛЬКО по требованию (non-goal: live-recovery)
+    storage.upsert = origUpsert;
+    const idxRun = mkIdx();
+    await idxRun._run("s1");
+    assert.equal((await storage.scan({ key })).length, 0, "skip-сессия штатным путём не восстанавливается");
+    idxRun.dispose();
+
+    // 3. HITL: memory_reindex → reindexSession → запись восстановлена
+    const idx2 = mkIdx();
+    const r = await idx2.reindexSession("s1");
+    assert.equal(r.status, "ok");
+    const rows = await storage.scan({ key });
+    assert.equal(rows.length, 1, "запись восстановлена (post-fact)");
+    assert.equal(rows[0].session_id, "s1");
+    assert.ok(rows[0].summary.length > 0, "summary из mock-LLM");
+    assert.equal(await state.isSkipped("s1"), false, "permanent-skip снят");
+    assert.equal(rows[0].head, head, "head из git-резолва");
+
+    // 4. Повторный прогон — честный early-exit (no_new_messages)
+    const r2 = await idx2._pipeline("s1");
+    assert.equal(r2.status, "no_new_messages", "новых сообщений нет — early-exit");
+    storage.dispose();
+    idx2.dispose();
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
