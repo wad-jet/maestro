@@ -81,14 +81,14 @@ export function buildManifestMeta({
 }
 
 /**
- * Разрешает абсолютный путь к каталогу backup.
+ * Разрешает путь к каталогу backup.
  *
- * @param {string} relPath — относительный путь (из config).
+ * @param {string} relPath — относительный или абсолютный путь; абсолютный
+ *   возвращается как есть, относительный — относительно root.
  * @param {string?} gitRoot — корень git-репозитория (или `process.cwd()`).
  * @returns {string} абсолютный путь.
  */
 export function resolveBackupDir(relPath, gitRoot) {
-  // Если relPath — абсолютный путь, возвращаем как есть; иначе резолвим относительно root.
   const root = gitRoot || process.cwd();
   if (isAbsolute(relPath)) return relPath;
   return join(root, relPath);
@@ -199,14 +199,15 @@ export function listBackups(dir, key) {
 /**
  * gitignore-проверка: только детерминированно (LLM warn не считает).
  *
- * @param {string} relPath — относительный путь к каталогу.
+ * @param {string} dir — путь (абсолютный или cwd-relative); нормализуется
+ *   `relative(gitRoot, …)`. Реальный вызывающий (runBackup) передаёт абсолютный dir.
  * @param {string?} gitRoot — корень git-репозитория.
  * @returns {{ ignored: boolean, reason: string|null }}
  */
-export function gitIgnoreWarn(relPath, gitRoot) {
+export function gitIgnoreWarn(dir, gitRoot) {
   if (!gitRoot) return { ignored: false, reason: "not_a_git_repo" };
   // Относительный путь корректнее для `git -C root check-ignore`.
-  const p = relative(gitRoot, relPath);
+  const p = relative(gitRoot, dir);
   const r = spawnSync("git", ["-C", gitRoot, "check-ignore", "-q", "--", p], { encoding: "utf8" });
   if (r.error || r.status === 127 || r.status === 128) return gitIgnoreFallback(p, gitRoot);
   return r.status === 0 ? { ignored: true, reason: null } : { ignored: false, reason: "not_ignored" };
@@ -297,38 +298,62 @@ export async function runBackup({ storage, backupCfg, effectiveKey, storageType,
  * @param {number} opts.dim — размерность эмбеддингов
  * @param {string} opts.file — абсолютный путь к .jsonl файлу
  * @param {boolean} [opts.replace=false] — replace (true) или merge (false)
- * @param {string} [opts.channel="tool"] — "tool" или "cli"
+ * @param {string} [opts.channel="tool"] — "tool" | "cli"; неизвестные значения
+ *   при replace:true не проходят cli-гейты (валидация — debt)
  * @param {boolean} [opts.isTty=false] — true если CLI интерактивный терминал
  * @param {string?} [opts.confirmNamespace=null] — namespace для подтверждения replace (cli)
  * @param {object} opts.maskPatterns — { confidential: string[], artifacts: string[] }
+ * @param {string?} [opts.pluginVersion] — версия плагина для warn-only сравнения
  * @param {(msg: string, extra: object) => void} [opts.log] — опциональный логгер
  * @param {string?} [opts.gitRoot] — корень git-репозитория
- * @returns {{ count: number, mode: "merge"|"replace", overwritten: number, added: number }}
+ * @returns {{ count: number, mode: "merge"|"replace", overwritten: number, added: number, warn: string|null }}
  */
-export async function runRestore({ storage, backupCfg, effectiveKey, storageType, modelId, dim, file, replace = false, channel = "tool", isTty = false, confirmNamespace = null, maskPatterns, log, gitRoot }) {
+export async function runRestore({ storage, backupCfg, effectiveKey, storageType, modelId, dim, file, replace = false, channel = "tool", isTty = false, confirmNamespace = null, maskPatterns, pluginVersion, log, gitRoot }) {
   if (storageType !== "sqlite") throw new Error("memory_backup: v1 — только storage.type sqlite");
   const dir = resolveBackupDir(backupCfg.path, gitRoot);
-  const sep = pathSep();
-  if (file !== dir && !file.startsWith(`${dir}${sep}`)) throw new Error("memory_backup: файл должен быть бэкапом из memory.backup.path (каталог бэкапов)");
+
+  // Path-guard: file должен быть внутри backup directory (防目录穿越)
+  const rel = relative(dir, file);
+  if (!rel || rel.startsWith("..") || isAbsolute(rel)) throw new Error("memory_backup: файл должен быть бэкапом из memory.backup.path (каталог бэкапов)");
 
   const manifestPath = file.endsWith(".jsonl") ? `${file.slice(0, -".jsonl".length)}.manifest.json` : file;
   if (!existsSync(manifestPath)) throw new Error("memory_backup: нет манифеста (fail-closed)");
-  const meta = JSON.parse(readFileSync(manifestPath, "utf8"));
+
+  let meta;
+  try {
+    const rawMeta = readFileSync(manifestPath, "utf8");
+    meta = JSON.parse(rawMeta);
+    if (typeof meta !== "object" || meta === null) throw new Error("not object");
+  } catch {
+    throw new Error("memory_backup: манифест невалиден (fail-closed)");
+  }
+
   const raw = readFileSync(file, "utf8");
+  if (meta.format !== BACKUP_FORMAT) throw new Error("memory_backup: формат манифеста не поддерживается (fail-closed)");
   if (createHash("sha256").update(raw).digest("hex") !== meta.sha256) throw new Error("memory_backup: sha256 не совпадает (порча или подмена файла)");
 
   if (meta.storage_type !== storageType) throw new Error(`memory_backup: storage_type не совпадает (манифест: ${meta.storage_type})`);
   if (meta.key !== effectiveKey) throw new Error(`memory_backup: key не совпадает (манифест: ${meta.key})`);
   if (meta.model_id !== modelId) throw new Error(`memory_backup: model_id не совпадает (манифест: ${meta.model_id})`);
   if (meta.dim !== dim) throw new Error(`memory_backup: dim не совпадает (манифест: ${meta.dim})`);
-  if (!Array.isArray(meta.schema_fields) || !meta.schema_fields.every((f) => SCAN_FIELDS.includes(f))) throw new Error("memory_backup: schema_fields манифеста несовместимы (fail-closed)");
+  if (!Array.isArray(meta.schema_fields) || JSON.stringify([...meta.schema_fields].sort()) !== JSON.stringify([...SCAN_FIELDS].sort())) throw new Error("memory_backup: schema_fields манифеста несовместимы (fail-closed)");
+
+  // plugin_version warn-only (паритет с runBackup)
+  const versionWarn = (meta.plugin_version && pluginVersion && meta.plugin_version !== pluginVersion)
+    ? `plugin_version: ${meta.plugin_version}`
+    : null;
 
   const entries = [];
   const lines = raw.split("\n");
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line) continue;
-    const parsed = JSON.parse(line);
+    let parsed;
+    try {
+      parsed = JSON.parse(line);
+    } catch {
+      throw new Error(`memory_backup: строка ${i + 1} невалидна: не JSON`);
+    }
     const reason = validateImportEntry(parsed, storage, effectiveKey, maskPatterns.artifacts);
     if (reason) throw new Error(`memory_backup: строка ${i + 1} невалидна: ${reason}`);
     entries.push(parsed);
@@ -348,10 +373,6 @@ export async function runRestore({ storage, backupCfg, effectiveKey, storageType
   await storage.upsert(masked);
   const added = masked.filter((e) => !existing.has(e.session_id)).length;
   const overwritten = masked.length - added;
-  log?.("memory:restore", { file, count: masked.length, mode: replace ? "replace" : "merge", overwritten, added, sha256: meta.sha256 });
-  return { count: masked.length, mode: replace ? "replace" : "merge", overwritten, added };
-}
-
-function pathSep() {
-  return process.platform === "win32" ? "\\" : "/";
+  log?.("memory:restore", { file, count: masked.length, mode: replace ? "replace" : "merge", overwritten, added, sha256: meta.sha256, warn: versionWarn });
+  return { count: masked.length, mode: replace ? "replace" : "merge", overwritten, added, warn: versionWarn };
 }

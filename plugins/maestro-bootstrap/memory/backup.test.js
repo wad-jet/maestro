@@ -3,12 +3,34 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, existsSync, rmSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
-import { backupBaseName, buildJsonl, buildManifestMeta, applyRetention, listBackups, resolveBackupDir, gitIgnoreWarn, gitIgnoreFallback, runBackup, runRestore } from "./backup.js";
+import { join, relative, isAbsolute } from "node:path";
+import { backupBaseName, buildJsonl, buildManifestMeta, applyRetention, listBackups, resolveBackupDir, gitIgnoreWarn, gitIgnoreFallback, runBackup, runRestore, BACKUP_FORMAT } from "./backup.js";
 import { SCAN_FIELDS } from "./backfill.js";
 
 const KEY = "test-ns";
 const tmp = () => mkdtempSync(join(tmpdir(), "maestro-backup-"));
+
+// ── Common helpers ──
+
+function mkMockStorage(rows) {
+  const upserts = [];
+  return {
+    upserts,
+    async scan({ fields }) { return rows; },
+    async upsert(entries) { upserts.push(entries); return entries.length; },
+    async deleteByFilter() { return 0; },
+    dim: 8, modelId: "mm",
+  };
+}
+
+const ROW = {
+  session_id: "s1",
+  key: "test-ns",
+  title: "test title",
+  summary: "raw secret value here",
+  embedding: [1, 2, 3, 4, 5, 6, 7, 8],
+  model_id: "mm",
+};
 
 // ── backupBaseName ──
 
@@ -250,6 +272,10 @@ test("resolveBackupDir: gitRoot=null → cwd + relPath", () => {
   assert.equal(resolveBackupDir("a/b", null), expected);
 });
 
+test("resolveBackupDir: абсолютный relPath → как есть", () => {
+  assert.equal(resolveBackupDir("/abs/x", "/root"), "/abs/x");
+});
+
 // ── gitIgnoreWarn ──
 
 test("gitIgnoreWarn: не-git-репо → not_a_git_repo", () => {
@@ -322,9 +348,9 @@ function writeBackupPair(dir, { key = RESTORE_KEY, entries, ts = 555, manifest }
   const jsonl = entries.map((e) => JSON.stringify(e)).join("\n") + "\n";
   writeFileSync(join(dir, `${base}.jsonl`), jsonl, "utf8");
   const meta = {
-    format: "maestro-memory-backup/v1",
+    format: BACKUP_FORMAT,
     plugin_version: "4.7.0",
-    schema_fields: ["session_id"],
+    schema_fields: [...SCAN_FIELDS],
     model_id: "mm",
     dim: 8,
     key,
@@ -336,16 +362,6 @@ function writeBackupPair(dir, { key = RESTORE_KEY, entries, ts = 555, manifest }
   };
   writeFileSync(join(dir, `${base}.manifest.json`), JSON.stringify(meta), "utf8");
   return join(dir, `${base}.jsonl`);
-}
-
-function mkRestoreOpts(storage, dir, extra = {}) {
-  return {
-    storage, backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
-    storageType: "sqlite", modelId: "mm", dim: 8,
-    maskPatterns: { confidential: [], artifacts: [] },
-    gitRoot: null,
-    ...extra,
-  };
 }
 
 // ── runRestore ──
@@ -362,9 +378,110 @@ test("runRestore merge: upsert; счёт overwritten/added", async () => {
       maskPatterns: { confidential: [], artifacts: [] },
     });
     assert.equal(r.mode, "merge");
+    assert.equal(r.count, 2);
     assert.equal(r.overwritten, 1);
     assert.equal(r.added, 1);
     assert.equal(storage.upserts.length, 1);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runRestore merge: maskEntry — confidential маскирует summary", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mr-mask-"));
+  try {
+    const storage = mkMockStorage([]);
+    // maskLines матчит token (до :) — паттерн должен совпадать с токеном строки
+    const file = writeBackupPair(dir, { entries: [mkEntry(1, {
+      summary: "confidential/value:raw secret value here\nother line",
+    })] });
+    const r = await runRestore({
+      storage, backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
+      storageType: "sqlite", modelId: "mm", dim: 8, file,
+      replace: false, channel: "tool",
+      maskPatterns: { confidential: ["confidential/**"], artifacts: [] },
+    });
+    assert.equal(r.mode, "merge");
+    const upserted = storage.upserts[0];
+    assert.equal(upserted.length, 1);
+    // maskEntry маскирует title/summary — строка с confidential-токеном → "[confidential]"
+    assert.ok(!String(upserted[0].summary).includes("confidential/value"), "confidential token не в upserted");
+    assert.ok(String(upserted[0].summary).includes("[confidential]"), "маска на месте");
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runRestore: plugin_version warn (совпадение) → null", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mr-pv1-"));
+  try {
+    const storage = mkMockStorage([]);
+    const file = writeBackupPair(dir, { entries: [mkEntry(1)] });
+    const r = await runRestore({
+      storage, backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
+      storageType: "sqlite", modelId: "mm", dim: 8, file,
+      pluginVersion: "4.7.0",
+      maskPatterns: { confidential: [], artifacts: [] },
+    });
+    assert.equal(r.warn, null);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runRestore: plugin_version warn (несовпадение) → содержит версию файла", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mr-pv2-"));
+  try {
+    const storage = mkMockStorage([]);
+    const file = writeBackupPair(dir, { entries: [mkEntry(1)], manifest: { plugin_version: "4.0.0" } });
+    const r = await runRestore({
+      storage, backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
+      storageType: "sqlite", modelId: "mm", dim: 8, file,
+      pluginVersion: "4.7.0",
+      maskPatterns: { confidential: [], artifacts: [] },
+    });
+    assert.ok(r.warn && r.warn.includes("4.0.0"), `warn содержит 4.0.0: ${r.warn}`);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runRestore: plugin_version без pluginVersion → warn null", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mr-pv3-"));
+  try {
+    const storage = mkMockStorage([]);
+    const file = writeBackupPair(dir, { entries: [mkEntry(1)], manifest: { plugin_version: "4.0.0" } });
+    const r = await runRestore({
+      storage, backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
+      storageType: "sqlite", modelId: "mm", dim: 8, file,
+      maskPatterns: { confidential: [], artifacts: [] },
+    });
+    assert.equal(r.warn, null);
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runRestore replace:true + fail валидации → deleteByFilter НЕ вызван", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mr-del-"));
+  try {
+    const calls = [];
+    const storage = {
+      ...mkMockStorage([]),
+      async deleteByFilter() { calls.push("delete"); return 0; },
+      async upsert() { calls.push("upsert"); return 0; },
+    };
+    const file = writeBackupPair(dir, { entries: [mkEntry(1)], manifest: { model_id: "other" } });
+    await assert.rejects(
+      () => runRestore({
+        storage, backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
+        storageType: "sqlite", modelId: "mm", dim: 8, file,
+        replace: true, channel: "tool",
+        maskPatterns: { confidential: [], artifacts: [] },
+      }),
+      /model_id/
+    );
+    assert.deepEqual(calls, [], "deleteByFilter/upsert не вызваны");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -507,9 +624,31 @@ test("runRestore replace (cli, confirm != key) → отказ", async () => {
 
 test("runRestore: файл вне каталога бэкапов → отказ", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mr9-"));
+  const outsideDir = mkdtempSync(join(tmpdir(), "mr9-out-"));
   try {
-    const outside = join(mkdtempSync(join(tmpdir(), "mr9-out-")), "backup-k1-555.jsonl");
+    const outside = join(outsideDir, "backup-k1-555.jsonl");
     writeFileSync(outside, "x", "utf8");
+    await assert.rejects(
+      () => runRestore({
+        storage: mkMockStorage([]), backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
+        storageType: "sqlite", modelId: "mm", dim: 8, file: outside,
+        replace: false, channel: "tool",
+        maskPatterns: { confidential: [], artifacts: [] },
+      }),
+      /каталог/
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+    rmSync(outsideDir, { recursive: true, force: true });
+  }
+});
+
+test("runRestore: ..-обход за пределами каталога → отказ", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mr-dotdot-"));
+  try {
+    const inside = join(dir, "backup-test-1.jsonl");
+    writeFileSync(inside, "{}\n", "utf8");
+    const outside = join(dir, "..", "outside.jsonl");
     await assert.rejects(
       () => runRestore({
         storage: mkMockStorage([]), backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
@@ -542,6 +681,95 @@ test("runRestore: count в манифесте не совпадает с чис�
   }
 });
 
+test("runRestore: schema_fields в манифесте ≠ SCAN_FIELDS → отказ", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mr-schema-"));
+  try {
+    const file = writeBackupPair(dir, {
+      entries: [mkEntry(1)],
+      manifest: { schema_fields: ["session_id", "bogus_field"] },
+    });
+    await assert.rejects(
+      () => runRestore({
+        storage: mkMockStorage([]), backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
+        storageType: "sqlite", modelId: "mm", dim: 8, file,
+        replace: false, channel: "tool",
+        maskPatterns: { confidential: [], artifacts: [] },
+      }),
+      /schema_fields/
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runRestore: manifest не содержит format → fail-closed", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mr-format-"));
+  try {
+    const base = `backup-${RESTORE_KEY}-555`;
+    const file = join(dir, `${base}.jsonl`);
+    const jsonl = JSON.stringify(mkEntry(1)) + "\n";
+    writeFileSync(file, jsonl, "utf8");
+    const meta = {
+      plugin_version: "4.7.0",
+      model_id: "mm",
+      dim: 8,
+      key: RESTORE_KEY,
+      ts: 555,
+      count: 1,
+      sha256: createHash("sha256").update(jsonl).digest("hex"),
+      storage_type: "sqlite",
+      schema_fields: [...SCAN_FIELDS],
+      // format отсутствует
+    };
+    writeFileSync(join(dir, `${base}.manifest.json`), JSON.stringify(meta), "utf8");
+    await assert.rejects(
+      () => runRestore({
+        storage: mkMockStorage([]), backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
+        storageType: "sqlite", modelId: "mm", dim: 8, file,
+        replace: false, channel: "tool",
+        maskPatterns: { confidential: [], artifacts: [] },
+      }),
+      /формат/
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("runRestore: manifest format != BACKUP_FORMAT → fail-closed", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mr-format2-"));
+  try {
+    const base = `backup-${RESTORE_KEY}-555`;
+    const file = join(dir, `${base}.jsonl`);
+    const jsonl = JSON.stringify(mkEntry(1)) + "\n";
+    writeFileSync(file, jsonl, "utf8");
+    const meta = {
+      format: "maestro-memory-backup/v0",
+      plugin_version: "4.7.0",
+      model_id: "mm",
+      dim: 8,
+      key: RESTORE_KEY,
+      ts: 555,
+      count: 1,
+      sha256: createHash("sha256").update(jsonl).digest("hex"),
+      storage_type: "sqlite",
+      schema_fields: [...SCAN_FIELDS],
+    };
+    writeFileSync(join(dir, `${base}.manifest.json`), JSON.stringify(meta), "utf8");
+    await assert.rejects(
+      () => runRestore({
+        storage: mkMockStorage([]), backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
+        storageType: "sqlite", modelId: "mm", dim: 8, file,
+        replace: false, channel: "tool",
+        maskPatterns: { confidential: [], artifacts: [] },
+      }),
+      /формат/
+    );
+  } finally {
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("runBackup: scan вызывается с fields = SCAN_FIELDS (полнота схемы v3)", async () => {
   const seen = {};
   const storage = {
@@ -564,48 +792,7 @@ test("runBackup: scan вызывается с fields = SCAN_FIELDS (полнот
   }
 });
 
-test("runRestore: schema_fields в манифесте содержат поле вне SCAN_FIELDS → отказ", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "mr-schema-"));
-  try {
-    const file = writeBackupPair(dir, {
-      entries: [mkEntry(1)],
-      manifest: { schema_fields: ["session_id", "bogus_field"] },
-    });
-    await assert.rejects(
-      () => runRestore({
-        storage: mkMockStorage([]), backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
-        storageType: "sqlite", modelId: "mm", dim: 8, file,
-        replace: false, channel: "tool",
-        maskPatterns: { confidential: [], artifacts: [] },
-      }),
-      /schema_fields/
-    );
-  } finally {
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
 // ── runBackup ──
-
-function mkMockStorage(rows) {
-  const upserts = [];
-  return {
-    upserts,
-    async scan({ fields }) { return rows; },
-    async upsert(entries) { upserts.push(entries); return entries.length; },
-    async deleteByFilter() { return 0; },
-    dim: 8, modelId: "mm",
-  };
-}
-
-const ROW = {
-  session_id: "s1",
-  key: "test-ns",
-  title: "test title",
-  summary: "raw secret value here",
-  embedding: [1, 2, 3, 4, 5, 6, 7, 8],
-  model_id: "mm",
-};
 
 test("runBackup: scan → maskEntry → JSONL+манифест → warn → retention → audit", async () => {
   const baseDir = mkdtempSync(join(tmpdir(), "mb-run-"));
