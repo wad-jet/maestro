@@ -120,12 +120,9 @@ export function defaultDataDir() {
   return join(os.homedir(), ".local", "share");
 }
 
-// Schema-v3 fields required for import (mirrors the `memory` table).
+// Schema-v3 fields required for import — shared with validation module.
 // git-метаданные branch/head/merged — опциональны при импорте (не входят в IMPORT_REQUIRED).
-const IMPORT_REQUIRED = [
-  "session_id", "key", "origin_project_hash", "title", "summary", "decisions",
-  "model_id", "author", "time_first", "time_last", "version",
-];
+export { IMPORT_REQUIRED } from "./validation.js";
 
 /**
  * Normalize an embedding value from any backend into a Float32Array.
@@ -365,69 +362,9 @@ function nodeTier(node, tierBySession) {
   return tier;
 }
 
-/**
- * Validate a parsed JSONL entry against schema v3 + model_id/dim match.
- * Returns an error reason string, or null when valid.
- * @param {object} e  Parsed entry.
- * @param {{ modelId: string, dim: number }} storage  Storage model identity
- *   (set in constructors on all backends; what upsert enforces).
- * @param {string} effectiveKey  Active project key (I-4 fail-closed on mismatch).
- * @param {string[]} artifactConfidentialPatterns  Resolved confidential set for
- *   artifacts (paths + builtin). CR-3: matching artifact elements are DROPPED
- *   (запись импортируется, элемент отбрасывается).
- * @returns {string|null}
- */
-function validateImportEntry(e, storage, effectiveKey, artifactConfidentialPatterns = []) {
-  if (!e || typeof e !== "object") return "не объект";
-  for (const f of IMPORT_REQUIRED) {
-    if (e[f] === undefined || e[f] === null) return `отсутствует поле ${f}`;
-  }
-  if (!Array.isArray(e.decisions)) return "decisions не массив";
-  if (!Array.isArray(e.embedding)) return "embedding не массив";
-  // Task 7 (v5.2): опциональное `artifacts` — массив repo-relative строк.
-  // Отсутствует → [] (старые записи). Не-массив/нарушения → reject записи.
-  if (e.artifacts === undefined) {
-    e.artifacts = [];
-  } else if (!Array.isArray(e.artifacts)) {
-    return "artifacts не массив";
-  } else if (e.artifacts.length > 8) {
-    return "artifacts: больше 8 элементов";
-  } else {
-    for (const a of e.artifacts) {
-      if (typeof a !== "string") return "artifacts: элемент не строка";
-      if (a.length > 512) return "artifacts: элемент длиннее 512 символов";
-      if (/[\u0000-\u001f\u007f]/.test(a)) return "artifacts: элемент содержит control chars";
-      // repo-relative форма: ведущий `/`, `..`-сегмент, backslash, drive-letter.
-      if (a.startsWith("/")) return "artifacts: ведущий /";
-      if (a.split(/[\\/]+/).includes("..")) return "artifacts: ..-сегмент";
-      if (a.includes("\\")) return "artifacts: backslash";
-      if (/^[a-zA-Z]:/.test(a)) return "artifacts: drive-letter";
-    }
-    // CR-3: после валидации — drop элементов, матчащих resolved confidential-набор.
-    const lowerConf = artifactConfidentialPatterns
-      .filter((p) => typeof p === "string" && p)
-      .map((p) => p.toLowerCase());
-    if (lowerConf.length) {
-      e.artifacts = e.artifacts.filter((a) => !lowerConf.some((pat) => confGlobMatch(pat, a.toLowerCase())));
-    }
-  }
-  // M-10: numeric time/version fields + finite embedding values.
-  if (typeof e.time_first !== "number") return "time_first не число";
-  if (typeof e.time_last !== "number") return "time_last не число";
-  if (typeof e.version !== "number") return "version не число";
-  if (!e.embedding.every((n) => typeof n === "number" && Number.isFinite(n))) {
-    return "embedding содержит нечисловые/неконечные значения";
-  }
-  // I-4: fail-closed — файл от другого проекта не импортируем.
-  if (e.key !== effectiveKey) return "key не совпадает с активным проектом";
-  if (e.model_id !== storage.modelId) {
-    return `model_id не совпадает (файл=${e.model_id}, хранилище=${storage.modelId})`;
-  }
-  if (e.embedding.length !== storage.dim) {
-    return `размерность embedding не совпадает (файл=${e.embedding.length}, хранилище=${storage.dim})`;
-  }
-  return null;
-}
+// Imported from validation module — shared with backup/restore.
+import { validateImportEntry } from "./validation.js";
+export { validateImportEntry } from "./validation.js";
 
 /**
  * Lazy-import a heavy dependency, resolving it from `moduleDir/node_modules`

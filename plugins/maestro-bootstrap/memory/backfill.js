@@ -25,7 +25,7 @@ function toF32(v) {
 // Поля записи для полного upsert (RI-3: спред из existing — меняются только
 // artifacts + version). embedding — opt-in поле scan (C1: storage.get затирает
 // embedding на всех бэкендах; scan без fields его не возвращает).
-const SCAN_FIELDS = [
+export const SCAN_FIELDS = [
   "session_id", "key", "origin_project_hash", "title", "summary", "decisions",
   "artifacts", "author", "time_first", "time_last", "version", "model_id",
   "embedding", "branch", "head", "merged", "host", "origin_remote", "prefixes",
