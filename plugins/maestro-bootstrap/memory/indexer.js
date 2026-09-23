@@ -206,23 +206,23 @@ export class Indexer {
       // идентично до-#77 catch.
       await this._pipeline(sessionID);
     } catch (err) {
-      // #77: обработка ошибок guards (state-чтения) — идентична до-#77 catch.
-      // Ошибки пайплайна обрабатываются внутри _pipeline и сюда не доходят.
-      const errorClass = err?.retryable ? "retryable" : "storage";
-      this.logError?.("memory:index_error", { sessionID, error_class: errorClass });
+      // #77: ошибки guards (state-чтения) — классификация как в _pipeline
+      // (F4: default index_error); enum-only (SEC-4b).
       if (err?.retryable) {
-        // retryable (сеть/timeout/5xx embed) — skip не засчитывается (I3).
+        this.logError?.("memory:index_error", { sessionID, error_class: "retryable" });
         this.logDebug?.("memory:index_retryable", { sessionID });
-      } else {
-        try { await this.state.recordFail(sessionID); } catch {}
-        // Task 3: локальный счётчик fails (state не отдаёт fails наружу) —
-        // memory:index_skipped ровно в момент перехода в skip (3+ fails).
-        const fails = (this._fails.get(sessionID) ?? 0) + 1;
-        this._fails.set(sessionID, fails);
-        if (fails >= 3) {
-          this.logWarn?.("memory:index_skipped", { sessionID, fails });
-        }
+        return;
       }
+      const rawClass = err?.errorClass;
+      const errorClass = (rawClass === "storage_error" || rawClass === "embedder_error" || rawClass === "index_error") ? rawClass : "index_error";
+      this.logError?.("memory:index_error", { sessionID, error_class: errorClass });
+      try { await this.state.recordFail(sessionID, errorClass); } catch {}
+      const fails = (this._fails.get(sessionID) ?? 0) + 1;
+      this._fails.set(sessionID, fails);
+      if (fails >= 3) {
+        this.logWarn?.("memory:index_skipped", { sessionID, fails });
+      }
+      try { this.setUnsaved?.(sessionID, errorClass); } catch {}
     } finally {
       this.running = false;
       // M3: dedup when processing queue
@@ -324,7 +324,7 @@ export class Indexer {
             summarizerModel: resolved.model,
           }));
         } catch (e) {
-          if (!e?.retryable) e.errorClass = "index_error";
+          if (e && typeof e === "object" && !e.retryable) e.errorClass = "index_error";
           throw e;
         }
         // Task 3: перф-аудит — duration; model — effective-модель саммаризации
@@ -394,7 +394,7 @@ export class Indexer {
         try {
           vec = await this.embeddings.embed(`${maskedEntry.title}\n${maskedEntry.summary}\n${maskedEntry.decisions.join("\n")}`);
         } catch (e) {
-          if (!e?.retryable) e.errorClass = "embedder_error";
+          if (e && typeof e === "object" && !e.retryable) e.errorClass = "embedder_error";
           throw e;
         }
         maskedEntry.embedding = vec;
@@ -422,7 +422,7 @@ export class Indexer {
         try {
           await this.storage.upsert([maskedEntry]);
         } catch (e) {
-          e.errorClass = "storage_error";
+          if (e && typeof e === "object") e.errorClass = "storage_error";
           throw e;
         }
         // Task 5: post-upsert recheck — сессия могла быть удалена между
@@ -434,7 +434,7 @@ export class Indexer {
           return { status: "no_new_messages" };
         }
         await this.state.setSummarized(sessionID);
-        this.clearUnsaved?.(sessionID);
+        try { this.clearUnsaved?.(sessionID); } catch {}
         // Task 3: lifecycle-аудит (spec §4.1) — indexed при первой записи,
         // reindexed при пере-саммаризации повторно посещённой сессии
         // (version > 1, spec §4.4). author — из записи (maskedEntry.author).
@@ -460,7 +460,8 @@ export class Indexer {
         this.logDebug?.("memory:index_retryable", { sessionID });
         return { status: "failed:retryable" };
       }
-      const errorClass = err?.errorClass ?? "index_error";
+      const rawClass = err?.errorClass;
+      const errorClass = (rawClass === "storage_error" || rawClass === "embedder_error" || rawClass === "index_error") ? rawClass : "index_error";
       this.logError?.("memory:index_error", { sessionID, error_class: errorClass });
       try { await this.state.recordFail(sessionID, errorClass); } catch {}
       // локальный счётчик fails — memory:index_skipped при переходе в skip
@@ -469,7 +470,7 @@ export class Indexer {
       if (fails >= 3) {
         this.logWarn?.("memory:index_skipped", { sessionID, fails });
       }
-      this.setUnsaved?.(sessionID, errorClass);
+      try { this.setUnsaved?.(sessionID, errorClass); } catch {}
       return { status: `failed:${errorClass}` };
     }
   }

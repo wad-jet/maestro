@@ -1757,3 +1757,87 @@ test("#77 T3-7: log memory:index_error несёт стадииный класс 
   assert.ok(!JSON.stringify(err).includes("db down"), "enum-only: сообщение ошибки в лог не попадает");
   idx.dispose();
 });
+
+test("#77 T3-8: upsert-retryable → failed:retryable без страйка (M-4)", async () => {
+  const client = mkClient();
+  let failCalled = false;
+  const u = mkUnsaved();
+  const storage = {
+    ...mkStorage(client),
+    upsert: async () => { const e = new Error("db timeout"); e.retryable = true; throw e; },
+  };
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage,
+    state: { ...mkState(), recordFail: async () => { failCalled = true; } },
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+    setUnsaved: u.setUnsaved, clearUnsaved: u.clearUnsaved,
+  });
+  const r = await idx._pipeline("s1");
+  assert.equal(r.status, "failed:retryable");
+  assert.equal(failCalled, false);
+  assert.deepEqual(u.set, []);
+  idx.dispose();
+});
+
+test("#77 T3-9: чужой errorClass вне allowlist → index_error (M-2)", async () => {
+  const client = mkClient();
+  const fails = [];
+  client.session.get = async () => { const e = new Error("x"); e.errorClass = "weird_class"; throw e; };
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client),
+    state: { ...mkState(), recordFail: async (sid, cls) => { fails.push([sid, cls]); } },
+    summarize: async () => ({}),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+  });
+  const r = await idx._pipeline("s1");
+  assert.equal(r.status, "failed:index_error");
+  assert.deepEqual(fails, [["s1", "index_error"]]);
+  idx.dispose();
+});
+
+test("#77 T3-10: non-object throw (throw \"str\") — не маскируется TypeError'ом (M-1)", async () => {
+  const client = mkClient();
+  const fails = [];
+  client.session.get = async () => { throw "str"; };
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client),
+    state: { ...mkState(), recordFail: async (sid, cls) => { fails.push([sid, cls]); } },
+    summarize: async () => ({}),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+  });
+  const r = await idx._pipeline("s1");
+  assert.equal(r.status, "failed:index_error");
+  assert.deepEqual(fails, [["s1", "index_error"]]);
+  idx.dispose();
+});
+
+test("#77 T3-11: guard-ошибка (isSkipped throw) → index_error + setUnsaved (I-1)", async () => {
+  const client = mkClient();
+  const fails = [];
+  const u = mkUnsaved();
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client),
+    state: {
+      ...mkState(),
+      isSkipped: async () => { throw new Error("state corrupt"); },
+      recordFail: async (sid, cls) => { fails.push([sid, cls]); },
+    },
+    summarize: async () => ({}),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    setUnsaved: u.setUnsaved, clearUnsaved: u.clearUnsaved,
+  });
+  await idx._run("s1");
+  assert.deepEqual(fails, [["s1", "index_error"]]);
+  assert.deepEqual(u.set, [["s1", "index_error"]]);
+  idx.dispose();
+});
