@@ -423,3 +423,17 @@ SEC-4b: session_id + enum/числа — допустимо (паритет су
 - [ ] Regression entry + changelog 4.7.1 + version bump.
 - [ ] Spec-ревью (sanitizer + opus) + HITL-утверждение; план — через
       writing-plans.
+
+<!-- maestro:sanitize
+status: CLEAN
+date: 2026-09-23
+reviewer: sanitizer
+hash: 7422e4d07f935dc007773a9558930d4312b5a26a326f62a310faa0f85c142fb9
+-->
+
+<!-- maestro:review
+reviewer: opus
+date: 2026-09-23
+verdict: approve
+hash: 7422e4d07f935dc007773a9558930d4312b5a26a326f62a310faa0f85c142fb9
+-->
