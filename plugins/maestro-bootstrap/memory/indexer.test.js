@@ -1507,3 +1507,95 @@ test("4.0.0 sessions: model (не small_model) → source: model", async () => {
   assert.equal(durations[0].model_source, "model");
   idx.dispose();
 });
+
+// ── #77 (Task 2): _pipeline — контракт outcome-statuses (чистый рефактор _run) ──
+
+test("#77: _pipeline returns outcome statuses (refactor contract)", async () => {
+  const client = mkClient();
+  const storage = mkStorage(client);
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+  });
+  const ok = await idx._pipeline("s1");
+  assert.equal(ok.status, "ok");
+  assert.equal(client.upserts.length, 1, "record written");
+  idx.dispose();
+});
+
+test("#77: _pipeline → unattributed (write-gate, head '')", async () => {
+  const client = mkClient();
+  const storage = mkStorage(client);
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: { resolveBranch: async () => "", resolveHead: async () => "" },
+  });
+  const r = await idx._pipeline("s1");
+  assert.equal(r.status, "unattributed");
+  assert.equal(client.upserts.length, 0);
+  idx.dispose();
+});
+
+test("#77: _pipeline → no_new_messages (пустой транскрипт)", async () => {
+  // mkClient([]) — пустой список сообщений (null дал бы default-сообщение из-за ??)
+  const client = mkClient([]);
+  const storage = mkStorage(client);
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+  });
+  const r = await idx._pipeline("s1");
+  assert.equal(r.status, "no_new_messages");
+  idx.dispose();
+});
+
+test("#77: _pipeline → skip_service (parentID)", async () => {
+  const client = mkClient();
+  client.session.get = async () => ({
+    data: { id: "s1", parentID: "p1", title: "st", time: { created: 1, updated: 100 } },
+  });
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client), state: mkState(),
+    summarize: async () => ({}),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+  });
+  const r = await idx._pipeline("s1");
+  assert.equal(r.status, "skip_service");
+  idx.dispose();
+});
+
+test("#77: _run delegates to _pipeline (regression: guards intact)", async () => {
+  // throttle: свежий lastAttempt → _run НЕ доходит до _pipeline
+  const client = mkClient();
+  let pipelineCalls = 0;
+  const storage = mkStorage(client);
+  const idx = new Indexer({
+    client, config: mkConfig({ retry_interval_min: 60 }),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: {
+      ...mkState(),
+      getLastAttempt: async () => Date.now(), // свежий attempt
+    },
+    summarize: async () => ({}),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+  });
+  const origPipeline = idx._pipeline.bind(idx);
+  idx._pipeline = async (...a) => { pipelineCalls++; return origPipeline(...a); };
+  await idx._run("s1");
+  assert.equal(pipelineCalls, 0, "throttle guard не снят");
+  idx.dispose();
+});

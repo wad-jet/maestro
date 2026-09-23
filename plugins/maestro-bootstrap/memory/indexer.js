@@ -195,9 +195,58 @@ export class Indexer {
       // I2: exclude maestro-memory sessions
       if (SESSIONS.has(sessionID)) return;
 
+      // #77 (Task 2): стадии пайплайна — _pipeline (обрабатывает ошибки сам,
+      // возвращает status). Этот catch — только для ошибок guards; поведение
+      // идентично до-#77 catch.
+      await this._pipeline(sessionID);
+    } catch (err) {
+      // #77: обработка ошибок guards (state-чтения) — идентична до-#77 catch.
+      // Ошибки пайплайна обрабатываются внутри _pipeline и сюда не доходят.
+      const errorClass = err?.retryable ? "retryable" : "storage";
+      this.logError?.("memory:index_error", { sessionID, error_class: errorClass });
+      if (err?.retryable) {
+        // retryable (сеть/timeout/5xx embed) — skip не засчитывается (I3).
+        this.logDebug?.("memory:index_retryable", { sessionID });
+      } else {
+        try { await this.state.recordFail(sessionID); } catch {}
+        // Task 3: локальный счётчик fails (state не отдаёт fails наружу) —
+        // memory:index_skipped ровно в момент перехода в skip (3+ fails).
+        const fails = (this._fails.get(sessionID) ?? 0) + 1;
+        this._fails.set(sessionID, fails);
+        if (fails >= 3) {
+          this.logWarn?.("memory:index_skipped", { sessionID, fails });
+        }
+      }
+    } finally {
+      this.running = false;
+      // M3: dedup when processing queue
+      const next = [...this.queue].find((sid) => sid !== sessionID);
+      if (next) {
+        this.queue.delete(next);
+        this._run(next).catch(() => {});
+      } else {
+        this.queue.clear();
+      }
+      const t = this.timers.get(sessionID);
+      if (t) { clearTimeout(t); this.timers.delete(sessionID); }
+    }
+  }
+
+  /**
+   * #77 (spec §5.1.1): пайплайн стадий штатного индексирования —
+   * session.read → min_new → transcript → maskTranscript → write-gate →
+   * summarize → maskEntry → embed → upsert → setSummarized.
+   * _run вызывает его после guards; reindexSession (Task 4) — напрямую,
+   * в обход running/queue/throttle-гардов.
+   * @param {string} sessionID
+   * @returns {Promise<{ status: string }>} "ok" | "unattributed" |
+   *   "no_new_messages" | "skip_service" | "failed:<class>"
+   */
+  async _pipeline(sessionID) {
+    try {
       const sessResp = await this.client.session.get({ path: { id: sessionID } });
       const sess = sessResp?.data ?? sessResp;
-      if (sess?.parentID) return;
+      if (sess?.parentID) return { status: "skip_service" };
 
       const msgResp = await this.client.session.messages({ path: { id: sessionID } });
       const messages = (msgResp?.data ?? msgResp) ?? [];
@@ -220,14 +269,14 @@ export class Indexer {
           const tc = m.time_created ?? m.info?.time?.created ?? 0;
           return tc > lastSummarized;
         }).length;
-        if (newCount < minNew) return;
+        if (newCount < minNew) return { status: "no_new_messages" };
       }
 
       const transcript = messages
         .map((m) => (m.parts ?? []).map((p) => p.type === "text" ? p.text : "").join("\n"))
         .join("\n");
 
-      if (!transcript.trim()) return;
+      if (!transcript.trim()) return { status: "no_new_messages" };
 
       // Mask confidential content BEFORE summarize
       const masked = maskTranscript(transcript, { confidentialPatterns: this.confidentialPatterns });
@@ -246,7 +295,7 @@ export class Indexer {
         const effHead = head || existing?.head || "";
         if (!effHead) {
           this.logDebug?.("memory:index_unattributed", { sessionID });
-          return;
+          return { status: "unattributed" };
         }
         const effBranch = branch || existing?.branch || "";
 
@@ -351,7 +400,7 @@ export class Indexer {
 
         // Task 5: tombstone race-guard (spec §5) — pre-check перед upsert:
         // если сессия удалена во время summarize, не пишем запись вовсе.
-        if (this._tombstones.has(sessionID)) return;
+        if (this._tombstones.has(sessionID)) return { status: "no_new_messages" };
         await this.storage.upsert([maskedEntry]);
         // Task 5: post-upsert recheck — сессия могла быть удалена между
         // pre-check и upsert; тогда удаляем только что записанную запись
@@ -359,7 +408,7 @@ export class Indexer {
         if (this._tombstones.has(sessionID)) {
           try { await this.storage.delete(sessionID); } catch {}
           this._tombstones.delete(sessionID);
-          return;
+          return { status: "no_new_messages" };
         }
         await this.state.setSummarized(sessionID);
         // Task 3: lifecycle-аудит (spec §4.1) — indexed при первой записи,
@@ -371,9 +420,10 @@ export class Indexer {
         } else {
           this.logInfo?.("memory:indexed", { sessionID, projectKey: this.projectKey.hash, author, version: maskedEntry.version });
         }
+        return { status: "ok" };
       })();
 
-      await withTimeout(work, timeoutMs);
+      return await withTimeout(work, timeoutMs);
     } catch (err) {
       // Task 3: root-cause-аудит (spec §4.1/§3) — enum-only: тела ошибок
       // (message/stack) в лог НЕ попадают, только error_class. Заменяет
@@ -393,18 +443,7 @@ export class Indexer {
           this.logWarn?.("memory:index_skipped", { sessionID, fails });
         }
       }
-    } finally {
-      this.running = false;
-      // M3: dedup when processing queue
-      const next = [...this.queue].find((sid) => sid !== sessionID);
-      if (next) {
-        this.queue.delete(next);
-        this._run(next).catch(() => {});
-      } else {
-        this.queue.clear();
-      }
-      const t = this.timers.get(sessionID);
-      if (t) { clearTimeout(t); this.timers.delete(sessionID); }
+      return { status: `failed:${errorClass}` };
     }
   }
 
