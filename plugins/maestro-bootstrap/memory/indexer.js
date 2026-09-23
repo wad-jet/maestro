@@ -475,6 +475,29 @@ export class Indexer {
     }
   }
 
+  /**
+   * #77 (spec §5.1.1): полный re-index сессии — синхронный для tool'а
+   * (memory_reindex, Task 6). НЕ идёт через running-queue и не гардится
+   * this.running; retry-throttle НЕ применяется (последствие сброса
+   * lastAttempt в clearSkip, C1). Guard-исходы (not_found, skip_service)
+   * пре-чекает tool (R2) — здесь не проверяются.
+   * Гонка с in-flight _run той же сессии — осознанный benign-race (N4):
+   * возможный двойной summarize (LLM-стоимость) + двойной version-bump;
+   * данные безопасны (upsert по session_id), guard не добавляется (YAGNI).
+   * @param {string} sessionID
+   * @returns {Promise<{ status: string }>} "ok" | "unattributed" |
+   *   "no_new_messages" | "failed:<class>"
+   */
+  async reindexSession(sessionID) {
+    // C1: сброс permanent-skip + throttle-якоря (lastAttempt → null);
+    // F5: сброс локального зеркала _fails — иначе memory:index_skipped
+    // сработает преждевременно после нового страйка (state=1, local >= 3).
+    // Вызывается только по явным ID (HITL) — авто-сбросов нет.
+    try { await this.state.clearSkip?.(sessionID); } catch {}
+    this._fails.delete(sessionID);
+    return await this._pipeline(sessionID);
+  }
+
   dispose() {
     for (const t of this.timers.values()) clearTimeout(t);
     this.timers.clear();

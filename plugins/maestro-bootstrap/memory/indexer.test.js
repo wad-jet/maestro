@@ -1841,3 +1841,135 @@ test("#77 T3-11: guard-ошибка (isSkipped throw) → index_error + setUnsav
   assert.deepEqual(u.set, [["s1", "index_error"]]);
   idx.dispose();
 });
+
+// ── #77 Task 4: reindexSession ──
+
+test("#77 T4-1: reindexSession bypasses retry-throttle (C1, свежий lastAttempt)", async () => {
+  const client = mkClient();
+  const storage = mkStorage(client);
+  const calls = { summarize: 0, clearSkip: 0 };
+  const idx = new Indexer({
+    client, config: mkConfig({ retry_interval_min: 60 }),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage,
+    state: {
+      ...mkState(),
+      getLastAttempt: async () => Date.now(), // свежий attempt: штатный _run ушёл бы в throttle
+      clearSkip: async () => { calls.clearSkip++; },
+    },
+    summarize: async () => { calls.summarize++; return { title: "t", summary: "s", decisions: [] }; },
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+  });
+  const r = await idx.reindexSession("s1");
+  assert.equal(r.status, "ok");
+  assert.equal(calls.summarize, 1, "summarize вызван (throttle не блокирует)");
+  assert.equal(calls.clearSkip, 1, "clearSkip вызван");
+  assert.equal(client.upserts.length, 1);
+  idx.dispose();
+});
+
+test("#77 T4-2: reindexSession сбрасывает skip (isSkipped=true до вызова)", async () => {
+  const client = mkClient();
+  const stateCalls = { clearSkip: [] };
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client),
+    state: {
+      ...mkState(),
+      isSkipped: async () => true, // до clearSkip сессия в skip
+      clearSkip: async (id) => { stateCalls.clearSkip.push(id); },
+    },
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+  });
+  const r = await idx.reindexSession("s1");
+  assert.equal(r.status, "ok");
+  assert.deepEqual(stateCalls.clearSkip, ["s1"]);
+  idx.dispose();
+});
+
+test("#77 T4-3: write-gate head '' → unattributed, запись НЕ создана, summarize не вызван (C2)", async () => {
+  const client = mkClient();
+  const storage = mkStorage(client);
+  let summarizeCalls = 0;
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage,
+    state: { ...mkState(), clearSkip: async () => {} },
+    summarize: async () => { summarizeCalls++; return { title: "t", summary: "s", decisions: [] }; },
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: { resolveBranch: async () => "", resolveHead: async () => "" },
+  });
+  const r = await idx.reindexSession("s1");
+  assert.equal(r.status, "unattributed");
+  assert.equal(summarizeCalls, 0, "write-gate: summarize до head не вызывается");
+  assert.equal(client.upserts.length, 0);
+  idx.dispose();
+});
+
+test("#77 T4-4: пустой транскрипт → no_new_messages (edge: запись удалена memory_forget)", async () => {
+  const client = mkClient([]); // messages: [] (null дала бы default-сообщение из-за ?? в хелпере)
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client),
+    state: { ...mkState(), clearSkip: async () => {} },
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+  });
+  const r = await idx.reindexSession("s1");
+  assert.equal(r.status, "no_new_messages");
+  idx.dispose();
+});
+
+test("#77 T4-5: хранилище лежит → failed:storage_error + recordFail с 0; после clearSkip + 1 страйк index_skipped НЕ возникает (F5)", async () => {
+  const cap = { calls: [] };
+  const mk = (lvl) => (m, extra) => cap.calls.push([lvl, m, extra]);
+  const client = mkClient();
+  const storage = { ...mkStorage(client), upsert: async () => { throw new Error("db down"); } };
+  const fails = [];
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage,
+    state: {
+      ...mkState(),
+      clearSkip: async () => {},
+      recordFail: async (sid, cls) => { fails.push([sid, cls]); },
+    },
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+    logInfo: mk("info"), logDebug: mk("debug"), logWarn: mk("warn"), logError: mk("error"),
+  });
+  idx._fails.set("s1", 3); // искусственно: зеркало до clearSkip = 3 (без сброса warn бы сработал)
+  const r = await idx.reindexSession("s1");
+  assert.equal(r.status, "failed:storage_error");
+  assert.deepEqual(fails, [["s1", "storage_error"]], "recordFail вызван (счётчик пересоздан с 0)");
+  const skip = cap.calls.find(([lvl, m]) => m === "memory:index_skipped");
+  assert.equal(skip, undefined, "F5: mirror сброшен → warn при 1 новом страйке не возникает");
+  idx.dispose();
+});
+
+test("#77 T4-6: reindexSession не трогает this.running/queue (синхронный, C2)", async () => {
+  const client = mkClient();
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client),
+    state: { ...mkState(), clearSkip: async () => {} },
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+  });
+  idx.running = true; // штатный _run в работе
+  const r = await idx.reindexSession("s1");
+  assert.equal(r.status, "ok", "reindexSession не гардится this.running");
+  assert.equal(idx.queue.size, 0, "в очередь не ставится");
+  idx.dispose();
+});
