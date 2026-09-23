@@ -72,19 +72,21 @@ function gitRootOf(cwd) {
 }
 
 /**
- * CLI-логгер: JSONL-append в общий daily-лог
- * `<root>/.maestro/logs/maestro-bootstrap-<YYYY-MM-DD>.log` (тот же файл, что у
- * плагина; формат записи — как у makeLogger: { ts, level, msg, ...extra }).
+ * CLI-логгер: JSONL-append в daily-файл bootstrap-лога
+ * `<dir>/maestro-bootstrap-<YYYY-MM-DD>.log`, где dir =
+ * `MAESTRO_BOOTSTRAP_LOG_DIR` (паритет с makeLogger — при кастомном env лог
+ * идёт в тот же каталог, что и у плагина) либо `<root>/.maestro/logs`.
+ * Формат записи — как у makeLogger: { ts, level, msg, ...extra }.
  * При недоступности лога — warn в stderr; операция НЕ блокируется (spec §5.1).
  *
  * Возвращает функцию-логгер `(msg, extra) => void` (контракт log у
- * runBackup/runRestore) с висящим `.logger` — объект-логгер
+ * runBackup/runRestore) с свойством `.logger` — объект-логгер
  * (debug/info/warn/error) для createStorage (контракт бэкендов).
  * @param {string} root
- * @returns {(msg: string, extra?: object) => void & { logger: object }}
+ * @returns {{ (msg: string, extra?: object): void, logger: object }}
  */
-function cliLog(root) {
-  const dir = join(root, ".maestro", "logs");
+export function cliLog(root) {
+  const dir = process.env.MAESTRO_BOOTSTRAP_LOG_DIR || join(root, ".maestro", "logs");
   const write = (level, msg, extra) => {
     const now = new Date();
     const entry = JSON.stringify({ ts: now.toISOString(), level, msg, ...(extra ?? {}) });
@@ -104,6 +106,30 @@ function cliLog(root) {
   const logFn = (msg, extra) => write("info", msg, extra);
   logFn.logger = logger;
   return logFn;
+}
+
+/**
+ * Интерактивное подтверждение replace (spec §5.2.4): ввод namespace.
+ * EOF (Ctrl+D) без ответа → null (runRestore честно откажется — «подтверждение
+ * не совпадает», а не тихий exit 0: до фикса promise не резолвился, event loop
+ * пустел, процесс завершался с кодом 0 без runRestore).
+ * @param {{ effectiveKey: string, input?: object, output?: object }} opts
+ *   input/output — инжектируемые потоки (тесты); по умолчанию process.stdin/stdout.
+ * @returns {Promise<string|null>} введённый namespace (trim) или null при EOF.
+ */
+export function askReplaceConfirm({ effectiveKey, input = process.stdin, output = process.stdout }) {
+  const rl = createInterface({ input, output });
+  return new Promise((res) => {
+    let settled = false;
+    const settle = (v) => {
+      if (settled) return; // close после ответа (и наоборот) → двойной resolve исключён
+      settled = true;
+      rl.close();
+      res(v);
+    };
+    rl.on("close", () => settle(null)); // EOF без ответа
+    rl.question(`Подтвердите replace — введите namespace (${effectiveKey}): `, (a) => settle(a.trim()));
+  });
 }
 
 /**
@@ -297,7 +323,12 @@ export async function main() {
   try {
     await storage.init();
   } catch (err) {
+    // Actionable (I-1): полный путь БД + для restore — подсказка по повреждённой БД.
     process.stderr.write(`backup-cli: не удалось инициализировать storage (sqlite): ${err instanceof Error ? err.message : String(err)}\n`);
+    process.stderr.write(`БД: ${dbPath}\n`);
+    if (action === "restore") {
+      process.stderr.write(`БД повреждена — переименуйте/удалите ${dbPath} (и ${dbPath}-wal, ${dbPath}-shm) и повторите restore.\n`);
+    }
     return 1;
   }
 
@@ -332,17 +363,11 @@ export async function main() {
   // Нормализация симлинков (см. root выше): обе стороны path-guard в runRestore
   // в одном физическом дереве. Файла нет → исходный путь (ошибка проявится ниже).
   const file = safeRealpath(parsed.file);
-  // ТTY-гейт --replace проверен выше; здесь — только интерактивное подтверждение.
-  let confirmNamespace = null;
-  if (parsed.replace) {
-    const rl = createInterface({ input: process.stdin, output: process.stdout });
-    confirmNamespace = await new Promise((res) => {
-      rl.question(`Подтвердите replace — введите namespace (${effectiveKey}): `, (a) => {
-        rl.close();
-        res(a.trim());
-      });
-    });
-  }
+  // ТTY-гейт --replace проверен выше; здесь — интерактивное подтверждение
+  // (EOF без ответа → null → runRestore откажет, exit 1).
+  const confirmNamespace = parsed.replace
+    ? await askReplaceConfirm({ effectiveKey, input: process.stdin, output: process.stdout })
+    : null;
   const r = await runRestore({
     storage,
     backupCfg,
