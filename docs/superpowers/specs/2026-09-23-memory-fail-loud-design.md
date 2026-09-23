@@ -11,6 +11,10 @@ sync-back) зафиксирован как non-goal / follow-up. Обсужде�
 full-reindex), C2 (синхронная семантика `reindexSession` + post-fact-статусы),
 I1–I4 (auto_recall, memory_probe, классификация ошибок, «тихий off»-пути) +
 minor M1–M6.
+**Rev. 3 (2026-09-23):** round-2 ревью opus — все 12 замечаний подтверждены
+закрытыми; учтены новые: N1 (временной критерий `unindexed()`), N2 (формулировка
+теста 15), N3 (early-exit-outcomes), N4 (benign-race задокументирован),
+N5 (полный process-enum в §7).
 
 ## 1. Контекст и проблема
 
@@ -99,7 +103,7 @@ minor M1–M6.
 | `memory/index.js` | (1) **все** «тихий off»-пути init (§4.4) — вместо `return {}` сокращённый набор хуков с notice (состав — §4.4); (2) notice-хук `experimental.chat.system.transform` в полный набор хуков, **независимо от `auto_recall`** (I1); (3) флаг-реестр unsaved-сессий (bounded, in-memory, cap 1024 → clear); (4) `memory_reindex`: новый режим full-reindex (вызов `indexer.reindexSession`); (5) `memory_stats_detail`: unindexed-блок (§5.2) |
 | `memory/backfill.js` | **не меняется** (artifacts-путь — регрессия) |
 | `memory/indexer.js` | (1) после `recordFail` — установка unsaved-флага (reason-класс, §4.1); (2) после успешного `setSummarized` — снятие флага; (3) `reindexSession(id)` — экспорт метода полного re-index, §5.1; (4) классификация ошибки по стадиям (таблица §4.1) — try/catch на каждой стадии (summarize/embed/upsert); (5) unsaved-реестр получает в конструкторе (deps: `setUnsaved(id, reason)` / `clearUnsaved(id)`) — владение реестром — index.js (M1) |
-| `memory/state.js` | (1) `clearSkip(id)` (сброс `skip` + `fails`); (2) `recordFail(id, errorClass)` — дополнительно хранит `lastErrorClass`; (3) `unindexed()` — read-all: сессии с `fails > 0` / `skip` / (`lastAttempt` без `lastSummarized`) → `{id, fails, skip, lastAttempt, lastSummarized, lastErrorClass}` |
+| `memory/state.js` | (1) `clearSkip(id)` (сброс `skip` + `fails` + `lastAttempt → null`); (2) `recordFail(id, errorClass)` — дополнительно хранит `lastErrorClass`; (3) `unindexed()` — read-all, **временной** критерий (N1): `skip === true` **или** (`lastAttempt != null` и (`lastSummarized == null` или `lastAttempt > lastSummarized`)) → `{id, fails, skip, lastAttempt, lastSummarized, lastErrorClass}`. Самовосстановившаяся сессия (`lastSummarized > lastAttempt`) — **не** в списке, даже с персистентным `fails > 0` (`setSummarized` не сбрасывает `fails` — `state.js:45-48`) |
 | `memory/index.test.js` / `indexer.test.js` / `state.test.js` | тесты §9 |
 | `commands/maestro-memory.md`, `commands/maestro-memory-reindex.md` | сценарии «не индексированные сессии» / «восстановить отсутствующую запись» |
 | `manual_docs/` (reference/memory.md, how-to, commands.md), `AGENTS.md`, `changelog.md`, `regression/entries/` | §10 |
@@ -220,11 +224,20 @@ notice (reason в скобках) вместо `return {}`:
 - **Свежие данные сессии:** `client.session.get/messages` перечитываются
   (не кэш) — как штатный `_run`.
 - **Post-fact-критерий результата (C2):** после выполнения tool проверяет
-  факт записи (scan по `session_id`) и применяет early-exit-статусы —
-  результат **не выводится** из «метод отработал без броска».
+  факт записи (scan/get по `session_id` — есть во всех трёх бэкендах) —
+  это **финальный арбитр** для `indexed`.
+- **Early-exit-outcomes (N3):** `reindexSession` возвращает исход ранних
+  выходов стадии (`unattributed` / `no_new_messages`) — они **не выводятся**
+  из post-fact «записи нет» (он их не различает); post-fact + outcome
+  вместе дают честный статус.
 - **Стадии и классификация** — те же, что у `_run` (§4.1); ошибки стадий →
   `failed: <класс>` + `recordFail` (повторный страйк после clearSkip —
   осознанно: хранилище всё ещё лежит → сессия честно уходит в skip-цикл).
+- **Гонка с in-flight `_run` (N4) — осознанный benign-race:** пересечение
+  с idle-индексированием той же сессии → возможный двойной summarize
+  (LLM-стоимость) и двойной version-bump; данные безопасны (upsert по
+  `session_id`), статус честен (post-fact). Guard **не** добавляется
+  (YAGNI; вероятность мала — HITL-вызов во время idle-окна).
 
 #### 5.1.2 Статусы (per-session, enum)
 
@@ -264,7 +277,7 @@ SEC-4b: session_id + enum/числа — допустимо (паритет су
 
 | Событие | Уровень | Когда | Поля (enum/числа, SEC-4b) |
 |---|---|---|---|
-| `memory:unsaved_notice` | info | установка unsaved-флага (1× per session per process) | `sessionID`, `reason` (enum §4.1) или `scope: "process"`, `reason: "init_failed"\|"probe_hard_fail"` |
+| `memory:unsaved_notice` | info | установка unsaved-флага (1× per session per process) | `sessionID`, `reason` (enum §4.1: `storage_error`\|`embedder_error`\|`index_error`) или `scope: "process"`, `reason` (enum §4.4: `init_failed`\|`config_invalid`\|`client_not_installed`\|`api_key_env_missing`\|`probe_hard_fail`) |
 | `memory:unsaved_cleared` | debug | снятие флага успешным индексированием | `sessionID` |
 | (существующие) `memory:index_error` / `memory:index_skipped` / `memory:reindex*` | — | без изменений; `memory:reindex*` — расширение result-enum на `full_index` | |
 
@@ -324,7 +337,8 @@ SEC-4b: session_id + enum/числа — допустимо (паритет су
 14. Write-gate: сессия с `head === ''` → статус `unattributed`, запись не
     создана (post-fact), без ложного `indexed` (C2).
 15. `min_new_messages`/пустой транскрипт → `no_new_messages` (включая edge:
-    запись удалена `memory_forget`, state чистый — M4).
+    запись удалена `memory_forget` — **state при этом не чистится**,
+    `lastSummarized` сохранён, в сессии мало нового — M4/N2).
 16. Хранилище **всё ещё лежит** при full-reindex → `failed: storage_error` +
     повторный `recordFail` (счётчик идёт с 0 после clearSkip).
 17. Сессия не найдена в opencode → `not_found`, без броска.
@@ -334,10 +348,11 @@ SEC-4b: session_id + enum/числа — допустимо (паритет су
 
 **State**
 
-20. `state.unindexed()`: сессии с `fails>0`, `skip`, `lastAttempt` без
-    `lastSummarized` — перечислены (в т.ч. `lastErrorClass` из
-    `recordFail(id, class)`); чистые — нет. Cap-вывод `memory_stats_detail`
-    — 20 строк + «…(+N ещё)».
+20. `state.unindexed()` (временной критерий, N1): в списке — `skip` и
+    (`lastAttempt` после `lastSummarized` или без неё); **НЕ в списке** —
+    самовосстановившаяся сессия (`fails=1`, `lastSummarized > lastAttempt`)
+    и чистые. Поля — в т.ч. `lastErrorClass` из `recordFail(id, class)`.
+    Cap-вывод `memory_stats_detail` — 20 строк + «…(+N ещё)».
 
 ## 10. Документация (критерий приёмки, AGENTS.md)
 
