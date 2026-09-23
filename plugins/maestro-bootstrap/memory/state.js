@@ -12,7 +12,7 @@ import { dirname } from "node:path";
  * @returns {{
  *   getLastSummarized(id): Promise<number|null>,
  *   setSummarized(id): Promise<void>,
- *   recordFail(id): Promise<void>,
+ *   recordFail(id, errorClass?): Promise<void>,
  *   isSkipped(id): Promise<boolean>,
  *   getLastAttempt(id): Promise<number|null>,
  *   getFirstRun(): Promise<number>,
@@ -20,6 +20,8 @@ import { dirname } from "node:path";
  *   delete(id): Promise<void>,
  *   getEmbedderProbe(): object|null,
  *   setEmbedderProbe(info): Promise<void>,
+ *   clearSkip(id): Promise<void>,
+ *   unindexed(): Promise<Array<object>>,
  * }}
  */
 export function createState(path, { log } = {}) {
@@ -46,10 +48,11 @@ export function createState(path, { log } = {}) {
       data.sessions[id] = { ...(data.sessions[id] ?? {}), lastSummarized: Date.now() };
       persist();
     },
-    async recordFail(id) {
+    async recordFail(id, errorClass) {
       const s = data.sessions[id] ?? {};
       s.fails = (s.fails ?? 0) + 1;
       s.lastAttempt = Date.now();
+      if (errorClass != null) s.lastErrorClass = errorClass;
       if (s.fails >= 3) s.skip = true;
       data.sessions[id] = s;
       persist();
@@ -69,6 +72,47 @@ export function createState(path, { log } = {}) {
         if (!v.lastAttempt || v.lastAttempt < cutoff) delete data.sessions[k];
       }
       persist();
+    },
+    /**
+     * #77 (spec §5.1): сброс permanent-skip и throttle-якоря. Вызывается ТОЛЬКО
+     * внутри full-reindex по явном session_id (indexer.reindexSession) —
+     * авто-сбросов нет. lastAttempt → null (C1): иначе следующий штатный _run
+     * уйдёт по retry-throttle (retry_interval_min) молча. No-op без записи.
+     */
+    async clearSkip(id) {
+      const s = data.sessions[id];
+      if (!s) return;
+      s.skip = false;
+      s.fails = 0;
+      s.lastAttempt = null;
+      persist();
+    },
+    /**
+     * #77 (spec §5.2, N1): неиндексированные сессии — ВРЕМЕННОЙ критерий:
+     * skip === true ИЛИ (lastAttempt != null И (lastSummarized == null ИЛИ
+     * lastAttempt > lastSummarized)). Самовосстановившаяся сессия
+     * (lastSummarized > lastAttempt) — НЕ в списке, даже с персистентным
+     * fails > 0 (setSummarized не сбрасывает fails).
+     * @returns {Promise<Array<{ id: string, fails: number, skip: boolean,
+     *   lastAttempt: number|null, lastSummarized: number|null,
+     *   lastErrorClass: string|null }>>}
+     */
+    async unindexed() {
+      const out = [];
+      for (const [id, s] of Object.entries(data.sessions)) {
+        const stale = s.skip === true ||
+          (s.lastAttempt != null && (s.lastSummarized == null || s.lastAttempt > s.lastSummarized));
+        if (!stale) continue;
+        out.push({
+          id,
+          fails: s.fails ?? 0,
+          skip: Boolean(s.skip),
+          lastAttempt: s.lastAttempt ?? null,
+          lastSummarized: s.lastSummarized ?? null,
+          lastErrorClass: s.lastErrorClass ?? null,
+        });
+      }
+      return out;
     },
     async delete(id) {
       delete data.sessions[id];
