@@ -7,6 +7,10 @@
 Волна 1 #77 + дизайн-гейт C4 (`docs/roadmap.md`: sqlite-fallback **vs** fail-closed).
 **Решение C4 (HITL, 2026-09-23): fail-closed «громкий»** — sqlite-fallback (staging +
 sync-back) зафиксирован как non-goal / follow-up. Обсуждение вариантов — см. §1.4.
+**Rev. 2 (2026-09-23):** учтено spec-ревью opus (Revise): C1 (throttle-bypass
+full-reindex), C2 (синхронная семантика `reindexSession` + post-fact-статусы),
+I1–I4 (auto_recall, memory_probe, классификация ошибок, «тихий off»-пути) +
+minor M1–M6.
 
 ## 1. Контекст и проблема
 
@@ -92,10 +96,10 @@ sync-back) зафиксирован как non-goal / follow-up. Обсужде�
 
 | Файл | Изменение |
 |---|---|
-| `memory/index.js` | (1) в catch init-fail (`:1831`) вместо `return {}` — сокращённый набор хуков с notice-инъекцией; (2) notice-хук `experimental.chat.system.transform` в полный набор хуков; (3) флаг-реестр unsaved-сессий (bounded, in-memory); (4) `memory_reindex`: новый режим full-reindex; (5) `@maestro-memory`-статус: unindexed-список |
-| `memory/indexer.js` | (1) после `recordFail` — установка unsaved-флага (reason-класс); (2) после успешного `setSummarized` — снятие флага |
+| `memory/index.js` | (1) **все** «тихий off»-пути init (§4.4) — вместо `return {}` сокращённый набор хуков с notice (состав — §4.4); (2) notice-хук `experimental.chat.system.transform` в полный набор хуков, **независимо от `auto_recall`** (I1); (3) флаг-реестр unsaved-сессий (bounded, in-memory, cap 1024 → clear); (4) `memory_reindex`: новый режим full-reindex (вызов `indexer.reindexSession`); (5) `memory_stats_detail`: unindexed-блок (§5.2) |
+| `memory/backfill.js` | **не меняется** (artifacts-путь — регрессия) |
+| `memory/indexer.js` | (1) после `recordFail` — установка unsaved-флага (reason-класс, §4.1); (2) после успешного `setSummarized` — снятие флага; (3) `reindexSession(id)` — экспорт метода полного re-index, §5.1; (4) классификация ошибки по стадиям (таблица §4.1) — try/catch на каждой стадии (summarize/embed/upsert); (5) unsaved-реестр получает в конструкторе (deps: `setUnsaved(id, reason)` / `clearUnsaved(id)`) — владение реестром — index.js (M1) |
 | `memory/state.js` | (1) `clearSkip(id)` (сброс `skip` + `fails`); (2) `recordFail(id, errorClass)` — дополнительно хранит `lastErrorClass`; (3) `unindexed()` — read-all: сессии с `fails > 0` / `skip` / (`lastAttempt` без `lastSummarized`) → `{id, fails, skip, lastAttempt, lastSummarized, lastErrorClass}` |
-| `memory/indexer.js` | (доп.) полный re-index отсутствующей записи по session_id: экспорт метода (напр. `reindexSession(id)`), вызывающего `_run` (summarize → embed → upsert) из tool-контекса — без новых LLM-механизмов; `backfill.js` **не меняется** (artifacts-путь — регрессия) |
 | `memory/index.test.js` / `indexer.test.js` / `state.test.js` | тесты §9 |
 | `commands/maestro-memory.md`, `commands/maestro-memory-reindex.md` | сценарии «не индексированные сессии» / «восстановить отсутствующую запись» |
 | `manual_docs/` (reference/memory.md, how-to, commands.md), `AGENTS.md`, `changelog.md`, `regression/entries/` | §10 |
@@ -108,38 +112,75 @@ sync-back) зафиксирован как non-goal / follow-up. Обсужде�
 ### 4.1 Триггер
 
 Установка unsaved-флага (`sessionID → reason`):
-- **per-session:** `recordFail` в `indexer._run` (hard-fail upsert/summarize/
-  embed-не-ретрайабл). Reason-класс (enum, SEC-4b): `storage_error` /
-  `embedder_error` / `index_error`.
-- **process-level (init-fail):** память off на процесс → отдельный флаг
-  «память не работает» (reason: `init_failed` / `probe_hard_fail`).
+- **per-session:** `recordFail` в `indexer._run` (hard-fail). Классификация —
+  **детерминированный маппинг по стадии** (I3): `indexer._run` оборачивает
+  каждую стадию в собственный try/catch, `errorClass` вычисляется в indexer
+  (передаётся в `recordFail(id, errorClass)` и в unsaved-реестр):
+
+  | Стадия / источник ошибки | errorClass |
+  |---|---|
+  | `storage.upsert` (любая ошибка storage-бэкенда) | `storage_error` |
+  | embed, **non-retryable** (plain Error: local embedder down, 401/403, dim mismatch) | `embedder_error` |
+  | summarize (LLM-ошибка / невалидный JSON / timeout) | `index_error` |
+
+- **process-level («память не работает в процессе»):** все ранние `return {}`-
+  пути init, §4.4. Reason-enum: `init_failed` / `config_invalid` /
+  `client_not_installed` / `api_key_env_missing` / `probe_hard_fail`.
 - **НЕ триггер:** retryable-ошибки (openai сеть/5xx — `memory:index_retryable`),
-  намеренное отключение по конфигу, disabled-причины валидации.
+  намеренное отключение по конфигу (`no_memory_section`,
+  `explicitly_disabled`) и static-валидация (`classifyMemoryConfig`).
 
 ### 4.2 Доставка
 
 - Хук `experimental.chat.system.transform` (прецедент `communication.js:135`):
   при установленном флаге — `out.system.push(<одна строка>)`. Инжектится пока
   флаг установлен (стабильно за сессию, как communication-директива).
+- **Независимость от `auto_recall` (I1):** notice-хук регистрируется
+  **независимо** от `config.auto_recall` — уведомление о потере данных, а не
+  функция recall. В текущем коде transform-хук живёт внутри условия
+  `auto_recall !== false` (`index.js:1781-1810`) — notice выносится из него.
 - **Guard** (паритет `communication.js isEligible`): только top-level сессии
   (без `parentID`), без сервис-сессий `[maestro-memory]`. Fail-soft (try/catch,
   ошибка → без инъекции).
-- **Инициализация-фол:** при init-fail `registerMemoryHooks` возвращает
-  **сокращённый** набор `{ "experimental.chat.system.transform": noticeHook }`
-  (вместо `{}`) — память не работает, но уведомление доходит. Все остальные
-  хуки/tools не регистрируются (инвариант «fail → нет memory-поверхности»
-  сохранён).
-- **Снятие:** успешное `setSummarized` для сессии (per-session флаг) / новый
-  успешный init в новом процессе (process-level — флаг in-memory, живёт
-  столько, сколько процесс). In-memory реестр — bounded (cap 1024 → clear,
-  прецедент `makeBoundedMap`).
+- **Состав сокращённого набора — по пути (§4.4):**
+  - `storage.init()` throw / static-config off-пути →
+    `{ "experimental.chat.system.transform": noticeHook }` — tools отсутствуют
+    (инвариант «fail → нет memory-поверхности» сохранён);
+  - `probe_hard_fail` →
+    `{ tool: { memory_probe }, "experimental.chat.system.transform": noticeHook }`
+    — диагностический tool `memory_probe` **сохраняется** (I2, существующее
+    поведение `index.js:577-581` не регрессирует).
+- **Снятие:** успешное `setSummarized` для сессии (per-session флаг,
+  `clearUnsaved`) / новый успешный init в новом процессе (process-level —
+  флаг in-memory, живёт столько, сколько процесс). In-memory реестр —
+  bounded (cap 1024 → clear, прецедент `makeBoundedMap`); владение —
+  `index.js`, indexer получает `setUnsaved`/`clearUnsaved` конструктором (M1).
+
+### 4.4 «Тихий off»-пути init (I4 — поимённо)
+
+Все пути, где память **настроена, но не работает** (среда/конфиг, не
+намеренный выбор), возвращают сокращённый набор хуков с process-level
+notice (reason в скобках) вместо `return {}`:
+
+| Путь (index.js) | reason |
+|---|---|
+| `storage.init()` throw (catch `:1831`) | `init_failed` |
+| `qdrant_config_invalid` (`:437-443`) / `pgvector_config_invalid` (`:444-450`) | `config_invalid` |
+| `embedding_api_key_env_missing` (`:454-458`) | `api_key_env_missing` |
+| `memory:client_not_installed` (qdrant/pg, `:496-520`) | `client_not_installed` |
+| probe hard-fail (`:576-581`) | `probe_hard_fail` (состав — §4.2) |
+
+НЕ уведомляем: `no_memory_section`, `explicitly_disabled`, static-
+`classifyMemoryConfig`-причины (намеренное отключение).
 
 ### 4.3 Текст (RU, самодостаточный, без данных сессии — SEC-4b)
 
 - per-session: `«maestro memory: данные этой сессии НЕ сохранены в памяти
   (причина: <класс>). Не рассуждай о «памяти проекта» как о актуальной по этой
-  теме. Восстановление: @maestro-memory-reindex (по требованию) или
-  автоматический повтор при перезапуске opencode.»`
+  теме. Восстановление: @maestro-memory-reindex (по требованию); при
+  перезапуске opencode повтор возможен, пока сессия не ушла в skip
+  (3 неудачи).»` (M6: не обещать авто-повтор для skip-сессий — backfill их
+  не берёт, `indexer.js:138`).
 - process-level: `«maestro memory: не работает в этом процессе (причина:
   <класс>) — данные сессий не сохраняются, поиск по памяти недоступен.
   Проверьте доступность хранилища; после перезапуска opencode сохранение
@@ -155,26 +196,58 @@ sync-back) зафиксирован как non-goal / follow-up. Обсужде�
 Существующий tool (permission `ask`, args: `action/source/session_ids/specs/…`).
 Расширение semantics для `source: "sessions"` + явные `session_ids`:
 
-1. Запись **существует** → текущее поведение (artifacts top-up, 0 LLM).
-2. Записи **нет** (или `skip = true`) → **полный re-index**:
-   `clearSkip(id)` → `indexer._run(id)` (summarize → embed → upsert).
+1. Запись **существует** → текущее поведение (artifacts top-up, 0 LLM) → `updated`.
+2. Записи **нет** (или `skip = true`) → **полный re-index** через
+   `indexer.reindexSession(id)` (§5.1.1) → пост-факт-статус (§5.1.2).
    LLM-затраты — как у штатного индексирования (один summarize на сессию).
 3. Сессии нет в opencode (`client.session.get` → не найдена) → `not_found`.
 
-Результат — per-session статусы: `indexed` / `updated` (artifacts) /
-`not_found` / `failed: <класс>`. Аудит: существующие события `memory:reindex*`
-+ новый результат `full_index` в enum.
+**Cap:** наследует существующий `max` (20/вызов) — LLM-затраты (M2).
 
-**Сброс skip** (`clearSkip`): `skip = false, fails = 0`, `lastAttempt`
-сохраняется (аудит). Вызывается только внутри full-reindex по явному ID —
+**Сброс skip** (`clearSkip`): `skip = false, fails = 0`; `lastAttempt`
+**сбрасывается в null** (C1: иначе `_run` уйдёт по retry-throttle
+`retry_interval_min` — `indexer.js:187-191` — молча, и восстановление
+не произойдёт). Вызывается только внутри full-reindex по явному ID —
 авто-сбросов нет.
 
-### 5.2 `@maestro-memory` — статус
+#### 5.1.1 `reindexSession(id)` — семантика (C1, C2)
 
-Новый блок: «Не индексированные сессии: N» — список (session_id, причина-класс,
-последняя попытка) из `state.unindexed()`. 0 → строка «все сессии
-проиндексированы». Ограничение вывода — cap 20 строк + «…(+N ещё)» (прецедент
-report-капов).
+- **Синхронная для tool'а:** метод **не** идёт через fire-and-forget
+  running-queue (`indexer.js:178-183`) и не гардится
+  `this.running === true` — выполняется в tool-контексе до ответа;
+  retry-throttle **не применяется** (последствие сброса `lastAttempt` в
+  `clearSkip`, C1).
+- **Свежие данные сессии:** `client.session.get/messages` перечитываются
+  (не кэш) — как штатный `_run`.
+- **Post-fact-критерий результата (C2):** после выполнения tool проверяет
+  факт записи (scan по `session_id`) и применяет early-exit-статусы —
+  результат **не выводится** из «метод отработал без броска».
+- **Стадии и классификация** — те же, что у `_run` (§4.1); ошибки стадий →
+  `failed: <класс>` + `recordFail` (повторный страйк после clearSkip —
+  осознанно: хранилище всё ещё лежит → сессия честно уходит в skip-цикл).
+
+#### 5.1.2 Статусы (per-session, enum)
+
+| Статус | Когда |
+|---|---|
+| `indexed` | post-fact: запись в storage (создана/перезаписана) |
+| `updated` | запись существовала → artifacts top-up (0 LLM) |
+| `not_found` | сессия отсутствует в opencode |
+| `unattributed` | write-gate: `head === ''` — запись **не** создаётся (`indexer.js:246-250`) |
+| `no_new_messages` | `min_new_messages` / пустой транскрипт (включая edge: запись удалена `memory_forget`, в сессии мало нового — M4) |
+| `failed: <класс>` | ошибка стадии (§4.1) |
+
+Аудит: существующие события `memory:reindex*` + новый результат `full_index`
+в enum (попытка), финальный статус — в ответе tool'а (HITL-вывод).
+
+### 5.2 `@maestro-memory` — статус (M5: точка встраивания)
+
+Новый блок в выводе **`memory_stats_detail`** (tool, на котором работает
+`@maestro-memory`, `index.js:1656+`): «Не индексированные сессии: N» —
+список (session_id, reason-класс из `lastErrorClass`, skip-флаг, последняя
+попытка) из `state.unindexed()`. 0 → строка «все сессии проиндексированы».
+Ограничение вывода — cap 20 строк + «…(+N ещё)» (прецедент report-капов).
+SEC-4b: session_id + enum/числа — допустимо (паритет существующего вывода).
 
 ### 5.3 Команда `@maestro-memory-reindex`
 
@@ -214,27 +287,57 @@ report-капов).
 
 ## 9. Тесты (`npm run test:memory` + `npm test`)
 
-1. `recordFail` (upsert-throw) → unsaved-флаг установлен →
+**Уведомление**
+
+1. `recordFail` (upsert-throw) → unsaved-флаг (`storage_error`) →
    `system.transform` инжектит notice (top-level сессия); после успешного
    re-index флаг снят (инъекции нет).
 2. Guard: task-сессия (с `parentID`) и `[maestro-memory]`-сессия — без
    инъекции (паритет communication-guard).
 3. Retryable-ошибка эмбеддера (`EmbedRetryableError`) → флага **нет**.
-4. Init-fail (storage.init throw) → `registerMemoryHooks` возвращает
-   сокращённый набор (только notice-хук; tools отсутствуют) → notice
-   инжектится; bootstrap-лог `memory: init failed` — без изменений.
-5. Память disabled по конфигу → хуки не регистрируются, инъекций нет
-   (регрессия).
-6. `memory_reindex` full-reindex: отсутствующая запись + явный ID →
-   summarize/embed/upsert вызваны, `skip` сброшен, результат `indexed`.
-7. Регрессия: существующая запись → artifacts top-up (0 LLM), результат
-   `updated` (существующие тесты не ломаются).
-8. `clearSkip`: `skip=true, fails=3` → после full-reindex `skip=false,
-   fails=0`, `lastAttempt` сохранён.
-9. Сессия не найдена в opencode → `not_found`, без броска.
-10. `state.unindexed()`: сессии с `fails>0`, `skip`, `lastAttempt` без
-    `lastSummarized` — перечислены (в т.ч. `lastErrorClass` из `recordFail`);
-    чистые — нет. Cap-вывод `@maestro-memory` — 20 строк.
+4. Init-fail (storage.init throw) → сокращённый набор (notice-хук, tools
+   отсутствуют, reason `init_failed`) → notice инжектится; bootstrap-лог
+   `memory: init failed` — без изменений.
+5. **`auto_recall: false`** + init-fail → notice-хук **всё равно**
+   зарегистрирован и инжектит (I1).
+6. **`probe_hard_fail`** → сокращённый набор = `{ tool: { memory_probe },
+   transform: noticeHook }` — `memory_probe` на месте (I2), notice
+   инжектится.
+7. Notice fail-soft: бросок в guard (session.get throw) → без инъекции,
+   без броска наружу.
+8. Маппинг §4.1: summarize-ошибка → `index_error`; non-retryable embed →
+   `embedder_error`; upsert → `storage_error` (по одному тесту на стадию).
+9. Log-события: `memory:unsaved_notice` (1× per session per process, поля
+   enum) при установке; `memory:unsaved_cleared` при снятии.
+10. Память disabled по конфигу (`no_memory_section`/`explicitly_disabled`) →
+    хуки не регистрируются, инъекций нет (регрессия).
+11. Статические off-пути (config_invalid / api_key_env_missing /
+    client_not_installed) → сокращённый набор + reason по таблице §4.4.
+
+**Восстановление (full-reindex)**
+
+12. Отсутствующая запись + явный ID, **свежий** `lastAttempt` (C1: только что
+    был страйк) → summarize/embed/upsert вызваны, `skip` сброшен,
+    `lastAttempt` был сброшен в null, post-fact `indexed`.
+13. `clearSkip`: `skip=true, fails=3, lastAttempt=T` → после full-reindex
+    `skip=false, fails=0, lastAttempt=null` (C1).
+14. Write-gate: сессия с `head === ''` → статус `unattributed`, запись не
+    создана (post-fact), без ложного `indexed` (C2).
+15. `min_new_messages`/пустой транскрипт → `no_new_messages` (включая edge:
+    запись удалена `memory_forget`, state чистый — M4).
+16. Хранилище **всё ещё лежит** при full-reindex → `failed: storage_error` +
+    повторный `recordFail` (счётчик идёт с 0 после clearSkip).
+17. Сессия не найдена в opencode → `not_found`, без броска.
+18. Cap: >20 session_ids → cap 20/вызов (M2), остаток — в ответе.
+19. Регрессия: существующая запись → artifacts top-up (0 LLM), `updated`
+    (существующие тесты `memory_reindex` не ломаются).
+
+**State**
+
+20. `state.unindexed()`: сессии с `fails>0`, `skip`, `lastAttempt` без
+    `lastSummarized` — перечислены (в т.ч. `lastErrorClass` из
+    `recordFail(id, class)`); чистые — нет. Cap-вывод `memory_stats_detail`
+    — 20 строк + «…(+N ещё)».
 
 ## 10. Документация (критерий приёмки, AGENTS.md)
 
