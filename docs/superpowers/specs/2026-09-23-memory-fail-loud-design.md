@@ -15,6 +15,12 @@ minor M1–M6.
 закрытыми; учтены новые: N1 (временной критерий `unindexed()`), N2 (формулировка
 теста 15), N3 (early-exit-outcomes), N4 (benign-race задокументирован),
 N5 (полный process-enum в §7).
+**Rev. 4 (2026-09-23):** round-3 ревью opus — N1–N5 подтверждены закрытыми;
+учтены новые: F1 (диспатч §5.1 — по временному критерию, stale-record →
+полный re-index), F2 (artifacts-статусы в enum), F3 (skip_service),
+F4 (default-класс неклассифицированных ошибок), F5 (сброс зеркала
+`indexer._fails` в `clearSkip`), F6 (пайплайн стадий в обход гардов),
+F7 (порядок §4.3/§4.4, формулировка §7).
 
 ## 1. Контекст и проблема
 
@@ -126,6 +132,7 @@ N5 (полный process-enum в §7).
   | `storage.upsert` (любая ошибка storage-бэкенда) | `storage_error` |
   | embed, **non-retryable** (plain Error: local embedder down, 401/403, dim mismatch) | `embedder_error` |
   | summarize (LLM-ошибка / невалидный JSON / timeout) | `index_error` |
+  | прочее: ошибки `client.session.get/messages`, fallback внешнего `withTimeout` (зависший upsert и т.п. — ошибки, не отнесённые к стадиям выше), F4 | `index_error` (default) |
 
 - **process-level («память не работает в процессе»):** все ранние `return {}`-
   пути init, §4.4. Reason-enum: `init_failed` / `config_invalid` /
@@ -160,6 +167,22 @@ N5 (полный process-enum в §7).
   bounded (cap 1024 → clear, прецедент `makeBoundedMap`); владение —
   `index.js`, indexer получает `setUnsaved`/`clearUnsaved` конструктором (M1).
 
+### 4.3 Текст (RU, самодостаточный, без данных сессии — SEC-4b)
+
+- per-session: `«maestro memory: данные этой сессии НЕ сохранены в памяти
+  (причина: <класс>). Не рассуждай о «памяти проекта» как о актуальной по этой
+  теме. Восстановление: @maestro-memory-reindex (по требованию); при
+  перезапуске opencode повтор возможен, пока сессия не ушла в skip
+  (3 неудачи).»` (M6: не обещать авто-повтор для skip-сессий — backfill их
+  не берёт, `indexer.js:138`).
+- process-level: `«maestro memory: не работает в этом процессе (причина:
+  <класс>) — данные сессий не сохраняются, поиск по памяти недоступен.
+  Проверьте доступность хранилища; после перезапуска opencode сохранение
+  восстановится.»`
+
+Тексты — канон в JSDoc/константе модуля; тесты ассертят по ключевым маркерам
+(«НЕ сохранены», «@maestro-memory-reindex»).
+
 ### 4.4 «Тихий off»-пути init (I4 — поимённо)
 
 Все пути, где память **настроена, но не работает** (среда/конфиг, не
@@ -177,42 +200,35 @@ notice (reason в скобках) вместо `return {}`:
 НЕ уведомляем: `no_memory_section`, `explicitly_disabled`, static-
 `classifyMemoryConfig`-причины (намеренное отключение).
 
-### 4.3 Текст (RU, самодостаточный, без данных сессии — SEC-4b)
-
-- per-session: `«maestro memory: данные этой сессии НЕ сохранены в памяти
-  (причина: <класс>). Не рассуждай о «памяти проекта» как о актуальной по этой
-  теме. Восстановление: @maestro-memory-reindex (по требованию); при
-  перезапуске opencode повтор возможен, пока сессия не ушла в skip
-  (3 неудачи).»` (M6: не обещать авто-повтор для skip-сессий — backfill их
-  не берёт, `indexer.js:138`).
-- process-level: `«maestro memory: не работает в этом процессе (причина:
-  <класс>) — данные сессий не сохраняются, поиск по памяти недоступен.
-  Проверьте доступность хранилища; после перезапуска opencode сохранение
-  восстановится.»`
-
-Тексты — канон в JSDoc/константе модуля; тесты ассертят по ключевым маркерам
-(«НЕ сохранены», «@maestro-memory-reindex»).
-
 ## 5. Восстановление по требованию (G2, G3)
 
 ### 5.1 `memory_reindex` — расширение
 
 Существующий tool (permission `ask`, args: `action/source/session_ids/specs/…`).
-Расширение semantics для `source: "sessions"` + явные `session_ids`:
+Расширение semantics для `source: "sessions"` + явные `session_ids`.
+**Диспатч — по временному критерию N1** (тот же, что у `unindexed()`, F1):
 
-1. Запись **существует** → текущее поведение (artifacts top-up, 0 LLM) → `updated`.
-2. Записи **нет** (или `skip = true`) → **полный re-index** через
+1. Запись **существует и актуальна** (`lastSummarized >= lastAttempt` или
+   `lastAttempt == null`) → текущее поведение (artifacts top-up, 0 LLM) →
+   `updated` (плюс статусы artifacts-пути, F2).
+2. Записи **нет**, **или stale** (`skip === true` **или**
+   `lastAttempt > lastSummarized`) → **полный re-index** через
    `indexer.reindexSession(id)` (§5.1.1) → пост-факт-статус (§5.1.2).
    LLM-затраты — как у штатного индексирования (один summarize на сессию).
 3. Сессии нет в opencode (`client.session.get` → не найдена) → `not_found`.
+4. Task/сервис-сессия (guard-выходы `_run`: `parentID` / `SESSIONS`,
+   `indexer.js:196-200`) → `skip_service` (F3, прецедент artifacts-пути).
 
 **Cap:** наследует существующий `max` (20/вызов) — LLM-затраты (M2).
 
 **Сброс skip** (`clearSkip`): `skip = false, fails = 0`; `lastAttempt`
 **сбрасывается в null** (C1: иначе `_run` уйдёт по retry-throttle
 `retry_interval_min` — `indexer.js:187-191` — молча, и восстановление
-не произойдёт). Вызывается только внутри full-reindex по явному ID —
-авто-сбросов нет.
+не произойдёт). **Сбрасывается также локальное зеркало `indexer._fails`**
+(`indexer.js:57-60` — источник `memory:index_skipped`): иначе после
+full-reindex с повторным страйком warn сработает преждевременно
+(state=1, local ≥ 3) (F5). Вызывается только внутри full-reindex по
+явному ID — авто-сбросов нет.
 
 #### 5.1.1 `reindexSession(id)` — семантика (C1, C2)
 
@@ -248,7 +264,11 @@ notice (reason в скобках) вместо `return {}`:
 | `not_found` | сессия отсутствует в opencode |
 | `unattributed` | write-gate: `head === ''` — запись **не** создаётся (`indexer.js:246-250`) |
 | `no_new_messages` | `min_new_messages` / пустой транскрипт (включая edge: запись удалена `memory_forget`, в сессии мало нового — M4) |
+| `skip_service` | task/сервис-сессия — guard-выходы `_run` (`indexer.js:196-200`), F3 |
 | `failed: <класс>` | ошибка стадии (§4.1) |
+| (artifacts-статусы) | п.1 диспатча возвращает **без изменений** статусы существующего
+  artifacts-пути (`no_change`, `skip_model_mismatch`, `skip_messages_unavailable`,
+  `skip_no_embedding`, `skip_service` — `backfill.js:50-51`), F2 |
 
 Аудит: существующие события `memory:reindex*` + новый результат `full_index`
 в enum (попытка), финальный статус — в ответе tool'а (HITL-вывод).
@@ -277,7 +297,7 @@ SEC-4b: session_id + enum/числа — допустимо (паритет су
 
 | Событие | Уровень | Когда | Поля (enum/числа, SEC-4b) |
 |---|---|---|---|
-| `memory:unsaved_notice` | info | установка unsaved-флага (1× per session per process) | `sessionID`, `reason` (enum §4.1: `storage_error`\|`embedder_error`\|`index_error`) или `scope: "process"`, `reason` (enum §4.4: `init_failed`\|`config_invalid`\|`client_not_installed`\|`api_key_env_missing`\|`probe_hard_fail`) |
+| `memory:unsaved_notice` | info | установка unsaved-флага (1× на установку флага; повторный вход в unsaved после clear + новый fail — новый event) | `sessionID`, `reason` (enum §4.1: `storage_error`\|`embedder_error`\|`index_error`) или `scope: "process"`, `reason` (enum §4.4: `init_failed`\|`config_invalid`\|`client_not_installed`\|`api_key_env_missing`\|`probe_hard_fail`) |
 | `memory:unsaved_cleared` | debug | снятие флага успешным индексированием | `sessionID` |
 | (существующие) `memory:index_error` / `memory:index_skipped` / `memory:reindex*` | — | без изменений; `memory:reindex*` — расширение result-enum на `full_index` | |
 
@@ -294,9 +314,12 @@ SEC-4b: session_id + enum/числа — допустимо (паритет су
   сессий, пути, тексты ошибок — не наружу.
 - Full-reindex — HITL (permission `ask`), по явным ID; auto-paths не
   получают новых прав.
-- Masking: full-reindex идёт через штатный `indexer._run` → `maskEntry`
-  применяет текущий confidential-набор (расширение `confidential.paths`
-  постфактум **отражается** — побочная польза, задокументировать).
+- Masking: full-reindex переиспользует **пайплайн стадий `_run`**
+  (summarize → `maskEntry` → embed → upsert) через `reindexSession` —
+  в обход running/queue/throttle-гардов (§5.1.1, F6), но стадийная
+  логика и маскирование идентичны штатному `_run`: `maskEntry` применяет
+  текущий confidential-набор (расширение `confidential.paths` постфактум
+  **отражается** — побочная польза, задокументировать).
 
 ## 9. Тесты (`npm run test:memory` + `npm test`)
 
@@ -334,6 +357,9 @@ SEC-4b: session_id + enum/числа — допустимо (паритет су
     `lastAttempt` был сброшен в null, post-fact `indexed`.
 13. `clearSkip`: `skip=true, fails=3, lastAttempt=T` → после full-reindex
     `skip=false, fails=0, lastAttempt=null` (C1).
+13a. **Stale-record (F1):** запись существует, `fails=1`,
+    `lastAttempt > lastSummarized` (не-skip) + reindex → summarize **вызван**
+    (не artifacts top-up), post-fact `indexed`.
 14. Write-gate: сессия с `head === ''` → статус `unattributed`, запись не
     создана (post-fact), без ложного `indexed` (C2).
 15. `min_new_messages`/пустой транскрипт → `no_new_messages` (включая edge:
