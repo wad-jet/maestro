@@ -15,8 +15,6 @@ import { SCAN_FIELDS } from "./backfill.js";
  * @module backup
  */
 
-const MAX_JSONL_SIZE = 100 * 1024; // 100 KB
-
 /**
  * Возвращает базовое имя backup-пары (без расширения).
  *
@@ -131,7 +129,7 @@ export function applyRetention(dir, key, retention) {
  *
  * @param {string} dir — путь к каталогу.
  * @param {string} key — namespace/key (фильтр имён).
- * @returns {Array<{ file: string, manifest: string, ts: number, jsonl: boolean, manifest_ok: boolean, size: number, jsonl_size_ok: boolean }>}
+ * @returns {Array<{ file: string, manifest: string, ts: number, jsonl: boolean, manifest_ok: boolean, size: number }>}
  */
 export function listBackups(dir, key) {
   if (!existsSync(dir)) return [];
@@ -147,7 +145,6 @@ export function listBackups(dir, key) {
         jsonl: false,
         manifest: false,
         size: 0,
-        jsonl_size_ok: true,
       });
     }
     return map.get(base);
@@ -162,7 +159,6 @@ export function listBackups(dir, key) {
       try {
         const st = statSync(join(dir, f));
         r.size = st.size;
-        r.jsonl_size_ok = st.size <= MAX_JSONL_SIZE;
       } catch {
         /* ok */
       }
@@ -181,6 +177,5 @@ export function listBackups(dir, key) {
       jsonl: r.jsonl,
       manifest_ok: r.manifest,
       size: r.size,
-      jsonl_size_ok: r.jsonl_size_ok,
     }));
 }
