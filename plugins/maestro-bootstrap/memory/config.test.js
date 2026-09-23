@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { loadMemoryConfig, classifyMemoryConfig, DEFAULTS, resolveEffectiveKey, resolveIdentity, resolveEffectiveTextConfig, sanitizeDirName, resolveHistoryGlobs } from "./config.js";
+import { loadMemoryConfig, classifyMemoryConfig, DEFAULTS, resolveEffectiveKey, resolveIdentity, resolveEffectiveTextConfig, sanitizeDirName, resolveHistoryGlobs, resolveBackupConfig, BACKUP_DEFAULTS } from "./config.js";
 
 test("default off when no memory section", () => {
   const cfg = loadMemoryConfig({});
@@ -396,4 +396,58 @@ test("4.0.0: legacy summarizer_model в конфиге — инертен (I5, �
     memory: { enabled: true, namespace: "x.y", summarizer_model: "prov/m" },
   });
   assert.equal(cfg.enabled, true);
+});
+
+// ── Task 2: memory.backup — resolveBackupConfig (spec §6) ──
+
+test("resolveBackupConfig: absent memory → defaults, warn false", () => {
+  assert.deepEqual(resolveBackupConfig({}), { path: ".maestro/memory/backup", retention: 3, warn: false });
+});
+
+test("resolveBackupConfig: explicit values used", () => {
+  assert.deepEqual(resolveBackupConfig({ backup: { path: "backups/mem", retention: 5 } }), { path: "backups/mem", retention: 5, warn: false });
+});
+
+test("resolveBackupConfig: retention 0 → 0 (off), warn false", () => {
+  assert.deepEqual(resolveBackupConfig({ backup: { retention: 0 } }), { path: ".maestro/memory/backup", retention: 0, warn: false });
+});
+
+test("resolveBackupConfig: invalid path (number) → default + warn true", () => {
+  assert.deepEqual(resolveBackupConfig({ backup: { path: 42 } }), { path: ".maestro/memory/backup", retention: 3, warn: true });
+});
+
+test("resolveBackupConfig: invalid retention (-1) → default + warn true", () => {
+  assert.deepEqual(resolveBackupConfig({ backup: { retention: -1 } }), { path: ".maestro/memory/backup", retention: 3, warn: true });
+});
+
+test("resolveBackupConfig: backup = array → defaults + warn true", () => {
+  assert.deepEqual(resolveBackupConfig({ backup: [] }), { path: ".maestro/memory/backup", retention: 3, warn: true });
+});
+
+test("resolveBackupConfig: BACKUP_DEFAULTS exported", () => {
+  assert.deepEqual(BACKUP_DEFAULTS, { path: ".maestro/memory/backup", retention: 3 });
+});
+
+test("resolveBackupConfig: backup absent → defaults (no backup key)", () => {
+  assert.deepEqual(resolveBackupConfig({}), { path: ".maestro/memory/backup", retention: 3, warn: false });
+});
+
+test("resolveBackupConfig: path trimmed", () => {
+  assert.deepEqual(resolveBackupConfig({ backup: { path: "  backups  " } }), { path: "backups", retention: 3, warn: false });
+});
+
+test("resolveBackupConfig: empty string path → default + warn", () => {
+  assert.deepEqual(resolveBackupConfig({ backup: { path: "" } }), { path: ".maestro/memory/backup", retention: 3, warn: true });
+});
+
+test("resolveBackupConfig: null retention → default", () => {
+  assert.deepEqual(resolveBackupConfig({ backup: { retention: null } }), { path: ".maestro/memory/backup", retention: 3, warn: false });
+});
+
+test("resolveBackupConfig: path null in object → uses default path", () => {
+  assert.deepEqual(resolveBackupConfig({ backup: { retention: 5 } }), { path: ".maestro/memory/backup", retention: 5, warn: false });
+});
+
+test("resolveBackupConfig: non-object backup (string) → defaults + warn", () => {
+  assert.deepEqual(resolveBackupConfig({ backup: "invalid" }), { path: ".maestro/memory/backup", retention: 3, warn: true });
 });

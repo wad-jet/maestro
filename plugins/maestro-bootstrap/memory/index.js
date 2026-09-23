@@ -4,7 +4,7 @@ import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
 import { makeBoundedMap, readPluginVersion, getGitConfig, loadConfidentialConfig } from "../core.js";
-import { loadMemoryConfig, resolveEffectiveKey, resolveIdentity, resolveEffectiveTextConfig, sanitizeDirName, resolveHistoryGlobs } from "./config.js";
+import { loadMemoryConfig, resolveEffectiveKey, resolveIdentity, resolveEffectiveTextConfig, sanitizeDirName, resolveHistoryGlobs, resolveBackupConfig } from "./config.js";
 import { maskEntry, maskTranscript } from "./mask.js";
 import { ensureModule } from "./provision.js";
 import { createStorage } from "./storage.js";
@@ -690,6 +690,10 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     // (RI-8: память не отключается) — однократно при регистрации.
     const historyGlobsRes = resolveHistoryGlobs(config);
     if (historyGlobsRes.fallback) logWarn("memory:config_fallback", {});
+    // Task 2 (backup): soft fallback для memory.backup — warn при невалидном конфиге
+    // (spec §6: память не отключается, warn → memory:config_fallback при старте).
+    const backupRes = resolveBackupConfig(config);
+    if (backupRes.warn) logWarn("memory:config_fallback", {});
     // M-2: init-warn — централизованный бэкенд + непустые confidential.paths
     // (имена веток, минующие sanitize, уходят на сервер). Дублируется в выдаче
     // memory_stats_detail / @maestro-memory (диагностика без логов).

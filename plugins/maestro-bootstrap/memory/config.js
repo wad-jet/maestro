@@ -303,6 +303,25 @@ export function sanitizeDirName(s) {
  * @param {object} config  Merged memory config (loadMemoryConfig output).
  * @returns {{ value: string[], fallback: boolean }}
  */
+export const BACKUP_DEFAULTS = { path: ".maestro/memory/backup", retention: 3 };
+
+/**
+ * memory.backup: мягкий fallback (spec §6). Невалидная секция → дефолты + warn: true
+ * (память НЕ отключается; warn-источник — memory:config_fallback при старте).
+ * retention: 0 = без ограничений; null/undefined = дефолт.
+ */
+export function resolveBackupConfig(m) {
+  const b = m?.backup;
+  const valid =
+    b == null ||
+    (typeof b === "object" && !Array.isArray(b) &&
+      (b.path == null || (typeof b.path === "string" && b.path.trim() !== "")) &&
+      (b.retention == null || (typeof b.retention === "number" && Number.isInteger(b.retention) && b.retention >= 0)));
+  const path = valid && typeof b?.path === "string" && b.path.trim() ? b.path.trim() : BACKUP_DEFAULTS.path;
+  const retention = valid && Number.isInteger(b?.retention) && b.retention >= 0 ? b.retention : BACKUP_DEFAULTS.retention;
+  return { path, retention, warn: !valid };
+}
+
 export function resolveHistoryGlobs(config) {
   const hg = config?.history_globs;
   const default_globs = config?.artifact_globs ?? DEFAULTS.artifact_globs;
