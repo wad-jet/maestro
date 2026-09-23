@@ -1,9 +1,9 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync } from "node:fs";
+import { mkdtempSync, rmSync, existsSync, readFileSync, readdirSync, writeFileSync, mkdirSync, statSync } from "node:fs";
 import { execSync } from "node:child_process";
 import { tmpdir, hostname } from "node:os";
-import { dirname, join } from "node:path";
+import { dirname, join, resolve, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { registerMemoryHooks } from "./index.js";
 import { getGitConfig, makeLogger } from "../core.js";
@@ -2709,6 +2709,75 @@ test("memory_backup action=restore without file → error", async () => {
     });
     const res = await hooks.tool.memory_backup.execute({ action: "restore" }, { sessionID: "s1" });
     assert.match(res, /restore требует file/, "restore without file → error");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_backup blocked for [maestro-memory] sessions", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-backup-gate-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.deleteByFilter = async () => 0;
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    SESSIONS.add("summ-session");
+    try {
+      const res = await hooks.tool.memory_backup.execute({ action: "list" }, { sessionID: "summ-session" });
+      assert.match(res, /недоступен для служебных сессий/);
+    } finally {
+      SESSIONS.delete("summ-session");
+    }
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("memory_backup backup→list→restore end-to-end", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-backup-e2e-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = await mkSqliteStorage(dir);
+    await storage.upsert([mkFullEntry({ branch: "feature/x", head: "abc123", merged: 0 })]);
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir, { namespace: "k" }),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    // backup
+    const bakRes = await hooks.tool.memory_backup.execute({ action: "backup" }, { sessionID: "s1" });
+    assert.match(bakRes, /^OK: /m, "backup returns OK:");
+    assert.match(bakRes, /записей: 1/, "backup reports 1 entry");
+    const jsonlFile = bakRes.match(/^OK: (\S+\.jsonl)/m)?.[1]?.trim();
+    assert.ok(jsonlFile, "backup output contains jsonl path");
+    assert.ok(existsSync(jsonlFile), "jsonl file exists");
+    const manifestFile = join(dirname(jsonlFile), `${basename(jsonlFile, ".jsonl")}.manifest.json`);
+    assert.ok(existsSync(manifestFile), "manifest file exists");
+    // list
+    const listRes = await hooks.tool.memory_backup.execute({ action: "list" }, { sessionID: "s1" });
+    assert.ok(listRes.includes(jsonlFile), "list contains backup file path");
+    // restore (merge)
+    const restoreRes = await hooks.tool.memory_backup.execute({ action: "restore", file: resolve(jsonlFile) }, { sessionID: "s1" });
+    assert.match(restoreRes, /OK: restore \(merge\)/, "restore returns merge mode");
+    assert.match(restoreRes, /записей: 1/, "restore reports 1 entry");
+    assert.match(restoreRes, /перезаписано: 1/, "merge overwrites existing entry");
+    assert.match(restoreRes, /добавлено: 0/, "merge adds nothing new");
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;

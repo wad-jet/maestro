@@ -36,7 +36,7 @@ import { getGitConfig, loadConfidentialConfig, readPluginVersion } from "../core
 // @opencode-ai/plugin обёрнут в try/catch с shim).
 import { defaultDataDir } from "./index.js";
 import { createStorage } from "./storage.js";
-import { runBackup, runRestore, listBackups, resolveBackupDir } from "./backup.js";
+import { runBackup, runRestore, listBackups, resolveBackupDir, gitignoreWarnText } from "./backup.js";
 
 export const HELP = `Аварийный CLI memory backup/restore (spec §3) — ручной запуск вне opencode.
 
@@ -171,28 +171,7 @@ function safeRealpath(p) {
   }
 }
 
-/**
- * Человеческий текст gitignore-warn (reason enum из gitIgnoreWarn).
- * @param {string} reason
- * @returns {string}
- */
-function gitignoreWarnText(reason) {
-  switch (reason) {
-    case "not_ignored":
-      return "каталог бэкапа НЕ в .gitignore (бэкапы могут попасть в git)";
-    case "not_ignored_fallback":
-      return "каталог бэкапа не найден в .gitignore (git недоступен — проверьте вручную)";
-    case "not_a_git_repo":
-      return "каталог бэкапа вне git-контроля (не-git-репозиторий)";
-    case "git_unavailable":
-      return "не удалось проверить .gitignore (git недоступен)";
-    default:
-      return `gitignore-check: ${reason}`;
-  }
-}
-
-/**
- * Точка входа CLI. Возвращает exit code (0 = успех); ошибки — throw (guard
+/** Точка входа CLI. Возвращает exit code (0 = успех); ошибки — throw (guard
  * конвертирует в stderr + exit 1).
  * @returns {Promise<number>}
  */

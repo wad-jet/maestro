@@ -197,6 +197,26 @@ export function listBackups(dir, key) {
 }
 
 /**
+ * Человеческий текст gitignore-warn (reason enum из gitIgnoreWarn).
+ * @param {string} reason
+ * @returns {string}
+ */
+export function gitignoreWarnText(reason) {
+  switch (reason) {
+    case "not_ignored":
+      return "каталог бэкапа НЕ в .gitignore (бэкапы могут попасть в git)";
+    case "not_ignored_fallback":
+      return "каталог бэкапа не найден в .gitignore (git недоступен — проверьте вручную)";
+    case "not_a_git_repo":
+      return "каталог бэкапа вне git-контроля (не-git-репозиторий)";
+    case "git_unavailable":
+      return "не удалось проверить .gitignore (git недоступен)";
+    default:
+      return `gitignore-check: ${reason}`;
+  }
+}
+
+/**
  * Нормализация embedding в JSON-совместимый number[] (spec §4: JSONL — чистый
  * JSON схемы v3, совместимый с memory_import). Реальный sqlite-бэкенд отдаёт
  * BLOB как Buffer (Node) / Uint8Array (bun-шим) из float32 LE-байтов;
