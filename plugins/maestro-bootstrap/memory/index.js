@@ -1797,6 +1797,21 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             // Task 8: последний cached-статус probe (из state) — для @maestro-memory.
             const cachedProbe = await state.getEmbedderProbe();
             if (cachedProbe) out.push(`Проверка embedder: ${cachedProbe.ok ? "OK" : "FAIL"}${cachedProbe.hard ? " (конфигурация)" : ""} (${cachedProbe.detail}, ${new Date(cachedProbe.at).toISOString()})`);
+            // #77 (spec §5.2): неиндексированные сессии (G2) — временной
+            // критерий state.unindexed(); cap 20 строк + «…(+N ещё)».
+            // SEC-4b: session_id + enum/числа — паритет существующего вывода.
+            let unindexed = [];
+            try { unindexed = await state.unindexed(); } catch { /* fail-soft */ }
+            if (unindexed.length === 0) {
+              out.push("Не индексированные сессии: 0 (все сессии проиндексированы)");
+            } else {
+              out.push(`Не индексированные сессии: ${unindexed.length}`);
+              const rows = unindexed.slice(0, 20);
+              for (const u of rows) {
+                out.push(`  ${u.id} | skip=${u.skip ? 1 : 0} | fails=${u.fails} | reason=${u.lastErrorClass ?? "-"} | last_attempt=${u.lastAttempt ? new Date(u.lastAttempt).toISOString() : "-"}`);
+              }
+              if (unindexed.length > rows.length) out.push(`  …(+${unindexed.length - rows.length} ещё)`);
+            }
             out.push("По авторам:");
             for (const [a, n] of [...byAuthor.entries()].sort((x, y) => y[1] - x[1])) out.push(`  ${a}: ${n}`);
             out.push("По датам:");

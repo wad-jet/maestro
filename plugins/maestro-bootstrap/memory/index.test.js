@@ -5732,3 +5732,71 @@ test("#77 T6-9: cap 20 — 25 явных ID → обработано 20, cap-п�
     rmSync(f.dir, { recursive: true, force: true });
   }
 });
+
+// ── Task 7: memory_stats_detail unindexed-sessions block ─────────────────
+
+test("#77 T7-1: memory_stats_detail — unindexed-блок (cap 20 + «…(+N ещё)»)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-stats-u7-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const { createState } = await import("./state.js");
+    const statePath = join(dir, "maestro", "memory", "state.json");
+    const st = createState(statePath);
+    // 22 stale-сессии → cap 20
+    for (let i = 0; i < 22; i++) {
+      await st.recordFail(`u${i}`, i % 2 ? "storage_error" : "embedder_error");
+    }
+    // одна самовосстановившаяся → НЕ в списке (N1)
+    await st.recordFail("healed");
+    await st.setSummarized("healed");
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: {
+        embeddings: mkMockEmbeddings(),
+        storage: { ...mkMockStorage(), scan: async () => [] },
+        git: mkScopeGit(),
+      },
+    });
+    const out = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "top" });
+    assert.ok(out.includes("Не индексированные сессии: 22"), `блок с N=22: ${out.slice(0, 800)}`);
+    assert.ok(out.includes("…(+2 ещё)"), "cap-пометка");
+    assert.ok(!out.includes("healed"), "самовосстановившаяся не в списке (N1)");
+    assert.ok(out.includes("reason=storage_error"), "storage_error present");
+    assert.ok(out.includes("reason=embedder_error"), "embedder_error present");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T7-2: memory_stats_detail — все проиндексированы → 0-строка", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-stats0-t7-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: {
+        embeddings: mkMockEmbeddings(),
+        storage: { ...mkMockStorage(), scan: async () => [] },
+        git: mkScopeGit(),
+      },
+    });
+    const out = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "top" });
+    assert.ok(out.includes("Не индексированные сессии: 0"), `0-строка: ${out.slice(0, 600)}`);
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
