@@ -1,14 +1,15 @@
 import { createHash } from "node:crypto";
 import { existsSync, readdirSync, unlinkSync, statSync, mkdirSync, writeFileSync, readFileSync } from "node:fs";
-import { join, relative } from "node:path";
+import { join, relative, isAbsolute } from "node:path";
 import { spawnSync } from "node:child_process";
 import { SCAN_FIELDS } from "./backfill.js";
 import { maskEntry } from "./mask.js";
+import { validateImportEntry } from "./validation.js";
 
 /**
- * backup.js — чистые функции для создания/перечня backup-файлов памяти.
+ * backup.js — функции для создания/перечня/восстановления backup-файлов памяти.
  *
- * Без side-effects при импорте. I/O только в retention/list.
+ * Без side-effects при импорте. I/O в retention/list/runBackup/runRestore.
  *
  * Формат:
  *   backup-<key>-<ts>.jsonl          — JSONL записей
@@ -87,7 +88,10 @@ export function buildManifestMeta({
  * @returns {string} абсолютный путь.
  */
 export function resolveBackupDir(relPath, gitRoot) {
-  return join(gitRoot || process.cwd(), relPath);
+  // Если relPath — абсолютный путь, возвращаем как есть; иначе резолвим относительно root.
+  const root = gitRoot || process.cwd();
+  if (isAbsolute(relPath)) return relPath;
+  return join(root, relPath);
 }
 
 /**
@@ -192,11 +196,17 @@ export function listBackups(dir, key) {
   }));
 }
 
-/** gitignore-проверка: только детерминированно (LLM warn не считает). */
-export function gitIgnoreWarn(dir, gitRoot) {
+/**
+ * gitignore-проверка: только детерминированно (LLM warn не считает).
+ *
+ * @param {string} relPath — относительный путь к каталогу.
+ * @param {string?} gitRoot — корень git-репозитория.
+ * @returns {{ ignored: boolean, reason: string|null }}
+ */
+export function gitIgnoreWarn(relPath, gitRoot) {
   if (!gitRoot) return { ignored: false, reason: "not_a_git_repo" };
   // Относительный путь корректнее для `git -C root check-ignore`.
-  const p = relative(gitRoot, dir);
+  const p = relative(gitRoot, relPath);
   const r = spawnSync("git", ["-C", gitRoot, "check-ignore", "-q", "--", p], { encoding: "utf8" });
   if (r.error || r.status === 127 || r.status === 128) return gitIgnoreFallback(p, gitRoot);
   return r.status === 0 ? { ignored: true, reason: null } : { ignored: false, reason: "not_ignored" };
@@ -205,18 +215,18 @@ export function gitIgnoreWarn(dir, gitRoot) {
 /**
  * Документированный fallback (git недоступен): наивный match по корневому .gitignore.
  *
- * @param {string} dir — относительный к `gitRoot` путь (уже посчитанный
- *   `relative(gitRoot, dir)` из вызывающего).
+ * @param {string} relPath — относительный к `gitRoot` путь (уже посчитанный
+ *   `relative(gitRoot, relPath)` из вызывающего).
  * @param {string} gitRoot — корень git-репозитория.
  * @returns {{ ignored: boolean, reason: string|null }}
  */
-export function gitIgnoreFallback(dir, gitRoot) {
+export function gitIgnoreFallback(relPath, gitRoot) {
   try {
     const lines = readFileSync(join(gitRoot, ".gitignore"), "utf8").split("\n").map((l) => l.trim()).filter(Boolean);
     const ignored = lines.some((l) => {
       if (l.startsWith("!")) return false;
       const p = l.endsWith("/") ? l.slice(0, -1) : l;
-      return dir === p || dir.startsWith(`${p}/`);
+      return relPath === p || relPath.startsWith(`${p}/`);
     });
     return ignored ? { ignored: true, reason: null } : { ignored: false, reason: "not_ignored_fallback" };
   } catch {
@@ -271,4 +281,77 @@ export async function runBackup({ storage, backupCfg, effectiveKey, storageType,
   log?.("memory:backup", { path: jsonlPath, count: entries.length, sha256: meta.sha256, warn: gi.ignored ? null : gi.reason, removed: removed.length });
 
   return { file: jsonlPath, manifest: manifestPath, count: entries.length, warn: gi.ignored ? null : gi.reason };
+}
+
+/**
+ * Restore (spec §5.2): файл обязан быть в каталоге бэкапов; валидация sha256 +
+ * манифеста (fail-closed набор) + всех строк — ДО изменений; merge (дефолт) /
+ * replace (tool — нативный ask + replace:true; cli — isTty + ввод namespace).
+ * Счёт: overwritten/added.
+ *
+ * @param {object} opts
+ * @param {object} opts.storage — хранилище с методами scan/upsert/deleteByFilter
+ * @param {string} opts.storageType — тип хранилища (sqlite-only)
+ * @param {string} opts.effectiveKey — namespace/key
+ * @param {string} opts.modelId — модель эмбеддингов
+ * @param {number} opts.dim — размерность эмбеддингов
+ * @param {string} opts.file — абсолютный путь к .jsonl файлу
+ * @param {boolean} [opts.replace=false] — replace (true) или merge (false)
+ * @param {string} [opts.channel="tool"] — "tool" или "cli"
+ * @param {boolean} [opts.isTty=false] — true если CLI интерактивный терминал
+ * @param {string?} [opts.confirmNamespace=null] — namespace для подтверждения replace (cli)
+ * @param {object} opts.maskPatterns — { confidential: string[], artifacts: string[] }
+ * @param {(msg: string, extra: object) => void} [opts.log] — опциональный логгер
+ * @param {string?} [opts.gitRoot] — корень git-репозитория
+ * @returns {{ count: number, mode: "merge"|"replace", overwritten: number, added: number }}
+ */
+export async function runRestore({ storage, backupCfg, effectiveKey, storageType, modelId, dim, file, replace = false, channel = "tool", isTty = false, confirmNamespace = null, maskPatterns, log, gitRoot }) {
+  if (storageType !== "sqlite") throw new Error("memory_backup: v1 — только storage.type sqlite");
+  const dir = resolveBackupDir(backupCfg.path, gitRoot);
+  const sep = pathSep();
+  if (file !== dir && !file.startsWith(`${dir}${sep}`)) throw new Error("memory_backup: файл должен быть бэкапом из memory.backup.path (каталог бэкапов)");
+
+  const manifestPath = file.endsWith(".jsonl") ? `${file.slice(0, -".jsonl".length)}.manifest.json` : file;
+  if (!existsSync(manifestPath)) throw new Error("memory_backup: нет манифеста (fail-closed)");
+  const meta = JSON.parse(readFileSync(manifestPath, "utf8"));
+  const raw = readFileSync(file, "utf8");
+  if (createHash("sha256").update(raw).digest("hex") !== meta.sha256) throw new Error("memory_backup: sha256 не совпадает (порча или подмена файла)");
+
+  if (meta.storage_type !== storageType) throw new Error(`memory_backup: storage_type не совпадает (манифест: ${meta.storage_type})`);
+  if (meta.key !== effectiveKey) throw new Error(`memory_backup: key не совпадает (манифест: ${meta.key})`);
+  if (meta.model_id !== modelId) throw new Error(`memory_backup: model_id не совпадает (манифест: ${meta.model_id})`);
+  if (meta.dim !== dim) throw new Error(`memory_backup: dim не совпадает (манифест: ${meta.dim})`);
+  if (!Array.isArray(meta.schema_fields) || !meta.schema_fields.every((f) => SCAN_FIELDS.includes(f))) throw new Error("memory_backup: schema_fields манифеста несовместимы (fail-closed)");
+
+  const entries = [];
+  const lines = raw.split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i].trim();
+    if (!line) continue;
+    const parsed = JSON.parse(line);
+    const reason = validateImportEntry(parsed, storage, effectiveKey, maskPatterns.artifacts);
+    if (reason) throw new Error(`memory_backup: строка ${i + 1} невалидна: ${reason}`);
+    entries.push(parsed);
+  }
+  if (entries.length !== meta.count) throw new Error("memory_backup: count манифеста не совпадает с числом строк");
+
+  if (replace) {
+    if (channel === "cli") {
+      if (!isTty) throw new Error("memory_backup: replace из не-интерактивного вызова запрещён — запустите CLI вручную");
+      if (confirmNamespace !== effectiveKey) throw new Error("memory_backup: подтверждение replace не совпадает с namespace");
+    }
+    await storage.deleteByFilter({ key: effectiveKey });
+  }
+
+  const existing = new Set((await storage.scan({ key: effectiveKey, fields: ["session_id"] })).map((r) => r.session_id));
+  const masked = entries.map((e) => maskEntry(e, { confidentialPatterns: maskPatterns.confidential, artifactConfidentialPatterns: maskPatterns.artifacts }));
+  await storage.upsert(masked);
+  const added = masked.filter((e) => !existing.has(e.session_id)).length;
+  const overwritten = masked.length - added;
+  log?.("memory:restore", { file, count: masked.length, mode: replace ? "replace" : "merge", overwritten, added, sha256: meta.sha256 });
+  return { count: masked.length, mode: replace ? "replace" : "merge", overwritten, added };
+}
+
+function pathSep() {
+  return process.platform === "win32" ? "\\" : "/";
 }
