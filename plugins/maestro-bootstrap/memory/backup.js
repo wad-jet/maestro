@@ -198,11 +198,18 @@ export function gitIgnoreWarn(dir, gitRoot) {
   // Относительный путь корректнее для `git -C root check-ignore`.
   const p = relative(gitRoot, dir);
   const r = spawnSync("git", ["-C", gitRoot, "check-ignore", "-q", "--", p], { encoding: "utf8" });
-  if (r.error || r.status === 127 || r.status === 128) return gitIgnoreFallback(dir, gitRoot);
+  if (r.error || r.status === 127 || r.status === 128) return gitIgnoreFallback(p, gitRoot);
   return r.status === 0 ? { ignored: true, reason: null } : { ignored: false, reason: "not_ignored" };
 }
 
-/** Документированный fallback (git недоступен): наивный match по корневому .gitignore. */
+/**
+ * Документированный fallback (git недоступен): наивный match по корневому .gitignore.
+ *
+ * @param {string} dir — относительный к `gitRoot` путь (уже посчитанный
+ *   `relative(gitRoot, dir)` из вызывающего).
+ * @param {string} gitRoot — корень git-репозитория.
+ * @returns {{ ignored: boolean, reason: string|null }}
+ */
 export function gitIgnoreFallback(dir, gitRoot) {
   try {
     const lines = readFileSync(join(gitRoot, ".gitignore"), "utf8").split("\n").map((l) => l.trim()).filter(Boolean);

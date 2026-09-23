@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync, existsSync, rmSync, readFileSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { backupBaseName, buildJsonl, buildManifestMeta, applyRetention, listBackups, resolveBackupDir, gitIgnoreWarn, runBackup } from "./backup.js";
+import { backupBaseName, buildJsonl, buildManifestMeta, applyRetention, listBackups, resolveBackupDir, gitIgnoreWarn, gitIgnoreFallback, runBackup } from "./backup.js";
 
 const KEY = "test-ns";
 const tmp = () => mkdtempSync(join(tmpdir(), "maestro-backup-"));
@@ -266,6 +266,32 @@ test("gitIgnoreWarn: не-gitignored-путь → not_ignored", () => {
   const r = gitIgnoreWarn("some/random/path", process.cwd());
   assert.equal(r.ignored, false);
   assert.equal(r.reason, "not_ignored");
+});
+
+// ── gitIgnoreFallback ──
+
+test("gitIgnoreFallback: относительный путь матчится по .gitignore → ignored", () => {
+  const baseDir = mkdtempSync(join(tmpdir(), "mb-fb-"));
+  try {
+    writeFileSync(join(baseDir, ".gitignore"), ".maestro/\n");
+    const r = gitIgnoreFallback(".maestro/memory/backup", baseDir);
+    assert.equal(r.ignored, true);
+    assert.equal(r.reason, null);
+  } finally {
+    rmSync(baseDir, { recursive: true, force: true });
+  }
+});
+
+test("gitIgnoreFallback: путь не матчится → not_ignored_fallback", () => {
+  const baseDir = mkdtempSync(join(tmpdir(), "mb-fb-"));
+  try {
+    writeFileSync(join(baseDir, ".gitignore"), ".maestro/\n");
+    const r = gitIgnoreFallback("backups/mem", baseDir);
+    assert.equal(r.ignored, false);
+    assert.equal(r.reason, "not_ignored_fallback");
+  } finally {
+    rmSync(baseDir, { recursive: true, force: true });
+  }
 });
 
 // ── runBackup ──
