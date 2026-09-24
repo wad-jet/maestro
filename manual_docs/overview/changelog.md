@@ -20,7 +20,8 @@
   score: статистика + нормализованное активное время + «факторы влияния
   (+/−)». Накопительная история — `.maestro/metrics/history.jsonl` (upsert по
   sessionID, атомарно, эфемерное). Механика — `timeline.mjs` (0 LLM, тот же
-  источник — `opencode export`).
+  источник — `opencode export`). Регресс:
+  `regression/entries/2026-09-24-pipeline-metrics-effort.md`.
 
 ## [2026-09-24]
 
