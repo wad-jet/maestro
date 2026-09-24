@@ -6,8 +6,8 @@
 
 Сквозной обзор pipeline скилла `maestro`: что происходит от входа `/maestro-init` до мержа в base. Двухуровневый режим:
 
-1. **Feature-маршрут** (полный, 0–18) — для фич от brainstorm до merge.
-2. **Bugfix-маршрут** (0–6 + D1–D7 + 11–18) — багфикс без spec/spec review, с debug sub-pipeline.
+1. **Feature-маршрут** (полный, 0–18.5) — для фич от brainstorm до merge.
+2. **Bugfix-маршрут** (0–6 + D1–D7 + 11–18.5) — багфикс без spec/spec review, с debug sub-pipeline.
 
 Вход — команда `/maestro-init` в любой primary-сессии. Оркестратор проходит через
 **HITL-гейты** — явные вопросы с вариантами (a)/(b)/(c), на каждом гейте пользователь подтверждает действие.
@@ -16,7 +16,7 @@
 
 ---
 
-## Feature-маршрут (0–18)
+## Feature-маршрут (0–18.5)
 
 ### Предисловие
 
@@ -53,6 +53,7 @@ project context, запускает pre-flight, определяет катег�
 | 16 | Code Review | Финальное ревью всей ветки (`code-reviewer`, opus-tier). Secret-scan diff. Трекинг issues: fixed / open + follow-up |
 | 17 | Pre-PR | Итоговая проверка: git log, тесты, coverage, открытые issues. Approve merge · Fix (→ шаг 13) · Cancel. **E2E-критерии приёмки** (если в спеке): прогнать или явно зафиксировать «пропущено, риск принят» — мягкий гейт, решение HITL |
 | 18 | Merge | Слияние feature-ветки в base-ветку. При fast-forward доп. тесты не нужны |
+| 18.5 | Feedback report (ретроспектива) | Режим по `maestro.json → feedback_report` (нет директивы → `manual`: одна строка-подсказка команды; `auto`: авто-сбор без HITL, fail-soft; `disable`: ничего) |
 
 > Подробнее: [HITL-гейты](../reference/hitl-gates.md), [Агенты и доверие](../explanation/agents-and-trust.md), [Конфигурация](../reference/config.md).
 
@@ -83,11 +84,12 @@ flowchart TB
   Step15b --> Step16["16: Code Review"]
   Step16 --> Step17["17: Pre-PR"]
   Step17 --> Step18["18: Merge в base"]
+  Step18 --> Step185["18.5: Feedback report (по feedback_report)"]
 ```
 
 ---
 
-## Bugfix-маршрут (0–6 → D1–D7 → 11–18)
+## Bugfix-маршрут (0–6 → D1–D7 → 11–18.5)
 
 Bugfix **пропускает** шаги 7–10 (spec/spec review), заменяя их debug sub-pipeline.
 После D7 переходит к шагу 11 (`Plan → SDD → Review → Merge`).

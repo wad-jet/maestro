@@ -61,6 +61,7 @@
 Шаг 17: HITL: рекомендую (a) Approve merge, потому что только follow-up issues,
         тесты зелёные -> (a) Approve merge
 Шаг 18: finishing-a-development-branch -> merge to base (--no-ff)
+Шаг 18.5: feedback-report (manual — подсказка команды; режим — `maestro.json -> feedback_report`)
 ```
 
 ## 💡 Ключевые наблюдения

@@ -20,7 +20,7 @@ primary-сессии.
 ## Tutorials (обучение)
 
 - [Настройка проекта для maestro](tutorials/setup-project.md) — подготовка проекта (`/maestro-setup`, `/maestro-design`, модели по тирам)
-- [Запуск первой фичи](tutorials/run-first-feature.md) — полный цикл 0→18
+- [Запуск первой фичи](tutorials/run-first-feature.md) — полный цикл 0→18.5
 
 ## How-to (инструкции)
 
@@ -47,7 +47,7 @@ primary-сессии.
 
 ## Explanation (пояснения)
 
-- [Всё: pipeline — Feature и Bugfix](explanation/pipeline-overview.md) — полный flow: Feature 0→18 и Bugfix D1→D7
+- [Всё: pipeline — Feature и Bugfix](explanation/pipeline-overview.md) — полный flow: Feature 0→18.5 и Bugfix D1→D7
 - [Агенты и модель доверия](explanation/agents-and-trust.md) — trust, sanitizer, роли
 - [Project Context (14 категорий)](explanation/project-context.md) — формат `docs/project-context.md`
 - [Простой язык: как это работает](explanation/plain-language.md) — механика режима `communication` / `--plain`
