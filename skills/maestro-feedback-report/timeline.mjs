@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { readFileSync, writeFileSync, unlinkSync, openSync, closeSync, mkdirSync, rmSync, existsSync, renameSync } from "node:fs";
-import { join, sep } from "node:path";
+import { join, sep, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 
@@ -400,5 +400,33 @@ const result = {
   timeline,
   metrics,
 };
+
+// --- metrics JSONL (upsert, атомарно, fail-soft) ---
+const METRICS_JSONL = process.env.MAESTRO_METRICS_JSONL || join(process.cwd(), ".maestro", "metrics", "history.jsonl");
+try {
+  mkdirSync(dirname(METRICS_JSONL), { recursive: true });
+  let existing = [];
+  try {
+    existing = readFileSync(METRICS_JSONL, "utf-8").split("\n").filter((l) => l.trim());
+  } catch {}
+  const valid = [];
+  for (const l of existing) {
+    try { JSON.parse(l); valid.push(l); } catch {}
+  }
+  const record = JSON.stringify({
+    sessionID: sessionID || info.id,
+    date: new Date().toISOString().slice(0, 10),
+    metrics,
+  });
+  valid.splice(0, valid.length, ...valid.filter((l) => {
+    try { return JSON.parse(l).sessionID !== (sessionID || info.id); } catch { return true; }
+  }));
+  valid.push(record);
+  const tmp = METRICS_JSONL + ".tmp";
+  writeFileSync(tmp, valid.join("\n") + "\n");
+  renameSync(tmp, METRICS_JSONL);
+} catch (e) {
+  process.stderr.write(`metrics jsonl: ${e.message}\n`);
+}
 
 process.stdout.write(JSON.stringify(result) + "\n");

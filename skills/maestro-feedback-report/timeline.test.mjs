@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync, chmodSync, openSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, chmodSync, openSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -593,6 +593,44 @@ test("tokensByAgent — без metadata.sessionId → игнор; failed (нет
   assert.equal(h.skipped, 5);  // cap_100..cap_104 — over-cap
   assert.equal(h.input, 99);   // cap_1..cap_99
   assert.equal(out.metrics.tokensByAgent.sonnet, undefined); // без metadata.sessionId — не ведру
+});
+
+test("JSONL — запись строки (sessionID, date, metrics)", () => {
+  const jsonl = join(tmpDir, "j1/history.jsonl");
+  runFixture({ info: { id: "ses_j1" }, messages: [] }, "j1", { MAESTRO_METRICS_JSONL: jsonl });
+  const lines = readFileSync(jsonl, "utf-8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].sessionID, "ses_test");
+  assert.match(lines[0].date, /^\d{4}-\d{2}-\d{2}$/);
+  assert.ok(typeof lines[0].metrics === "object" && lines[0].metrics.tokens);
+});
+
+test("JSONL — upsert по sessionID: повторный запуск заменяет строку", () => {
+  const jsonl = join(tmpDir, "j2/history.jsonl");
+  runFixture({ info: { id: "ses_j2" }, messages: [] }, "j2a", { MAESTRO_METRICS_JSONL: jsonl });
+  runFixture({ info: { id: "ses_j2", tokens: { input: 999 } }, messages: [
+    { info: { role: "assistant", time: { created: 2000 }, tokens: { input: 999, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } }, parts: [] },
+  ] }, "j2b", { MAESTRO_METRICS_JSONL: jsonl });
+  const lines = readFileSync(jsonl, "utf-8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].metrics.tokens.input, 999);
+});
+
+test("JSONL — невалидные строки пропускаются (self-healing), валидные чужие сохраняются", () => {
+  const dir = join(tmpDir, "j3");
+  mkdirSync(dir, { recursive: true });
+  const jsonl = join(dir, "history.jsonl");
+  writeFileSync(jsonl, '{"sessionID":"ses_old","date":"2026-01-01","metrics":{}}\n{broken\n');
+  runFixture({ info: { id: "ses_j3" }, messages: [] }, "j3", { MAESTRO_METRICS_JSONL: jsonl });
+  const lines = readFileSync(jsonl, "utf-8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.equal(lines.length, 2); // ses_old (валидная) + ses_test; broken — удалён
+  assert.ok(lines.some((l) => l.sessionID === "ses_old"));
+});
+
+test("JSONL — fail-soft: неписательный путь → stdout не меняется, код 0", () => {
+  const jsonl = "/proc/never-writable/history.jsonl";
+  const out = runFixture({ info: { id: "ses_j4" }, messages: [] }, "j4", { MAESTRO_METRICS_JSONL: jsonl });
+  assert.ok(out.metrics); // stdout валиден
 });
 
 test("tokensByAgent — зависший child-экспорт (таймаут) → skipped, вывод не блокируется", async () => {
