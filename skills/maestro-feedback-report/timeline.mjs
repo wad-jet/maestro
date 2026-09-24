@@ -49,7 +49,13 @@ async function exportSession(sessionID, timeoutMs) {
   return await new Promise((resolve, reject) => {
     const tmpFile = join(tmpdir(), `maestro-child-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
     const fd = openSync(tmpFile, "w");
-    const child = spawn("opencode", ["export", sessionID], { stdio: ["ignore", fd, "inherit"] });
+    const child = spawn("opencode", ["export", sessionID], { stdio: ["ignore", fd, "pipe"] });
+    let errTail = "";
+    child.stderr.on("data", (d) => { errTail = (errTail + d).slice(-500); });
+    const fail = (e) => {
+      try { process.stderr.write(`[timeline] export failed: ${sessionID} — ${errTail.trim().slice(-300) || "no stderr"}\n`); } catch {}
+      reject(e);
+    };
     let done = false;
     const timer = setTimeout(() => {
       if (done) return;
@@ -57,20 +63,20 @@ async function exportSession(sessionID, timeoutMs) {
       try { child.kill("SIGKILL"); } catch {}
       try { closeSync(fd); } catch {}
       try { unlinkSync(tmpFile); } catch {}
-      reject(new Error("child_export_timeout"));
+      fail(new Error("child_export_timeout"));
     }, timeoutMs);
-    child.on("error", (e) => { if (done) return; done = true; clearTimeout(timer); try { closeSync(fd); } catch {}; try { unlinkSync(tmpFile); } catch {}; reject(e); });
+    child.on("error", (e) => { if (done) return; done = true; clearTimeout(timer); try { closeSync(fd); } catch {}; try { unlinkSync(tmpFile); } catch {}; fail(e); });
     child.on("exit", (code) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
       try { closeSync(fd); } catch {}
-      if (code !== 0) { try { unlinkSync(tmpFile); } catch {}; reject(new Error("export_failed")); return; }
+      if (code !== 0) { try { unlinkSync(tmpFile); } catch {}; fail(new Error("export_failed")); return; }
       let raw;
-      try { raw = readFileSync(tmpFile, "utf-8"); } catch (e) { try { unlinkSync(tmpFile); } catch {}; reject(e); return; }
+      try { raw = readFileSync(tmpFile, "utf-8"); } catch (e) { try { unlinkSync(tmpFile); } catch {}; fail(e); return; }
       try { unlinkSync(tmpFile); } catch {}
-      if (!raw || !raw.trim()) { reject(new Error("export_failed")); return; }
-      try { resolve(JSON.parse(raw)); } catch { reject(new Error("invalid_export")); }
+      if (!raw || !raw.trim()) { fail(new Error("export_failed")); return; }
+      try { resolve(JSON.parse(raw)); } catch { fail(new Error("invalid_export")); }
     });
   });
 }
@@ -98,17 +104,23 @@ try {
       await new Promise((resolve, reject) => {
         const fd = openSync(tmpFile, "w");
         const child = spawn("opencode", ["export", sessionID], {
-          stdio: ["ignore", fd, "inherit"],
+          stdio: ["ignore", fd, "pipe"],
         });
+        let errTail = "";
+        child.stderr.on("data", (d) => { errTail = (errTail + d).slice(-500); });
         child.on("exit", (code) => {
           closeSync(fd);
           if (code !== 0) {
+            process.stderr.write(`[timeline] export failed: ${sessionID} — ${errTail.trim().slice(-300) || "no stderr"}\n`);
             reject(new Error("export failed"));
           } else {
             resolve();
           }
         });
-        child.on("error", reject);
+        child.on("error", (e) => {
+          process.stderr.write(`[timeline] export failed: ${sessionID} — ${errTail.trim().slice(-300) || "no stderr"}\n`);
+          reject(e);
+        });
       });
       raw = readFileSync(tmpFile, "utf-8");
       if (!raw || !raw.trim()) {

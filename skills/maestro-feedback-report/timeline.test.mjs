@@ -1,6 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { execFileSync, spawn } from "node:child_process";
+import { execFileSync, spawn, spawnSync } from "node:child_process";
 import { mkdtempSync, writeFileSync, rmSync, mkdirSync, chmodSync, openSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -718,4 +718,78 @@ test("JSONL: fast-mode строка children=skipped; full-прогон посл
   lines = readFileSync(jsonl, "utf-8").trim().split("\n");
   assert.equal(lines.length, 1);
   assert.equal(JSON.parse(lines[0]).metrics.children, "full");
+});
+
+const fixtureStderr = {
+  info: { id: "ses_stderr", model: "m", time: { created: 1000, end: 5000 } },
+  messages: [
+    { info: { role: "user", time: { created: 1000 } }, parts: [{ type: "text", text: "hi" }] },
+    {
+      info: { role: "assistant", time: { created: 2000 }, tokens: { input: 5, output: 3, reasoning: 0, cache: { read: 0, write: 0 } } },
+      parts: [
+        { type: "tool", tool: "task", callID: "t1", state: { status: "completed", input: { subagent_type: "haiku", description: "x" }, output: "ok", metadata: { sessionId: "ses_child_bad" }, time: { start: 3000, end: 4000 } }, id: "tt1" },
+      ],
+    },
+  ],
+};
+
+// fake-`opencode` (sh) в temp-dir в PATH: шум в stderr + JSON в stdout;
+// failChild — сбой только для child-sid; failAll — сбой для всех вызовов
+function makeFakeOpencode(dirName, { failChild = false, failAll = false, noise = 1 } = {}) {
+  const dir = join(tmpDir, dirName);
+  try { rmSync(dir, { recursive: true, force: true }); } catch { }
+  mkdirSync(dir);
+  const fixturePath = join(dir, "fixture.json");
+  writeFileSync(fixturePath, JSON.stringify(fixtureStderr));
+  const lines = ["#!/bin/sh"];
+  if (failAll) {
+    lines.push("echo 'boom-detail' >&2; exit 1");
+  } else {
+    if (failChild) lines.push('if [ "$2" = "ses_child_bad" ]; then echo "boom-detail" >&2; exit 1; fi');
+    for (let i = 0; i < noise; i++) lines.push("echo 'progress-noise-" + i + "' >&2");
+    lines.push('cat "' + fixturePath + '"');
+  }
+  const sh = join(dir, "opencode");
+  writeFileSync(sh, lines.join("\n"));
+  chmodSync(sh, "755");
+  return dir;
+}
+
+function runReal(dir, sessionID, extraArgs = []) {
+  return spawnSync(process.execPath, [scriptPath, sessionID, ...extraArgs], {
+    encoding: "utf-8", timeout: 30000,
+    env: { ...process.env, PATH: dir + ":" + process.env.PATH, MAESTRO_METRICS_JSONL: join(tmpDir, "real.jsonl") },
+  });
+}
+
+test("stderr: прогресс-шум CLI подавляется при успехе (обе spawn-точки, многословный stderr)", () => {
+  const dir = makeFakeOpencode("stderr_ok", { noise: 5 });
+  const r = runReal(dir, "ses_stderr");
+  assert.equal(r.status, 0);
+  const data = JSON.parse(r.stdout.trim());
+  assert.ok(data.metrics.tokensByAgent.haiku, "child-пул должен был отработать (task-часть с metadata.sessionId)");
+  assert.equal(r.stderr, "");
+});
+
+test("stderr: сбой child-CLI → ровно одна диагностическая строка с tail, stdout-JSON валиден (fail-soft)", () => {
+  const dir = makeFakeOpencode("stderr_cfail", { failChild: true, noise: 3 });
+  const r = runReal(dir, "ses_stderr_c");
+  assert.equal(r.status, 0);
+  const data = JSON.parse(r.stdout.trim());
+  assert.equal(data.metrics.children, "full");
+  assert.ok(data.metrics.tokensByAgent.haiku.failed >= 1);
+  const lines = r.stderr.trim().split("\n");
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /\[timeline\] export failed: ses_child_bad/);
+  assert.match(lines[0], /boom-detail/);
+});
+
+test("stderr: сбой primary-CLI → diag-строка + export_failed + exit 1", () => {
+  const dir = makeFakeOpencode("stderr_pfail", { failAll: true });
+  const r = runReal(dir, "ses_stderr_p");
+  assert.equal(r.status, 1);
+  assert.match(r.stdout, /"error":"export_failed"/);
+  const lines = r.stderr.trim().split("\n");
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /\[timeline\] export failed: ses_stderr_p/);
 });
