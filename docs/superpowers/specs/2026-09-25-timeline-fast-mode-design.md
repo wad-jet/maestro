@@ -48,8 +48,8 @@
 - `child.stderr` — в буфер с обрезкой хвоста (~500 байт, только хвост хранится).
 - При **успехе** — буфер отбрасывается (в stderr ничего не пишут).
 - При **сбое** — ОДНА строка в stderr: `[timeline] export failed: <sessionID> — <tail>`:
-  - child-экспорт: timeout / non-zero exit / parse-error / spawn error; сбой,
-    кроме того, учитывается в `tokensByAgent.failed` (fail-soft, как сейчас).
+  - child-экспорт: timeout / non-zero exit / parse-error / spawn error;
+    timeout → `skipped`, остальные сбои → `failed` (fail-soft, как сейчас).
   - primary-экспорт: non-zero exit / spawn error → прежний
     `{"error":"export_failed"}` + exit 1; parse-error → прежний
     `{"error":"invalid_export"}` (контракт без изменений; primary-timeout НЕ
@@ -132,5 +132,12 @@ expected-объект теста «empty export» (полный deepEqual stdout
 <!-- maestro:sanitize
 status: CLEAN
 date: 2026-09-25
-hash: c1b7f25f1a99b92bb78e7e6d6b2037739bfd19dcbce6ccdaadcafc70791eaa11
+hash: debdf8c302454cd608192ef16f2890fb146ae00618f06eea01cbd90a7d644fa8
+-->
+
+<!-- maestro:review
+reviewer: opus
+date: 2026-09-25
+verdict: approve
+hash: debdf8c302454cd608192ef16f2890fb146ae00618f06eea01cbd90a7d644fa8
 -->
