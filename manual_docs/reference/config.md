@@ -40,7 +40,11 @@
 
 > **ИБ:** версия плагина — только `.maestro/plugin-version` (semver-only);
 > конфиг `maestro.json` защищается **нативно** — deny `read`/`glob`/`grep` +
-> edit-ask в `.opencode/opencode.json` (см. [`SECURITY.md`](../../../SECURITY.md)).
+> edit-ask в `.opencode/opencode.json`; санкционированный канал чтения
+> параметров в сессии — плагин-тул `maestro_config` (permission `ask`, только
+> top-level primary; сабагенты — per-agent deny + плагинный fail-closed guard);
+> bash-чтение запрещено процессным каноном
+> (см. [`SECURITY.md`](../../../SECURITY.md) → P6).
 
 ### Секция `trust`
 
@@ -585,6 +589,7 @@ merge-config (`.opencode/opencode.json`
         "edit": "deny",
         "bash": "deny",
         "task": "deny",
+        "maestro_config": "deny",
         "hidden": true
       }
     },
@@ -597,6 +602,7 @@ merge-config (`.opencode/opencode.json`
         "edit": "deny",
         "bash": "deny",
         "task": "deny",
+        "maestro_config": "deny",
         "hidden": true
       }
     },
@@ -606,6 +612,7 @@ merge-config (`.opencode/opencode.json`
         "edit": "allow",
         "bash": "allow",
         "task": "deny",
+        "maestro_config": "deny",
         "hidden": true
       }
     },
@@ -615,6 +622,7 @@ merge-config (`.opencode/opencode.json`
         "edit": "allow",
         "bash": "allow",
         "task": "deny",
+        "maestro_config": "deny",
         "hidden": true
       }
     },
@@ -624,6 +632,7 @@ merge-config (`.opencode/opencode.json`
         "edit": "deny",
         "bash": "deny",
         "task": "deny",
+        "maestro_config": "deny",
         "hidden": true
       }
     },
@@ -633,6 +642,7 @@ merge-config (`.opencode/opencode.json`
         "edit": "deny",
         "bash": "deny",
         "task": "deny",
+        "maestro_config": "deny",
         "hidden": true
       }
     },
@@ -642,6 +652,7 @@ merge-config (`.opencode/opencode.json`
         "edit": "deny",
         "bash": "allow",
         "task": "deny",
+        "maestro_config": "deny",
         "hidden": false
       }
     }
@@ -664,6 +675,8 @@ merge-config (`.opencode/opencode.json`
 > `grep` в merge-config. Канон и семантика (`*` пересекает `/`, last-match-wins) —
 > в скилле `maestro-assistant`. Подробнее про риски обхода плагина через
 > `bash`/`glob`/`grep` — см. [Агенты и модель доверия](../explanation/agents-and-trust.md).
+> Чтение параметров `maestro.json` в сессии — только плагин-тулом `maestro_config`
+> (global `ask`; сабагенты — per-agent `deny`); bash-чтение запрещено (P6).
 
 > **`doom_loop` guard (R8).** OpenCode автоматически переспрашивает при
 > повторении **одинакового** вызова тула 3 раза подряд (по умолчанию `ask`) —
