@@ -2583,3 +2583,42 @@ describe("communication wiring (MaestroBootstrapPlugin)", () => {
     }
   });
 });
+
+describe("feedback-report wiring (MaestroBootstrapPlugin)", () => {
+  let dir;
+  before(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-fr-")); });
+  after(() => { fs.rmSync(dir, { recursive: true, force: true }); });
+
+  it("feedback_report: auto → plugin-level system.transform инжектит директиву (chainHooks, 3-й источник)", async () => {
+    fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({ feedback_report: "auto" }));
+    const client = { session: { get: async () => ({ data: { parentID: null, title: "primary" } }) } };
+    const hooks = await MaestroBootstrapPlugin({ directory: dir, client });
+    assert.equal(typeof hooks["experimental.chat.system.transform"], "function");
+    const out = { system: [] };
+    await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, out);
+    assert.ok(out.system.some((s) => s.includes("feedback_report: auto")));
+  });
+
+  it("ключ отсутствует → без директивы (безопасный дефолт manual)", async () => {
+    const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), "fab-fr2-"));
+    fs.writeFileSync(path.join(dir2, "maestro.json"), JSON.stringify({}));
+    const client = { session: { get: async () => ({ data: { parentID: null, title: "primary" } }) } };
+    const hooks = await MaestroBootstrapPlugin({ directory: dir2, client });
+    const out = { system: [] };
+    await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, out);
+    assert.ok(!out.system.some((s) => s.includes("feedback_report")));
+    fs.rmSync(dir2, { recursive: true, force: true });
+  });
+
+  it("enum-синхронизация: invalid-детект loadFeedbackReportConfig и registerFeedbackReportHooks совпадают", async () => {
+    for (const v of ["auto", "manual", "disable", "AUTO", "nope", 42, null, ""]) {
+      const coreInvalid = loadFeedbackReportConfig({ feedback_report: v }).invalid;
+      const log = { calls: [], warn: (m) => log.calls.push(m), info: () => {}, error: () => {}, debug: () => {} };
+      await registerFeedbackReportHooks({
+        client: { session: { get: async () => { throw new Error("x"); } } },
+        config: { feedback_report: v }, log });
+      const hookInvalid = log.calls.includes("feedback_report:config_fallback");
+      assert.equal(hookInvalid, coreInvalid, `desync для значения ${JSON.stringify(v)}`);
+    }
+  });
+});
