@@ -147,7 +147,7 @@ description: Сбор фактуры по прошлым процессам maes
   `cost` (число или `null` — провайдер без прайсинга);
 - `tokensByAgent` (по `subagent_type`): `count` (task-диспатчей с известной
   child-сессией; **может быть меньше** таблицы «Агенты» из 3c — туда входят
-  все task-части), токены child-сессий, `skipped`/`failed`
+  все task-части), токены child-сессий (`input/output/reasoning/cacheRead/cacheWrite`), `skipped`/`failed`
   (over-cap/таймаут/сбой child-экспорта — пометка «атрибуция неполная»);
 - `activeMs` (активное время = wall − user_wait; `null` без таймстампов);
 - `questionCount` (HITL-гейты); `reviewDispatches` (механический ориентир
@@ -218,14 +218,15 @@ sessionID; эфемерное, gitignored — пользовательская �
 > + ход диалога (нарратив). Только агрегаты (SEC-4b).
 
 ### Итоговая статистика
-- **Токены (primary):** input <N> / output <N> / reasoning <N> / cache read <N> / cache write <N>; cost: <$X | —>
+- **Токены (primary):** input <N> / output <N> / reasoning <N> / cache read <N> / cache write <N>; cost: <$X | — (провайдер без прайсинга)>
 - **Токены по агентам:**
 
 | Агент | Диспатчей* | Input | Output | Атрибуция |
 |---|---|---|---|---|
-| <subagent_type> | <N> | <N> | <N> | <полная \| неполная: skipped N / failed M> |
+| <subagent_type> | <N> | <N> | <N> | <«полная» (skipped=0 и failed=0) / «неполная: skipped N / failed M»> |
 
 \* диспатчей с известной child-сессией; может быть меньше таблицы «Агенты» (3c).
+Атрибуция: «полная», если `skipped = 0` И `failed = 0`; иначе — «неполная: skipped N / failed M» с числами из `metrics.tokensByAgent`.
 
 - **Активное время:** <H ч M мин> (доля <P>% от wall-длительности сессии)
 - **HITL:** question-гейтов <N>; retry-повторов: <из 3a>
