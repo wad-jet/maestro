@@ -386,6 +386,26 @@ export function loadCommunicationConfig(config) {
   return { mode: "plain", explicit: false, invalid: true };
 }
 
+const FEEDBACK_REPORT_MODES = new Set(["auto", "manual", "disable"]);
+
+/**
+ * Разбор `feedback_report` из maestro.json — режим отчёта ретроспективы
+ * (шаг 18.5 pipeline). Ключ отсутствует → "manual" (дефолт). Невалидное
+ * значение → soft fallback в дефолт + invalid: true (философия
+ * communication:config_fallback).
+ * @param {object} [config]  Parsed `maestro.json` (from loadMaestroConfig).
+ * @returns {{ mode: "auto"|"manual"|"disable", explicit: boolean, invalid: boolean }}
+ */
+export function loadFeedbackReportConfig(config) {
+  const value =
+    config && typeof config === "object" ? config.feedback_report : undefined;
+  if (value === undefined) return { mode: "manual", explicit: false, invalid: false };
+  if (typeof value === "string" && FEEDBACK_REPORT_MODES.has(value)) {
+    return { mode: value, explicit: true, invalid: false };
+  }
+  return { mode: "manual", explicit: false, invalid: true };
+}
+
 /**
  * Resolve effective options for a subagent: rules (respect by_agent) + patterns.
  * @param {object} whitelist  Parsed whitelist.

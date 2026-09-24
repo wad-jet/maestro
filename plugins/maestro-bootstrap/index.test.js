@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MaestroBootstrapPlugin, createBootstrapAdapter, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile, loadCommunicationConfig } from "./core.js";
+import { MaestroBootstrapPlugin, createBootstrapAdapter, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile, loadCommunicationConfig, loadFeedbackReportConfig } from "./core.js";
 import {
   detectPlainFlag,
   SOURCE_LABELS,
@@ -2195,6 +2195,33 @@ describe("communication config (loadCommunicationConfig)", () => {
   });
   it("невалидное (строка вне enum) → fallback plain + invalid: true", () => {
     assert.deepEqual(loadCommunicationConfig({ communication: "simple" }), { mode: "plain", explicit: false, invalid: true });
+  });
+});
+
+describe("feedback_report config (loadFeedbackReportConfig)", () => {
+  it("ключ отсутствует → manual (дефолт)", () => {
+    assert.deepEqual(loadFeedbackReportConfig({}), { mode: "manual", explicit: false, invalid: false });
+  });
+  it("config отсутствует → manual (дефолт)", () => {
+    assert.deepEqual(loadFeedbackReportConfig(undefined), { mode: "manual", explicit: false, invalid: false });
+  });
+  it("auto explicit", () => {
+    assert.deepEqual(loadFeedbackReportConfig({ feedback_report: "auto" }), { mode: "auto", explicit: true, invalid: false });
+  });
+  it("manual explicit", () => {
+    assert.deepEqual(loadFeedbackReportConfig({ feedback_report: "manual" }), { mode: "manual", explicit: true, invalid: false });
+  });
+  it("disable explicit", () => {
+    assert.deepEqual(loadFeedbackReportConfig({ feedback_report: "disable" }), { mode: "disable", explicit: true, invalid: false });
+  });
+  it("невалидное (42) → manual + invalid", () => {
+    assert.deepEqual(loadFeedbackReportConfig({ feedback_report: 42 }), { mode: "manual", explicit: false, invalid: true });
+  });
+  it("невалидное ('nope') → manual + invalid", () => {
+    assert.deepEqual(loadFeedbackReportConfig({ feedback_report: "nope" }), { mode: "manual", explicit: false, invalid: true });
+  });
+  it("невалидное ('AUTO', регистр) → manual + invalid", () => {
+    assert.deepEqual(loadFeedbackReportConfig({ feedback_report: "AUTO" }), { mode: "manual", explicit: false, invalid: true });
   });
 });
 
