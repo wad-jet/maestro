@@ -10,23 +10,27 @@ const tmpDir = mkdtempSync(join(tmpdir(), "timeline-test-"));
 
 process.on("exit", () => { rmSync(tmpDir, { recursive: true, force: true }); });
 
-function runFixture(data, name) {
+const fixtureMetricsJsonl = join(tmpDir, "metrics-history.jsonl");
+
+function runFixture(data, name, extraEnv = {}) {
   const path = join(tmpDir, `${name}.json`);
   writeFileSync(path, JSON.stringify(data));
   const out = execFileSync(process.execPath, [scriptPath, "ses_test", path], {
     encoding: "utf-8",
     timeout: 30000,
+    env: { ...process.env, MAESTRO_METRICS_JSONL: fixtureMetricsJsonl, ...extraEnv },
   });
   return JSON.parse(out.trim());
 }
 
-function runFixtureFail(name) {
+function runFixtureFail(name, extraEnv = {}) {
   const path = join(tmpDir, `${name}.txt`);
   writeFileSync(path, "not json at all");
   try {
     const out = execFileSync(process.execPath, [scriptPath, "ses_test", path], {
       encoding: "utf-8",
       timeout: 30000,
+      env: { ...process.env, MAESTRO_METRICS_JSONL: fixtureMetricsJsonl, ...extraEnv },
     });
     return { stdout: out.trim(), code: 0 };
   } catch (e) {
@@ -529,4 +533,80 @@ test("metrics — drift-формата: нет tokens/title/state → нули, 
   assert.deepEqual(out.metrics.tokens, { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: null });
   assert.equal(out.metrics.reviewDispatches, 0);
   assert.equal(out.metrics.questionCount, 0);
+});
+
+function childFixture(id, tokens) {
+  return JSON.stringify({ info: { id, tokens }, messages: [] });
+}
+
+test("tokensByAgent — атрибуция по child-экспорту (fixture-mode)", () => {
+  const exportDir = join(tmpDir, "child-export-1");
+  mkdirSync(exportDir, { recursive: true });
+  writeFileSync(join(exportDir, "child_a.json"), childFixture("child_a", { input: 100, output: 10, reasoning: 0, cache: { read: 5, write: 0 } }));
+  writeFileSync(join(exportDir, "child_b.json"), childFixture("child_b", { input: 50, output: 5, reasoning: 0, cache: { read: 0, write: 0 } }));
+  const data = {
+    info: { id: "ses_ca" },
+    messages: [
+      { info: { role: "assistant", time: { created: 2000 } }, parts: [
+        { type: "tool", tool: "task", callID: "c1", state: { status: "completed", input: { subagent_type: "sonnet" }, output: "ok", metadata: { sessionId: "child_a" }, time: { start: 2100, end: 2500 } }, id: "tc1" },
+        { type: "tool", tool: "task", callID: "c2", state: { status: "completed", input: { subagent_type: "haiku" }, output: "ok", metadata: { sessionId: "child_b" }, time: { start: 2600, end: 2900 } }, id: "tc2" },
+      ] },
+    ],
+  };
+  const out = runFixture(data, "by-agent", { MAESTRO_TIMELINE_EXPORT_DIR: exportDir });
+  assert.deepEqual(out.metrics.tokensByAgent.sonnet, { count: 1, input: 100, output: 10, reasoning: 0, cacheRead: 5, cacheWrite: 0, skipped: 0, failed: 0 });
+  assert.deepEqual(out.metrics.tokensByAgent.haiku, { count: 1, input: 50, output: 5, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 0, failed: 0 });
+});
+
+test("tokensByAgent — дубль sessionId: токены 1 раз, count = task-части; атрибуция по первому subagent_type", () => {
+  const exportDir = join(tmpDir, "child-export-2");
+  mkdirSync(exportDir, { recursive: true });
+  writeFileSync(join(exportDir, "child_d.json"), childFixture("child_d", { input: 77, output: 7, reasoning: 0, cache: { read: 0, write: 0 } }));
+  const data = {
+    info: { id: "ses_dup" },
+    messages: [
+      { info: { role: "assistant", time: { created: 2000 } }, parts: [
+        { type: "tool", tool: "task", callID: "c1", state: { status: "completed", input: { subagent_type: "sonnet" }, output: "ok", metadata: { sessionId: "child_d" }, time: { start: 2100, end: 2500 } }, id: "tc1" },
+        { type: "tool", tool: "task", callID: "c2", state: { status: "completed", input: { subagent_type: "haiku" }, output: "ok", metadata: { sessionId: "child_d" }, time: { start: 2600, end: 2900 } }, id: "tc2" },
+      ] },
+    ],
+  };
+  const out = runFixture(data, "dup", { MAESTRO_TIMELINE_EXPORT_DIR: exportDir });
+  assert.deepEqual(out.metrics.tokensByAgent.sonnet, { count: 1, input: 77, output: 7, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 0, failed: 0 });
+  assert.deepEqual(out.metrics.tokensByAgent.haiku, { count: 1, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 0, failed: 0 });
+});
+
+test("tokensByAgent — без metadata.sessionId → игнор; failed (нет fixture); over-cap → skipped", () => {
+  const exportDir = join(tmpDir, "child-export-3");
+  mkdirSync(exportDir, { recursive: true });
+  const parts = [];
+  for (let i = 0; i < 105; i++) {
+    parts.push({ type: "tool", tool: "task", callID: "c" + i, state: { status: "completed", input: { subagent_type: "haiku" }, output: "ok", metadata: { sessionId: "cap_" + i }, time: { start: 1000 + i, end: 1100 + i } }, id: "tc" + i });
+  }
+  parts.push({ type: "tool", tool: "task", callID: "cnometa", state: { status: "completed", input: { subagent_type: "sonnet" }, output: "ok", time: { start: 2000, end: 2100 } }, id: "tcn" });
+  for (let i = 1; i < 100; i++) writeFileSync(join(exportDir, `cap_${i}.json`), childFixture("cap_" + i, { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } }));
+  const data = { info: { id: "ses_cap" }, messages: [{ info: { role: "assistant", time: { created: 1000 } }, parts }] };
+  const out = runFixture(data, "cap", { MAESTRO_TIMELINE_EXPORT_DIR: exportDir });
+  const h = out.metrics.tokensByAgent.haiku;
+  assert.equal(h.count, 105);
+  assert.equal(h.failed, 1);   // cap_0 — нет fixture
+  assert.equal(h.skipped, 5);  // cap_100..cap_104 — over-cap
+  assert.equal(h.input, 99);   // cap_1..cap_99
+  assert.equal(out.metrics.tokensByAgent.sonnet, undefined); // без metadata.sessionId — не ведру
+});
+
+test("tokensByAgent — зависший child-экспорт (таймаут) → skipped, вывод не блокируется", async () => {
+  const exportDir = join(tmpDir, "child-export-4");
+  mkdirSync(exportDir, { recursive: true });
+  writeFileSync(join(exportDir, "hang_1.hang"), "");
+  const data = {
+    info: { id: "ses_hang" },
+    messages: [
+      { info: { role: "assistant", time: { created: 2000 } }, parts: [
+        { type: "tool", tool: "task", callID: "c1", state: { status: "completed", input: { subagent_type: "opus" }, output: "ok", metadata: { sessionId: "hang_1" }, time: { start: 2100, end: 2500 } }, id: "tc1" },
+      ] },
+    ],
+  };
+  const out = runFixture(data, "hang", { MAESTRO_TIMELINE_EXPORT_DIR: exportDir, MAESTRO_CHILD_EXPORT_TIMEOUT_MS: "200" });
+  assert.deepEqual(out.metrics.tokensByAgent.opus, { count: 1, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 1, failed: 0 });
 });
