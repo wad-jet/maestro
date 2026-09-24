@@ -264,7 +264,8 @@ bash → тул: ветка, срабатывающая при недоступ�
 
 ### 3.9 Реестр регрессии
 
-Новая запись в `regression/entries/` (следующий номер после #113):
+Новая запись в `regression/entries/` — файл
+`2026-09-24-maestro-config-read-tool.md` (конвенция `<date>-<topic>.md`):
 риск «misconfig `maestro_config` (stale merge-config / обход plugin guard) →
 сабагент читает параметры конфига» + митигация (`ask` + per-agent deny +
 fail-closed plugin guard + аудит `maestro_config:access_denied`) +
@@ -339,7 +340,7 @@ fail-closed plugin guard + аудит `maestro_config:access_denied`) +
 2. Канон R6 + 8 флоу (skills/commands): «чтение через bash» для
    `maestro.json` отсутствует; existence-only `test -f` задокументирован;
    диагностические/fallback-ветки «тул недоступен» не читают конфиг и не
-   ссылаются на `maestro_config` в состоянии «тул отсутствует» (правило
+   вызывают `maestro_config` в состоянии «тул отсутствует» (правило
    вывода §3.4a); `@maestro-memory-report` Шаг 1a сужен (§3.4a).
 3. Нативные permissions: `"maestro_config": "ask"` + per-agent deny —
    эталон R6, генерация `/maestro-setup`, локальный dogfooding-конфиг.
