@@ -368,6 +368,7 @@ test("empty file yields export_failed", () => {
     execFileSync(process.execPath, [scriptPath, "ses_empty", path], {
       encoding: "utf-8",
       timeout: 30000,
+      env: { ...process.env, MAESTRO_METRICS_JSONL: join(tmpDir, "metrics-history-empty.jsonl") },
     });
     assert.fail("should have thrown");
   } catch (e) {
@@ -421,7 +422,7 @@ test("path-less export path (shim opencode)", () => {
   const out = execFileSync(process.execPath, [scriptPath, "ses_shim"], {
     encoding: "utf-8",
     timeout: 30000,
-    env: { ...process.env, PATH: shimPathEnv },
+    env: { ...process.env, PATH: shimPathEnv, MAESTRO_METRICS_JSONL: join(tmpDir, "metrics-history-shim.jsonl") },
   });
   const data = JSON.parse(out.trim());
   assert.equal(data.session.id, "ses_shim");
@@ -476,7 +477,7 @@ test("large export >128K via spawn path (regression)", () => {
   const out = execFileSync(process.execPath, [scriptPath, "ses_large"], {
     encoding: "utf-8",
     timeout: 30000,
-    env: { ...process.env, PATH: shimPathEnv },
+    env: { ...process.env, PATH: shimPathEnv, MAESTRO_METRICS_JSONL: join(tmpDir, "metrics-history-large.jsonl") },
   });
   const data = JSON.parse(out.trim());
   assert.equal(data.session.id, "ses_large");
