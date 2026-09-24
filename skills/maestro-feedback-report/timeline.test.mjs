@@ -200,6 +200,29 @@ const expectedEmpty = {
   top_ops: [],
   gaps: [],
   timeline: [],
+  metrics: { tokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: null }, activeMs: null, questionCount: 0, reviewDispatches: 0, tokensByAgent: {} },
+};
+
+const fixtureTokens = {
+  info: { id: "ses_tok", model: "m", cost: 0.01, tokens: { input: 130, output: 70, reasoning: 5, cache: { read: 10, write: 2 } } },
+  messages: [
+    { info: { role: "user", time: { created: 1000 } }, parts: [{ type: "text", text: "hi" }] },
+    {
+      info: { role: "assistant", time: { created: 2000 }, tokens: { input: 100, output: 50, reasoning: 5, cache: { read: 10, write: 2 } }, cost: 0.001 },
+      parts: [
+        { type: "tool", tool: "question", callID: "q1", state: { status: "completed", input: {}, output: "a", time: { start: 2100, end: 2200 } }, id: "tq1" },
+      ],
+    },
+    {
+      info: { role: "assistant", time: { created: 3000 }, tokens: { input: 30, output: 20, reasoning: 0, cache: { read: 0, write: 0 } }, cost: 0.0005 },
+      parts: [
+        { type: "tool", tool: "task", callID: "r1", state: { status: "completed", input: { subagent_type: "opus", description: "x" }, output: "ok", title: "Review feature X", time: { start: 3100, end: 3500 } }, id: "tr1" },
+        { type: "tool", tool: "task", callID: "r2", state: { status: "completed", input: { subagent_type: "opus", description: "y" }, output: "ok", title: "Preview check", time: { start: 3600, end: 3900 } }, id: "tr2" },
+        { type: "tool", tool: "task", callID: "r3", state: { status: "pending", input: { subagent_type: "opus", description: "z" }, title: "Review spec", time: { start: 4000 } }, id: "tr3" },
+        { type: "tool", tool: "task", callID: "r4", state: { status: "completed", input: { subagent_type: "opus", description: "w" }, output: "ok", title: "Ревью по спеке", time: { start: 4100, end: 4400 } }, id: "tr4" },
+      ],
+    },
+  ],
 };
 
 test("aggregates agents/tools/bash", () => {
@@ -456,4 +479,54 @@ test("large export >128K via spawn path (regression)", () => {
   assert.equal(data.totals.toolOps, 1);
   assert.equal(data.totals.toolTimeMs, 5000);
   assert.equal(data.totals.userMessages, 1);
+});
+
+test("metrics.tokens — сумма по assistant-сообщениям + cross-check с info.tokens", () => {
+  const out = runFixture(fixtureTokens, "tokens");
+  assert.deepEqual(out.metrics.tokens, { input: 130, output: 70, reasoning: 5, cacheRead: 10, cacheWrite: 2, cost: 0.0015 });
+  // cross-check (spec Answers-1): сумма сообщений == top-level info.tokens
+  const top = fixtureTokens.info.tokens;
+  assert.equal(out.metrics.tokens.input, top.input);
+  assert.equal(out.metrics.tokens.cacheRead, top.cache.read);
+});
+
+test("metrics.tokens.cost — все 0/absent → null", () => {
+  const data = {
+    info: { id: "ses_nc", model: "m" },
+    messages: [
+      { info: { role: "user", time: { created: 1000 } }, parts: [] },
+      { info: { role: "assistant", time: { created: 2000 }, tokens: { input: 10, output: 5, reasoning: 0, cache: { read: 0, write: 0 } }, cost: 0 }, parts: [] },
+    ],
+  };
+  const out = runFixture(data, "cost-null");
+  assert.equal(out.metrics.tokens.cost, null);
+});
+
+test("metrics.activeMs — duration − idleWait (floor 0); null без таймстампов", () => {
+  const out = runFixture(fixtureTokens, "tokens");
+  assert.equal(out.metrics.activeMs, 2000 - (out.totals.idleWaitMs || 0));
+  const noTs = { info: { id: "ses_nt" }, messages: [{ info: { role: "user" }, parts: [] }] };
+  const out2 = runFixture(noTs, "no-ts");
+  assert.equal(out2.metrics.activeMs, null);
+});
+
+test("metrics.questionCount и reviewDispatches — completed-only, граница слова", () => {
+  const out = runFixture(fixtureTokens, "tokens");
+  assert.equal(out.metrics.questionCount, 1);
+  assert.equal(out.metrics.reviewDispatches, 2); // "Review feature X" + "Ревью по спеке"; "Preview" и pending — нет
+});
+
+test("metrics — drift-формата: нет tokens/title/state → нули, без исключений", () => {
+  const data = {
+    info: { id: "ses_drift" },
+    messages: [
+      { info: { role: "assistant", time: { created: 2000 } }, parts: [
+        { type: "tool", tool: "task", callID: "d1", state: { status: "completed", input: { subagent_type: "opus" } }, id: "td1" },
+      ] },
+    ],
+  };
+  const out = runFixture(data, "drift");
+  assert.deepEqual(out.metrics.tokens, { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: null });
+  assert.equal(out.metrics.reviewDispatches, 0);
+  assert.equal(out.metrics.questionCount, 0);
 });

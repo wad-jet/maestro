@@ -202,6 +202,51 @@ for (const msg of messages) {
   timeline.push({ kind: "assistant", ts, nTools, toolMs, inferenceMs: infMs });
 }
 
+// --- metrics (primary-данные) ---
+let mInput = 0, mOutput = 0, mReasoning = 0, mCacheRead = 0, mCacheWrite = 0;
+let costSum = 0, costSeen = false;
+let questionCount = 0;
+let reviewDispatches = 0;
+const REVIEW_RE = /\breview\b|ревью/i;
+
+for (const msg of messages) {
+  const info = msg.info || {};
+  if (info.role === "assistant") {
+    const t = info.tokens;
+    if (t && typeof t === "object") {
+      mInput += t.input || 0;
+      mOutput += t.output || 0;
+      mReasoning += t.reasoning || 0;
+      mCacheRead += (t.cache && t.cache.read) || 0;
+      mCacheWrite += (t.cache && t.cache.write) || 0;
+    }
+    if (typeof info.cost === "number" && info.cost > 0) { costSum += info.cost; costSeen = true; }
+  }
+  const parts = Array.isArray(msg.parts) ? msg.parts : [];
+  for (const p of parts) {
+    if (typeof p !== "object" || !p || p.type !== "tool") continue;
+    if (p.tool === "question") questionCount++;
+    if (p.tool === "task") {
+      const st = p.state;
+      if (st && st.status === "completed" && typeof st.title === "string" && REVIEW_RE.test(st.title)) {
+        reviewDispatches++;
+      }
+    }
+  }
+}
+
+const metrics = {
+  tokens: {
+    input: mInput, output: mOutput, reasoning: mReasoning,
+    cacheRead: mCacheRead, cacheWrite: mCacheWrite,
+    cost: costSeen ? costSum : null,
+  },
+  activeMs: sessionDurationMs === null ? null : Math.max(0, sessionDurationMs - idleWaitMs),
+  questionCount,
+  reviewDispatches,
+  tokensByAgent: {},
+};
+
 const topOpsResult = topOps.sort((a, b) => b.durationMs - a.durationMs).slice(0, 10);
 const gapsResult = gaps.sort((a, b) => b.ms - a.ms).slice(0, 5);
 
@@ -242,6 +287,7 @@ const result = {
   top_ops: topOpsResult,
   gaps: gapsResult,
   timeline,
+  metrics,
 };
 
 process.stdout.write(JSON.stringify(result) + "\n");
