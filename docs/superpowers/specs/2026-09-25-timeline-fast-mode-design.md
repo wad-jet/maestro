@@ -20,7 +20,7 @@
 - Кэш child-экспортов (YAGNI: рераны редки; invalidation нетривиален — resumed
   child-сессии мутятся между прогонами).
 - Изменение concurrency (4 — принято в спеке #109/#115, A1) и cap/timeout.
-- Dead-code shim-скрипт в primary-экспорте (строки 88–94 `timeline.mjs` — пишется,
+- Dead-code shim-скрипт в primary-экспорте (строки 86–94 `timeline.mjs` — пишется,
   не используется) — follow-up отдельно.
 - Streaming-чтение JSONL, Error-классы (known-accepted, 4.10.0).
 
@@ -47,11 +47,15 @@
   `stdio: ["ignore", fd, "pipe"]` вместо `inherit`.
 - `child.stderr` — в буфер с обрезкой хвоста (~500 байт, только хвост хранится).
 - При **успехе** — буфер отбрасывается (в stderr ничего не пишут).
-- При **сбое** (timeout / non-zero exit / parse-error / spawn error) — ОДНА
-  строка в stderr: `[timeline] export failed: <sessionID> — <tail>`. Для
-  child-экспорта сбой, кроме того, учитывается в `tokensByAgent.failed`
-  (fail-soft, как сейчас); для primary — прежний `{"error":"export_failed"}` +
-  exit 1 (диагностическая строка stderr не мешает JSON-stdout контракту).
+- При **сбое** — ОДНА строка в stderr: `[timeline] export failed: <sessionID> — <tail>`:
+  - child-экспорт: timeout / non-zero exit / parse-error / spawn error; сбой,
+    кроме того, учитывается в `tokensByAgent.failed` (fail-soft, как сейчас).
+  - primary-экспорт: non-zero exit / spawn error → прежний
+    `{"error":"export_failed"}` + exit 1; parse-error → прежний
+    `{"error":"invalid_export"}` (контракт без изменений; primary-timeout НЕ
+    добавляется — scope).
+  - Подлинные локальные диагностики (напр., JSONL fail-soft `metrics jsonl: …`)
+    остаются в stderr — гасится только прогресс-шум CLI.
 - SEC-4b: stderr-строки — диагностика для оператора (sessionID + хвост вывода
   CLI), не попадают в отчёт и stdout-JSON.
 
@@ -59,8 +63,9 @@
 
 - Секция 3c (запуск helper): строка — «сохрани stdout в temp-файл и переиспользуй
   (3c/3d/шаблон); НЕ перезапускай скрипт — полный прогон с child fanout 2–4 мин».
-- Секция 3d: строка про fast mode — флаг `--no-children` (~5 с); при
-  `metrics.children: "skipped"` — `tokensByAgent` пуст, атрибуция недоступна.
+- Секция 3d: строка про fast mode — флаг `--no-children` (~5 с); **по умолчанию —
+  полный прогон**; `--no-children` — только если атрибуция по агентам не нужна;
+  при `metrics.children: "skipped"` — `tokensByAgent` пуст, атрибуция недоступна.
 - Шаблон отчёта, таблица «Токены по агентам»: fallback — при
   `children: "skipped"` вместо таблицы: «Атрибуция по агентам недоступна
   (fast mode `--no-children`)».
@@ -72,7 +77,8 @@
 - `manual_docs/reference/commands.md` — в описании `@maestro-feedback-report`
   (секция «Метрики пайплайна и Effort») — одна строка про `--no-children`.
 - `regression/entries/2026-09-25-timeline-fast-mode.md` — канонический формат
-  (known limitation: полный прогон ~2–4 мин при cap-100 child; тесты; SEC-4b;
+  (known limitation: полный прогон ~2–4 мин при cap-100 child; fast-прогон после
+  full затирает атрибуцию в JSONL-строке — known behavior; тесты; SEC-4b;
   non-goals из §2).
 - `docs/project-context.md` §10 — счётчик timeline-тестов по факту прогона.
 - `docs/roadmap.md` — НЕ меняется (не roadmap-пункт).
@@ -81,18 +87,26 @@
 ## 4. Тесты (TDD, `timeline.test.mjs`)
 
 1. `--no-children`: stdout-JSON — `metrics.children === "skipped"`,
-   `tokensByAgent === {}`, primary-метрики на месте (fixture mode).
+   `tokensByAgent === {}`, primary-метрики на месте (fixture mode). Фикстура
+   содержит task-часть с `metadata.sessionId` — иначе ассерт `tokensByAgent === {}`
+   вакуозен (не отличает «флаг сработал» от «child не было»).
 2. Обычный прогон: `metrics.children === "full"` (regression-гард нового поля).
 3. Flag-ordering: `--no-children` первым/последним/между позиционными — работает;
    usage-ошибка при отсутствии sessionID не изменена.
 4. JSONL: строка в fast mode содержит `children: "skipped"`; upsert при повторном
    прогоне (fast после full) заменяет строку.
 5. Чистый stderr (реальный spawn, не fixture): fake-`opencode` (sh-скрипт в
-   temp-dir в PATH: пишет строку прогресса в stderr + JSON в stdout) — при
-   успешном прогоне stderr helper пуст; при сбое fake-CLI (non-zero exit + текст
+   temp-dir в PATH: пишет строку прогресса в stderr + JSON в stdout; прецедент —
+   тесты «shim opencode»/«large export» в том же файле) — фикстура содержит
+   task-часть с `metadata.sessionId`, чтобы проверялись ОБЕ spawn-точки (primary +
+   child): при успешном прогоне stderr helper пуст (JSONL-диagnostics не
+   учитываются — тест без сбоев JSONL); при сбое fake-CLI (non-zero exit + текст
    в stderr) — ровно одна диагностическая строка с tail'ом.
 
-Базовый прогон: существующие 24 теста — без изменений (backward-compat).
+Базовый прогон: существующие 24 теста **семантически** без изменений;
+expected-объект теста «empty export» (полный deepEqual stdout, включая `metrics`)
+дополняется полем `metrics.children: "full"` (прецедент 4.10.0 — baseline не
+считается «нетронутым», обновление expected — часть фикса).
 
 ## 5. Риски / безопасность
 
@@ -106,14 +120,17 @@
 ## 6. Критерии приёмки
 
 1. `--no-children` — прогон ~5 с, `children: "skipped"`, `tokensByAgent: {}`.
-2. Полноценный прогон (dogfooding на сессии с child-сессиями): stderr пуст
-   (успех); при искусственном сбое child — одна диагностическая строка.
-3. Тесты: все зелёные (24 baseline + новые), плагин 250/250 (не тронут).
+2. Полноценный прогон (dogfooding на сессии с child-сессиями): прогресс-шум CLI
+   в stderr отсутствует (успех); подлинные локальные diagnostics (JSONL
+   fail-soft) — не считаются шумом; при искусственном сбое child — одна
+   диагностическая строка.
+3. Тесты: все зелёные (24 baseline, с обновлением expected-объекта empty-export
+   + новые), плагин — без регрессий (счёт по факту прогона).
 4. Доки синхронны (changelog/commands/regression/project-context).
 5. Версия 4.11.0 (bump после merge).
 
 <!-- maestro:sanitize
 status: CLEAN
 date: 2026-09-25
-hash: 966d1e6df0dee1004e27b8a385d2c98713f26ef1192a709282d2ea10836d1551
+hash: c1b7f25f1a99b92bb78e7e6d6b2037739bfd19dcbce6ccdaadcafc70791eaa11
 -->
