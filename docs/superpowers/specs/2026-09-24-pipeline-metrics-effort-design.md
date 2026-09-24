@@ -32,37 +32,47 @@ backward-compat).
 
 - **`metrics.tokens`** (primary-сессия): `{ input, output, reasoning,
   cacheRead, cacheWrite, cost }` — сумма `info.tokens` по assistant-сообщениям
-  (совпадает с `info.tokens` экспорта); `cost` — сумма `info.cost`,
-  **`null` при отсутствии прайсинга** (все `cost` = 0/absent → `null`;
-  валидное число > 0 → число).
+  (вход — вложенная форма `tokens.cache.read/write`; выход — плоский
+  маппинг `cacheRead`/`cacheWrite`). Top-level `info.tokens` сессии — только
+  **cross-check** (могут разойтись на aborted/variant-генерациях), первичный
+  расчёт — по сообщениям. `cost` — сумма `info.cost`, **`null` при
+  отсутствии прайсинга** (все значения 0/отсутствуют → `null`; число > 0 →
+  число).
 - **`metrics.tokensByAgent`** (по `subagent_type`): `{ count, input, output,
   reasoning, cacheRead, cacheWrite, skipped, failed }` — токены child-сессий
   сабагентов: для каждой `task`-части `state.metadata.sessionId` → отдельный
   `opencode export <childSessionId>` → `info.tokens`. Детерминированная
   атрибуция: child-ID берётся только из metadata (не из output).
-  - **Стратегия child-экспорта (A1):** concurrency **4** (фиксировано для
-    детерминизма; согласованный диапазон 4–5), **cap 100**
-    child-экспортов на запуск; over-cap и
-    неуспевшие — `skipped`, ошибки экспорта (сбой/`invalid_export`) —
-    `failed`. **Fail-soft:** любой сбой child не блокирует основной вывод.
+  - **Стратегия child-экспорта (A1):** concurrency **4** (фиксированное
+    значение из согласованного диапазона 4–5), **cap 100**
+    child-экспортов на запуск; over-cap → `skipped`; каждый child-экспорт
+    имеет **таймаут 30 c** — истёкший → `skipped`; ошибки экспорта
+    (сбой/`invalid_export`) → `failed`. **Fail-soft:** любой сбой child не
+    блокирует основной вывод. **Инвариант:** child-экспорт всегда вызывается
+    **без флага `--sanitize`** (флаг редактит `tool-title`/`tool-state-metadata`
+    и молча ломает `reviewDispatches`/`tokensByAgent`).
   - `task`-части без `metadata.sessionId` — не попадают ни в count, ни в
     счётчики (исключение не считается).
   - Пересчёт дублей: если один child-`sessionId` встречается в нескольких
     `task`-частях — токены учитываются **один раз** (unique по sessionId),
-    `count` — количество task-частей.
+    `count` — количество task-частей. Если у одного sessionId встретились
+    разные `subagent_type` — атрибуция **по первому встреченному**
+    (теоретический кейс resume с другой моделью).
 - **`metrics.activeMs`** — `session.durationMs − totals.idleWaitMs`
   (активное время без ожидания пользователя; floor 0; `null`, если
   `session.durationMs` — `null`).
 - **`metrics.questionCount`** — количество `question`-tool-частей (HITL-гейты).
-- **`metrics.reviewDispatches`** — количество `task`-частей, чей
-  `state.title` матчит `/review|ревью/i` (case-insensitive). **Только
-  счётчик** — title не выводится в stdout-JSON (SEC-4b); title уже
-  санирован плагином (Level 1) до диспатча. Хэвистика задокументирована:
-  ложные срабатывания/пропуски допустимы (агрегат-ориентир, не истина).
+- **`metrics.reviewDispatches`** — количество **completed** `task`-частей
+  (у pending/error-стейтов `title` отсутствует по схеме), чей `state.title`
+  матчит `/\breview\b|ревью/i` (case-insensitive; граница слова исключает
+  «preview»/«overview»). **Только счётчик** — title используется только
+  in-process для матчинга; в stdout/JSONL/отчёт не выводится (SEC-4b).
+  Хэвистика задокументирована: ложные срабатывания/пропуски допустимы
+  (агрегат-ориентир, не истина).
 - **JSONL-история (A2):** helper **сам** пишет строку в
   `.maestro/metrics/history.jsonl` (каталог создаётся; одна JSON-строка на
-  запуск): `{ sessionID, date (YYYY-MM-DD), metrics }` (metrics — тот же
-  блок, что в stdout, без `timeline`). **Upsert по `sessionID`**: при
+  запуск): `{ sessionID, date (YYYY-MM-DD) — дата запуска helper, metrics }`
+  (metrics — тот же блок, что в stdout, без `timeline`). **Upsert по `sessionID`**: при
   повторном запуске для той же сессии старая строка заменяется новой
   (идемпотентность регенерации отчёта). **Fail-soft:** отсутствие/недоступность
   `.maestro/` → строка не пишется, вывод в stdout не меняется (stderr —
@@ -118,20 +128,20 @@ Effort»**:
 
 | Файл | Изменение |
 |---|---|
-| `skills/maestro-feedback-report/timeline.mjs` | блок `metrics`, child-экспорт (concurrency 4–5, cap 100, fail-soft), JSONL upsert |
+| `skills/maestro-feedback-report/timeline.mjs` | блок `metrics`, child-экспорт (concurrency 4, cap 100, таймаут 30 c, fail-soft), JSONL upsert |
 | `skills/maestro-feedback-report/timeline.test.mjs` | новые тесты (baseline 11) |
 | `skills/maestro-feedback-report/SKILL.md` | раздел «Метрики пайплайна и Effort» + шаблон отчёта |
 | `manual_docs/reference/commands.md` | синк описания `@maestro-feedback-report` (новый раздел) |
 | `manual_docs/overview/changelog.md` | `[Unreleased]` → буллит фичи |
-| `docs/project-context.md` | §10 (число timeline-тестов), при необходимости §14 |
+| `docs/project-context.md` | §10 — число timeline-тестов + сверка/фикс дрейфа plugin-test-count (236 → актуальный из прогона) |
 | `docs/roadmap.md` | #109/#115 → выполнено (4.10.0) |
 | `regression/entries/2026-09-24-pipeline-metrics-effort.md` | новая entry |
 
 ## Тестирование
 
 - **`timeline.test.mjs`** (baseline 11, extend):
-  - `metrics.tokens` — агрегация по assistant-сообщениям; cost: 0/absent →
-    `null`, > 0 → число;
+  - `metrics.tokens` — агрегация по assistant-сообщениям; `cost` — при всех
+    значениях 0/отсутствует → `null`, при числе > 0 → число;
   - `tokensByAgent` — атрибуция по child-экспорту (mock-экспорт: fixture-JSON
     файла, 2-й аргумент-механизм расширить на child? — **нет**: child-экспорт
     тестируется через фикстуру + monkey-patch spawn или вынос функции
@@ -142,18 +152,29 @@ Effort»**:
     регистр, кириллица);
   - JSONL: запись строки, upsert по sessionID (повторная запись → одна
     строка), fail-soft (недоступный путь → stdout не меняется);
+  - **зависший child-экспорт** (таймаут) → `skipped`, основной вывод не
+    блокируется;
   - **backward-compat**: существующие ключи stdout-JSON идентичны
-    (отдельный тест-ассерт на ключи/структуру).
+    (отдельный тест-ассерт на ключи/структуру). **Примечание:** существующий
+    тест «empty export» делает full `deepEqual` всего stdout — expected-объект
+    обновляется под новый ключ `metrics` (baseline не считается «нетронутым»).
 - **Плагин:** `node --test plugins/maestro-bootstrap/index.test.js` — без
-  регрессий (baseline 250) — плагин не меняется, контроль регресса.
-- **E2E-смоук:** `./maestro-sandbox.sh` (чеклист) — без изменений поведения
-  feedback-report в сценариях чеклиста.
+  регрессий; фактический счёт — из прогона на момент записи (прецедент #113,
+  хардкод числа из спеки не использовать) — плагин не меняется, контроль
+  регресса.
+- **Dogfooding-верификация (позитивный сценарий на реальных данных):** прогон
+  `node timeline.mjs <реальный sessionID>` на живой сессии с task-частями;
+  контроли: `metrics.tokens.input > 0`, `cost` — число|null, `tokensByAgent`
+  непуст при наличии task-частей, строка `history.jsonl` записана.
+  (Sandbox-чеклист feedback-report-сценариев не содержит — вакуозная E2E-заявка
+  исключена; формат экспорта верифицируется на установленной версии opencode.)
 
 ## Риски
 
-1. **Производительность child-экспорта** — до cap 100 × ~1–2 c (concurrency
-   4–5 → до ~25–40 c в худшем случае). Митигация: cap + fail-soft; отчёт
-   собирается после завершения пайплайна (не в критическом пути).
+1. **Производительность/зависание child-экспорта** — до cap 100 × ~1–2 c
+   (concurrency 4 → до ~50 c в худшем случае); зависший экспорт ограничен
+   таймаутом 30 c. Митигация: cap + таймаут + fail-soft; отчёт собирается
+   после завершения пайплайна (не в критическом пути).
 2. **`reviewDispatches` — хэвистика** — ложные срабатывания/пропуски.
    Митигация: пометка «механический ориентир» + LLM-нарратив как истина.
 3. **Дрейф формата `opencode export`** — новые/переименованные поля
@@ -192,7 +213,24 @@ Effort»**:
 5. Все fail-soft-сценарии (нет `.maestro/`, сбой child-экспорта, over-cap,
    отсутствие `metadata.sessionId`, `cost` без прайсинга) — pipeline и вывод
    не блокируются.
-6. Тесты: `timeline.test.mjs` зелёные (11 baseline + новые), плагин 250/250,
-   `./maestro-sandbox.sh` без деградаций.
+6. Тесты: `timeline.test.mjs` зелёные (11 baseline + новые, включая
+   empty-export deepEqual под новый ключ `metrics`), плагин — без регрессий
+   (фактический счёт из прогона), dogfooding-прогон на живой сессии:
+   контроли `metrics.tokens.input > 0`, `cost` — число|null, `tokensByAgent`
+   непуст, строка `history.jsonl` записана.
 7. Доки синхронизированы (manual_docs, project-context, roadmap, regression
    entry) — DoD волны.
+
+<!-- maestro:sanitize
+status: CLEAN
+date: 2026-09-24
+reviewer: sanitizer
+hash: 6ce9f235671ec892eab2307b7bcc84dc444c7cfd476f193829eeb880a180a9a8
+-->
+
+<!-- maestro:review
+reviewer: opus
+date: 2026-09-24
+verdict: approve
+hash: 6ce9f235671ec892eab2307b7bcc84dc444c7cfd476f193829eeb880a180a9a8
+-->
