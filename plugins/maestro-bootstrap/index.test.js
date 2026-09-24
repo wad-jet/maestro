@@ -1,9 +1,9 @@
-import { describe, it, before, after } from "node:test";
+import { describe, it, before, after, afterEach } from "node:test";
 import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MaestroBootstrapPlugin, createBootstrapAdapter, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile, loadCommunicationConfig, loadFeedbackReportConfig } from "./core.js";
+import { MaestroBootstrapPlugin, createBootstrapAdapter, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile, loadCommunicationConfig, loadFeedbackReportConfig, makeMaestroConfigTool, resolveConfigFile } from "./core.js";
 import {
   detectPlainFlag,
   SOURCE_LABELS,
@@ -2619,6 +2619,183 @@ describe("feedback-report wiring (MaestroBootstrapPlugin)", () => {
         config: { feedback_report: v }, log });
       const hookInvalid = log.calls.includes("feedback_report:config_fallback");
       assert.equal(hookInvalid, coreInvalid, `desync для значения ${JSON.stringify(v)}`);
+    }
+  });
+});
+
+describe("maestro_config tool (read-only maestro.json, spec 2026-09-24)", () => {
+  let dir;
+  let savedMAESTRO;
+
+  const cfgPath = () => path.join(dir, "maestro.json");
+  const lines = (msg) => readLogs(dir).filter((e) => e.msg === msg);
+  const clientWith = (sessions) => ({
+    session: {
+      get: async ({ path: { id } }) => {
+        const s = sessions[id];
+        if (!s) throw new Error("no session");
+        return s;
+      },
+    },
+  });
+  const primary = () => clientWith({ s1: { parentID: null, title: "primary" } });
+  const run = (t, args, sessionID = "s1") => t.execute(args ?? {}, { sessionID });
+  const jrun = async (t, args, sid) => JSON.parse(await run(t, args, sid));
+  const makeTool = async (config, client = primary()) => {
+    if (config === null) fs.rmSync(cfgPath(), { force: true });
+    else
+      fs.writeFileSync(
+        cfgPath(),
+        typeof config === "string" ? config : JSON.stringify(config),
+      );
+    const plugin = await MaestroBootstrapPlugin({ directory: dir, client });
+    return plugin.tool.maestro_config;
+  };
+  const cleanup = () => fs.rmSync(cfgPath(), { force: true });
+
+  before(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "maestro-config-tool-"));
+    savedMAESTRO = process.env.MAESTRO_CONFIG;
+    delete process.env.MAESTRO_CONFIG;
+  });
+  after(() => {
+    cleanup();
+    if (savedMAESTRO === undefined) delete process.env.MAESTRO_CONFIG;
+    else process.env.MAESTRO_CONFIG = savedMAESTRO;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  afterEach(cleanup);
+
+  it("1. весь конфиг: exists + config + path; аудит ok", async () => {
+    const t = await makeTool({ trust: { custodian: true } });
+    const out = await jrun(t, {});
+    assert.equal(out.exists, true);
+    assert.deepEqual(out.config, { trust: { custodian: true } });
+    assert.equal(out.path, cfgPath());
+    assert.ok(lines("maestro_config:read").some((e) => e.result === "ok"));
+  });
+
+  it("2. section: top-level и вложенный dot-path; null-значение найдено", async () => {
+    const t = await makeTool({ memory: { enabled: true, embedding: { model: null, dim: 384 } } });
+    const top = await jrun(t, { section: "memory" });
+    assert.equal(top.section_found, true);
+    assert.equal(top.config.enabled, true);
+    const nested = await jrun(t, { section: "memory.embedding.dim" });
+    assert.equal(nested.section_found, true);
+    assert.equal(nested.config, 384);
+    const nullVal = await jrun(t, { section: "memory.embedding.model" });
+    assert.equal(nullVal.section_found, true);
+    assert.equal(nullVal.config, null);
+  });
+
+  it("3. section не найден → section_found: false + аудит section_missing", async () => {
+    const t = await makeTool({ trust: {} });
+    const out = await jrun(t, { section: "nope" });
+    assert.equal(out.section_found, false);
+    assert.equal(out.config, null);
+    assert.ok(lines("maestro_config:read").some((e) => e.result === "section_missing"));
+  });
+
+  it("4. файл отсутствует → exists: false + аудит file_missing", async () => {
+    const t = await makeTool(null);
+    const out = await jrun(t, {});
+    assert.equal(out.exists, false);
+    assert.deepEqual(out.config, {});
+    assert.ok(lines("maestro_config:read").some((e) => e.result === "file_missing"));
+  });
+
+  it("5. невалидный JSON → parse_error: true + аудит parse_error", async () => {
+    const t = await makeTool("{ not json");
+    const out = await jrun(t, {});
+    assert.equal(out.parse_error, true);
+    assert.ok(lines("maestro_config:read").some((e) => e.result === "parse_error"));
+  });
+
+  it("6. невалидный section → сообщение об ошибке, без throw", async () => {
+    const t = await makeTool({ a: { b: 1 } });
+    for (const bad of ["", ".x", "a..b", "a."]) {
+      const msg = await run(t, { section: bad });
+      assert.match(msg, /invalid section/i);
+    }
+  });
+
+  it("7. Guard: task-сессия (parentID) → deny task_session, без данных конфига", async () => {
+    const t = await makeTool(
+      { trust: { custodian: true } },
+      clientWith({ t1: { parentID: "s0", title: "sub" } }),
+    );
+    const msg = await run(t, {}, "t1");
+    assert.match(msg, /only available in top-level primary sessions/);
+    assert.ok(!msg.includes("custodian"));
+    assert.ok(
+      lines("maestro_config:access_denied").some((e) => e.reason === "task_session"),
+    );
+  });
+
+  it("8. Guard: service-сессия (title [maestro-memory]) → deny service_session", async () => {
+    const t = await makeTool(
+      {},
+      clientWith({ s2: { parentID: null, title: "[maestro-memory] summarize s1" } }),
+    );
+    const msg = await run(t, {}, "s2");
+    assert.match(msg, /only available in top-level primary sessions/);
+    assert.ok(
+      lines("maestro_config:access_denied").some((e) => e.reason === "service_session"),
+    );
+  });
+
+  it("9. Guard: SESSIONS (fast-check до session.get) → deny service_session", async () => {
+    const { SESSIONS } = await import("./memory/summarize.js");
+    const t = await makeTool({}, clientWith({})); // session.get бы бросил — fast-check сработает раньше
+    SESSIONS.add("svc-1");
+    try {
+      const msg = await run(t, {}, "svc-1");
+      assert.match(msg, /only available in top-level primary sessions/);
+      assert.ok(
+        lines("maestro_config:access_denied").some(
+          (e) => e.reason === "service_session" && e.sessionID === "svc-1",
+        ),
+      );
+    } finally {
+      SESSIONS.delete("svc-1");
+    }
+  });
+
+  it("10. Guard: session.get-ошибка / нет sessionID → deny session_unavailable (fail-closed)", async () => {
+    const t = await makeTool({}, primary());
+    const msg1 = await run(t, {}, "unknown"); // не в map → throw
+    assert.match(msg1, /only available in top-level primary sessions/);
+    const msg2 = await t.execute({}, {}); // ctx без sessionID
+    assert.match(msg2, /only available in top-level primary sessions/);
+    assert.ok(
+      lines("maestro_config:access_denied").filter(
+        (e) => e.reason === "session_unavailable",
+      ).length >= 2,
+    );
+  });
+
+  it("11. Guard: primary-сессия → ok", async () => {
+    const t = await makeTool({ communication: "plain" });
+    const out = await jrun(t, { section: "communication" });
+    assert.equal(out.config, "plain");
+  });
+
+  it("12. регистрация безусловна (без секции memory в конфиге)", async () => {
+    const t = await makeTool({ trust: {} });
+    assert.equal(typeof t.execute, "function");
+  });
+
+  it("13. MAESTRO_CONFIG override → path в ответе", async () => {
+    const alt = path.join(dir, "custom-config.json");
+    fs.writeFileSync(alt, JSON.stringify({ custom: true }));
+    process.env.MAESTRO_CONFIG = alt;
+    try {
+      const t = await makeTool({ ignored: true }); // основной файл есть, override побеждает
+      const out = await jrun(t, {});
+      assert.equal(out.path, alt);
+      assert.equal(out.config.custom, true);
+    } finally {
+      delete process.env.MAESTRO_CONFIG;
     }
   });
 });
