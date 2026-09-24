@@ -96,9 +96,9 @@ auto / manual / disable». Роадмап (M2): дефолт — консерв�
 | Файл | Изменение |
 |---|---|
 | `plugins/maestro-bootstrap/feedback-report.js` | **новый self-contained модуль** (паттерн `communication.js`, НЕ импортирует core.js): разбор `feedback_report` из config (enum `auto`/`manual`/`disable`; отсутствует → manual; невалидное → manual + `invalid: true`), текст директивы, `registerFeedbackReportHooks({client, config, log})` → хук `experimental.chat.system.transform`: инъекция `maestro.json → feedback_report: <mode>` только при явном non-manual, guard top-level primary (без task-сессий/`[maestro-memory]`), fail-soft, warn `feedback_report:config_fallback` |
-| `plugins/maestro-bootstrap/core.js` | регистрация `registerFeedbackReportHooks` (рядом с `registerCommunicationHooks`, fail-soft try/catch) |
+| `plugins/maestro-bootstrap/core.js` | регистрация `registerFeedbackReportHooks` (рядом с `registerCommunicationHooks`, fail-soft try/catch) + **расширение `chainHooks`: хуки директивы — третий источник в цепочке `experimental.chat.system.transform`** (сегодня ровно два: `commHooks` + `memoryHooks`; без расширения зарегистрированный хук — dead code, директива не инжектится) |
 | `plugins/maestro-bootstrap/index.test.js` | unit-тесты: parse (enum/дефолт/невалидное), инъекция директивы (только non-manual, только top-level primary, без task/`[maestro-memory]`), отсутствие директивы при manual/ключе-нет, warn при невалидном, fail-soft (сбой хука не ломает chat) |
-| `skills/maestro/SKILL.md` | шаг 18.5 (pipeline feature + bugfix, обзоры маршрутов «0–18» → «0–18.5», примеры feature + bugfix; в тексте шага 18.5 — источник режима: директива плагина в system-контексте, нет директивы → manual; промпт-override для `auto` по §2: подавление Гейта 0 и подтверждающих вопросов скилла, выбор сессии самостоятельно) |
+| `skills/maestro/SKILL.md` | шаг 18.5 (pipeline feature + bugfix, обзоры маршрутов «0–18» → «0–18.5»; примеры: **feature (L2213) и полный bugfix (L2270) — добавить строку 18.5**; сокращённый пример «Багфикс (interactive mode)» (L2287, «Шаг 18: merge») — осознанно оставить (элидированный пример); bump-упоминания (L231–232) остаются — bump на шаге 18. В тексте шага 18.5 — источник режима: директива плагина в system-контексте, нет директивы → manual; промпт-override для `auto` по §2: подавление Гейта 0 и подтверждающих вопросов скилла, выбор сессии самостоятельно) |
 | `skills/maestro-assistant/SKILL.md` | канон: секция «Ключ `feedback_report`» (значения, дефолт, fallback — невалидное → manual + warn в лог; **читает плагин при init — смена значения требует перезапуска opencode** (прецедент `communication`), смена — правка `maestro.json`; **при `/maestro-setup` ключ не генерируется и не спрашивается — отсутствие = manual**, no-silent-opt-in по паттерну секции `memory`) |
 | `skills/maestro-feedback-report/SKILL.md` | Overview: примечание «вызов из pipeline (шаг 18.5, режим auto) — тот же скилл; режим — `maestro.json → feedback_report`» |
 | `commands/maestro-feedback-report.md` | примечание: режимы pipeline — `maestro.json → feedback_report`; команда всегда интерактивна |
@@ -125,17 +125,27 @@ auto / manual / disable». Роадмап (M2): дефолт — консерв�
   и `[maestro-memory]` исключены), warn `feedback_report:config_fallback`
   при невалидном, fail-soft хука. Существующие:
   `node --test plugins/maestro-bootstrap/index.test.js` — без регрессий
-  (база 210 + новые). Число тестов для drift-фикса
+  (база 210 + новые).
+- **Wiring-тест (I1, прецедент `describe("communication wiring (MaestroBootstrapPlugin)")`):**
+  `MaestroBootstrapPlugin` с `feedback_report: "auto"` в maestro.json →
+  plugin-level `experimental.chat.system.transform` инжектит директиву.
+  Ловит «мёртвую» сборку: хук зарегистрирован, но не включён в `chainHooks`
+  (класс дефекта адаптера 3.0.3 — зелёные module-тесты, фича не работает).
+  Число тестов для drift-фикса
   `docs/project-context.md` фиксировать фактическим выводом прогона на
   момент записи (см. «Файлы»), не значением из спеки.
 - `npm run test:memory` — без регрессий.
 - Верификация — diff-сверка доков (AGENTS.md: manual_docs-синк — критерий
   приёмки) + regression entry.
-- Grep-сверка конца пайплайна в manual_docs — паттерн
-  `0–18|0→18|шаг 18|17–18`: каждое попадание либо обновлено до 18.5, либо
-  осознанно оставлено без правки: исторические записи
-  `overview/changelog.md` и «bump — шаг 18 после merge» в
-  `reference/hitl-gates.md` (bump остаётся на шаге 18).
+- Grep-сверка конца пайплайна в manual_docs **и `skills/maestro/SKILL.md`**
+  — case-insensitive-паттерн `0[–-]18|0→18|шаг ?18|17[–-]18|11[–-]18|step ?18`
+  (оба варианта дефиса — en-dash и hyphen; латинский `Step 18`): каждое
+  попадание либо обновлено до 18.5, либо осознанно оставлено без правки:
+  исторические записи `overview/changelog.md` и «bump — шаг 18 после merge»
+  в `reference/hitl-gates.md` (bump остаётся на шаге 18).
+- Bump `package.json` 4.7.1 → 4.8.0 — шаг 18 по правилам версионирования
+  project-context §3, отдельный коммит `chore: bump version to 4.8.0 —
+  feedback-report modes (changelog/version)` на base-ветке после merge.
 
 ## Риски
 
