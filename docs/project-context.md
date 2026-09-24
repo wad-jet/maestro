@@ -39,7 +39,7 @@
   доработке — pipeline: гейт 17 показывает предлагаемую версию, после merge —
   bump; канон хука — SKILL.md maestro, шаги 0/17/18).
   - **Схема:** semver `MAJOR.MINOR.PATCH`. Текущая версия дистрибутива —
-    `4.6.0` (единая для скиллов и плагина, см. `manual_docs/how-to/update-maestro.md`).
+    `4.8.0` (единая для скиллов и плагина, см. `manual_docs/how-to/update-maestro.md`).
   - **Где живёт версия:** корневой `package.json → version` (единый источник).
   - **Маппинг типа изменения → уровень:** новая фича / процессное правило
     скилла — **minor**; багфикс / патч — **patch**; **memory layer в beta** —
@@ -166,7 +166,7 @@
 ## 10. Тестирование
 
 - **Unit (плагин):** встроенный Node test runner — `node --test
-  plugins/maestro-bootstrap/index.test.js` (176 тестов).
+  plugins/maestro-bootstrap/index.test.js` (236 тестов).
 - **QA-чеклист (e2e-смоук):** `./maestro-sandbox.sh` создаёт `.sandbox/` (фиктивное
   целевое приложение), чеклист `docs/testing/maestro-sandbox-checklist.md`.
 - Команды тестирования зафиксированы в §14.
@@ -220,3 +220,9 @@ OBSERVABILITY_COVERAGE_COMMAND: "none"
 - `@maestro-memory` — статус memory layer (бэкенд, модель, записи, кластеры/граф, тюнинг; только агрегаты).
 - `@maestro-memory-report` — статический HTML-отчёт в `.maestro/` (только агрегаты, SEC-4b; `report.include_text` — opt-in).
 - `@maestro-memory-prune` — HITL-утилизация брошенных/unknown записей (листинг → подтверждение → удаление).
+- `@maestro-memory-reindex` — HITL-бэкафилл индексации (sessions + git-история → full-reindex), восстановление после skip-дрейфа.
+- `@maestro-memory-backup` — HITL бэкап/восстановление memory layer (sqlite v1, double-masking, manifest sha256).
+- `memory_probe` — принудительная проверка доступности модели эмбеддингов (mиnu cooldown).
+
+### Команды пайплайна
+- Шаг 18.5 — `@maestro-feedback-report`: режимы `auto/manual/disable` в `maestro.json` (канон `maestro-assistant`, плагин `feedback-report.js`, directive injection в system-контекст).
