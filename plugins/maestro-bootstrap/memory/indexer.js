@@ -25,6 +25,10 @@ export class Indexer {
     // artifactConfidentialPatterns: resolved-набор для artifact-фильтра (Z4);
     // НЕ переиспользуем confidentialPatterns маскирования (I2) — отдельный набор.
     artifactGlobs = [], artifactConfidentialPatterns = [],
+    // #77 (spec §4.2, M1): unsaved-реестр владет index.js; indexer получает
+    // колбэки (default no-op — backward compat). setUnsaved — при hard-fail
+    // (non-retryable), clearUnsaved — при успешном setSummarized.
+    setUnsaved = () => {}, clearUnsaved = () => {},
     // Task 3: аудит-лог-хелперы (spec §2.2) — пишут в memoryLog ?? log;
     // default — заглушки (backward compat: без хелперов события не пишутся).
     logInfo = () => {}, logDebug = () => {}, logWarn = () => {}, logError = () => {},
@@ -50,6 +54,8 @@ export class Indexer {
     this.root = root;
     this.artifactGlobs = artifactGlobs;
     this.artifactConfidentialPatterns = artifactConfidentialPatterns;
+    this.setUnsaved = setUnsaved;
+    this.clearUnsaved = clearUnsaved;
     // Task 4: sticky branch/head per session (resolved once, reused on version++).
     // M-7: bounded Map — FIFO-эвикция старейшего при превышении cap.
     this._branchContext = new Map();
@@ -195,9 +201,58 @@ export class Indexer {
       // I2: exclude maestro-memory sessions
       if (SESSIONS.has(sessionID)) return;
 
+      // #77 (Task 2): стадии пайплайна — _pipeline (обрабатывает ошибки сам,
+      // возвращает status). Этот catch — только для ошибок guards; поведение
+      // идентично до-#77 catch.
+      await this._pipeline(sessionID);
+    } catch (err) {
+      // #77: ошибки guards (state-чтения) — классификация как в _pipeline
+      // (F4: default index_error); enum-only (SEC-4b).
+      if (err?.retryable) {
+        this.logError?.("memory:index_error", { sessionID, error_class: "retryable" });
+        this.logDebug?.("memory:index_retryable", { sessionID });
+        return;
+      }
+      const rawClass = err?.errorClass;
+      const errorClass = (rawClass === "storage_error" || rawClass === "embedder_error" || rawClass === "index_error") ? rawClass : "index_error";
+      this.logError?.("memory:index_error", { sessionID, error_class: errorClass });
+      try { await this.state.recordFail(sessionID, errorClass); } catch {}
+      const fails = (this._fails.get(sessionID) ?? 0) + 1;
+      this._fails.set(sessionID, fails);
+      if (fails >= 3) {
+        this.logWarn?.("memory:index_skipped", { sessionID, fails });
+      }
+      try { this.setUnsaved?.(sessionID, errorClass); } catch {}
+    } finally {
+      this.running = false;
+      // M3: dedup when processing queue
+      const next = [...this.queue].find((sid) => sid !== sessionID);
+      if (next) {
+        this.queue.delete(next);
+        this._run(next).catch(() => {});
+      } else {
+        this.queue.clear();
+      }
+      const t = this.timers.get(sessionID);
+      if (t) { clearTimeout(t); this.timers.delete(sessionID); }
+    }
+  }
+
+  /**
+   * #77 (spec §5.1.1): пайплайн стадий штатного индексирования —
+   * session.read → min_new → transcript → maskTranscript → write-gate →
+   * summarize → maskEntry → embed → upsert → setSummarized.
+   * _run вызывает его после guards; reindexSession (Task 4) — напрямую,
+   * в обход running/queue/throttle-гардов.
+   * @param {string} sessionID
+   * @returns {Promise<{ status: string }>} "ok" | "unattributed" |
+   *   "no_new_messages" | "skip_service" | "failed:<class>"
+   */
+  async _pipeline(sessionID) {
+    try {
       const sessResp = await this.client.session.get({ path: { id: sessionID } });
       const sess = sessResp?.data ?? sessResp;
-      if (sess?.parentID) return;
+      if (sess?.parentID) return { status: "skip_service" };
 
       const msgResp = await this.client.session.messages({ path: { id: sessionID } });
       const messages = (msgResp?.data ?? msgResp) ?? [];
@@ -220,14 +275,14 @@ export class Indexer {
           const tc = m.time_created ?? m.info?.time?.created ?? 0;
           return tc > lastSummarized;
         }).length;
-        if (newCount < minNew) return;
+        if (newCount < minNew) return { status: "no_new_messages" };
       }
 
       const transcript = messages
         .map((m) => (m.parts ?? []).map((p) => p.type === "text" ? p.text : "").join("\n"))
         .join("\n");
 
-      if (!transcript.trim()) return;
+      if (!transcript.trim()) return { status: "no_new_messages" };
 
       // Mask confidential content BEFORE summarize
       const masked = maskTranscript(transcript, { confidentialPatterns: this.confidentialPatterns });
@@ -246,7 +301,7 @@ export class Indexer {
         const effHead = head || existing?.head || "";
         if (!effHead) {
           this.logDebug?.("memory:index_unattributed", { sessionID });
-          return;
+          return { status: "unattributed" };
         }
         const effBranch = branch || existing?.branch || "";
 
@@ -259,13 +314,19 @@ export class Indexer {
         if (resolved.error) {
           this.logWarn?.("memory:summarizer_unavailable", { reason: resolved.error });
         }
-        const { title, summary, decisions } = await this.summarize({
-          client: this.client,
-          sessionID,
-          transcript: masked,
-          model: modelRef,
-          summarizerModel: resolved.model,
-        });
+        let title, summary, decisions;
+        try {
+          ({ title, summary, decisions } = await this.summarize({
+            client: this.client,
+            sessionID,
+            transcript: masked,
+            model: modelRef,
+            summarizerModel: resolved.model,
+          }));
+        } catch (e) {
+          if (e && typeof e === "object" && !e.retryable) e.errorClass = "index_error";
+          throw e;
+        }
         // Task 3: перф-аудит — duration; model — effective-модель саммаризации
         // (resolved, либо модель сессии при fallback); model_source — enum (SEC-4b).
         this.logDebug?.("memory:summarize.duration", {
@@ -329,7 +390,13 @@ export class Indexer {
         });
 
         // I1: embed AFTER mask
-        const vec = await this.embeddings.embed(`${maskedEntry.title}\n${maskedEntry.summary}\n${maskedEntry.decisions.join("\n")}`);
+        let vec;
+        try {
+          vec = await this.embeddings.embed(`${maskedEntry.title}\n${maskedEntry.summary}\n${maskedEntry.decisions.join("\n")}`);
+        } catch (e) {
+          if (e && typeof e === "object" && !e.retryable) e.errorClass = "embedder_error";
+          throw e;
+        }
         maskedEntry.embedding = vec;
 
         // G5: version increment — reuse `existing` fetched by the write-gate.
@@ -351,17 +418,23 @@ export class Indexer {
 
         // Task 5: tombstone race-guard (spec §5) — pre-check перед upsert:
         // если сессия удалена во время summarize, не пишем запись вовсе.
-        if (this._tombstones.has(sessionID)) return;
-        await this.storage.upsert([maskedEntry]);
+        if (this._tombstones.has(sessionID)) return { status: "no_new_messages" };
+        try {
+          await this.storage.upsert([maskedEntry]);
+        } catch (e) {
+          if (e && typeof e === "object") e.errorClass = "storage_error";
+          throw e;
+        }
         // Task 5: post-upsert recheck — сессия могла быть удалена между
         // pre-check и upsert; тогда удаляем только что записанную запись
         // (не даём «воскреснуть» удалённой сессии).
         if (this._tombstones.has(sessionID)) {
           try { await this.storage.delete(sessionID); } catch {}
           this._tombstones.delete(sessionID);
-          return;
+          return { status: "no_new_messages" };
         }
         await this.state.setSummarized(sessionID);
+        try { this.clearUnsaved?.(sessionID); } catch {}
         // Task 3: lifecycle-аудит (spec §4.1) — indexed при первой записи,
         // reindexed при пере-саммаризации повторно посещённой сессии
         // (version > 1, spec §4.4). author — из записи (maskedEntry.author).
@@ -371,41 +444,60 @@ export class Indexer {
         } else {
           this.logInfo?.("memory:indexed", { sessionID, projectKey: this.projectKey.hash, author, version: maskedEntry.version });
         }
+        return { status: "ok" };
       })();
 
-      await withTimeout(work, timeoutMs);
+      return await withTimeout(work, timeoutMs);
     } catch (err) {
-      // Task 3: root-cause-аудит (spec §4.1/§3) — enum-only: тела ошибок
-      // (message/stack) в лог НЕ попадают, только error_class. Заменяет
-      // прежнее «memory: indexer error» с errMsg (нарушало whitelist).
-      const errorClass = err?.retryable ? "retryable" : "storage";
-      this.logError?.("memory:index_error", { sessionID, error_class: errorClass });
+      // #77 (spec §4.1): поимённая классификация — stage-tag (e.errorClass),
+      // поставленный обёртками стадий; default — index_error (F4: ошибки
+      // session.get/messages и fallback withTimeout). enum-only (SEC-4b):
+      // тела ошибок в лог НЕ попадают.
       if (err?.retryable) {
-        // retryable (сеть/timeout/5xx embed) — skip не засчитывается (I3).
+        // retryable (сеть/timeout/5xx embed) — skip не засчитывается (I3),
+        // unsaved-флаг НЕ ставится (spec §4.1: НЕ триггер).
+        this.logError?.("memory:index_error", { sessionID, error_class: "retryable" });
         this.logDebug?.("memory:index_retryable", { sessionID });
-      } else {
-        try { await this.state.recordFail(sessionID); } catch {}
-        // Task 3: локальный счётчик fails (state не отдаёт fails наружу) —
-        // memory:index_skipped ровно в момент перехода в skip (3+ fails).
-        const fails = (this._fails.get(sessionID) ?? 0) + 1;
-        this._fails.set(sessionID, fails);
-        if (fails >= 3) {
-          this.logWarn?.("memory:index_skipped", { sessionID, fails });
-        }
+        return { status: "failed:retryable" };
       }
-    } finally {
-      this.running = false;
-      // M3: dedup when processing queue
-      const next = [...this.queue].find((sid) => sid !== sessionID);
-      if (next) {
-        this.queue.delete(next);
-        this._run(next).catch(() => {});
-      } else {
-        this.queue.clear();
+      const rawClass = err?.errorClass;
+      const errorClass = (rawClass === "storage_error" || rawClass === "embedder_error" || rawClass === "index_error") ? rawClass : "index_error";
+      this.logError?.("memory:index_error", { sessionID, error_class: errorClass });
+      try { await this.state.recordFail(sessionID, errorClass); } catch {}
+      // локальный счётчик fails — memory:index_skipped при переходе в skip
+      const fails = (this._fails.get(sessionID) ?? 0) + 1;
+      this._fails.set(sessionID, fails);
+      if (fails >= 3) {
+        this.logWarn?.("memory:index_skipped", { sessionID, fails });
       }
-      const t = this.timers.get(sessionID);
-      if (t) { clearTimeout(t); this.timers.delete(sessionID); }
+      try { this.setUnsaved?.(sessionID, errorClass); } catch {}
+      return { status: `failed:${errorClass}` };
     }
+  }
+
+  /**
+   * #77 (spec §5.1.1): полный re-index сессии — синхронный для tool'а
+   * (memory_reindex, Task 6). НЕ идёт через running-queue и не гардится
+   * this.running; retry-throttle НЕ применяется (последствие сброса
+   * lastAttempt в clearSkip, C1). Guard-исходы (not_found, skip_service)
+   * пре-чекает tool (R2) — здесь не проверяются.
+   * Гонка с in-flight _run той же сессии — осознанный benign-race (N4):
+   * возможный двойной summarize (LLM-стоимость) + двойной version-bump;
+   * данные безопасны (upsert по session_id), guard не добавляется (YAGNI).
+   * @param {string} sessionID
+   * @returns {Promise<{ status: string }>} "ok" | "unattributed" |
+   *   "no_new_messages" | "skip_service" | "failed:<class>"
+   *   (passthrough _pipeline: parentID-сессия → skip_service; not_found
+   *   пре-чекает tool — в enum не входит)
+   */
+  async reindexSession(sessionID) {
+    // C1: сброс permanent-skip + throttle-якоря (lastAttempt → null);
+    // F5: сброс локального зеркала _fails — иначе memory:index_skipped
+    // сработает преждевременно после нового страйка (state=1, local >= 3).
+    // Вызывается только по явным ID (HITL) — авто-сбросов нет.
+    try { await this.state.clearSkip?.(sessionID); } catch {}
+    this._fails.delete(sessionID);
+    return await this._pipeline(sessionID);
   }
 
   dispose() {

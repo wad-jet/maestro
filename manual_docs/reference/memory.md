@@ -544,7 +544,7 @@ memory_prune({action: "list" | "delete", session_ids?, heads?, category?}) → �
 - **Permission:** `memory_prune: "ask"` в merge-config (обязательное правило —
   без него новый tool получает ungated-доступ по дефолту OpenCode).
 
-### `memory_reindex` (v3.5.0)
+### `memory_reindex` (v3.5.0, fail-loud 4.7.1)
 
 ```
 memory_reindex({action: "list" | "run", source: "sessions" | "git", session_ids?, all_empty?, specs?, all?, max?}) → листинг/бэкфилл
@@ -580,6 +580,13 @@ memory_reindex({action: "list" | "run", source: "sessions" | "git", session_ids?
   `memory_prune` (spec §7).
 - **Permission:** `memory_reindex: "ask"` в merge-config (обязательное правило —
   HITL boundary-tool, не авто-запуск; как `memory_prune`).
+- **Полный re-index (full-reindex, 4.7.1):** явный `session_id` с отсутствующей
+  или stale-записью → LLM-summarize из сессии + сброс permanent-skip;
+  актуальная запись → artifacts top-up (0 LLM). Статусы run: `indexed`,
+  `unattributed`, `no_new_messages`, `not_found`, `skip_service`,
+  `failed: <класс>`. Причина индес-ошибки per-session — enum:
+  `storage_error|embedder_error|index_error`; процесс —
+  `init_failed|config_invalid|client_not_installed|api_key_env_missing|probe_hard_fail`.
 
 ### `memory_export`
 
@@ -796,6 +803,10 @@ memory_stats_detail() → агрегаты (без summary-текста)
 (`memory.enabled: false`), «конфиг-невалиден» (честная причина по
 `disabled_reason`) и «плагин недоступен» (`enabled: true` + инструмент
 недоступен → перезапустить opencode).
+
+**Блок «Не индексированные сессии: N»** — cap 20 строк; N=0 «все сессии
+проиндексированы», N>0 — показать список (reason-класс, skip, последняя
+попытка) + предложить `@maestro-memory-reindex`.
 
 ### `@maestro-memory-report`
 
@@ -1034,6 +1045,9 @@ sessions → возможна пара (реальная + синтетичес�
 | Restore: несовпадение sha256 / `storage_type` / `key` / `model_id` / `dim` / `schema_fields`, невалидная строка, файл вне каталога бэкапов | Отказ, **без partial restore**, БД не изменена (fail-closed); при повреждённой БД — actionable-ошибка (путь к БД, CLI: переименовать/удалить `memory.db` (+`-wal`, `-shm`) и повторить) |
 | Prune (retention): бэкенд недоступен | Лог, без тихого пропуска |
 | Кластеры: мало записей (<2) | Каждая запись образует singleton-кластер («размер 1»); граф — 0 рёбер |
+| Бэкенд недоступен (при старте) | Память off в процессе; **уведомление в сессию (system-notice)** «память не работает в этом процессе (причина)» на каждой top-level сессии; инструменты памяти недоступны |
+| Сбой индексации во время работы | **Уведомление в текущую сессию** «данные НЕ сохранены в памяти (причина)» при первой неудаче (не после 3); retryable-сбои (сеть) уведомление не генерируют; восстановление — `@maestro-memory-reindex` (full-reindex) или перезапуск opencode |
+| «skip after 3» (permanent-skip) | Сбрасывается `memory_reindex` (full-reindex по явному session_id); до сброса штатное индексирование сессию не берёт |
 | `messages.transform` (запрещён) | НЕ используется — инвариант + тест |
 
 Все memory-хуки — глобальные, try/catch-guarded (инвариант плагина).
@@ -1079,7 +1093,7 @@ sessions → возможна пара (реальная + синтетичес�
 | `memory:session_delete_failed` (error) | sessionID |
 | `memory:index_unattributed` (debug) | sessionID (нет git-якоря — запись не индексируется) |
 | `memory:pruned` | count, records (число удалённых записей и session_id) |
-| `memory:reindex.sessions` | selected, updated, no_change, already_indexed, skipped (aggregates-only, SEC-4b) |
+| `memory:reindex.sessions` | selected, updated, no_change, already_indexed, skipped, full_index, indexed, not_found, skip_service, unattributed, no_new_messages, failed (aggregates-only, SEC-4b) |
 | `memory:reindex.git` | selected, indexed, already_indexed, no_change, skipped (aggregates-only, SEC-4b) |
 | `memory:config_fallback` (warn) | — (невалидный `history_globs` → soft fallback на `artifact_globs`; память не отключается) |
 | `memory:delete_on_session_delete_centralized` (warn) | — (флаг `delete_on_session_delete` на централизованном бэкенде) |

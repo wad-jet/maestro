@@ -373,7 +373,7 @@ test("I3: memory_search unavailable for [maestro-memory] sessions", async () => 
 
 // ── M2: auto_recall off ────────────────────────────────────────────────
 
-test("M2: auto_recall false → no chat.message/system.transform hooks", async () => {
+test("#77 T5-5: auto_recall false → no chat.message; transform-хук живёт (notice-слой)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mem-hooks-"));
   const saved = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = dir;
@@ -387,7 +387,12 @@ test("M2: auto_recall false → no chat.message/system.transform hooks", async (
     });
     assert.ok(hooks.tool && hooks.tool.memory_search, "tool still present");
     assert.equal(hooks["chat.message"], undefined);
-    assert.equal(hooks["experimental.chat.system.transform"], undefined);
+    // #77 (I1): transform-хук живёт независимо от auto_recall (notice-слой);
+    // recall-инъекция внутри хука выключена.
+    assert.equal(typeof hooks["experimental.chat.system.transform"], "function");
+    const out = { system: [] };
+    await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, out);
+    assert.equal(out.system.length, 0, "auto_recall false → recall-блоков нет");
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
@@ -3216,6 +3221,7 @@ test("startup probe hard fail → memory off (memory_probe only, no tool hooks)"
     assert.equal(hooks.memory_search, undefined, "no top-level memory_search on hard fail");
     assert.equal(hooks.tool.memory_search, undefined, "no regular tool hooks on hard fail");
     assert.equal(hooks["chat.message"], undefined, "no chat.message on hard fail");
+    assert.equal(typeof hooks["experimental.chat.system.transform"], "function", "#77: process-notice на hard-fail");
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
@@ -3587,7 +3593,9 @@ test("storage_mismatch logs model/dim on init mismatch", async () => {
       root: dir,
       deps: { embeddings: mkMockEmbeddings() },
     });
-    assert.deepEqual(hooks, {}, "init failed → memory off");
+    // #77: init-fail → сокращённый набор (process-notice, без tools) вместо {}.
+    assert.equal(hooks.tool, undefined, "init failed → нет tools");
+    assert.equal(typeof hooks["experimental.chat.system.transform"], "function", "#77: process-notice на init-fail");
     const ev = errors.find(([m]) => m === "memory:storage_mismatch");
     assert.ok(ev, "must emit memory:storage_mismatch");
     assert.equal(ev[1].type, "sqlite");
@@ -4748,8 +4756,12 @@ test("memory_reindex run sessions: явные session_ids (снапшот не �
     mkdirSync(join(dir, "docs/superpowers/specs"), { recursive: true });
     writeFileSync(join(dir, "docs/superpowers/specs/x-design.md"), "# X\n");
     const upserts = [];
+    // #77 T6: N1-диспатч — актуальные записи (storage.get, state без fails)
+    // идут через artifacts top-up (0 LLM) — прежний контракт явных ID.
+    const recs = [mkSessionRecord("s1"), mkSessionRecord("s2")];
     const storage = mkMockStorage();
-    storage.scan = async () => [mkSessionRecord("s1"), mkSessionRecord("s2")];
+    storage.scan = async () => recs;
+    storage.get = async (sid) => recs.find((r) => r.session_id === sid) ?? null;
     storage.upsert = async (entries) => { upserts.push(entries); };
     const client = mkClient({
       session: {
@@ -4808,8 +4820,12 @@ test("memory_reindex run sessions: cap max — первые max, пометка 
     mkdirSync(join(dir, "docs/superpowers/specs"), { recursive: true });
     writeFileSync(join(dir, "docs/superpowers/specs/x-design.md"), "# X\n");
     const upserts = [];
+    // #77 T6: актуальные записи в storage.get — явные ID идут через
+    // artifacts top-up (0 LLM), cap-семантика прежняя.
+    const recs = [mkSessionRecord("s1"), mkSessionRecord("s2"), mkSessionRecord("s3")];
     const storage = mkMockStorage();
-    storage.scan = async () => [mkSessionRecord("s1"), mkSessionRecord("s2"), mkSessionRecord("s3")];
+    storage.scan = async () => recs;
+    storage.get = async (sid) => recs.find((r) => r.session_id === sid) ?? null;
     storage.upsert = async (entries) => { upserts.push(entries); };
     const client = mkClient({
       session: {
@@ -5209,6 +5225,653 @@ test("memory_reindex: git-адаптер end-to-end — реальный tmp git
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── #77 Task 5: notice-хуки (per-session + process-level) ──
+
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+
+function noticeFixture(overrides = {}) {
+  // git repo с head — write-gate проходит, _run доходит до upsert.
+  // Адаптация плана: client дополнен create/prompt/delete (mock-LLM) и
+  // assistant-сообщением с providerID/modelID — без них summarize-стадия
+  // _pipeline не резолвит модель и не доходит до upsert (reason стал бы
+  // index_error, а не storage_error).
+  const dir = mkdtempSync(join(tmpdir(), "mem-notice-"));
+  execSync("git init -q -b main", { cwd: dir, stdio: "ignore" });
+  execSync("git -c user.email=t@t.local -c user.name=t commit -q --allow-empty -m x", { cwd: dir, stdio: "ignore" });
+  let upsertImpl = null;
+  const storage = {
+    ...mkMockStorage(),
+    upsert: async (es) => { if (upsertImpl) await upsertImpl(es); },
+    get: async () => null,
+  };
+  const client = {
+    session: {
+      get: async ({ path }) => ({ data: { id: path.id, parentID: null, title: "st", time: { created: 1, updated: 100 } } }),
+      // Свежие таймстемпы на каждое чтение: после успешного re-index
+      // (setSummarized) повторный run проходит min_new_messages (T5-8
+      // re-entry) — статичные 1970-е даты дали бы no_new_messages.
+      messages: async () => ({ data: [
+        { info: { role: "user", time: { created: Date.now() } }, parts: [{ type: "text", text: "hello" }] },
+        { info: { role: "assistant", providerID: "prov", modelID: "mod", time: { created: Date.now() } }, parts: [{ type: "text", text: "world" }] },
+      ] }),
+      list: async () => ({ data: [] }),
+      create: async () => ({ data: { id: "summ-mock" } }),
+      prompt: async () => ({ data: { parts: [{ type: "text", text: '{"title":"t","summary":"s","decisions":[]}' }] } }),
+      delete: async () => ({ data: {} }),
+    },
+  };
+  const events = [];
+  const log = { debug: () => {}, info: () => {}, warn() {}, error() {} };
+  for (const k of ["debug", "info", "warn", "error"]) {
+    log[k] = (m, extra) => { events.push([k, m, extra]); };
+  }
+  const cfg = mkConfig(dir, {
+    idle_debounce_min: 0.001,   // 60ms — _run в тестах
+    retry_interval_min: 0,       // без throttle-блокировки повторов
+    min_new_messages: 1,
+    ...overrides.config,
+  });
+  const setUpsertFail = (fail) => { upsertImpl = fail ? async () => { throw new Error("db down"); } : null; };
+  return {
+    dir, storage, client, log, events, cfg, setUpsertFail,
+    init: async (depsOverrides = {}) => registerMemoryHooks({ client, config: cfg, log, root: dir, deps: { embeddings: mkMockEmbeddings(), storage, ...depsOverrides } }),
+  };
+}
+
+test("#77 T5-1: upsert-fail → unsaved-флаг → transform инжектит notice; после успешного re-index — снят", async () => {
+  const f = noticeFixture();
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = f.dir;
+  try {
+    f.setUpsertFail(true);
+    const hooks = await f.init();
+    const idle = () => hooks.event({ event: { type: "session.idle", properties: { sessionID: "s1" } } });
+    idle();
+    await sleep(300);
+    const notice = f.events.find(([lvl, m]) => m === "memory:unsaved_notice");
+    assert.ok(notice, "unsaved_notice в логе");
+    assert.equal(notice[2].reason, "storage_error");
+    let out = { system: [] };
+    await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, out);
+    assert.ok(out.system.some((s) => s.includes("НЕ сохранены")), "notice инжектится");
+    assert.ok(out.system.some((s) => s.includes("@maestro-memory-reindex")), "маркер команды восстановления");
+    // восстановление: upsert ожил → повторный idle → успех → флаг снят
+    f.setUpsertFail(false);
+    idle();
+    await sleep(300);
+    assert.ok(f.events.some(([lvl, m]) => m === "memory:unsaved_cleared"), "unsaved_cleared в логе");
+    out = { system: [] };
+    await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, out);
+    assert.equal(out.system.filter((s) => s.includes("НЕ сохранены")).length, 0, "notice снят");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T5-2: guard — task-сессия (parentID) без инъекции (паритет communication-guard)", async () => {
+  const f = noticeFixture();
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = f.dir;
+  try {
+    const hooks = await f.init();
+    f.client.session.get = async ({ path }) => ({ data: { id: path.id, parentID: "p1", title: "st" } });
+    const out = { system: [] };
+    await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, out);
+    assert.equal(out.system.filter((s) => s.includes("НЕ сохранены")).length, 0, "task-сессия — без notice");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T5-3: retryable embed-ошибка → unsaved-флага НЕТ (регрессия)", async () => {
+  const f = noticeFixture();
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = f.dir;
+  try {
+    const hooks = await f.init({ embeddings: { embed: async () => { const e = new Error("network"); e.retryable = true; throw e; }, dim: 3, modelId: "m" } });
+    hooks.event({ event: { type: "session.idle", properties: { sessionID: "s1" } } });
+    await sleep(300);
+    assert.ok(!f.events.some(([lvl, m]) => m === "memory:unsaved_notice"), "retryable не ставит флаг");
+    assert.ok(f.events.some(([lvl, m]) => m === "memory:index_retryable"), "retryable-аудит на месте");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T5-4: init-fail (storage.init throw) → сокращённый набор (notice, БЕЗ tools), reason init_failed", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-initfail-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    // Адаптация плана: injected deps.storage bypass'ит storage.init() в
+    // registerMemoryHooks — init-fail провоцируем реальным sqlite (meta dim
+    // mismatch → storage.init() бросает, как в тесте storage_mismatch выше).
+    const dbPath = dbPathFor(dir, dir);
+    mkdirSync(dirname(dbPath), { recursive: true });
+    const { default: Database } = await import("better-sqlite3");
+    const db = new Database(dbPath);
+    db.exec("CREATE TABLE meta (name TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    db.prepare("INSERT INTO meta (name, value) VALUES ('model_id', 'x')").run();
+    db.prepare("INSERT INTO meta (name, value) VALUES ('dim', '999')").run();
+    db.close();
+    const events = [];
+    const log = { debug: () => {}, info: () => {}, warn() {}, error() {} };
+    for (const k of ["debug", "info", "warn", "error"]) log[k] = (m, e) => { events.push([k, m, e]); };
+    const hooks = await registerMemoryHooks({ client: mkClient(), config: mkConfig(dir), log, root: dir, deps: { embeddings: mkMockEmbeddings() } });
+    assert.equal(hooks.tool, undefined, "tools отсутствуют (fail → нет memory-поверхности)");
+    assert.equal(typeof hooks["experimental.chat.system.transform"], "function", "notice-хук зарегистрирован");
+    assert.ok(events.some(([lvl, m]) => m === "memory: init failed"), "bootstrap-лог «memory: init failed» без изменений");
+    assert.ok(events.some(([lvl, m, e]) => m === "memory:unsaved_notice" && e.scope === "process" && e.reason === "init_failed"));
+    const out = { system: [] };
+    await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, out);
+    assert.ok(out.system[0].includes("не работает в этом процессе"), "process-notice");
+    assert.ok(out.system[0].includes("init_failed"), "reason в notice");
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T5-5: auto_recall false + init-fail → notice-хук ВСЁ РАВНО зарегистрирован (I1)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-recall-off-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    // Иниф-фил реальным sqlite (meta dim mismatch) — см. T5-4.
+    const dbPath = dbPathFor(dir, dir);
+    mkdirSync(dirname(dbPath), { recursive: true });
+    const { default: Database } = await import("better-sqlite3");
+    const db = new Database(dbPath);
+    db.exec("CREATE TABLE meta (name TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    db.prepare("INSERT INTO meta (name, value) VALUES ('model_id', 'x')").run();
+    db.prepare("INSERT INTO meta (name, value) VALUES ('dim', '999')").run();
+    db.close();
+    const hooks = await registerMemoryHooks({
+      client: mkClient(), config: mkConfig(dir, { auto_recall: false }), log: { debug() {}, info() {}, warn() {}, error() {} },
+      root: dir, deps: { embeddings: mkMockEmbeddings() },
+    });
+    assert.equal(typeof hooks["experimental.chat.system.transform"], "function", "I1: notice вне auto_recall-условия");
+    assert.equal(hooks["chat.message"], undefined, "chat.message (recall) при auto_recall false — отсутствует");
+    const out = { system: [] };
+    await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, out);
+    assert.equal(out.system.length, 1, "process-notice инжектится");
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T5-6: probe_hard_fail → { tool: { memory_probe }, transform } — memory_probe на месте (I2)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-probe-notice-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const hooks = await registerMemoryHooks({
+      client: mkClient(), config: mkConfig(dir), log: { debug() {}, info() {}, warn() {}, error() {} },
+      root: dir,
+      deps: { storage: mkMockStorage(), embeddings: { probe: async () => ({ ok: false, hard: true, detail: "dim mismatch" }), dim: 3, modelId: "m" } },
+    });
+    assert.ok(hooks.tool.memory_probe, "memory_probe сохранён (I2)");
+    assert.equal(hooks.tool.memory_search, undefined, "остальные tools отсутствуют");
+    assert.equal(typeof hooks["experimental.chat.system.transform"], "function");
+    const out = { system: [] };
+    await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, out);
+    assert.ok(out.system[0].includes("probe_hard_fail"), "reason в notice");
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T5-7: notice fail-soft — session.get throw в guard → без инъекции, без броска", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-notice-fs-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    // init-fail реальным sqlite (meta dim mismatch) → process-notice-путь.
+    const dbPath = dbPathFor(dir, dir);
+    mkdirSync(dirname(dbPath), { recursive: true });
+    const { default: Database } = await import("better-sqlite3");
+    const db = new Database(dbPath);
+    db.exec("CREATE TABLE meta (name TEXT PRIMARY KEY, value TEXT NOT NULL)");
+    db.prepare("INSERT INTO meta (name, value) VALUES ('model_id', 'x')").run();
+    db.prepare("INSERT INTO meta (name, value) VALUES ('dim', '999')").run();
+    db.close();
+    const client = { session: { get: async () => { throw new Error("opencode down"); }, list: async () => ({ data: [] }) } };
+    const hooks = await registerMemoryHooks({ client, config: mkConfig(dir), log: { debug() {}, info() {}, warn() {}, error() {} }, root: dir, deps: { embeddings: mkMockEmbeddings() } });
+    const out = { system: [] };
+    await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, out); // не бросает
+    assert.equal(out.system.length, 0);
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T5-8: re-entry — fail → clear → fail → ВТОРОЙ unsaved_notice (1× на установку флага)", async () => {
+  const f = noticeFixture();
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = f.dir;
+  try {
+    f.setUpsertFail(true);
+    const hooks = await f.init();
+    const idle = () => hooks.event({ event: { type: "session.idle", properties: { sessionID: "s1" } } });
+    idle(); await sleep(300);
+    f.setUpsertFail(false);
+    idle(); await sleep(300); // clear
+    f.setUpsertFail(true);
+    idle(); await sleep(300); // новый fail
+    const notices = f.events.filter(([lvl, m]) => m === "memory:unsaved_notice");
+    assert.equal(notices.length, 2, "re-entry: второй event после clear + новый fail");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T5-9: статические off-пути → сокращённый набор + reason по таблице §4.4", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-staticoff-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const mkLog = () => {
+      const events = [];
+      const log = { debug: () => {}, info: () => {}, warn() {}, error() {} };
+      for (const k of ["debug", "info", "warn", "error"]) log[k] = (m, e) => { events.push([k, m, e]); };
+      return { log, events };
+    };
+    // qdrant_config_invalid (identity обязателен на централизованных бэкендах).
+    {
+      const { log, events } = mkLog();
+      const hooks = await registerMemoryHooks({ client: mkClient(), config: mkConfig(dir, { storage: { type: "qdrant" }, identity: "x" }), log, root: dir, deps: { embeddings: mkMockEmbeddings() } });
+      assert.equal(hooks.tool, undefined);
+      assert.equal(typeof hooks["experimental.chat.system.transform"], "function");
+      assert.ok(events.some(([l, m, e]) => m === "memory:unsaved_notice" && e.reason === "config_invalid"));
+    }
+    // api_key_env_missing (openai без env).
+    {
+      const { log, events } = mkLog();
+      const savedKey = process.env.T59_KEY_UNSET;
+      delete process.env.T59_KEY_UNSET;
+      try {
+        const hooks = await registerMemoryHooks({ client: mkClient(), config: mkConfig(dir, { embedding: { provider: "openai", model: "x", base_url: "https://x", api_key_env: "T59_KEY_UNSET", dim: 3 } }), log, root: dir, deps: { embeddings: mkMockEmbeddings() } });
+        assert.equal(hooks.tool, undefined);
+        assert.ok(events.some(([l, m, e]) => m === "memory:unsaved_notice" && e.reason === "api_key_env_missing"));
+      } finally {
+        if (savedKey !== undefined) process.env.T59_KEY_UNSET = savedKey;
+      }
+    }
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── #77 Task 6: memory_reindex full-reindex (диспатч явных ID по N1) ──
+
+// #77 T6: фикстура диспатча по явным session_ids.
+// Адаптация плана: (1) state — реальный file-based (createState читает
+// <XDG>/maestro/memory/state.json при init; deps.state не существует) —
+// сетап ПЕРЕД init (setState пишет файл), ассерты — чтение файла после run;
+// (2) client дополнен create/delete (контракт summarizeSession) и
+// assistant-сообщением с providerID/modelID + свежими таймстемпами
+// (резолв модели в _pipeline + min_new_messages при ресаммаризации —
+// паттерн noticeFixture); (3) запись через mkSessionRecord (SCAN_FIELDS).
+function reindexFixture(overrides = {}) {
+  const dir = mkdtempSync(join(tmpdir(), "mem-reidx-"));
+  execSync("git init -q -b main", { cwd: dir, stdio: "ignore" });
+  execSync("git -c user.email=t@t.local -c user.name=t commit -q --allow-empty -m x", { cwd: dir, stdio: "ignore" });
+  const records = new Map(); // session_id → record
+  const storage = {
+    ...mkMockStorage(),
+    scan: async () => [...records.values()],
+    get: async (sid) => records.get(sid) ?? null,
+    upsert: async (es) => { for (const e of es) records.set(e.session_id, e); },
+  };
+  const client = {
+    session: {
+      get: async ({ path }) => (overrides.missing ? null : { data: { id: path.id, parentID: overrides.parentIDs?.has(path.id) ? "p1" : null, title: "st", time: { created: 1, updated: 100 } } }),
+      messages: async () => ({ data: overrides.emptyMessages ? [] : [
+        { info: { role: "user", time: { created: Date.now() } }, parts: [{ type: "text", text: "hello world" }] },
+        { info: { role: "assistant", providerID: "prov", modelID: "mod", time: { created: Date.now() } }, parts: [{ type: "text", text: "world" }] },
+      ] }),
+      list: async () => ({ data: [] }),
+      create: async () => ({ data: { id: "summ-t6" } }),
+      prompt: async () => ({ data: { parts: [{ type: "text", text: JSON.stringify({ title: "t", summary: "s", decisions: [] }) }] } }),
+      delete: async () => ({ data: {} }),
+    },
+  };
+  const statePath = join(dir, "maestro", "memory", "state.json");
+  const readState = () => {
+    try { return JSON.parse(readFileSync(statePath, "utf8")); } catch { return { sessions: {} }; }
+  };
+  const setState = (id, fields) => {
+    const data = readState();
+    data.sessions[id] = { ...(data.sessions[id] ?? {}), ...fields };
+    mkdirSync(dirname(statePath), { recursive: true });
+    writeFileSync(statePath, JSON.stringify(data), "utf8");
+  };
+  let hooks;
+  const init = async () => {
+    hooks = await registerMemoryHooks({
+      client, config: mkConfig(dir), log: silentLog,
+      root: dir, deps: { embeddings: mkMockEmbeddings(), storage },
+    });
+    return hooks;
+  };
+  const run = async (args) => hooks.tool.memory_reindex.execute(args, { sessionID: "top" });
+  return { dir, records, storage, client, init, run, setState, readState, hooks: () => hooks };
+}
+
+test("#77 T6-1: отсутствующая запись + fresh lastAttempt → full re-index → indexed (post-fact)", async () => {
+  const f = reindexFixture();
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = f.dir;
+  try {
+    f.setState("s1", { lastAttempt: Date.now() }); // C1: только что страйк, throttle активен
+    await f.init();
+    const out = await f.run({ action: "run", source: "sessions", session_ids: "s1" });
+    assert.ok(out.includes("s1: indexed"), `indexed в ответе: ${out}`);
+    assert.ok(f.records.has("s1"), "запись создана в storage (post-fact)");
+    const st = f.readState();
+    assert.equal(st.sessions.s1?.lastAttempt, null, "clearSkip: lastAttempt сброшен");
+    await f.hooks().dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T6-2: skip=true + запись существует → full re-index, skip сброшен", async () => {
+  const f = reindexFixture();
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = f.dir;
+  try {
+    f.records.set("s2", mkSessionRecord("s2", { head: "b".repeat(40), branch: "main", version: 1 }));
+    f.setState("s2", { skip: true, fails: 2, lastAttempt: Date.now() });
+    await f.init();
+    const out = await f.run({ action: "run", source: "sessions", session_ids: "s2" });
+    assert.ok(out.includes("s2: indexed"), `indexed: ${out}`);
+    const st = f.readState();
+    assert.equal(st.sessions.s2?.skip, false, "skip сброшен");
+    assert.equal(st.sessions.s2?.lastAttempt, null, "lastAttempt сброшен (C1)");
+    await f.hooks().dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T6-3: stale-record (F1): запись существует, lastAttempt > lastSummarized → full re-index (не artifacts top-up)", async () => {
+  const f = reindexFixture();
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = f.dir;
+  try {
+    f.records.set("s3", mkSessionRecord("s3", { head: "c".repeat(40), branch: "main", version: 1, model_id: "m" }));
+    const now = Date.now();
+    f.setState("s3", { lastSummarized: now - 1000, lastAttempt: now }); // stale: attempt после summarized
+    await f.init();
+    const out = await f.run({ action: "run", source: "sessions", session_ids: "s3" });
+    assert.ok(out.includes("s3: indexed"), `full-reindex, не updated: ${out}`);
+    assert.ok(f.records.get("s3").version >= 2, "запись пересаммаризирована (version bump)");
+    await f.hooks().dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T6-4: актуальная запись → artifacts top-up, 0 LLM (регрессия п.1)", async () => {
+  const f = reindexFixture();
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = f.dir;
+  try {
+    f.records.set("s4", mkSessionRecord("s4", { head: "d".repeat(40), branch: "main", artifacts: [] }));
+    await f.init();
+    const out = await f.run({ action: "run", source: "sessions", session_ids: "s4" });
+    assert.ok(/s4: (updated|no_change|skip_\w+)/.test(out), `artifacts-статус: ${out}`);
+    assert.ok(!out.includes("s4: indexed"), "не full-reindex");
+    await f.hooks().dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T6-5: пустой транскрипт → no_new_messages (edge: запись удалена memory_forget)", async () => {
+  const f = reindexFixture({ emptyMessages: true });
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = f.dir;
+  try {
+    await f.init();
+    const out = await f.run({ action: "run", source: "sessions", session_ids: "s5" });
+    assert.ok(out.includes("s5: no_new_messages"), `no_new_messages: ${out}`);
+    assert.ok(!f.records.has("s5"), "запись не создана");
+    await f.hooks().dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T6-6: сессия не найдена → not_found, без броска", async () => {
+  const f = reindexFixture({ missing: true });
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = f.dir;
+  try {
+    await f.init();
+    const out = await f.run({ action: "run", source: "sessions", session_ids: "ghost" });
+    assert.ok(out.includes("ghost: not_found"), `not_found: ${out}`);
+    await f.hooks().dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T6-7: task-сессия (parentID) → skip_service (F3)", async () => {
+  const f = reindexFixture({ parentIDs: new Set(["task1"]) });
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = f.dir;
+  try {
+    await f.init();
+    const out = await f.run({ action: "run", source: "sessions", session_ids: "task1" });
+    assert.ok(out.includes("task1: skip_service"), `skip_service: ${out}`);
+    await f.hooks().dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T6-8: хранилище лежит при full-reindex → failed: storage_error + повторный recordFail (счётчик с 0)", async () => {
+  const f = reindexFixture();
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = f.dir;
+  try {
+    f.storage.upsert = async () => { throw new Error("db down"); };
+    f.setState("s9", { skip: true, fails: 2 });
+    await f.init();
+    const out = await f.run({ action: "run", source: "sessions", session_ids: "s9" });
+    assert.ok(out.includes("s9: failed: storage_error"), `failed: ${out}`);
+    const st = f.readState();
+    assert.ok(st.sessions.s9?.lastAttempt, "recordFail вызван (счётчик с 0 после clearSkip)");
+    assert.equal(st.sessions.s9?.lastErrorClass, "storage_error", "errorClass сохранён");
+    await f.hooks().dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T6-9: cap 20 — 25 явных ID → обработано 20, cap-пометка в ответе", async () => {
+  const f = reindexFixture({ missing: true });
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = f.dir;
+  try {
+    await f.init();
+    const ids = Array.from({ length: 25 }, (_, i) => `s${i}`).join(",");
+    const out = await f.run({ action: "run", source: "sessions", session_ids: ids });
+    const processed = (out.match(/s\d+: /g) ?? []).length;
+    assert.equal(processed, 20, `cap 20: ${processed}`);
+    assert.ok(out.includes("cap"), "cap-пометка в ответе");
+    await f.hooks().dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME; else process.env.XDG_DATA_HOME = saved;
+    rmSync(f.dir, { recursive: true, force: true });
+  }
+});
+
+// ── Task 7: memory_stats_detail unindexed-sessions block ─────────────────
+
+test("#77 T7-1: memory_stats_detail — unindexed-блок (cap 20 + «…(+N ещё)»)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-stats-u7-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const { createState } = await import("./state.js");
+    const statePath = join(dir, "maestro", "memory", "state.json");
+    const st = createState(statePath);
+    // 22 stale-сессии → cap 20
+    for (let i = 0; i < 22; i++) {
+      await st.recordFail(`u${i}`, i % 2 ? "storage_error" : "embedder_error");
+    }
+    // одна самовосстановившаяся → НЕ в списке (N1)
+    await st.recordFail("healed");
+    await st.setSummarized("healed");
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: {
+        embeddings: mkMockEmbeddings(),
+        storage: { ...mkMockStorage(), scan: async () => [] },
+        git: mkScopeGit(),
+      },
+    });
+    const out = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "top" });
+    assert.ok(out.includes("Не индексированные сессии: 22"), `блок с N=22: ${out.slice(0, 800)}`);
+    assert.ok(out.includes("…(+2 ещё)"), "cap-пометка");
+    assert.ok(!out.includes("healed"), "самовосстановившаяся не в списке (N1)");
+    assert.ok(out.includes("reason=storage_error"), "storage_error present");
+    assert.ok(out.includes("reason=embedder_error"), "embedder_error present");
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("#77 T7-2: memory_stats_detail — все проиндексированы → 0-строка", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-stats0-t7-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const hooks = await registerMemoryHooks({
+      client: mkClient(),
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: {
+        embeddings: mkMockEmbeddings(),
+        storage: { ...mkMockStorage(), scan: async () => [] },
+        git: mkScopeGit(),
+      },
+    });
+    const out = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "top" });
+    assert.ok(out.includes("Не индексированные сессии: 0"), `0-строка: ${out.slice(0, 600)}`);
+    await hooks.dispose?.();
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+// ── #77 Task 8: E2E — реальный sqlite + mock-LLM ──
+
+test("#77 E2E: full re-index restores lost sqlite record and resets permanent-skip", async () => {
+  const { createState } = await import("./state.js");
+  const { Indexer } = await import("./indexer.js");
+  const { createStorage } = await import("./storage.js");
+  const { resolveEffectiveKey } = await import("./config.js");
+  const dir = mkdtempSync(join(tmpdir(), "mem-e2e-"));
+  const head = "e".repeat(40);
+  try {
+    const state = createState(join(dir, "state.json"));
+    const embeddings = { embed: async () => new Float32Array([0.1, 0.2, 0.3]), dim: 3, modelId: "m" };
+    const client = {
+      session: {
+        get: async () => ({ data: { id: "s1", parentID: null, title: "st", time: { created: 1, updated: 100 } } }),
+        messages: async () => ({ data: [{ info: { role: "user", time: { created: 50 } }, parts: [{ type: "text", text: "hello e2e" }] }] }),
+        list: async () => ({ data: [] }),
+      },
+    };
+    const summarize = async () => ({ title: "t", summary: "s-e2e", decisions: [] });
+    const cfg = {
+      min_new_messages: 1, idle_debounce_min: 10, backfill_window_days: 30,
+      backfill_max_per_start: 5, retry_interval_min: 0, namespace: null,
+      top_k: 3, min_score: 0.35, author: "test",
+    };
+    const storage = createStorage({ type: "sqlite", options: { dbPath: join(dir, "memory.db") }, modelId: "m", dim: 3 });
+    await storage.init();
+    const origUpsert = storage.upsert.bind(storage);
+    // key = resolveEffectiveKey(projectHash, namespace=null) → projectHash (config.js)
+    const key = resolveEffectiveKey({ projectHash: "khash", namespace: null });
+    assert.equal(key, "khash", "namespace:null → ключ = projectHash");
+    const mkIdx = () => new Indexer({
+      client, config: cfg, embeddings, storage, state, summarize,
+      projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+      git: { resolveBranch: async () => "main", resolveHead: async () => head },
+      logInfo: () => {}, logDebug: () => {}, logWarn: () => {}, logError: () => {},
+    });
+
+    // 1. Бэкенд «падает»: upsert throw × 3 → permanent-skip, записей нет
+    const idx = mkIdx();
+    storage.upsert = async () => { throw new Error("qdrant down"); };
+    for (let i = 0; i < 3; i++) await idx._pipeline("s1");
+    assert.equal(await state.isSkipped("s1"), true, "permanent-skip после 3 страйков");
+    assert.equal((await storage.scan({ key })).length, 0, "потеря данных");
+    idx.dispose();
+
+    // 2. Бэкенд «ожил»: штатный путь НЕ восстанавливает (skip-guard) —
+    // восстановление ТОЛЬКО по требованию (non-goal: live-recovery)
+    storage.upsert = origUpsert;
+    const idxRun = mkIdx();
+    await idxRun._run("s1");
+    assert.equal((await storage.scan({ key })).length, 0, "skip-сессия штатным путём не восстанавливается");
+    idxRun.dispose();
+
+    // 3. HITL: memory_reindex → reindexSession → запись восстановлена
+    const idx2 = mkIdx();
+    const r = await idx2.reindexSession("s1");
+    assert.equal(r.status, "ok");
+    const rows = await storage.scan({ key });
+    assert.equal(rows.length, 1, "запись восстановлена (post-fact)");
+    assert.equal(rows[0].session_id, "s1");
+    assert.ok(rows[0].summary.length > 0, "summary из mock-LLM");
+    assert.equal(await state.isSkipped("s1"), false, "permanent-skip снят");
+    assert.equal(rows[0].head, head, "head из git-резолва");
+
+    // 4. Повторный прогон — честный early-exit (no_new_messages)
+    const r2 = await idx2._pipeline("s1");
+    assert.equal(r2.status, "no_new_messages", "новых сообщений нет — early-exit");
+    storage.dispose();
+    idx2.dispose();
+  } finally {
     rmSync(dir, { recursive: true, force: true });
   }
 });

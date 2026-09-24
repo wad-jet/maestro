@@ -133,6 +133,8 @@ primary-сессия при чтении того же файла получае
 `memory_stats_detail` команда различает: «память выключена» (`memory.enabled:
 false`), «конфиг-невалиден» (честная причина по `disabled_reason`) и «плагин
 недоступен» (`enabled: true` + инструмент недоступен → перезапустить opencode).
+Блок **«Не индексированные сессии: N»** — cap 20 строк; N>0 — предложить
+`@maestro-memory-reindex` (явные session_id из списка).
 Подробнее — [Память](../reference/memory.md).
 
 ### `@maestro-memory-report`
@@ -152,12 +154,15 @@ HITL-утилизация брошенных/unknown записей памяти
 
 ### `@maestro-memory-reindex`
 
-HITL-бэкфилл памяти (v3.5.0): листинг кандидатов на индексацию (dry-run
-превью, 0 LLM) — секция A (sessions с пустыми `artifacts`) + секция B
+HITL-бэкфилл памяти (v3.5.0, fail-loud 4.7.1): листинг кандидатов на индексацию
+(dry-run превью, 0 LLM) — секция A (sessions с пустыми `artifacts`) + секция B
 (git-история по `history_globs`) → HITL-выбор источника и объёма →
 `memory_reindex` `run` (light-путь sessions / LLM-синтез git) → агрегатный
 отчёт (SEC-4b). Рекомендованный порядок: сначала sessions, затем git.
-Permission `ask`. Подробнее — [Память](../reference/memory.md).
+**Полный re-index (full-reindex):** явный `session_id` с отсутствующей/stale-
+записью → LLM-summarize из сессии + сброс permanent-skip; статусы:
+`indexed`/`unattributed`/`no_new_messages`/`not_found`/`skip_service`/
+`failed: <класс>`. Permission `ask`. Подробнее — [Память](../reference/memory.md).
 
 ### `@maestro-memory-backup`
 

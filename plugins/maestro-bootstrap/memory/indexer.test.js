@@ -1507,3 +1507,469 @@ test("4.0.0 sessions: model (не small_model) → source: model", async () => {
   assert.equal(durations[0].model_source, "model");
   idx.dispose();
 });
+
+// ── #77 (Task 2): _pipeline — контракт outcome-statuses (чистый рефактор _run) ──
+
+test("#77: _pipeline returns outcome statuses (refactor contract)", async () => {
+  const client = mkClient();
+  const storage = mkStorage(client);
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+  });
+  const ok = await idx._pipeline("s1");
+  assert.equal(ok.status, "ok");
+  assert.equal(client.upserts.length, 1, "record written");
+  idx.dispose();
+});
+
+test("#77: _pipeline → unattributed (write-gate, head '')", async () => {
+  const client = mkClient();
+  const storage = mkStorage(client);
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: { resolveBranch: async () => "", resolveHead: async () => "" },
+  });
+  const r = await idx._pipeline("s1");
+  assert.equal(r.status, "unattributed");
+  assert.equal(client.upserts.length, 0);
+  idx.dispose();
+});
+
+test("#77: _pipeline → no_new_messages (пустой транскрипт)", async () => {
+  // mkClient([]) — пустой список сообщений (null дал бы default-сообщение из-за ??)
+  const client = mkClient([]);
+  const storage = mkStorage(client);
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+  });
+  const r = await idx._pipeline("s1");
+  assert.equal(r.status, "no_new_messages");
+  idx.dispose();
+});
+
+test("#77: _pipeline → skip_service (parentID)", async () => {
+  const client = mkClient();
+  client.session.get = async () => ({
+    data: { id: "s1", parentID: "p1", title: "st", time: { created: 1, updated: 100 } },
+  });
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client), state: mkState(),
+    summarize: async () => ({}),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+  });
+  const r = await idx._pipeline("s1");
+  assert.equal(r.status, "skip_service");
+  idx.dispose();
+});
+
+test("#77: _run delegates to _pipeline (regression: guards intact)", async () => {
+  // throttle: свежий lastAttempt → _run НЕ доходит до _pipeline
+  const client = mkClient();
+  let pipelineCalls = 0;
+  const storage = mkStorage(client);
+  const idx = new Indexer({
+    client, config: mkConfig({ retry_interval_min: 60 }),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: {
+      ...mkState(),
+      getLastAttempt: async () => Date.now(), // свежий attempt
+    },
+    summarize: async () => ({}),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+  });
+  const origPipeline = idx._pipeline.bind(idx);
+  idx._pipeline = async (...a) => { pipelineCalls++; return origPipeline(...a); };
+  await idx._run("s1");
+  assert.equal(pipelineCalls, 0, "throttle guard не снят");
+  idx.dispose();
+});
+
+// ── #77 Task 3: классификация ошибок + unsaved-триггеры ──
+
+function mkUnsaved() {
+  const set = []; const clear = [];
+  return {
+    set, clear,
+    setUnsaved: (sid, cls) => { set.push([sid, cls]); },
+    clearUnsaved: (sid) => { clear.push(sid); },
+  };
+}
+
+test("#77 T3-1: upsert-ошибка → failed:storage_error + recordFail(class) + setUnsaved", async () => {
+  const client = mkClient();
+  const storage = { ...mkStorage(client), upsert: async () => { throw new Error("db down"); } };
+  const fails = [];
+  const u = mkUnsaved();
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage,
+    state: { ...mkState(), recordFail: async (sid, cls) => { fails.push([sid, cls]); } },
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+    setUnsaved: u.setUnsaved, clearUnsaved: u.clearUnsaved,
+  });
+  const r = await idx._pipeline("s1");
+  assert.equal(r.status, "failed:storage_error");
+  assert.deepEqual(fails, [["s1", "storage_error"]]);
+  assert.deepEqual(u.set, [["s1", "storage_error"]]);
+  assert.deepEqual(u.clear, []);
+  idx.dispose();
+});
+
+test("#77 T3-2: non-retryable embed → failed:embedder_error", async () => {
+  const client = mkClient();
+  const fails = [];
+  const u = mkUnsaved();
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => { throw new Error("local embedder down"); }, dim: 1, modelId: "m" },
+    storage: mkStorage(client),
+    state: { ...mkState(), recordFail: async (sid, cls) => { fails.push([sid, cls]); } },
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+    setUnsaved: u.setUnsaved, clearUnsaved: u.clearUnsaved,
+  });
+  const r = await idx._pipeline("s1");
+  assert.equal(r.status, "failed:embedder_error");
+  assert.deepEqual(fails, [["s1", "embedder_error"]]);
+  assert.deepEqual(u.set, [["s1", "embedder_error"]]);
+  idx.dispose();
+});
+
+test("#77 T3-3: retryable embed → failed:retryable, БЕЗ recordFail и БЕЗ setUnsaved (регрессия)", async () => {
+  const client = mkClient();
+  let failCalled = false;
+  const u = mkUnsaved();
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: {
+      embed: async () => { const e = new Error("network"); e.retryable = true; throw e; },
+      dim: 1, modelId: "m",
+    },
+    storage: mkStorage(client),
+    state: { ...mkState(), recordFail: async () => { failCalled = true; } },
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+    setUnsaved: u.setUnsaved, clearUnsaved: u.clearUnsaved,
+  });
+  const r = await idx._pipeline("s1");
+  assert.equal(r.status, "failed:retryable");
+  assert.equal(failCalled, false, "retryable не съедал страйк");
+  assert.deepEqual(u.set, [], "retryable НЕ ставит unsaved-флаг");
+  idx.dispose();
+});
+
+test("#77 T3-4: summarize-ошибка → failed:index_error", async () => {
+  const client = mkClient();
+  const fails = [];
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client),
+    state: { ...mkState(), recordFail: async (sid, cls) => { fails.push([sid, cls]); } },
+    summarize: async () => { throw new Error("llm down"); },
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+  });
+  const r = await idx._pipeline("s1");
+  assert.equal(r.status, "failed:index_error");
+  assert.deepEqual(fails, [["s1", "index_error"]]);
+  idx.dispose();
+});
+
+test("#77 T3-5: session.get-ошибка (default-класс, F4) → failed:index_error + recordFail", async () => {
+  const client = mkClient();
+  client.session.get = async () => { throw new Error("network"); };
+  const fails = [];
+  const u = mkUnsaved();
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client),
+    state: { ...mkState(), recordFail: async (sid, cls) => { fails.push([sid, cls]); } },
+    summarize: async () => ({}),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    setUnsaved: u.setUnsaved, clearUnsaved: u.clearUnsaved,
+  });
+  const r = await idx._pipeline("s1");
+  assert.equal(r.status, "failed:index_error");
+  assert.deepEqual(fails, [["s1", "index_error"]]);
+  assert.deepEqual(u.set, [["s1", "index_error"]]);
+  idx.dispose();
+});
+
+test("#77 T3-6: успешный индекс → clearUnsaved (G4)", async () => {
+  const client = mkClient();
+  const u = mkUnsaved();
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client), state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+    setUnsaved: u.setUnsaved, clearUnsaved: u.clearUnsaved,
+  });
+  const r = await idx._pipeline("s1");
+  assert.equal(r.status, "ok");
+  assert.deepEqual(u.clear, ["s1"], "clearUnsaved после успешного setSummarized");
+  idx.dispose();
+});
+
+test("#77 T3-7: log memory:index_error несёт стадииный класс (enum-only)", async () => {
+  const cap = { calls: [] };
+  const mk = (lvl) => (m, extra) => cap.calls.push([lvl, m, extra]);
+  const client = mkClient();
+  const storage = { ...mkStorage(client), upsert: async () => { throw new Error("db down"); } };
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage, state: mkState(),
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+    logInfo: mk("info"), logDebug: mk("debug"), logWarn: mk("warn"), logError: mk("error"),
+  });
+  await idx._pipeline("s1");
+  const err = cap.calls.find(([lvl, m]) => m === "memory:index_error");
+  assert.ok(err);
+  assert.equal(err[2].error_class, "storage_error");
+  assert.ok(!JSON.stringify(err).includes("db down"), "enum-only: сообщение ошибки в лог не попадает");
+  idx.dispose();
+});
+
+test("#77 T3-8: upsert-retryable → failed:retryable без страйка (M-4)", async () => {
+  const client = mkClient();
+  let failCalled = false;
+  const u = mkUnsaved();
+  const storage = {
+    ...mkStorage(client),
+    upsert: async () => { const e = new Error("db timeout"); e.retryable = true; throw e; },
+  };
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage,
+    state: { ...mkState(), recordFail: async () => { failCalled = true; } },
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+    setUnsaved: u.setUnsaved, clearUnsaved: u.clearUnsaved,
+  });
+  const r = await idx._pipeline("s1");
+  assert.equal(r.status, "failed:retryable");
+  assert.equal(failCalled, false);
+  assert.deepEqual(u.set, []);
+  idx.dispose();
+});
+
+test("#77 T3-9: чужой errorClass вне allowlist → index_error (M-2)", async () => {
+  const client = mkClient();
+  const fails = [];
+  client.session.get = async () => { const e = new Error("x"); e.errorClass = "weird_class"; throw e; };
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client),
+    state: { ...mkState(), recordFail: async (sid, cls) => { fails.push([sid, cls]); } },
+    summarize: async () => ({}),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+  });
+  const r = await idx._pipeline("s1");
+  assert.equal(r.status, "failed:index_error");
+  assert.deepEqual(fails, [["s1", "index_error"]]);
+  idx.dispose();
+});
+
+test("#77 T3-10: non-object throw (throw \"str\") — не маскируется TypeError'ом (M-1)", async () => {
+  const client = mkClient();
+  const fails = [];
+  client.session.get = async () => { throw "str"; };
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client),
+    state: { ...mkState(), recordFail: async (sid, cls) => { fails.push([sid, cls]); } },
+    summarize: async () => ({}),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+  });
+  const r = await idx._pipeline("s1");
+  assert.equal(r.status, "failed:index_error");
+  assert.deepEqual(fails, [["s1", "index_error"]]);
+  idx.dispose();
+});
+
+test("#77 T3-11: guard-ошибка (isSkipped throw) → index_error + setUnsaved (I-1)", async () => {
+  const client = mkClient();
+  const fails = [];
+  const u = mkUnsaved();
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client),
+    state: {
+      ...mkState(),
+      isSkipped: async () => { throw new Error("state corrupt"); },
+      recordFail: async (sid, cls) => { fails.push([sid, cls]); },
+    },
+    summarize: async () => ({}),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    setUnsaved: u.setUnsaved, clearUnsaved: u.clearUnsaved,
+  });
+  await idx._run("s1");
+  assert.deepEqual(fails, [["s1", "index_error"]]);
+  assert.deepEqual(u.set, [["s1", "index_error"]]);
+  idx.dispose();
+});
+
+// ── #77 Task 4: reindexSession ──
+
+test("#77 T4-1: reindexSession bypasses retry-throttle (C1, свежий lastAttempt)", async () => {
+  const client = mkClient();
+  const storage = mkStorage(client);
+  const calls = { summarize: 0, clearSkip: 0 };
+  const idx = new Indexer({
+    client, config: mkConfig({ retry_interval_min: 60 }),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage,
+    state: {
+      ...mkState(),
+      getLastAttempt: async () => Date.now(), // свежий attempt: штатный _run ушёл бы в throttle
+      clearSkip: async () => { calls.clearSkip++; },
+    },
+    summarize: async () => { calls.summarize++; return { title: "t", summary: "s", decisions: [] }; },
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+  });
+  const r = await idx.reindexSession("s1");
+  assert.equal(r.status, "ok");
+  assert.equal(calls.summarize, 1, "summarize вызван (throttle не блокирует)");
+  assert.equal(calls.clearSkip, 1, "clearSkip вызван");
+  assert.equal(client.upserts.length, 1);
+  idx.dispose();
+});
+
+test("#77 T4-2: reindexSession сбрасывает skip (isSkipped=true до вызова)", async () => {
+  const client = mkClient();
+  const stateCalls = { clearSkip: [] };
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client),
+    state: {
+      ...mkState(),
+      isSkipped: async () => true, // до clearSkip сессия в skip
+      clearSkip: async (id) => { stateCalls.clearSkip.push(id); },
+    },
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+  });
+  const r = await idx.reindexSession("s1");
+  assert.equal(r.status, "ok");
+  assert.deepEqual(stateCalls.clearSkip, ["s1"]);
+  idx.dispose();
+});
+
+test("#77 T4-3: write-gate head '' → unattributed, запись НЕ создана, summarize не вызван (C2)", async () => {
+  const client = mkClient();
+  const storage = mkStorage(client);
+  let summarizeCalls = 0;
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage,
+    state: { ...mkState(), clearSkip: async () => {} },
+    summarize: async () => { summarizeCalls++; return { title: "t", summary: "s", decisions: [] }; },
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: { resolveBranch: async () => "", resolveHead: async () => "" },
+  });
+  const r = await idx.reindexSession("s1");
+  assert.equal(r.status, "unattributed");
+  assert.equal(summarizeCalls, 0, "write-gate: summarize до head не вызывается");
+  assert.equal(client.upserts.length, 0);
+  idx.dispose();
+});
+
+test("#77 T4-4: пустой транскрипт → no_new_messages (edge: запись удалена memory_forget)", async () => {
+  const client = mkClient([]); // messages: [] (null дала бы default-сообщение из-за ?? в хелпере)
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client),
+    state: { ...mkState(), clearSkip: async () => {} },
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+  });
+  const r = await idx.reindexSession("s1");
+  assert.equal(r.status, "no_new_messages");
+  idx.dispose();
+});
+
+test("#77 T4-5: хранилище лежит → failed:storage_error + recordFail с 0; после clearSkip + 1 страйк index_skipped НЕ возникает (F5)", async () => {
+  const cap = { calls: [] };
+  const mk = (lvl) => (m, extra) => cap.calls.push([lvl, m, extra]);
+  const client = mkClient();
+  const storage = { ...mkStorage(client), upsert: async () => { throw new Error("db down"); } };
+  const fails = [];
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage,
+    state: {
+      ...mkState(),
+      clearSkip: async () => {},
+      recordFail: async (sid, cls) => { fails.push([sid, cls]); },
+    },
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+    logInfo: mk("info"), logDebug: mk("debug"), logWarn: mk("warn"), logError: mk("error"),
+  });
+  idx._fails.set("s1", 3); // искусственно: зеркало до clearSkip = 3 (без сброса warn бы сработал)
+  const r = await idx.reindexSession("s1");
+  assert.equal(r.status, "failed:storage_error");
+  assert.deepEqual(fails, [["s1", "storage_error"]], "recordFail вызван (счётчик пересоздан с 0)");
+  const skip = cap.calls.find(([lvl, m]) => m === "memory:index_skipped");
+  assert.equal(skip, undefined, "F5: mirror сброшен → warn при 1 новом страйке не возникает");
+  idx.dispose();
+});
+
+test("#77 T4-6: reindexSession не трогает this.running/queue (синхронный, C2)", async () => {
+  const client = mkClient();
+  const idx = new Indexer({
+    client, config: mkConfig(),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client),
+    state: { ...mkState(), clearSkip: async () => {} },
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+  });
+  idx.running = true; // штатный _run в работе
+  const r = await idx.reindexSession("s1");
+  assert.equal(r.status, "ok", "reindexSession не гардится this.running");
+  assert.equal(idx.queue.size, 0, "в очередь не ставится");
+  idx.dispose();
+});

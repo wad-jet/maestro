@@ -386,9 +386,11 @@ async function loadFromModuleDir(moduleDir, pkg) {
  * Register memory hooks (tool `memory_search`, `chat.message`,
  * `experimental.chat.system.transform`, `event` additions, `dispose`).
  *
- * Fail-soft: любая ошибка инициализации → лог + `{}` (память off, сессии
- * работают). Инвариант: `experimental.chat.messages.transform` никогда не
- * возвращается (не присваивается).
+ * Fail-soft: любая ошибка инициализации → лог + сокращённый набор хуков
+ * с process-level notice (`#77`, spec §4.4: «громкий» off; намеренное
+ * отключение по конфигу — `return {}` без notice). Инвариант:
+ * `experimental.chat.messages.transform` никогда не возвращается (не
+ * присваивается).
  *
  * @param {{ client: object, config: object, log: object, memoryLog?: object|null,
  *   root: string, deps?: { storage?: object, embeddings?: object } }} opts
@@ -409,6 +411,43 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
   const logDebug = (msg, extra) => memLog?.debug?.(msg, extra);
   const logWarn = (msg, extra) => memLog?.warn?.(msg, extra);
   const logError = (msg, extra) => memLog?.error?.(msg, extra);
+
+  // #77 (spec §4.3): тексты уведомлений — канон (RU, самодостаточные,
+  // без данных сессии — SEC-4b). Тесты ассертят по ключевым маркерам
+  // («НЕ сохранены», «не работает в этом процессе», «@maestro-memory-reindex»).
+  const noticeSessionText = (reason) =>
+    `maestro memory: данные этой сессии НЕ сохранены в памяти (причина: ${reason}). Не рассуждай о «памяти проекта» как о актуальной по этой теме. Восстановление: @maestro-memory-reindex (по требованию); при перезапуске opencode повтор возможен, пока сессия не ушла в skip (3 неудачи).`;
+  const noticeProcessText = (reason) =>
+    `maestro memory: не работает в этом процессе (причина: ${reason}) — данные сессий не сохраняются, поиск по памяти недоступен. Проверьте доступность хранилища; после перезапуска opencode сохранение восстановится.`;
+  // #77 (spec §4.2): guard (паритет communication.js isEligible) — только
+  // top-level сессии без сервис-сессий; fail-soft (ошибка → без инъекции).
+  const isNoticeEligible = async (sessionID) => {
+    if (!sessionID) return false;
+    try {
+      const resp = await client?.session?.get?.({ path: { id: sessionID } });
+      const data = resp?.data ?? resp;
+      return Boolean(data) && !data.parentID && !SESSIONS.has(sessionID) &&
+        !(typeof data.title === "string" && data.title.startsWith("[maestro-memory]"));
+    } catch {
+      return false;
+    }
+  };
+  // #77 (spec §4.4): process-level notice — «тихий off»-путь init →
+  // сокращённый набор хуков с notice вместо return {} (reason-enum §4.4/§7).
+  const processNotice = (reason) => {
+    logInfo("memory:unsaved_notice", { scope: "process", reason });
+    return {
+      "experimental.chat.system.transform": async ({ sessionID }, out) => {
+        try {
+          if (!(await isNoticeEligible(sessionID))) return;
+          if (out?.system) out.system.push(noticeProcessText(reason));
+        } catch {
+          /* fail-soft */
+        }
+      },
+    };
+  };
+
   // I-2: identity — identity_env → git user.name → os username (fallback).
   // gitName резолвится ДО loadMemoryConfig, чтобы централизованный gate
   // (classifyMemoryConfig) принимал git user.name как identity.
@@ -438,14 +477,16 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       const q = config.storage.qdrant ?? {};
       if (!q.url || !q.api_key_env) {
         log?.info?.("memory: disabled", { reason: "qdrant_config_invalid" }); // carve-out: bootstrap-лог
-        return {};
+        // #77 (spec §4.4): громкий off — process-notice вместо return {}.
+        return processNotice("config_invalid");
       }
     }
     if (config.storage.type === "pgvector") {
       const p = config.storage.pgvector ?? {};
       if (!p.connection_string_env) {
         log?.info?.("memory: disabled", { reason: "pgvector_config_invalid" }); // carve-out: bootstrap-лог
-        return {};
+        // #77 (spec §4.4): громкий off — process-notice вместо return {}.
+        return processNotice("config_invalid");
       }
     }
 
@@ -454,7 +495,8 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     const isOpenai = config.embedding.provider === "openai";
     if (isOpenai && !process.env[config.embedding.api_key_env]) {
       log?.info?.("memory: disabled", { reason: "embedding_api_key_env_missing" }); // carve-out: bootstrap-лог
-      return {};
+      // #77 (spec §4.4): громкий off — process-notice вместо return {}.
+      return processNotice("api_key_env_missing");
     }
 
     // I-2: identity — identity_env → git user.name → os username (fallback).
@@ -500,7 +542,8 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
         // путь); actionable текст — в bootstrap-лог (carve-out-стиль).
         logError("memory:client_not_installed", { error_class: "not_installed" });
         log?.error?.("memory: qdrant client not installed — run npm install in " + moduleDir);
-        return {};
+        // #77 (spec §4.4): громкий off — process-notice вместо return {}.
+        return processNotice("client_not_installed");
       }
       storageOptions.client = new QdrantClient({
         url: config.storage.qdrant.url,
@@ -516,7 +559,8 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
         // путь); actionable текст — в bootstrap-лог (carve-out-стиль).
         logError("memory:client_not_installed", { error_class: "not_installed" });
         log?.error?.("memory: pg client not installed — run npm install in " + moduleDir);
-        return {};
+        // #77 (spec §4.4): громкий off — process-notice вместо return {}.
+        return processNotice("client_not_installed");
       }
       storageOptions.pool = new pg.Pool({
         connectionString: process.env[config.storage.pgvector.connection_string_env],
@@ -578,7 +622,10 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
         // Spec follow-up 2: hard-fail оставляет диагностический memory_probe
         // (live-проверка вручную, минуя cooldown), но без штатных tool-хуков.
         // core.js сливает только memoryHooks.tool → оборачиваем в { tool: {...} }.
-        return { tool: { memory_probe: makeMemoryProbeTool({ embeddings, state, log, apiKeyEnv }) } };
+        // #77 (spec §4.4, I2): + process-notice; состав сокращённого набора —
+        // { tool: { memory_probe }, transform } (memory_probe не регрессирует).
+        const probeNotice = processNotice("probe_hard_fail");
+        return { tool: { memory_probe: makeMemoryProbeTool({ embeddings, state, log, apiKeyEnv }) }, ...probeNotice };
       } else {
         // Fix round 1 (C1): enum-only error_class (SEC-4b) — p.detail (err.message)
         // в аудит-лог не попадает.
@@ -743,6 +790,21 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     } catch {
       /* fail-soft */
     }
+    // #77 (spec §4.2, M1): unsaved-реестр (bounded, in-memory) — владение
+    // index.js; indexer получает колбэки. 1× на установку флага; re-entry
+    // (clear + новый fail) — новый event (spec §7).
+    const unsaved = makeBoundedMap(1024);
+    const setUnsaved = (sid, reason) => {
+      if (unsaved.get(sid) === undefined) logInfo("memory:unsaved_notice", { sessionID: sid, reason });
+      unsaved.set(sid, reason);
+    };
+    const clearUnsaved = (sid) => {
+      if (unsaved.get(sid) !== undefined) {
+        logDebug("memory:unsaved_cleared", { sessionID: sid });
+        unsaved.delete(sid);
+      }
+    };
+
     const indexer = new Indexer({
       client,
       config,
@@ -751,6 +813,8 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       state,
       summarize: summarizeSession,
       projectKey,
+      // #77 (spec §4.2, M1): unsaved-колбэки (hard-fail → флаг; успех → снятие).
+      setUnsaved, clearUnsaved,
       // C1 (review): provenance-штамп — key (для prefixes) и originRemote
       // (для origin_remote) обязаны доезжать до индексатора. Без них каждая
       // новая запись получает origin_remote:"" и prefixes:[] → на qdrant
@@ -1093,7 +1157,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       }),
       memory_reindex: tool({
         description:
-          "HITL-бэкфилл памяти: dry-run листинг на индексацию (sessions + git-история) → run по явным ID или всё по снапшоту, cap 20/вызов (permission: ask).",
+          "HITL-бэкфилл памяти: dry-run листинг на индексацию (sessions + git-история) → run по явным ID или всё по снапшоту, cap 20/источник за вызов (session_ids и all_empty-снапшот считаются отдельно); явные session_ids с отсутствующей/stale-записью — полный re-index (LLM, сброс skip).",
         args: {
           action: tool.schema.string().describe("list | run"),
           source: tool.schema.string().optional().describe("sessions | git (для run)"),
@@ -1212,35 +1276,99 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             if (!args.source) return "memory_reindex: для run укажите source (sessions | git)";
 
             if (args.source === "sessions") {
-              // Явные session_ids (снапшот не нужен) ∪ all_empty (строго по
-              // снапшоту листинга) → cap max → reindexSessionArtifacts на
-              // каждый; fail-soft по элементу (RI-9).
-              let ids = args.session_ids ? args.session_ids.split(",").map((s) => s.trim()).filter(Boolean) : [];
+              // #77 (spec §5.1): явные session_ids — диспатч по временному
+              // критерию N1 (тот же, что у state.unindexed()): запись
+              // существует И актуальна → artifacts top-up (0 LLM); иначе
+              // (нет / skip / lastAttempt > lastSummarized) → полный
+              // re-index (LLM, сброс skip C1). all_empty (снапшот) — legacy:
+              // только artifacts top-up. Cap max общий; fail-soft по элементу.
+              const explicit = args.session_ids
+                ? args.session_ids.split(",").map((s) => s.trim()).filter(Boolean)
+                : [];
+              let snapshotIds = [];
               if (args.all_empty) {
                 if (reindexSnapshot === null) {
                   return "memory_reindex: сначала выполните list (action: \"list\"), затем run с all_empty — выбор по снапшоту листинга";
                 }
-                ids = [...reindexSnapshot.sessions.keys()];
+                snapshotIds = [...reindexSnapshot.sessions.keys()];
               }
-              const unique = [...new Set(ids)];
-              const capped = unique.length > max;
-              const selected = unique.slice(0, max);
+              const uniqueExplicit = [...new Set(explicit)];
+              const uniqueAll = [...new Set(snapshotIds)];
+              const capped = uniqueExplicit.length > max || uniqueAll.length > max;
+              const selExplicit = uniqueExplicit.slice(0, max);
+              const selAll = uniqueAll.slice(0, max).filter((id) => !selExplicit.includes(id));
+              const selected = [...selExplicit, ...selAll];
               if (!selected.length) return "memory_reindex: ничего не выбрано для индексации (sessions).";
-              const agg = { selected: selected.length, updated: 0, no_change: 0, already_indexed: 0, skipped: {} };
+              const agg = {
+                selected: selected.length, updated: 0, no_change: 0, already_indexed: 0,
+                // #77 (spec §5.1): full-reindex-счётчики (агрегаты, SEC-4b).
+                indexed: 0, full_index: 0, not_found: 0, skip_service: 0,
+                unattributed: 0, no_new_messages: 0, failed: 0,
+                skipped: {},
+              };
               const lines = [];
+              const artifactsDeps = {
+                client, storage, root, key: effectiveKey,
+                artifactGlobs: config.artifact_globs,
+                artifactConfidentialPatterns,
+                confidentialPatterns: confidentialPaths,
+                embedModelId: embeddings.modelId,
+              };
               for (const sid of selected) {
                 try {
-                  const r = await reindexSessionArtifacts({
-                    client, storage, root, key: effectiveKey,
-                    artifactGlobs: config.artifact_globs,
-                    artifactConfidentialPatterns,
-                    confidentialPatterns: confidentialPaths,
-                    embedModelId: embeddings.modelId,
-                  }, sid);
-                  if (r.status === "updated") agg.updated++;
-                  else if (r.status === "no_change") agg.no_change++;
-                  else agg.skipped[r.status] = (agg.skipped[r.status] ?? 0) + 1;
-                  lines.push(`- ${sid}: ${r.status}`);
+                  let status;
+                  if (selExplicit.includes(sid)) {
+                    // R2: pre-check ДО full re-index — not_found / skip_service
+                    // (0 LLM, без побочных эффектов reindexSession).
+                    let sess = null;
+                    try {
+                      const resp = await client.session.get({ path: { id: sid } });
+                      sess = resp?.data ?? resp;
+                    } catch { /* sess = null → not_found */ }
+                    if (!sess || typeof sess !== "object") {
+                      status = "not_found";
+                    } else if (sess.parentID || SESSIONS.has(sid)) {
+                      status = "skip_service";
+                    } else {
+                      const rec = await storage.get(sid);
+                      const lastSum = await state.getLastSummarized(sid);
+                      const lastAtt = await state.getLastAttempt(sid);
+                      const isSkip = await state.isSkipped(sid);
+                      // N1: актуальность = запись есть И !stale.
+                      const stale = isSkip || (lastAtt != null && (lastSum == null || lastAtt > lastSum));
+                      if (rec && !stale) {
+                        // Актуальная запись — light-путь (0 LLM).
+                        status = (await reindexSessionArtifacts(artifactsDeps, sid)).status;
+                      } else {
+                        // Нет/skip/stale — полный re-index (LLM, сброс skip).
+                        agg.full_index++;
+                        const r = await indexer.reindexSession(sid);
+                        if (r.status === "ok") {
+                          // C2: post-fact-арбитр — запись обязана появиться.
+                          const post = await storage.get(sid);
+                          status = post ? "indexed" : "failed: index_error";
+                        } else if (r.status.startsWith("failed:")) {
+                          status = `failed: ${r.status.slice("failed:".length)}`;
+                        } else {
+                          // unattributed | no_new_messages | skip_service
+                          status = r.status;
+                        }
+                      }
+                    }
+                  } else {
+                    // legacy (all_empty): artifacts top-up, 0 LLM.
+                    status = (await reindexSessionArtifacts(artifactsDeps, sid)).status;
+                  }
+                  if (status === "updated") agg.updated++;
+                  else if (status === "no_change") agg.no_change++;
+                  else if (status === "indexed") agg.indexed++;
+                  else if (status === "not_found") agg.not_found++;
+                  else if (status === "skip_service") agg.skip_service++;
+                  else if (status === "unattributed") agg.unattributed++;
+                  else if (status === "no_new_messages") agg.no_new_messages++;
+                  else if (status.startsWith("failed:")) agg.failed++;
+                  else agg.skipped[status] = (agg.skipped[status] ?? 0) + 1;
+                  lines.push(`- ${sid}: ${status}`);
                 } catch (err) {
                   agg.skipped.error = (agg.skipped.error ?? 0) + 1;
                   lines.push(`- ${sid}: error`);
@@ -1250,10 +1378,14 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
               // без путей/текста/session_id.
               logInfo("memory:reindex.sessions", {
                 selected: agg.selected, updated: agg.updated, no_change: agg.no_change,
-                already_indexed: agg.already_indexed, skipped: agg.skipped,
+                already_indexed: agg.already_indexed,
+                full_index: agg.full_index, indexed: agg.indexed,
+                not_found: agg.not_found, skip_service: agg.skip_service,
+                unattributed: agg.unattributed, no_new_messages: agg.no_new_messages,
+                failed: agg.failed, skipped: agg.skipped,
               });
               const capNote = capped ? ` (cap: взяты первые ${max})` : "";
-              return `memory_reindex (sessions): selected=${agg.selected}, updated=${agg.updated}, no_change=${agg.no_change}, already_indexed=${agg.already_indexed}, skipped=${JSON.stringify(agg.skipped)}${capNote}\n` + lines.join("\n");
+              return `memory_reindex (sessions): selected=${agg.selected}, updated=${agg.updated}, no_change=${agg.no_change}, indexed=${agg.indexed}, full_index=${agg.full_index}, failed=${agg.failed}, skipped=${JSON.stringify(agg.skipped)}${capNote}\n` + lines.join("\n");
             }
 
             if (args.source === "git") {
@@ -1665,6 +1797,21 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             // Task 8: последний cached-статус probe (из state) — для @maestro-memory.
             const cachedProbe = await state.getEmbedderProbe();
             if (cachedProbe) out.push(`Проверка embedder: ${cachedProbe.ok ? "OK" : "FAIL"}${cachedProbe.hard ? " (конфигурация)" : ""} (${cachedProbe.detail}, ${new Date(cachedProbe.at).toISOString()})`);
+            // #77 (spec §5.2): неиндексированные сессии (G2) — временной
+            // критерий state.unindexed(); cap 20 строк + «…(+N ещё)».
+            // SEC-4b: session_id + enum/числа — паритет существующего вывода.
+            let unindexed = [];
+            try { unindexed = await state.unindexed(); } catch { /* fail-soft */ }
+            if (unindexed.length === 0) {
+              out.push("Не индексированные сессии: 0 (все сессии проиндексированы)");
+            } else {
+              out.push(`Не индексированные сессии: ${unindexed.length}`);
+              const rows = unindexed.slice(0, 20);
+              for (const u of rows) {
+                out.push(`  ${u.id} | skip=${u.skip ? 1 : 0} | fails=${u.fails} | reason=${u.lastErrorClass ?? "-"} | last_attempt=${u.lastAttempt ? new Date(u.lastAttempt).toISOString() : "-"}`);
+              }
+              if (unindexed.length > rows.length) out.push(`  …(+${unindexed.length - rows.length} ещё)`);
+            }
             out.push("По авторам:");
             for (const [a, n] of [...byAuthor.entries()].sort((x, y) => y[1] - x[1])) out.push(`  ${a}: ${n}`);
             out.push("По датам:");
@@ -1777,7 +1924,9 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       },
     };
 
-    // M2: auto_recall off → без chat.message / system.transform.
+    // M2: auto_recall off → без chat.message (recall). #77 (I1): transform —
+    // комбайн: recall-блок за auto_recall + notice-слой НЕЗАВИСИМО (уведомление
+    // о потере данных — не функция recall; паритет guard — communication.js).
     if (config.auto_recall !== false) {
       hooks["chat.message"] = async (input, output) => {
         try {
@@ -1799,15 +1948,24 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
           /* fail-quiet */
         }
       };
-      hooks["experimental.chat.system.transform"] = async ({ sessionID }, out) => {
+    }
+    hooks["experimental.chat.system.transform"] = async ({ sessionID }, out) => {
+      if (config.auto_recall !== false) {
         try {
           const b = await recall.systemBlock({ sessionID });
           if (b && out?.system) out.system.push(b);
         } catch {
           /* fail-quiet */
         }
-      };
-    }
+      }
+      try {
+        if (!(await isNoticeEligible(sessionID))) return;
+        const reason = unsaved.get(sessionID);
+        if (reason && out?.system) out.system.push(noticeSessionText(reason));
+      } catch {
+        /* fail-soft */
+      }
+    };
 
     // I6: backfill при старте (fire-and-forget). Task 7: по завершении окна
     // эмитим memory:storage.stats (cumulative-агрегаты, spec §4.4).
@@ -1832,6 +1990,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     // Carve-out: «memory: init failed» остаётся на bootstrap-`log` напрямую
     // (не через logError) — видимость в общей картине плагина.
     log?.error?.("memory: init failed", { error: err instanceof Error ? err.message : String(err) });
-    return {};
+    // #77 (spec §4.4): громкий off — process-notice (init_failed) вместо return {}.
+    return processNotice("init_failed");
   }
 }

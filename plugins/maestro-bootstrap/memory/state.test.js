@@ -102,3 +102,76 @@ test("atomic write leaves no tmp file and valid JSON", async () => {
   assert.doesNotThrow(() => JSON.parse(readFileSync(p, "utf8")));
   rmSync(dir, { recursive: true, force: true });
 });
+
+// ─── #77: recordFail(errorClass), clearSkip, unindexed ───
+
+test("#77: recordFail(id, errorClass) stores lastErrorClass", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createState(join(dir, "state.json"));
+  await st.recordFail("s1", "storage_error");
+  const u = await st.unindexed();
+  assert.equal(u.length, 1);
+  assert.equal(u[0].id, "s1");
+  assert.equal(u[0].fails, 1);
+  assert.equal(u[0].skip, false);
+  assert.equal(u[0].lastErrorClass, "storage_error");
+  assert.ok(u[0].lastAttempt > 0);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("#77: recordFail без errorClass — lastErrorClass null (backward compat)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createState(join(dir, "state.json"));
+  await st.recordFail("s1");
+  const u = await st.unindexed();
+  assert.equal(u[0].lastErrorClass, null);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("#77: clearSkip resets skip/fails/lastAttempt (C1)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createState(join(dir, "state.json"));
+  await st.recordFail("s1"); await st.recordFail("s1"); await st.recordFail("s1");
+  assert.equal(await st.isSkipped("s1"), true);
+  await st.clearSkip("s1");
+  assert.equal(await st.isSkipped("s1"), false);
+  assert.equal(await st.getLastAttempt("s1"), null, "lastAttempt сброшен в null (C1: throttle не блокирует повтор)");
+  assert.equal((await st.unindexed()).length, 0);
+  await st.recordFail("s1");
+  const after = await st.unindexed();
+  assert.equal(after.length, 1);
+  assert.equal(after[0].fails, 1, "fails сброшен в 0 (один новый страйк = 1)");
+  assert.equal(await st.isSkipped("s1"), false, "один новый страйк не ставит skip");
+  await st.clearSkip("nope"); // no-op, без броска
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("#77: unindexed() — временной критерий (N1)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createState(join(dir, "state.json"));
+  // самовосстановившаяся: lastSummarized ПОСЛЕ lastAttempt → НЕ в списке (даже fails>0)
+  await st.recordFail("healed");
+  await st.setSummarized("healed");
+  // stale: lastAttempt ПОСЛЕ lastSummarized → в списке (задержка для разных timestamp)
+  await st.setSummarized("stale");
+  await new Promise((r) => setTimeout(r, 10));
+  await st.recordFail("stale");
+  // permanent-skip → в списке
+  await st.recordFail("skip3"); await st.recordFail("skip3"); await st.recordFail("skip3");
+  // чистая → не в списке
+  await st.setSummarized("clean");
+  const ids = (await st.unindexed()).map((x) => x.id).sort();
+  assert.deepEqual(ids, ["skip3", "stale"]);
+  rmSync(dir, { recursive: true, force: true });
+});
+
+test("#77: unindexed() — lastAttempt без lastSummarized (запись не создавалась) → в списке", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-"));
+  const st = createState(join(dir, "state.json"));
+  await st.recordFail("fresh-fail", "embedder_error");
+  const u = (await st.unindexed());
+  assert.equal(u.length, 1);
+  assert.equal(u[0].lastSummarized, null);
+  assert.equal(u[0].lastErrorClass, "embedder_error");
+  rmSync(dir, { recursive: true, force: true });
+});

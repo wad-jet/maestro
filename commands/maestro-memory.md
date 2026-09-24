@@ -106,6 +106,14 @@ description: Показать статус memory layer плагина maestro-b
 - `unmasked_branch_metadata` — централизованный бэкенд + непустые `confidential.paths` (имена веток уходят на сервер);
 - `external_embedder_unmasked_queries` — внешний embedder + непустые `confidential.paths` (запросы/контент уходят внешнему вендору).
 
+**Не индексированные сессии**
+
+`memory_stats_detail` показывает блок «Не индексированные сессии: N» — сессии,
+данные которых НЕ сохранены в памяти (сбой индексирования). Для каждой —
+reason-класс, skip-флаг, время последней попытки. 0 — «все сессии
+проиндексированы». Если N > 0 — предложить пользователю восстановление через
+`@maestro-memory-reindex` (явные session_id из списка).
+
 **Аудит-лог memory layer:** для root-cause/эффективности/латентности укажи файл
 `.maestro/logs/maestro-memory-<дата>.log` (JSONL; lifecycle/эффективность — `info`,
 перф/root-cause — `debug`, поднимается `MAESTRO_MEMORY_LOG_LEVEL=debug`). Грепы:
