@@ -220,9 +220,9 @@ OBSERVABILITY_COVERAGE_COMMAND: "none"
 - `@maestro-memory` — статус memory layer (бэкенд, модель, записи, кластеры/граф, тюнинг; только агрегаты).
 - `@maestro-memory-report` — статический HTML-отчёт в `.maestro/` (только агрегаты, SEC-4b; `report.include_text` — opt-in).
 - `@maestro-memory-prune` — HITL-утилизация брошенных/unknown записей (листинг → подтверждение → удаление).
-- `@maestro-memory-reindex` — HITL-бэкафилл индексации (sessions + git-история → full-reindex), восстановление после skip-дрейфа.
+- `@maestro-memory-reindex` — HITL-бэкфилл индексации (sessions + git-история → full-reindex), восстановление после skip-дрейфа.
 - `@maestro-memory-backup` — HITL бэкап/восстановление memory layer (sqlite v1, double-masking, manifest sha256).
-- `memory_probe` — принудительная проверка доступности модели эмбеддингов (mиnu cooldown).
+- `memory_probe` — принудительная проверка доступности модели эмбеддингов (минус cooldown).
 
 ### Команды пайплайна
 - Шаг 18.5 — `@maestro-feedback-report`: режимы `auto/manual/disable` в `maestro.json` (канон `maestro-assistant`, плагин `feedback-report.js`, directive injection в system-контекст).

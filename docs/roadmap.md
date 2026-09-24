@@ -25,9 +25,12 @@
    сохранены» (spec 2026-09-23): loud-уведомления (per-session + process-level) +
    восстановление по требованию (`memory_reindex` full-reindex), sqlite-fallback —
    non-goal.
-3. **#113** — `@maestro-feedback-report`: режимы `auto/manual/disable` в `maestro.json`.
-    **Выполнено (4.8.0, 2026-09-24)** — плагин `feedback-report.js` + `loadFeedbackReportConfig`
-    (core.js, 3-й источник chainHooks); дефолт `manual`, fail-soft для auto, disable — пропуск.
+3. **#113** — `@maestro-feedback-report`: режимы `auto/manual/disable` в
+   `maestro.json`. **Выполнено (4.8.0, 2026-09-24)** — ключ `feedback_report`
+   (дефолт `manual`), плагин-директива в system-контексте (паттерн
+   `communication`), шаг 18.5 пайплайна (manual — подсказка / auto —
+   авто-сбор без HITL, fail-soft / disable — ничего); spec
+   `docs/superpowers/specs/2026-09-24-feedback-report-modes-design.md`.
 
 Параллельно (дёшево, не релизные обязательства):
 
