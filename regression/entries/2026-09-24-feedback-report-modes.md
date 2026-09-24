@@ -26,6 +26,6 @@
   - **[Manual] лог directive_injected:** при успешной инъекции в primary — `feedback_report:directive_injected` (debug).
   - **[Manual] смена режима:** правка `maestro.json → feedback_report` без рестарта — без эффекта; после рестарта opencode — новый режим активен.
 - **regressions:** ⚑1–4 не затрагиваются; `/maestro-setup` не генерирует и не спрашивает `feedback_report`; команда `@maestro-feedback-report` всегда интерактивна (режим влияет только на авто-вызов на шаге 18.5).
-- **version:** 4.8.0
+- **plugin-version:** 4.8.0
 - **tests_total:** плагин 236 (210 baseline + 26 новых) / memory 809 pass (2 skip на Bun)
 - **links:** spec `docs/superpowers/specs/2026-09-24-feedback-report-modes-design.md` | plan `docs/superpowers/plans/2026-09-24-feedback-report-modes-plan.md` | changelog `[Unreleased]` → `4.8.0`
