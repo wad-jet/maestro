@@ -204,7 +204,7 @@ const expectedEmpty = {
   top_ops: [],
   gaps: [],
   timeline: [],
-  metrics: { tokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: null }, activeMs: null, questionCount: 0, reviewDispatches: 0, tokensByAgent: {} },
+  metrics: { tokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: null }, activeMs: null, questionCount: 0, reviewDispatches: 0, children: "full", tokensByAgent: {} },
 };
 
 const fixtureTokens = {
@@ -224,6 +224,20 @@ const fixtureTokens = {
         { type: "tool", tool: "task", callID: "r2", state: { status: "completed", input: { subagent_type: "opus", description: "y" }, output: "ok", title: "Preview check", time: { start: 3600, end: 3900 } }, id: "tr2" },
         { type: "tool", tool: "task", callID: "r3", state: { status: "pending", input: { subagent_type: "opus", description: "z" }, title: "Review spec", time: { start: 4000 } }, id: "tr3" },
         { type: "tool", tool: "task", callID: "r4", state: { status: "completed", input: { subagent_type: "opus", description: "w" }, output: "ok", title: "Ревью по спеке", time: { start: 4100, end: 4400 } }, id: "tr4" },
+      ],
+    },
+  ],
+};
+
+const fixtureFast = {
+  info: { id: "ses_fast", model: "m", time: { created: 1000, end: 5000 } },
+  messages: [
+    { info: { role: "user", time: { created: 1000 } }, parts: [{ type: "text", text: "hi" }] },
+    {
+      info: { role: "assistant", time: { created: 2000 }, tokens: { input: 10, output: 5, reasoning: 0, cache: { read: 0, write: 0 } } },
+      parts: [
+        { type: "tool", tool: "question", callID: "q1", state: { status: "completed", input: {}, output: "a", time: { start: 2100, end: 2200 } }, id: "tq1" },
+        { type: "tool", tool: "task", callID: "t1", state: { status: "completed", input: { subagent_type: "haiku", description: "x" }, output: "ok", metadata: { sessionId: "ses_child_fast" }, time: { start: 3000, end: 4000 } }, id: "tt1" },
       ],
     },
   ],
@@ -648,4 +662,60 @@ test("tokensByAgent — зависший child-экспорт (таймаут) �
   };
   const out = runFixture(data, "hang", { MAESTRO_TIMELINE_EXPORT_DIR: exportDir, MAESTRO_CHILD_EXPORT_TIMEOUT_MS: "200" });
   assert.deepEqual(out.metrics.tokensByAgent.opus, { count: 1, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 1, failed: 0 });
+});
+
+test("--no-children: children=skipped, tokensByAgent пуст даже при наличии task-частей (fixture)", () => {
+  const path = join(tmpDir, "fast.json");
+  writeFileSync(path, JSON.stringify(fixtureFast));
+  const out = execFileSync(process.execPath, [scriptPath, "ses_test", path, "--no-children"], {
+    encoding: "utf-8", timeout: 30000,
+    env: { ...process.env, MAESTRO_TIMELINE_EXPORT_DIR: join(tmpDir, "fast-children"), MAESTRO_METRICS_JSONL: join(tmpDir, "fast.jsonl") },
+  });
+  const data = JSON.parse(out.trim());
+  assert.equal(data.metrics.children, "skipped");
+  assert.deepEqual(data.metrics.tokensByAgent, {});
+  assert.equal(data.metrics.questionCount, 1);
+  assert.equal(data.metrics.tokens.input, 10);
+});
+
+test("обычный прогон: metrics.children === 'full' (regression-гард нового поля)", () => {
+  const data = runFixture(fixtureTokens, "childrenFull");
+  assert.equal(data.metrics.children, "full");
+});
+
+test("--no-children: порядок флага среди позиционных + usage при отсутствии sessionID", () => {
+  const path = join(tmpDir, "fast2.json");
+  writeFileSync(path, JSON.stringify(fixtureEmpty));
+  for (const a of [
+    ["--no-children", "ses_test", path],
+    ["ses_test", "--no-children", path],
+    ["ses_test", path, "--no-children"],
+  ]) {
+    const out = execFileSync(process.execPath, [scriptPath, ...a], {
+      encoding: "utf-8", timeout: 30000, env: { ...process.env, MAESTRO_METRICS_JSONL: join(tmpDir, "fast2.jsonl") },
+    });
+    assert.equal(JSON.parse(out.trim()).metrics.children, "skipped");
+  }
+  let err;
+  try {
+    execFileSync(process.execPath, [scriptPath, "--no-children"], { encoding: "utf-8", timeout: 30000, env: { ...process.env, MAESTRO_METRICS_JSONL: join(tmpDir, "fast2.jsonl") } });
+    assert.fail("ожидался exit 1 (usage)");
+  } catch (e) { err = e; }
+  assert.equal(err.status, 1);
+  assert.match(err.stderr, /Usage/);
+});
+
+test("JSONL: fast-mode строка children=skipped; full-прогон после fast заменяет строку (upsert, known behavior)", () => {
+  const path = join(tmpDir, "fast3.json");
+  writeFileSync(path, JSON.stringify(fixtureEmpty));
+  const jsonl = join(tmpDir, "fast3.jsonl");
+  const run = (a) => execFileSync(process.execPath, [scriptPath, ...a], { encoding: "utf-8", timeout: 30000, env: { ...process.env, MAESTRO_METRICS_JSONL: jsonl } });
+  run(["ses_test", path, "--no-children"]);
+  let lines = readFileSync(jsonl, "utf-8").trim().split("\n");
+  assert.equal(lines.length, 1);
+  assert.equal(JSON.parse(lines[0]).metrics.children, "skipped");
+  run(["ses_test", path]);
+  lines = readFileSync(jsonl, "utf-8").trim().split("\n");
+  assert.equal(lines.length, 1);
+  assert.equal(JSON.parse(lines[0]).metrics.children, "full");
 });
