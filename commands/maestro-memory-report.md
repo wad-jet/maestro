@@ -12,8 +12,12 @@ description: Сгенерировать статический HTML-отчёт �
 
 ## Шаг 1. Получить детальную статистику памяти
 
-1. Прочитай `maestro.json` через bash (cat/sed — нативный deny-ит read-тул):
-   `memory.enabled`, `memory.storage.type`, `memory.module_dir`.
+1. **Гейт `maestro_config`:** если плагин-тул `maestro_config` **недоступен** →
+   вывод «Перезапустите opencode / обновите плагин maestro-bootstrap (≥ 4.9.0)»
+   (дистинкция по `.maestro/plugin-version` как в `@maestro-memory` шаг 1.2) —
+   завершение. **Конфиг НЕ читать (bash-fallback запрещён).** Если доступен →
+   прочитай секцию `memory` через тул (`section: "memory"`): `memory.enabled`,
+   `memory.storage.type`, `memory.module_dir`.
 2. Ветвление:
    - `memory.enabled: false` → выведи «Память maestro выключена — включите в maestro.json:
      memory.enabled: true» (текущее сообщение; fallback НЕ запускать).
@@ -38,11 +42,13 @@ description: Сгенерировать статический HTML-отчёт �
    (рёбра между `session_id`, узлы — сессии). НЕ рендерь молча несогласованный
    отчёт (пустой commit-граф / неверный формат).
 
-## Шаг 1a. Fallback: прямое чтение sqlite (только при sqlite-бэкенде, tool недоступен)
+## Шаг 1a. Fallback: прямое чтение sqlite (только при sqlite-бэкенде, плагин
+загружен/актуален, но `memory_stats_detail` временно недоступен)
 
 1. Резолв данных (через provisioned-код module_dir, НЕ дублируя логику):
    - `<data-dir>`: вычисли из XDG/`~/Library/Application Support` (maestro).
-   - module_dir: `memory.module_dir` из maestro.json, иначе `<data-dir>/maestro/memory/module`.
+   - module_dir: `memory.module_dir` (из секции `memory`, прочитанной в шаге 1
+     плагин-тулом `maestro_config`), иначе `<data-dir>/maestro/memory/module`.
    - `<key>`: импортируй `resolveEffectiveKey`/`sanitizeDirName` из
      `<module_dir>/config.js` и `deriveProjectKey` из `<module_dir>/project.js`
      через dynamic import (ESM). projectHash вычисли как
@@ -76,9 +82,9 @@ description: Сгенерировать статический HTML-отчёт �
 
 ## Шаг 2. Прочитать конфигурацию
 
-1. Извлеки `memory.report.include_text` из уже прочитанного в шаге 1 `maestro.json`
-   (чтение через bash — нативный permission-слой deny-ит `read`-тул по `maestro.json`).
-   Если отсутствует → `false` (по умолчанию).
+1. Извлеки `memory.report.include_text` из уже прочитанной в шаге 1 секции
+   `memory` (плагин-тул `maestro_config` — `read`-тул нативно denied,
+   bash-чтение запрещено). Если отсутствует → `false` (по умолчанию).
 
 ## Шаг 3. Сформировать статический HTML
 
