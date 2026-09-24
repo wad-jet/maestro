@@ -20,6 +20,7 @@ const EXPORT_DIR = process.env.MAESTRO_TIMELINE_EXPORT_DIR || null;
 const CHILD_TIMEOUT_MS = Number(process.env.MAESTRO_CHILD_EXPORT_TIMEOUT_MS) > 0 ? Number(process.env.MAESTRO_CHILD_EXPORT_TIMEOUT_MS) : 30000;
 const CHILD_CONCURRENCY = 4;
 const CHILD_CAP = 100;
+const errTailOneLine = (t) => t.replace(/\r?\n/g, " ").trim().slice(-300) || "no stderr";
 
 async function exportSession(sessionID, timeoutMs) {
   if (EXPORT_DIR) {
@@ -48,12 +49,12 @@ async function exportSession(sessionID, timeoutMs) {
   }
   return await new Promise((resolve, reject) => {
     const tmpFile = join(tmpdir(), `maestro-child-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
-    const fd = openSync(tmpFile, "w");
+    const fd = openSync(tmpFile, "w", 0o600);
     const child = spawn("opencode", ["export", sessionID], { stdio: ["ignore", fd, "pipe"] });
     let errTail = "";
     child.stderr.on("data", (d) => { errTail = (errTail + d).slice(-500); });
     const fail = (e) => {
-      try { process.stderr.write(`[timeline] export failed: ${sessionID} — ${errTail.trim().slice(-300) || "no stderr"}\n`); } catch {}
+      try { process.stderr.write(`[timeline] export failed: ${sessionID} — ${errTailOneLine(errTail)}\n`); } catch {}
       reject(e);
     };
     let done = false;
@@ -102,7 +103,7 @@ try {
     writeFileSync(shimPath, shimScript, { mode: 0o755 });
     try {
       await new Promise((resolve, reject) => {
-        const fd = openSync(tmpFile, "w");
+        const fd = openSync(tmpFile, "w", 0o600);
         const child = spawn("opencode", ["export", sessionID], {
           stdio: ["ignore", fd, "pipe"],
         });
@@ -111,14 +112,14 @@ try {
         child.on("exit", (code) => {
           closeSync(fd);
           if (code !== 0) {
-            process.stderr.write(`[timeline] export failed: ${sessionID} — ${errTail.trim().slice(-300) || "no stderr"}\n`);
+            process.stderr.write(`[timeline] export failed: ${sessionID} — ${errTailOneLine(errTail)}\n`);
             reject(new Error("export failed"));
           } else {
             resolve();
           }
         });
         child.on("error", (e) => {
-          process.stderr.write(`[timeline] export failed: ${sessionID} — ${errTail.trim().slice(-300) || "no stderr"}\n`);
+          process.stderr.write(`[timeline] export failed: ${sessionID} — ${errTailOneLine(errTail)}\n`);
           reject(e);
         });
       });

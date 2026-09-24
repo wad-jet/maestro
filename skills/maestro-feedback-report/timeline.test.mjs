@@ -793,3 +793,17 @@ test("stderr: сбой primary-CLI → diag-строка + export_failed + exit 
   assert.equal(lines.length, 1);
   assert.match(lines[0], /\[timeline\] export failed: ses_stderr_p/);
 });
+
+test("stderr: многострочный stderr CLI → diag остаётся одной строкой (anti-injection)", () => {
+  const dir = makeFakeOpencode("stderr_multiline", { failChild: true, noise: 0 });
+  // многострочный stderr для child-sid; cat — абсолютным путём (CWD репо, а не dir)
+  const sh = join(dir, "opencode");
+  writeFileSync(sh, "#!/bin/sh\nif [ \"$2\" = \"ses_child_bad\" ]; then printf 'line1\\nline2-injected\\n' >&2; exit 1; fi\ncat \"" + join(dir, "fixture.json") + "\"\n");
+  chmodSync(sh, "755");
+  const r = runReal(dir, "ses_stderr_ml");
+  assert.equal(r.status, 0);
+  const lines = r.stderr.trim().split("\n");
+  assert.equal(lines.length, 1);
+  assert.match(lines[0], /\[timeline\] export failed: ses_child_bad/);
+  assert.match(lines[0], /line1 line2-injected/);
+});
