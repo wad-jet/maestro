@@ -1,6 +1,6 @@
 {
   "name": "maestro",
-  "version": "4.9.0",
+  "version": "4.10.0",
   "description": "Maestro skill system for OpenCode: skills, commands, agents and the maestro-bootstrap plugin",
   "type": "module",
   "main": "./plugins/maestro-bootstrap/index.js",
