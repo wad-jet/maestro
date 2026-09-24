@@ -57,8 +57,8 @@ description: Use when implementing a feature end-to-end — orchestrates brainst
 на ключевых точках. Spec review — только по запросу.
 
 **Три маршрута на шаге 1:**
-- **Feature** (шаги 0–18) — полный цикл: project context → pre-flight → brainstorm (primary + custodian Q/A) → spec → plan → SDD → docs → review → finish
-- **Bugfix** (шаги 0–6 → D1–D7 → шаги 11–18) — project context → pre-flight + branch → debug sub-pipeline: ресеч → гипотеза → probe → откат → plan → SDD → docs → review → finish
+- **Feature** (шаги 0–18.5) — полный цикл: project context → pre-flight → brainstorm (primary + custodian Q/A) → spec → plan → SDD → docs → review → finish → feedback report
+- **Bugfix** (шаги 0–6 → D1–D7 → шаги 11–18.5) — project context → pre-flight + branch → debug sub-pipeline: ресеч → гипотеза → probe → откат → plan → SDD → docs → review → finish → feedback report
 - **Spike** (feasibility/ресеч/прототип, OQ-6/OQ-9) — короткий ресеч кода/прототип → вывод-рекомендация; **без spec/plan/мержа**; код — throwaway. Использует Spike-path скилла brainstorming (см. шаг 1, вариант (s)). Шаги 11-18 НЕ выполняются.
 
 **Mode protocol:** Два уровня режимов:
@@ -272,8 +272,8 @@ Interactive — агент комментирует находки по ходу
       **Авто-режимы:** auto-answer — маршрут из текста задачи, авто-принятие только
       при однозначности (иначе HITL); auto-ai — ИИ решает сам с доп. анализом.
       Выбор:
-        - (b) → шаги 0–6 (project context + pre-flight + branch) → Debug Sub-pipeline (шаги D1–D7) → шаги 11–18 (plan → SDD → docs → review → finish)
-        - (f) → основной pipeline (шаги 0–18)
+        - (b) → шаги 0–6 (project context + pre-flight + branch) → Debug Sub-pipeline (шаги D1–D7) → шаги 11–18.5 (plan → SDD → docs → review → finish → feedback report)
+        - (f) → основной pipeline (шаги 0–18.5)
         - (s) → **Spike** (feasibility/ресеч/прототип, OQ-6/OQ-9):
             — короткий ресеч кода/прототип → вывод-рекомендация; БЕЗ spec/plan/мержа.
             — Изоляция НЕ требуется (опц. временный worktree для прототипа,
@@ -915,6 +915,37 @@ Interactive — агент комментирует находки по ходу
         ссылающихся на текущую версию, отдельный коммит
         `chore: bump version to X.Y.Z — <содержание> (changelog/version)` на
         base-ветке (до push, если push ещё не выполнен).
+🟢 18.5. [agent] Feedback report (ретроспектива) — режим `feedback_report`
+      — **Источник режима — директива плагина в system-контексте:** строка
+        `maestro.json → feedback_report: <mode>` (инжектится плагин при явном
+        non-manual). **Директивы нет → `manual`** (дефолт: ключ отсутствует /
+        `manual` / невалидное / старая версия плагина — безопасный дефолт во
+        всех случаях). Шаг 18.5 НЕ читает `maestro.json` (ни read-тулом, ни
+        bash).
+      — **Маршруты:** feature (все категории, включая Bounded) + bugfix.
+        **Spike — НЕ выполняется** (отчёт не генерируется, заметка не
+        показывается).
+      — **`manual` (дефолт):** одна строка БЕЗ вопроса: «Для сбора отчёта
+        ретроспективы выполните `@maestro-feedback-report`». Заметка —
+        информационное сообщение: стиль следует режиму `communication`
+        (plain/professional); в efficient-режиме (шаг 1.5) допустима — одна
+        строка, не gate и не подтверждение.
+      — **`auto`:** выполнить `skill maestro-feedback-report`. **Промпт-
+        override вызова из pipeline (механика скилла не меняется — Гейт 0 и
+        вопросы сохраняются для интерактивной команды):** в auto-режиме
+        оркестратор не выполняет HITL-указания скилла — (а) жёсткий стоп
+        Гейта 0 подавляется; (б) подтверждающие вопросы скилла подавляются,
+        включая «либо подтверди у пользователя» на шаге 1 выбора сессии —
+        сессию оркестратор выбирает самостоятельно (текущая сессия pipeline,
+        `opencode session list`). Любой стоп/сбой/отказ → **fail-soft**: одна
+        строка «Отчёт не сгенерирован: <причина>», без HITL — pipeline
+        завершается, отчёт не блокирует завершение. Сообщение при успехе:
+        «Отчёт сохранён в `<путь>` (режим auto). Для добавления комментариев
+        выполните `@maestro-feedback-report`».
+      — **`disable`:** ничего видимого.
+      — **Новых HITL-gate НЕТ** ни в одном режиме. Инварианты ⚑1–4 не
+        затрагиваются (не merge, не принятие спеки, не чувствительные
+        изменения).
 ```
 
 ## HITL Gate Protocol
@@ -2211,6 +2242,7 @@ Pipeline не имеет механизма cross-repo координации (�
 Шаг 17: -- HITL: pre-PR (follow-up-список: 2 Minor, не блокирует merge),
         пользователь approves merge --
 Шаг 18: [agent] finishing-a-development-branch -> merge to base (--no-ff)
+Шаг 18.5: [agent] feedback report — режим по директиве (нет директивы → manual: подсказка команды)
 ```
 
 ```
@@ -2268,6 +2300,7 @@ Pipeline не имеет механизма cross-repo координации (�
 Шаг 16: [agent] requesting-code-review -> final review -> approved
 Шаг 17: -- HITL: pre-PR, пользователь approves merge --
 Шаг 18: [agent] finishing-a-development-branch -> merge to develop (--no-ff)
+Шаг 18.5: [agent] feedback report — режим по директиве (нет директивы → manual: подсказка команды)
 ```
 
 ```
