@@ -288,11 +288,12 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
   артефакты (спецы/планы/код/доки) и субагенты не затрагиваются. Флаг
   `@maestro-init --plain` — per-run, приоритетнее конфига (даже
   `professional`).
-- **Процедура смены режима:** чтение `maestro.json` — через bash (нативный
-  read-deny), правка — `edit` (нативный ask → HITL-подтверждение), затем
-  **обязательно сообщить о перезапуске opencode** (конфиг плагина читается
-  один раз при init — без рестарта эффект не наступит). Объяснить
-  последствия: дефолт `plain`, приоритет флага, область действия.
+- **Процедура смены режима:** чтение `maestro.json` — плагин-тул
+  `maestro_config` (arg `section: "communication"`; native ask), правка —
+  `edit` (нативный ask → HITL-подтверждение), затем **обязательно сообщить о
+  перезапуске opencode** (конфиг плагина читается один раз при init — без
+  рестарта эффект не наступит). Объяснить последствия: дефолт `plain`,
+  приоритет флага, область действия.
 
 ### Ключ `feedback_report` (режим отчёта ретроспективы)
 
@@ -345,6 +346,14 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
   команды (агрегация аудит-лога). Защита bash от секретов — через `read`/`edit`
   deny по реальным путям + санитайзер промптов; bash — best-effort слой.
 
+- **Чтение параметров `maestro.json`** — только через плагин-тул `maestro_config`
+  (native `ask`, только top-level primary-сессии; сабагенты — per-agent deny, см.
+  Per-agent exceptions). Чтение через `read`/`glob`/`grep` и bash
+  (`cat`/`sed`/`node -e`/иные) — запрещено. Исключение: existence-only
+  `test -f maestro.json` (1 бит, без раскрытия параметров). Тул недоступен
+  (плагин не загружен / устарел) — конфиг не читается: сообщение
+  «перезапустите opencode / обновите плагин»; bash-fallback запрещён.
+
 ### Глобальные deny (R1+R4) — эталон конфигурации init
 
 Генерируется `/maestro-setup`; assistant поддерживает/чинит:
@@ -356,7 +365,8 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
     "edit": { "*": "allow", "maestro.json": "ask", "docs/confidential/*": "deny", "*.env": "deny", "*.env.*": "deny", "*.env.example": "allow", "*.pem": "deny", "*.key": "deny", "*.crt": "deny", "*.p12": "deny", "*.pfx": "deny" },
     "bash": { "*": "allow" },
     "glob": { "*": "allow", "maestro.json": "deny", ".maestro/**": "deny", "docs/confidential/*": "deny" },
-    "grep": { "*": "allow", "maestro.json": "deny", ".maestro/**": "deny", "docs/confidential/*": "deny" }
+    "grep": { "*": "allow", "maestro.json": "deny", ".maestro/**": "deny", "docs/confidential/*": "deny" },
+    "maestro_config": "ask"
   }
 }
 ```
@@ -378,6 +388,10 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
   после V1. Ограничение: если runtime-V1 покажет, что agent allow не перекрывает
   global deny → fallback: скоупить нативный confidential-deny из Этапа A
   (оставить built-in секреты).
+
+- **`maestro_config`:** per-agent `deny` для **всех** сабагентов (untrusted и
+  trusted) — тул доступен только в top-level primary-сессиях (native ask +
+  плагинный fail-closed guard).
 
 ### Правила вывода
 
@@ -431,8 +445,10 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
 
 ### 2. Настройка конфигурации (правка)
 
-1. Прочитать текущий артефакт (`maestro.json` — через bash, `cat`/`sed`: нативный
-   permission-слой deny-ит `read`-тул; `.opencode/opencode.json` / `project-context.md`).
+1. Прочитать текущий артефакт (`maestro.json` — плагин-тул `maestro_config`
+   (native ask; `read` нативно denied, bash-чтение запрещено правилом R6);
+   `.opencode/opencode.json` / `project-context.md`). Тул недоступен — конфиг
+   не читать: «перезапустите opencode / обновите плагин».
 2. **Детектор дрейфа:** сверить `confidential.paths` из `maestro.json` с нативными
    deny в `.opencode/opencode.json` (read/edit/glob/grep). При расхождении —
    предупредить «paths и нативные deny расходятся — перегенерирую» (включается в
