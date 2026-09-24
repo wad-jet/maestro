@@ -11,6 +11,25 @@
 
 ## [2026-09-24]
 
+> **Версия 4.9.0** — Minor-релиз: read-only плагин-тул `maestro_config` — единственный санкционированный канал чтения параметров `maestro.json` в сессии (native `ask`, только top-level primary; сабагенты — per-agent `deny` + плагинный fail-closed guard).
+
+### Добавлено
+
+- **`maestro_config` read tool (4.9.0):** read-only плагин-тул — чтение
+  параметров `maestro.json` (весь конфиг или секция по dot-path; без redact) —
+  единственный санкционированный канал в сессии: native permission `ask`,
+  только top-level primary-сессия (сабагенты — per-agent `deny` в эталоне R6
+  и генерации `/maestro-setup` + плагинный fail-closed guard: task/service-
+  сессии и session-ошибки отклоняются). Аудит: `maestro_config:read` /
+  `maestro_config:access_denied` в `.maestro/logs/`. Чтение через
+  `read`/`glob`/`grep` и bash запрещено (каноны R6/SECURITY.md P6); допущен
+  только existence-only `test -f maestro.json`. Миграция 7+ flows (скиллы
+  maestro/setup/design, команды assistant/setup/design/memory/memory-report —
+  гейт §3.4a: тул недоступен → «перезапустите/обновите плагин (≥ 4.9.0)»,
+  конфиг не читается). SECURITY.md P6 — многоуровневая модель (sanctioned
+  channel / нативный слой / процессный канон) + задокументированный Residual.
+  Регресс: `regression/entries/2026-09-24-maestro-config-read-tool.md`.
+
 > **Версия 4.8.0** — Minor-релиз: режимы отчёта ретроспективы `feedback_report` (manual/auto/disable) + новый шаг 18.5 пайплайна.
 
 ### Добавлено
