@@ -35,5 +35,6 @@
     "enabled": true,
     "namespace": "ai.opencode.maestro"
   },
-  "communication": "professional"
+  "communication": "professional",
+  "feedback_report": "auto"
 }
