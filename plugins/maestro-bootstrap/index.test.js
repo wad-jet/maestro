@@ -2719,6 +2719,15 @@ describe("maestro_config tool (read-only maestro.json, spec 2026-09-24)", () => 
     }
   });
 
+  it("6a. dot-path: inherited-свойства (proto-chain) → section_missing", async () => {
+    const t = await makeTool({ trust: {} });
+    for (const bad of ["__proto__", "constructor"]) {
+      const out = await jrun(t, { section: bad });
+      assert.equal(out.section_found, false);
+      assert.equal(out.config, null);
+    }
+  });
+
   it("7. Guard: task-сессия (parentID) → deny task_session, без данных конфига", async () => {
     const t = await makeTool(
       { trust: { custodian: true } },

@@ -477,7 +477,8 @@ export function makeMaestroConfigTool({ client, root, log }) {
       }
       let value = config;
       for (const seg of section.split(".")) {
-        if (value !== null && typeof value === "object" && seg in value) {
+        if (value !== null && typeof value === "object" &&
+            Object.hasOwn(value, seg)) {
           value = value[seg];
         } else {
           log?.info?.("maestro_config:read", {
