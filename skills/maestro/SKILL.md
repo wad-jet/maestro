@@ -59,7 +59,7 @@ description: Use when implementing a feature end-to-end — orchestrates brainst
 **Три маршрута на шаге 1:**
 - **Feature** (шаги 0–18.5) — полный цикл: project context → pre-flight → brainstorm (primary + custodian Q/A) → spec → plan → SDD → docs → review → finish → feedback report
 - **Bugfix** (шаги 0–6 → D1–D7 → шаги 11–18.5) — project context → pre-flight + branch → debug sub-pipeline: ресеч → гипотеза → probe → откат → plan → SDD → docs → review → finish → feedback report
-- **Spike** (feasibility/ресеч/прототип, OQ-6/OQ-9) — короткий ресеч кода/прототип → вывод-рекомендация; **без spec/plan/мержа**; код — throwaway. Использует Spike-path скилла brainstorming (см. шаг 1, вариант (s)). Шаги 11-18 НЕ выполняются.
+- **Spike** (feasibility/ресеч/прототип, OQ-6/OQ-9) — короткий ресеч кода/прототип → вывод-рекомендация; **без spec/plan/мержа**; код — throwaway. Использует Spike-path скилла brainstorming (см. шаг 1, вариант (s)). Шаги 11-18.5 НЕ выполняются.
 
 **Mode protocol:** Два уровня режимов:
 
@@ -285,7 +285,7 @@ Interactive — агент комментирует находки по ходу
             — HITL-gates: шаг 1 (выбор spike) + nod на план + финальный
               «принять/продолжить/отмена».
             — Spike ≠ bugfix: debug sub-pipeline (D1-D7) НЕ применяется.
-            — Шаги 11-18 НЕ выполняются. Выход: HITL решает — оформить как
+            — Шаги 11-18.5 НЕ выполняются. Выход: HITL решает — оформить как
               feature/bugfix/завершить.
 🟡 1.5. -- HITL GATE: выбрать режим работы --
       "Как будем работать? (a) efficient — (b) interactive — (c) отмена"
