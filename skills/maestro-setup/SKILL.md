@@ -147,14 +147,18 @@ description: Use when initializing maestro for a new or existing project — gen
 `sanitizer_whitelist` из §3/§12. Идемпотентность: при существовании `maestro.json` — diff по
 секциям; merge сохраняет пользовательские правки; если файла нет — создаётся целиком.
 
-**Чтение текущего `maestro.json`** (существующий проект, diff секций) — **через bash**
-(`cat`/`sed`), не через read-тул: нативный permission-слой deny-ит `read` по
-`maestro.json` (см. канон нативных permissions в `maestro-assistant`).
+**Чтение текущего `maestro.json`** (существующий проект, diff секций) —
+**плагин-тулом `maestro_config`** (весь конфиг; native `ask`). `read`-тул —
+нативно denied, bash-чтение запрещено (см. канон нативных permissions в
+`maestro-assistant`). Тул недоступен — «перезапустите opencode / обновите плагин
+(≥ 4.9.0)», конфиг не читать.
 
 **Нативные permissions** (файл-доступ) генерируются в
 `.opencode/opencode.json` (merge-config) по канону `maestro-assistant` §«Канон нативных
 permissions OpenCode»: `read`/`glob`/`grep` deny `maestro.json`/`.maestro/**`,
-`read`-allow `.maestro/plugin-version`, `edit`-ask `maestro.json`.
+`read`-allow `.maestro/plugin-version`, `edit`-ask `maestro.json`, глобально
+`maestro_config` — `ask`, per-agent `maestro_config` — `deny` для всех
+сабагентов.
 
 ### Секция `memory` (опциональный memory layer)
 

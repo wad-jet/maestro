@@ -145,8 +145,10 @@ BUILD_COMMAND: "go build ./..."
 **Нативные permissions** (файл-доступ) генерируются в `.opencode/opencode.json`
 (merge-config) по канону `maestro-assistant` §«Канон нативных permissions OpenCode»:
 `read`/`glob`/`grep` deny `maestro.json`/`.maestro/**`, `read`-allow
-`.maestro/plugin-version`, `edit`-ask `maestro.json`. Чтение текущего `maestro.json`
-(сравнение секций) — через bash (`cat`/`sed`), не через read-тул (нативный deny).
+`.maestro/plugin-version`, `edit`-ask `maestro.json`, `maestro_config` — `ask`
++ per-agent `deny` (все сабагенты). Чтение текущего `maestro.json`
+(сравнение секций) — плагин-тулом `maestro_config` (`read`-тул нативно
+denied, bash-чтение запрещено).
 
 > Полный JSON-канон и детали — в `skills/maestro-assistant/SKILL.md` (единый источник; не
 > дублировать здесь).

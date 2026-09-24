@@ -10,8 +10,9 @@ description: Use to produce design, spec, scaffold and roadmap for a project aft
 1. **Маркер проекта.** Если в корне проекта есть `maestro.json` — это проект под
    управлением maestro, выполняется проверка плагина (шаг 2). Если `maestro.json`
    НЕТ — проект не под maestro, гейт пропускается, работаем как обычно.
-   Проверка наличия/чтение `maestro.json` — **через bash** (`cat`/`sed`/`test`):
-   нативный permission-слой deny-ит `read`-тул по `maestro.json`.
+    Existence-check `maestro.json` — `test -f maestro.json` (existence-only: 1 бит,
+    без раскрытия параметров); чтение параметров — плагин-тулом `maestro_config`
+    (native `ask`; bash-чтение запрещено, `read`-тул нативно denied).
 
 2. **Плагин реально работал.** Открой самый свежий файл
    `.maestro/logs/maestro-bootstrap-<дата>.log` (по имени-дате) — **через bash**
@@ -70,8 +71,8 @@ description: Use to produce design, spec, scaffold and roadmap for a project aft
 выполнен:
 
 - `docs/project-context.md` существует;
-- `maestro.json` существует (конфигурация maestro) — проверка через bash
-  (`test -f`/`cat`), нативный deny блокирует read-тул;
+- `maestro.json` существует (конфигурация maestro) — `test -f maestro.json`
+  (existence-only; `read`-тул нативно denied, параметры — тулом `maestro_config`);
 - `.maestro/last-run.md` существует (свод setup) — проверка через bash
   (`test -f`/`cat`), нативный deny по `.maestro/**`.
 
