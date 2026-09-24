@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { execFileSync, spawn } from "node:child_process";
-import { mkdtempSync, writeFileSync, rmSync, mkdirSync, chmodSync, openSync } from "node:fs";
+import { mkdtempSync, writeFileSync, rmSync, mkdirSync, chmodSync, openSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -10,23 +10,27 @@ const tmpDir = mkdtempSync(join(tmpdir(), "timeline-test-"));
 
 process.on("exit", () => { rmSync(tmpDir, { recursive: true, force: true }); });
 
-function runFixture(data, name) {
+const fixtureMetricsJsonl = join(tmpDir, "metrics-history.jsonl");
+
+function runFixture(data, name, extraEnv = {}) {
   const path = join(tmpDir, `${name}.json`);
   writeFileSync(path, JSON.stringify(data));
   const out = execFileSync(process.execPath, [scriptPath, "ses_test", path], {
     encoding: "utf-8",
     timeout: 30000,
+    env: { ...process.env, MAESTRO_METRICS_JSONL: fixtureMetricsJsonl, ...extraEnv },
   });
   return JSON.parse(out.trim());
 }
 
-function runFixtureFail(name) {
+function runFixtureFail(name, extraEnv = {}) {
   const path = join(tmpDir, `${name}.txt`);
   writeFileSync(path, "not json at all");
   try {
     const out = execFileSync(process.execPath, [scriptPath, "ses_test", path], {
       encoding: "utf-8",
       timeout: 30000,
+      env: { ...process.env, MAESTRO_METRICS_JSONL: fixtureMetricsJsonl, ...extraEnv },
     });
     return { stdout: out.trim(), code: 0 };
   } catch (e) {
@@ -200,6 +204,29 @@ const expectedEmpty = {
   top_ops: [],
   gaps: [],
   timeline: [],
+  metrics: { tokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: null }, activeMs: null, questionCount: 0, reviewDispatches: 0, tokensByAgent: {} },
+};
+
+const fixtureTokens = {
+  info: { id: "ses_tok", model: "m", cost: 0.01, tokens: { input: 130, output: 70, reasoning: 5, cache: { read: 10, write: 2 } } },
+  messages: [
+    { info: { role: "user", time: { created: 1000 } }, parts: [{ type: "text", text: "hi" }] },
+    {
+      info: { role: "assistant", time: { created: 2000 }, tokens: { input: 100, output: 50, reasoning: 5, cache: { read: 10, write: 2 } }, cost: 0.001 },
+      parts: [
+        { type: "tool", tool: "question", callID: "q1", state: { status: "completed", input: {}, output: "a", time: { start: 2100, end: 2200 } }, id: "tq1" },
+      ],
+    },
+    {
+      info: { role: "assistant", time: { created: 3000 }, tokens: { input: 30, output: 20, reasoning: 0, cache: { read: 0, write: 0 } }, cost: 0.0005 },
+      parts: [
+        { type: "tool", tool: "task", callID: "r1", state: { status: "completed", input: { subagent_type: "opus", description: "x" }, output: "ok", title: "Review feature X", time: { start: 3100, end: 3500 } }, id: "tr1" },
+        { type: "tool", tool: "task", callID: "r2", state: { status: "completed", input: { subagent_type: "opus", description: "y" }, output: "ok", title: "Preview check", time: { start: 3600, end: 3900 } }, id: "tr2" },
+        { type: "tool", tool: "task", callID: "r3", state: { status: "pending", input: { subagent_type: "opus", description: "z" }, title: "Review spec", time: { start: 4000 } }, id: "tr3" },
+        { type: "tool", tool: "task", callID: "r4", state: { status: "completed", input: { subagent_type: "opus", description: "w" }, output: "ok", title: "Ревью по спеке", time: { start: 4100, end: 4400 } }, id: "tr4" },
+      ],
+    },
+  ],
 };
 
 test("aggregates agents/tools/bash", () => {
@@ -341,6 +368,7 @@ test("empty file yields export_failed", () => {
     execFileSync(process.execPath, [scriptPath, "ses_empty", path], {
       encoding: "utf-8",
       timeout: 30000,
+      env: { ...process.env, MAESTRO_METRICS_JSONL: join(tmpDir, "metrics-history-empty.jsonl") },
     });
     assert.fail("should have thrown");
   } catch (e) {
@@ -394,7 +422,7 @@ test("path-less export path (shim opencode)", () => {
   const out = execFileSync(process.execPath, [scriptPath, "ses_shim"], {
     encoding: "utf-8",
     timeout: 30000,
-    env: { ...process.env, PATH: shimPathEnv },
+    env: { ...process.env, PATH: shimPathEnv, MAESTRO_METRICS_JSONL: join(tmpDir, "metrics-history-shim.jsonl") },
   });
   const data = JSON.parse(out.trim());
   assert.equal(data.session.id, "ses_shim");
@@ -449,11 +477,175 @@ test("large export >128K via spawn path (regression)", () => {
   const out = execFileSync(process.execPath, [scriptPath, "ses_large"], {
     encoding: "utf-8",
     timeout: 30000,
-    env: { ...process.env, PATH: shimPathEnv },
+    env: { ...process.env, PATH: shimPathEnv, MAESTRO_METRICS_JSONL: join(tmpDir, "metrics-history-large.jsonl") },
   });
   const data = JSON.parse(out.trim());
   assert.equal(data.session.id, "ses_large");
   assert.equal(data.totals.toolOps, 1);
   assert.equal(data.totals.toolTimeMs, 5000);
   assert.equal(data.totals.userMessages, 1);
+});
+
+test("metrics.tokens — сумма по assistant-сообщениям + cross-check с info.tokens", () => {
+  const out = runFixture(fixtureTokens, "tokens");
+  assert.deepEqual(out.metrics.tokens, { input: 130, output: 70, reasoning: 5, cacheRead: 10, cacheWrite: 2, cost: 0.0015 });
+  // cross-check (spec Answers-1): сумма сообщений == top-level info.tokens
+  const top = fixtureTokens.info.tokens;
+  assert.equal(out.metrics.tokens.input, top.input);
+  assert.equal(out.metrics.tokens.cacheRead, top.cache.read);
+});
+
+test("metrics.tokens.cost — все 0/absent → null", () => {
+  const data = {
+    info: { id: "ses_nc", model: "m" },
+    messages: [
+      { info: { role: "user", time: { created: 1000 } }, parts: [] },
+      { info: { role: "assistant", time: { created: 2000 }, tokens: { input: 10, output: 5, reasoning: 0, cache: { read: 0, write: 0 } }, cost: 0 }, parts: [] },
+    ],
+  };
+  const out = runFixture(data, "cost-null");
+  assert.equal(out.metrics.tokens.cost, null);
+});
+
+test("metrics.activeMs — duration − idleWait (floor 0); null без таймстампов", () => {
+  const out = runFixture(fixtureTokens, "tokens");
+  assert.equal(out.metrics.activeMs, 2000 - (out.totals.idleWaitMs || 0));
+  const noTs = { info: { id: "ses_nt" }, messages: [{ info: { role: "user" }, parts: [] }] };
+  const out2 = runFixture(noTs, "no-ts");
+  assert.equal(out2.metrics.activeMs, null);
+});
+
+test("metrics.questionCount и reviewDispatches — completed-only, граница слова", () => {
+  const out = runFixture(fixtureTokens, "tokens");
+  assert.equal(out.metrics.questionCount, 1);
+  assert.equal(out.metrics.reviewDispatches, 2); // "Review feature X" + "Ревью по спеке"; "Preview" и pending — нет
+});
+
+test("metrics — drift-формата: нет tokens/title/state → нули, без исключений", () => {
+  const data = {
+    info: { id: "ses_drift" },
+    messages: [
+      { info: { role: "assistant", time: { created: 2000 } }, parts: [
+        { type: "tool", tool: "task", callID: "d1", state: { status: "completed", input: { subagent_type: "opus" } }, id: "td1" },
+      ] },
+    ],
+  };
+  const out = runFixture(data, "drift");
+  assert.deepEqual(out.metrics.tokens, { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: null });
+  assert.equal(out.metrics.reviewDispatches, 0);
+  assert.equal(out.metrics.questionCount, 0);
+});
+
+function childFixture(id, tokens) {
+  return JSON.stringify({ info: { id, tokens }, messages: [] });
+}
+
+test("tokensByAgent — атрибуция по child-экспорту (fixture-mode)", () => {
+  const exportDir = join(tmpDir, "child-export-1");
+  mkdirSync(exportDir, { recursive: true });
+  writeFileSync(join(exportDir, "child_a.json"), childFixture("child_a", { input: 100, output: 10, reasoning: 0, cache: { read: 5, write: 0 } }));
+  writeFileSync(join(exportDir, "child_b.json"), childFixture("child_b", { input: 50, output: 5, reasoning: 0, cache: { read: 0, write: 0 } }));
+  const data = {
+    info: { id: "ses_ca" },
+    messages: [
+      { info: { role: "assistant", time: { created: 2000 } }, parts: [
+        { type: "tool", tool: "task", callID: "c1", state: { status: "completed", input: { subagent_type: "sonnet" }, output: "ok", metadata: { sessionId: "child_a" }, time: { start: 2100, end: 2500 } }, id: "tc1" },
+        { type: "tool", tool: "task", callID: "c2", state: { status: "completed", input: { subagent_type: "haiku" }, output: "ok", metadata: { sessionId: "child_b" }, time: { start: 2600, end: 2900 } }, id: "tc2" },
+      ] },
+    ],
+  };
+  const out = runFixture(data, "by-agent", { MAESTRO_TIMELINE_EXPORT_DIR: exportDir });
+  assert.deepEqual(out.metrics.tokensByAgent.sonnet, { count: 1, input: 100, output: 10, reasoning: 0, cacheRead: 5, cacheWrite: 0, skipped: 0, failed: 0 });
+  assert.deepEqual(out.metrics.tokensByAgent.haiku, { count: 1, input: 50, output: 5, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 0, failed: 0 });
+});
+
+test("tokensByAgent — дубль sessionId: токены 1 раз, count = task-части; атрибуция по первому subagent_type", () => {
+  const exportDir = join(tmpDir, "child-export-2");
+  mkdirSync(exportDir, { recursive: true });
+  writeFileSync(join(exportDir, "child_d.json"), childFixture("child_d", { input: 77, output: 7, reasoning: 0, cache: { read: 0, write: 0 } }));
+  const data = {
+    info: { id: "ses_dup" },
+    messages: [
+      { info: { role: "assistant", time: { created: 2000 } }, parts: [
+        { type: "tool", tool: "task", callID: "c1", state: { status: "completed", input: { subagent_type: "sonnet" }, output: "ok", metadata: { sessionId: "child_d" }, time: { start: 2100, end: 2500 } }, id: "tc1" },
+        { type: "tool", tool: "task", callID: "c2", state: { status: "completed", input: { subagent_type: "haiku" }, output: "ok", metadata: { sessionId: "child_d" }, time: { start: 2600, end: 2900 } }, id: "tc2" },
+      ] },
+    ],
+  };
+  const out = runFixture(data, "dup", { MAESTRO_TIMELINE_EXPORT_DIR: exportDir });
+  assert.deepEqual(out.metrics.tokensByAgent.sonnet, { count: 1, input: 77, output: 7, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 0, failed: 0 });
+  assert.deepEqual(out.metrics.tokensByAgent.haiku, { count: 1, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 0, failed: 0 });
+});
+
+test("tokensByAgent — без metadata.sessionId → игнор; failed (нет fixture); over-cap → skipped", () => {
+  const exportDir = join(tmpDir, "child-export-3");
+  mkdirSync(exportDir, { recursive: true });
+  const parts = [];
+  for (let i = 0; i < 105; i++) {
+    parts.push({ type: "tool", tool: "task", callID: "c" + i, state: { status: "completed", input: { subagent_type: "haiku" }, output: "ok", metadata: { sessionId: "cap_" + i }, time: { start: 1000 + i, end: 1100 + i } }, id: "tc" + i });
+  }
+  parts.push({ type: "tool", tool: "task", callID: "cnometa", state: { status: "completed", input: { subagent_type: "sonnet" }, output: "ok", time: { start: 2000, end: 2100 } }, id: "tcn" });
+  for (let i = 1; i < 100; i++) writeFileSync(join(exportDir, `cap_${i}.json`), childFixture("cap_" + i, { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } }));
+  const data = { info: { id: "ses_cap" }, messages: [{ info: { role: "assistant", time: { created: 1000 } }, parts }] };
+  const out = runFixture(data, "cap", { MAESTRO_TIMELINE_EXPORT_DIR: exportDir });
+  const h = out.metrics.tokensByAgent.haiku;
+  assert.equal(h.count, 105);
+  assert.equal(h.failed, 1);   // cap_0 — нет fixture
+  assert.equal(h.skipped, 5);  // cap_100..cap_104 — over-cap
+  assert.equal(h.input, 99);   // cap_1..cap_99
+  assert.equal(out.metrics.tokensByAgent.sonnet, undefined); // без metadata.sessionId — не ведру
+});
+
+test("JSONL — запись строки (sessionID, date, metrics)", () => {
+  const jsonl = join(tmpDir, "j1/history.jsonl");
+  runFixture({ info: { id: "ses_j1" }, messages: [] }, "j1", { MAESTRO_METRICS_JSONL: jsonl });
+  const lines = readFileSync(jsonl, "utf-8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].sessionID, "ses_test");
+  assert.match(lines[0].date, /^\d{4}-\d{2}-\d{2}$/);
+  assert.ok(typeof lines[0].metrics === "object" && lines[0].metrics.tokens);
+});
+
+test("JSONL — upsert по sessionID: повторный запуск заменяет строку", () => {
+  const jsonl = join(tmpDir, "j2/history.jsonl");
+  runFixture({ info: { id: "ses_j2" }, messages: [] }, "j2a", { MAESTRO_METRICS_JSONL: jsonl });
+  runFixture({ info: { id: "ses_j2", tokens: { input: 999 } }, messages: [
+    { info: { role: "assistant", time: { created: 2000 }, tokens: { input: 999, output: 0, reasoning: 0, cache: { read: 0, write: 0 } } }, parts: [] },
+  ] }, "j2b", { MAESTRO_METRICS_JSONL: jsonl });
+  const lines = readFileSync(jsonl, "utf-8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].metrics.tokens.input, 999);
+});
+
+test("JSONL — невалидные строки пропускаются (self-healing), валидные чужие сохраняются", () => {
+  const dir = join(tmpDir, "j3");
+  mkdirSync(dir, { recursive: true });
+  const jsonl = join(dir, "history.jsonl");
+  writeFileSync(jsonl, '{"sessionID":"ses_old","date":"2026-01-01","metrics":{}}\n{broken\n');
+  runFixture({ info: { id: "ses_j3" }, messages: [] }, "j3", { MAESTRO_METRICS_JSONL: jsonl });
+  const lines = readFileSync(jsonl, "utf-8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.equal(lines.length, 2); // ses_old (валидная) + ses_test; broken — удалён
+  assert.ok(lines.some((l) => l.sessionID === "ses_old"));
+});
+
+test("JSONL — fail-soft: неписательный путь → stdout не меняется, код 0", () => {
+  const jsonl = "/proc/never-writable/history.jsonl";
+  const out = runFixture({ info: { id: "ses_j4" }, messages: [] }, "j4", { MAESTRO_METRICS_JSONL: jsonl });
+  assert.ok(out.metrics); // stdout валиден
+});
+
+test("tokensByAgent — зависший child-экспорт (таймаут) → skipped, вывод не блокируется", async () => {
+  const exportDir = join(tmpDir, "child-export-4");
+  mkdirSync(exportDir, { recursive: true });
+  writeFileSync(join(exportDir, "hang_1.hang"), "");
+  const data = {
+    info: { id: "ses_hang" },
+    messages: [
+      { info: { role: "assistant", time: { created: 2000 } }, parts: [
+        { type: "tool", tool: "task", callID: "c1", state: { status: "completed", input: { subagent_type: "opus" }, output: "ok", metadata: { sessionId: "hang_1" }, time: { start: 2100, end: 2500 } }, id: "tc1" },
+      ] },
+    ],
+  };
+  const out = runFixture(data, "hang", { MAESTRO_TIMELINE_EXPORT_DIR: exportDir, MAESTRO_CHILD_EXPORT_TIMEOUT_MS: "200" });
+  assert.deepEqual(out.metrics.tokensByAgent.opus, { count: 1, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 1, failed: 0 });
 });

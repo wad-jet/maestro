@@ -1,0 +1,25 @@
+# Regression — pipeline metrics & Effort (feedback-report)
+
+- **version:** 1
+- **feature:** метрики пайплайна и Effort (#109+#115) в `@maestro-feedback-report` — расширение `timeline.mjs` (блок `metrics`: токены primary + child-сессии сабагентов (concurrency 4, cap 100, таймаут 30 c, fail-soft), cost (null без прайсинга), activeMs, questionCount, reviewDispatches (title-хэвистика, in-process), JSONL `.maestro/metrics/history.jsonl` (upsert по sessionID, tmp+rename — уникальное tmp pid+ts, self-healing)) + раздел «Метрики пайплайна и Effort» в отчёте (методология Effort — без числового score)
+- **added:** 2026-09-24
+- **status:** active
+- **last_full_pass:** —
+- **risk:** LOW
+- **category:** скилл `maestro-feedback-report` (helper `timeline.mjs`, 0 LLM; тот же источник — `opencode export` + child-экспорт); плагин НЕ меняется; отчёт — только агрегаты
+- **scenarios:**
+  - **unit-тесты фичи** (timeline.test.mjs — 24: 11 baseline + 13 новых; backward-compat, cap/skipped, timeout, upsert, fail-soft, drift-формата):
+    - run: `node --test skills/maestro-feedback-report/timeline.test.mjs`
+    - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent`
+    - expected: 24 pass / 0 fail
+  - **тесты плагина** (коэксистенция; плагин не меняется):
+    - run: `node --test plugins/maestro-bootstrap/index.test.js`
+    - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent`
+    - expected: 250 pass / 0 fail
+  - **[Manual] живой прогон (AC #6):** `node skills/maestro-feedback-report/timeline.mjs <SessionID>` → `metrics.tokens.input > 0`, `cost` — число|null, `tokensByAgent` непуст (child-сессии по `task.state.metadata.sessionId`), строка записана в `.maestro/metrics/history.jsonl`; cross-check `metrics.tokens.input` == `info.tokens.input` экспорта. Выполнено 2026-09-25 на `ses_f2e11f772ffe8QHp0PdIJ2bT1A`: input 10235385 (совпадение), tokensByAgent opus/sonnet/haiku/sanitizer/code-reviewer (25 child, skipped 0 / failed 0), cost null (нет прайсинга).
+  - **[Manual] отчёт:** раздел «Метрики пайплайна и Effort» в `@maestro-feedback-report` — статистика + нормализованное активное время + «факторы влияния (+/−)»; числового Effort-score нет; при сбое child-экспорта — fail-soft (запись в секции, отчёт генерируется).
+- **regressions:** ⚑1–4 не затрагиваются; существующие ключи stdout-JSON `timeline.mjs` (`session/totals/agents/tools/bash/top_ops/gaps/timeline`) — без изменений (backward-compat); плагин не меняется; `.maestro/metrics/history.jsonl` — эфемерное (gitignored, не коммитится). Non-goals: #89 (майк-оценки), #95, #107, кросс-сессийный агрегатор, изменения пайплайна maestro, числовой Effort-score
+- **SEC-4b:** только агрегаты; title не выводится; temp-файлы удаляются (уникальное tmp pid+ts + rename); child-экспорт без `--sanitize`
+- **plugin-version:** 4.10.0 (целевая; код плагина не меняется — 4.9.0)
+- **tests_total:** timeline.test.mjs 24 / плагин 250
+- **links:** spec `docs/superpowers/specs/2026-09-24-pipeline-metrics-effort-design.md` | plan `docs/superpowers/plans/2026-09-24-pipeline-metrics-effort-plan.md` | changelog `[Unreleased]` → `4.10.0`

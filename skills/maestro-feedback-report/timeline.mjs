@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync, unlinkSync, openSync, closeSync, mkdirSync, rmSync } from "node:fs";
-import { join, sep } from "node:path";
+import { readFileSync, writeFileSync, unlinkSync, openSync, closeSync, mkdirSync, rmSync, existsSync, renameSync } from "node:fs";
+import { join, sep, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 
@@ -12,6 +12,67 @@ if (args.length < 1) {
 
 const sessionID = args[0];
 const exportPath = args[1];
+
+// --- child-экспорт (metrics.tokensByAgent) ---
+const EXPORT_DIR = process.env.MAESTRO_TIMELINE_EXPORT_DIR || null;
+const CHILD_TIMEOUT_MS = Number(process.env.MAESTRO_CHILD_EXPORT_TIMEOUT_MS) > 0 ? Number(process.env.MAESTRO_CHILD_EXPORT_TIMEOUT_MS) : 30000;
+const CHILD_CONCURRENCY = 4;
+const CHILD_CAP = 100;
+
+async function exportSession(sessionID, timeoutMs) {
+  if (EXPORT_DIR) {
+    // fixture-mode: <dir>/<id>.json — данные; <dir>/<id>.hang — сон max(timeoutMs*5, 2000) мс (эмуляция зависания)
+    const work = (async () => {
+      if (existsSync(join(EXPORT_DIR, sessionID + ".hang"))) {
+        await new Promise((r) => setTimeout(r, Math.max(timeoutMs * 5, 2000)));
+      }
+      const p = join(EXPORT_DIR, sessionID + ".json");
+      if (!existsSync(p)) throw new Error("child_export_missing");
+      const raw = readFileSync(p, "utf-8");
+      if (!raw || !raw.trim()) throw new Error("export_failed");
+      return JSON.parse(raw);
+    })();
+    let timer;
+    try {
+      return await Promise.race([
+        work,
+        new Promise((_, reject) => {
+          timer = setTimeout(() => reject(new Error("child_export_timeout")), timeoutMs);
+        }),
+      ]);
+    } finally {
+      clearTimeout(timer);
+    }
+  }
+  return await new Promise((resolve, reject) => {
+    const tmpFile = join(tmpdir(), `maestro-child-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+    const fd = openSync(tmpFile, "w");
+    const child = spawn("opencode", ["export", sessionID], { stdio: ["ignore", fd, "inherit"] });
+    let done = false;
+    const timer = setTimeout(() => {
+      if (done) return;
+      done = true;
+      try { child.kill("SIGKILL"); } catch {}
+      try { closeSync(fd); } catch {}
+      try { unlinkSync(tmpFile); } catch {}
+      reject(new Error("child_export_timeout"));
+    }, timeoutMs);
+    child.on("error", (e) => { if (done) return; done = true; clearTimeout(timer); try { closeSync(fd); } catch {}; try { unlinkSync(tmpFile); } catch {}; reject(e); });
+    child.on("exit", (code) => {
+      if (done) return;
+      done = true;
+      clearTimeout(timer);
+      try { closeSync(fd); } catch {}
+      if (code !== 0) { try { unlinkSync(tmpFile); } catch {}; reject(new Error("export_failed")); return; }
+      let raw;
+      try { raw = readFileSync(tmpFile, "utf-8"); } catch (e) { try { unlinkSync(tmpFile); } catch {}; reject(e); return; }
+      try { unlinkSync(tmpFile); } catch {}
+      if (!raw || !raw.trim()) { reject(new Error("export_failed")); return; }
+      try { resolve(JSON.parse(raw)); } catch { reject(new Error("invalid_export")); }
+    });
+  });
+}
+
 let raw;
 
 try {
@@ -202,6 +263,101 @@ for (const msg of messages) {
   timeline.push({ kind: "assistant", ts, nTools, toolMs, inferenceMs: infMs });
 }
 
+// --- metrics (primary-данные) ---
+let mInput = 0, mOutput = 0, mReasoning = 0, mCacheRead = 0, mCacheWrite = 0;
+let costSum = 0, costSeen = false;
+let questionCount = 0;
+let reviewDispatches = 0;
+const REVIEW_RE = /\breview\b|ревью/i;
+
+for (const msg of messages) {
+  const msgInfo = msg.info || {};
+  if (msgInfo.role === "assistant") {
+    const t = msgInfo.tokens;
+    if (t && typeof t === "object") {
+      mInput += t.input || 0;
+      mOutput += t.output || 0;
+      mReasoning += t.reasoning || 0;
+      mCacheRead += (t.cache && t.cache.read) || 0;
+      mCacheWrite += (t.cache && t.cache.write) || 0;
+    }
+    if (typeof msgInfo.cost === "number" && msgInfo.cost > 0) { costSum += msgInfo.cost; costSeen = true; }
+  }
+  const parts = Array.isArray(msg.parts) ? msg.parts : [];
+  for (const p of parts) {
+    if (typeof p !== "object" || !p || p.type !== "tool") continue;
+    if (p.tool === "question") questionCount++;
+    if (p.tool === "task") {
+      const st = p.state;
+      if (st && st.status === "completed" && typeof st.title === "string" && REVIEW_RE.test(st.title)) {
+        reviewDispatches++;
+      }
+    }
+  }
+}
+
+const metrics = {
+  tokens: {
+    input: mInput, output: mOutput, reasoning: mReasoning,
+    cacheRead: mCacheRead, cacheWrite: mCacheWrite,
+    cost: costSeen ? costSum : null,
+  },
+  activeMs: sessionDurationMs === null ? null : Math.max(0, sessionDurationMs - idleWaitMs),
+  questionCount,
+  reviewDispatches,
+  tokensByAgent: {},
+};
+
+// --- metrics.tokensByAgent (child-экспорт) ---
+const agentBuckets = {};
+const uniqueChildren = new Map(); // sessionId -> agent (первое вхождение)
+for (const msg of messages) {
+  const parts = Array.isArray(msg.parts) ? msg.parts : [];
+  for (const p of parts) {
+    if (typeof p !== "object" || !p || p.type !== "tool" || p.tool !== "task") continue;
+    const st = p.state;
+    if (!st || st.status !== "completed") continue;
+    const sid = st.metadata && st.metadata.sessionId;
+    if (!sid || typeof sid !== "string") continue;
+    const agent = (st.input && st.input.subagent_type) || "unknown";
+    if (!agentBuckets[agent]) agentBuckets[agent] = { count: 0, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 0, failed: 0 };
+    agentBuckets[agent].count++;
+    if (!uniqueChildren.has(sid)) uniqueChildren.set(sid, agent);
+  }
+}
+
+const childEntries = [...uniqueChildren.entries()];
+const toRun = childEntries.slice(0, CHILD_CAP);
+for (const [sid, agent] of childEntries.slice(CHILD_CAP)) agentBuckets[agent].skipped++;
+
+await (async () => {
+  let idx = 0;
+  async function worker() {
+    while (idx < toRun.length) {
+      const i = idx++;
+      const [sid, agent] = toRun[i];
+      const b = agentBuckets[agent];
+      try {
+        const data = await exportSession(sid, CHILD_TIMEOUT_MS);
+        const t = data && data.info && data.info.tokens;
+        if (t && typeof t === "object") {
+          b.input += t.input || 0;
+          b.output += t.output || 0;
+          b.reasoning += t.reasoning || 0;
+          b.cacheRead += (t.cache && t.cache.read) || 0;
+          b.cacheWrite += (t.cache && t.cache.write) || 0;
+        }
+      } catch (e) {
+        if (e && e.message === "child_export_timeout") b.skipped++;
+        else b.failed++;
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(CHILD_CONCURRENCY, toRun.length) }, () => worker()));
+})();
+
+metrics.tokensByAgent = agentBuckets;
+
 const topOpsResult = topOps.sort((a, b) => b.durationMs - a.durationMs).slice(0, 10);
 const gapsResult = gaps.sort((a, b) => b.ms - a.ms).slice(0, 5);
 
@@ -242,6 +398,36 @@ const result = {
   top_ops: topOpsResult,
   gaps: gapsResult,
   timeline,
+  metrics,
 };
+
+// --- metrics JSONL (upsert, атомарно, fail-soft) ---
+const METRICS_JSONL = process.env.MAESTRO_METRICS_JSONL || join(process.cwd(), ".maestro", "metrics", "history.jsonl");
+try {
+  mkdirSync(dirname(METRICS_JSONL), { recursive: true });
+  let existing = [];
+  try {
+    existing = readFileSync(METRICS_JSONL, "utf-8").split("\n").filter((l) => l.trim());
+  } catch {}
+  const valid = [];
+  for (const l of existing) {
+    try { JSON.parse(l); valid.push(l); } catch {}
+  }
+  const record = JSON.stringify({
+    sessionID: sessionID || info.id,
+    date: new Date().toISOString().slice(0, 10),
+    metrics,
+  });
+  // unique tmp (pid+ts) — parallel processes don't overwrite each other; same dir → atomic rename
+  const kept = valid.filter((l) => {
+    try { return JSON.parse(l).sessionID !== (sessionID || info.id); } catch { return true; }
+  });
+  kept.push(record);
+  const tmp = `${METRICS_JSONL}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(tmp, kept.join("\n") + "\n");
+  renameSync(tmp, METRICS_JSONL);
+} catch (e) {
+  process.stderr.write(`metrics jsonl: ${e.message}\n`);
+}
 
 process.stdout.write(JSON.stringify(result) + "\n");

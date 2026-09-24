@@ -9,6 +9,20 @@
 
 ## [Unreleased]
 
+### Добавлено
+
+- **Метрики пайплайна и Effort (4.10.0):** новый раздел отчёта
+  `@maestro-feedback-report` — итоговая статистика запуска: токены
+  (primary-сессия + по сабагентам через child-экспорт сессий, cap 100,
+  таймаут 30 c, fail-soft), cost (— без прайсинга), активное время
+  (wall − user_wait), HITL-гейты, retry, циклы ревью (title-хэвистика —
+  механический ориентир + LLM-нарратив). Методология Effort — без числового
+  score: статистика + нормализованное активное время + «факторы влияния
+  (+/−)». Накопительная история — `.maestro/metrics/history.jsonl` (upsert по
+  sessionID, атомарно, эфемерное). Механика — `timeline.mjs` (0 LLM, тот же
+  источник — `opencode export`). Регресс:
+  `regression/entries/2026-09-24-pipeline-metrics-effort.md`.
+
 ## [2026-09-24]
 
 > **Версия 4.9.0** — Minor-релиз: read-only плагин-тул `maestro_config` — единственный санкционированный канал чтения параметров `maestro.json` в сессии (native `ask`, только top-level primary; сабагенты — per-agent `deny` + плагинный fail-closed guard).
