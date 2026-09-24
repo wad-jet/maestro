@@ -271,9 +271,9 @@ let reviewDispatches = 0;
 const REVIEW_RE = /\breview\b|ревью/i;
 
 for (const msg of messages) {
-  const info = msg.info || {};
-  if (info.role === "assistant") {
-    const t = info.tokens;
+  const msgInfo = msg.info || {};
+  if (msgInfo.role === "assistant") {
+    const t = msgInfo.tokens;
     if (t && typeof t === "object") {
       mInput += t.input || 0;
       mOutput += t.output || 0;
@@ -281,7 +281,7 @@ for (const msg of messages) {
       mCacheRead += (t.cache && t.cache.read) || 0;
       mCacheWrite += (t.cache && t.cache.write) || 0;
     }
-    if (typeof info.cost === "number" && info.cost > 0) { costSum += info.cost; costSeen = true; }
+    if (typeof msgInfo.cost === "number" && msgInfo.cost > 0) { costSum += msgInfo.cost; costSeen = true; }
   }
   const parts = Array.isArray(msg.parts) ? msg.parts : [];
   for (const p of parts) {
@@ -418,12 +418,13 @@ try {
     date: new Date().toISOString().slice(0, 10),
     metrics,
   });
-  valid.splice(0, valid.length, ...valid.filter((l) => {
+  // unique tmp (pid+ts) — parallel processes don't overwrite each other; same dir → atomic rename
+  const kept = valid.filter((l) => {
     try { return JSON.parse(l).sessionID !== (sessionID || info.id); } catch { return true; }
-  }));
-  valid.push(record);
-  const tmp = METRICS_JSONL + ".tmp";
-  writeFileSync(tmp, valid.join("\n") + "\n");
+  });
+  kept.push(record);
+  const tmp = `${METRICS_JSONL}.${process.pid}.${Date.now()}.tmp`;
+  writeFileSync(tmp, kept.join("\n") + "\n");
   renameSync(tmp, METRICS_JSONL);
 } catch (e) {
   process.stderr.write(`metrics jsonl: ${e.message}\n`);
