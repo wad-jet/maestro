@@ -17,8 +17,8 @@ description: Инициализация maestro для нового или уж�
    `docs/superpowers/{specs,plans}/`. **Задача 3 требует скилл `maestro-assistant`
    (жёсткий gate): если его нет — установить и продолжить, иначе прерывание.**
    Правила/канон конфига — из `skills/maestro-assistant/SKILL.md`. Чтение текущего
-   `maestro.json` (diff секций) — через bash (`cat`/`sed`), не через read-тул
-   (нативный deny по `maestro.json`).
+   `maestro.json` (diff секций) — плагин-тулом `maestro_config` (`read`-тул
+   нативно denied, bash-чтение запрещено).
 5. Проверка скилов superpowers (пробник через `skill` tool; при отсутствии —
    предложить установку через HITL).
 6. Проверка плагина `maestro-bootstrap` (не блокер).

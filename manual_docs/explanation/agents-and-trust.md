@@ -119,6 +119,10 @@ permission-слой (trusted-исключения — per-agent allow).
 
 > **`maestro.json` защищается нативно** — deny `read`/`glob`/`grep` + edit-ask
 > в `.opencode/opencode.json` (fail-closed, см. [`SECURITY.md`](../../SECURITY.md) → P6).
+> Санкционированный канал чтения параметров в сессии — плагин-тул
+> `maestro_config` (permission `ask`, только top-level primary; сабагенты —
+> per-agent deny + плагинный fail-closed guard); bash-чтение запрещено
+> процессным каноном.
 > Расширение `isPluginMetaFile` касается **только одного semver-метафайла**
 > (`.maestro/plugin-version`) — `/maestro-version` использует его, не ослабляя
 > доступ к конфигу.

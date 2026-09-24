@@ -12,14 +12,22 @@ description: Показать статус memory layer плагина maestro-b
 
 1. Попробуй вызвать инструмент `memory_stats_detail` (без параметров).
 1.2. Если `memory_stats_detail` недоступен:
-   - Прочитай maestro.json через bash: `memory.enabled`, `memory.storage.type`.
+   - **Гейт `maestro_config`:** если плагин-тул `maestro_config` тоже
+     **недоступен** → вывод «Перезапустите opencode / обновите плагин
+     maestro-bootstrap (≥ 4.9.0)» (дистинкция по `.maestro/plugin-version`:
+     `< 4.9.0` → «плагин устарел — обновите и перезапустите opencode»; свежей
+     init-записи в `.maestro/logs/` нет → «плагин не загружен — перезапустите
+     opencode»). **Конфиг НЕ читать (bash-fallback запрещён).**
+   - Если `maestro_config` доступен → прочитай секцию `memory` через тул
+     (`section: "memory"`, native `ask`): `memory.enabled`,
+     `memory.storage.type`.
    - `memory.enabled: false` → «Память maestro выключена — включите memory.enabled: true».
    - `enabled: true` + конфиг-невалиден (disabled_reason) → честная причина по
      `disabled_reason` (namespace, embedder, mainline и т.п.).
    - `enabled: true` + конфиг валиден → «Плагин maestro-bootstrap недоступен —
      перезапустите opencode». НЕ «память выключена».
 
-   Причину (`disabled_reason`) определи по `maestro.json`: отсутствие секции `memory` →
+   Причину (`disabled_reason`) определи по прочитанной секции `memory`: отсутствие секции `memory` →
    `no_memory_section`; `memory.enabled: false` → `explicitly_disabled`; невалидные ключи
    (`retention_days`, `similarity_threshold`, `storage.type`, `branch_context`, `mainline`,
    `storage.pgvector.text_search_config`, `embedding`, `probe_cooldown_min`, `artifact_globs`) → соответствующий код (`*_invalid`);
@@ -51,8 +59,10 @@ description: Показать статус memory layer плагина maestro-b
 
 ## Шаг 2. Прочитать конфигурацию памяти
 
-1. Прочитай `maestro.json` (файл в корне проекта) через **bash** (`cat`/`sed`) —
-   нативный permission-слой deny-ит `read`-тул по `maestro.json`.
+1. Прочитай секцию `memory` (файл `maestro.json` в корне проекта) плагин-тулом
+   `maestro_config` (`section: "memory"`, native `ask`). Тул недоступен —
+   «Перезапустите opencode / обновите плагин (≥ 4.9.0)», команда прерывается
+   (bash-fallback запрещён).
 2. Извлеки секцию `memory`. Если секция отсутствует → используй значения по умолчанию:
 
    | Параметр            | Значение по умолчанию                                        |

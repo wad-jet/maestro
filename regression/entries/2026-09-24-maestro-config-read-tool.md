@@ -1,0 +1,26 @@
+# Regression — maestro_config read tool
+
+- **version:** 1
+- **feature:** read-only плагин-тул `maestro_config` — единственный санкционированный канал чтения параметров `maestro.json` в сессии (native `ask`, top-level primary; сабагенты — per-agent `deny` + плагинный fail-closed guard); миграция 7+ flows с bash-чтения; канон R6; P6 SECURITY.md (multi-level + residual); existence-only `test -f`
+- **added:** 2026-09-24
+- **status:** active
+- **last_full_pass:** —
+- **risk:** MEDIUM
+- **category:** новый публичный плагин-API (tool-shim.js + core.js) + cross-layer: скиллы/команды/manual_docs/SECURITY.md, 7+ flows чтения `maestro.json`
+- **scenarios:**
+  - **unit-тесты фичи** (14 новых: contract 7 + guard 4 + регистрация/env 3):
+    - run: `node --test plugins/maestro-bootstrap/index.test.js`
+    - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent`
+    - expected: 250 pass / 0 fail (236 baseline + 14)
+  - **Primary-канал:** `maestro_config()` в top-level primary возвращает `{exists, config, path}`; `section` (dot-path) — вложенный доступ; audit `maestro_config:read result=ok` в `.maestro/logs/`.
+  - **Subagent-deny:** вызов из task-сессии (parentID) / service-сессии (`[maestro-memory]` title / SESSIONS) → deny-сообщение БЕЗ данных конфига + audit `maestro_config:access_denied reason=task_session|service_session`.
+  - **Fail-closed:** `session.get`-ошибка / отсутствие `sessionID` → deny `session_unavailable` (конфиг не читается).
+  - **Tool-unavailable branch:** `@maestro-memory` / `@maestro-memory-report` при отсутствии `memory_stats_detail` И `maestro_config` → «Перезапустите opencode / обновите плагин (≥ 4.9.0)»; `maestro.json` НЕ читается (bash-fallback в тексте команд отсутствует — grep-верификация).
+  - **Diff-merge:** `maestro-setup` diff по секциям сохраняет пользовательские `sanitizer_whitelist.patterns` — redact в ответе тула НЕТ (тест 1: deepEqual).
+  - **Без маэстро-конфига:** плагин init без `maestro.json` — тул зарегистрирован (бесусловно), ответ `{exists:false, config:{}, path}`.
+  - **MAESTRO_CONFIG override:** `path` в ответе = переопределённый путь (паритет с `loadMaestroConfig`).
+- **regressions:** ⚑1–4 не затрагиваются (⚑4 закрыт: пользователь явно аппрувил spec со всеми rule-изменениями на Gate 10); `loadMaestroConfig` и plugin-internal-чтение конфига НЕ меняются; `feedback_report` НЕ мигрирован (плагин инжектит директиву, оркестратор ключ не читает); residual: ручной `bash cat maestro.json` через native `bash: allow` остаётся (документировано в P6, паритет с tamper, P5).
+- **SEC-3 accepted/follow-up (Security Audit, 2026-09-24):** SEC-3.2 TOCTOU-лейбл (read-error → parse_error, fail-safe) — follow-up; SEC-3.3 per-agent deny не дублируется в `agents/*.md` frontmatter (stale-config окно закрыт плагинным fail-closed guard, spec §8) — follow-up; SEC-3.5 audit-логи: метаданные запросов (sessionID/section/reason), без значений — принято (класс `memory:log_confidential_note`).
+- **plugin-version:** 4.9.0
+- **tests_total:** плагин 250 (236 baseline + 14 новых) / memory 809 pass (2 skip на Bun)
+- **links:** spec `docs/superpowers/specs/2026-09-24-maestro-config-read-tool-design.md` | plan `docs/superpowers/plans/2026-09-24-maestro-config-read-tool-plan.md` | changelog `[Unreleased]` → `4.9.0`

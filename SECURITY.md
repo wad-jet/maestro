@@ -1,6 +1,6 @@
 # SECURITY — Требования и оценка информационной безопасности (ИБ)
 
-> Статус: **актуально**. Дата: 2026-09-06. Версия: 1.
+> Статус: **актуально**. Дата: 2026-09-24. Версия: 2.
 > Репо: `maestro-agent` (authoring). Назначение: **внутренний стандарт ИБ** для
 > разработчика скилла `maestro` — ориентир при принятии решений при развитии
 > pipeline. Пользовательская документация — в `manual_docs/`.
@@ -44,12 +44,36 @@
 - **P5.** Плагин `maestro-bootstrap` обязателен (гейт на входе `/maestro-init`). При
   отключённом плагине защита fail-open — признанный риск (см. §5).
 - **P6.** `maestro.json` (в т.ч. `sanitizer_whitelist.patterns`) защищается
-  **нативно** — deny в `.opencode/opencode.json` (`read`/`glob`/`grep`) + edit-ask;
-  не плагином. Residual risk: bash `cat` остаётся доступен untrusted (паритет с
-  прежним access_policy). Tamper: `.opencode/opencode.json` редактируем untrusted
-  (parity), усиление — вне scope. Предупреждение о версии (`/maestro-version`)
-  использует только `.maestro/plugin-version` (semver-only) и НЕ ослабляет доступ
-  к конфигу.
+  **многоуровнево**:
+  1. **Sanctioned channel (в сессии):** чтение параметров — только через
+     плагин-тул `maestro_config` (read-only, `maestro.json` в корне; native
+     permission `ask`; только top-level primary-сессия — сабагенты: per-agent
+     `deny` в конфиге + плагинный fail-closed guard: task/service-сессии и
+     session-ошибки отклоняются). `maestro.json` не читается сабагентами в ходе
+     пайплайна — только оркестратором на шаге 0 (кэш) и при явном
+     HITL-запросе.
+  2. **Нативный permission-слой OpenCode** (fail-closed, не плагином):
+     `read`/`glob`/`grep` deny + `edit` ask в `.opencode/opencode.json` или
+     global — см. канон нативных permissions в `maestro-assistant`.
+  3. **Процессный канон (R6):** чтение через bash (`cat`/`sed`/`node -e`/иные)
+     запрещено; допущен только existence-only `test -f maestro.json` (1 бит, без
+     раскрытия параметров).
+
+  Файл содержит sensitive-конфиг (список trusted-агентов, конфиг
+  confidential-каталогов, whitelist sanitizer) и его чтение untrusted-агентом
+  может раскрыть структуру защиты проекта. `maestro.json` коммитится в git
+  (консолидированный конфиг, доступен владельцу вне сессии); секреты (API-ключи,
+  credentials) в файл **не** входят (только через ссылки на env).
+
+  **Residual (документировано, не устраняется в 4.9.0):** ручной `bash cat
+  maestro.json` через native `bash: allow` (primary-сессия и сабагенты с
+  `bash: allow`) остаётся
+  (аналогично tamper `.opencode/opencode.json`, P5; tamper — parity,
+  усиление — вне scope) — процессный канон запрещает чтение конфига
+  bash-командами в потоке пайплайна; технический запрет bash не вводится
+  (R6-консистентность: нативный deny только на `read`/`glob`/`grep`/`edit`).
+  Предупреждение о версии (`/maestro-version`) использует только
+  `.maestro/plugin-version` (semver-only) и НЕ ослабляет доступ к конфигу.
 - **P7.** Для fast-track-входов (шаг 7d) подпись spec (`maestro:sanitize`/
   `maestro:review`) не является основанием авто-пропуска sanitize/review:
   подпись подделываема и доказывает лишь соответствие hash'а содержимому, не

@@ -20,6 +20,7 @@
 | A5 | Маркер `из confidential` не маскируется sanitizer | ✅ | тест в index.test.js (S10) | |
 | A6 | Маркер не ломает sanitize (не ложное срабатывание) | ❌ | маркер не вызывает false-positive маскирование | |
 | A7 | Un-trusted custodian/sanitizer — юнит-тесты плагина | ✅ | `npm test` покрывает `trust.custodian: false` / `trust.sanitizer: false` (confidential deny + prompt sanitize). Парный с D7/D8 | |
+| A8 | `maestro_config`: primary — ok (возвращает конфиг); сабагент — deny + `maestro_config:access_denied` в логе; ветка «тул недоступен» не читает конфиг (bash-fallback отсутствует) | ✅/❌ | primary-вызов возвращает конфиг; сабагент — deny-сообщение + `maestro_config:access_denied` в логе; диагностические ветки — без bash-чтения и вызова тула | |
 
 ## B. Подготовка спецификации / brainstorm
 | # | Сценарий | Тип | Проверка | Результат |

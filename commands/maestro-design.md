@@ -9,8 +9,10 @@ description: Дизайн и scaffold проекта после /maestro-setup: 
 Действия:
 1. Проверка выполнения `/maestro-setup`: если проект новый или скилл `maestro`
    ранее не применялся — проверить признаки init (`docs/project-context.md`,
-   `maestro.json`, `.maestro/last-run.md`) — чтение через **bash** (`cat`/`sed`/
-   `test -f`), нативный deny блокирует read-тул по `maestro.json`/`.maestro/**`.
+   `maestro.json`, `.maestro/last-run.md`): existence-check — `test -f`
+   (existence-only); содержимое `docs/project-context.md` — `read`; параметры
+   `maestro.json` — плагин-тулом `maestro_config` (`read`-тул нативно denied
+   по `maestro.json`/`.maestro/**`, bash-чтение запрещено).
    Если init не выполнялся — предложить выполнить `/maestro-setup` перед
    `/maestro-design` (HITL).
 2. (a) Brainstorm primary (superpowers:brainstorming) + custodian Q/A (trusted) -> spec пишет primary -> `docs/superpowers/specs/YYYY-MM-DD-<project>-design.md`.

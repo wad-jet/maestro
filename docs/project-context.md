@@ -132,6 +132,10 @@
 - `SECURITY.md` — источник истины для security; изменять только через согласованный
   процесс.
 - `.opencode/` и `.maestro/` — доставляемое/эфемерное, в git не коммитится.
+- **Чтение параметров `maestro.json` в сессии** — только плагин-тулом
+  `maestro_config` (native `ask`, top-level primary; сабагенты — per-agent deny +
+  плагинный fail-closed guard); bash-чтение запрещено, existence-only — `test -f`
+  (4.9.0).
 
 ## 7. Риски
 
@@ -188,6 +192,10 @@
 - **Секреты:** `.env`, `*.env.*`, `*.{pem,key,cert,secret}` — deny (built-in + config).
 - **File-доступ — нативный:** deny/ask в `.opencode/opencode.json` (read/glob/grep);
   `maestro.json`/`.maestro` защищены нативно (deny + edit-ask).
+- **`maestro_config`** — read-only плагин-тул для параметров `maestro.json`
+  (global `ask`; только top-level primary — сабагенты per-agent `deny` +
+  плагинный fail-closed guard; bash-чтение запрещено процессным каноном;
+  4.9.0).
 - **Санитайзинг:** маскировка чувствительных данных перед untrusted-диспатчем
   (`sanitizer_whitelist`).
 - **Память (memory layer):** маскирование `sanitize()` до и после саммаризации —

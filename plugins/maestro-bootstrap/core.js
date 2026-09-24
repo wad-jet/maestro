@@ -25,6 +25,8 @@ import path from "node:path";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { classifyMemoryConfig } from "./memory/config.js";
+import { tool } from "./tool-shim.js";
+import { SESSIONS as MEMORY_SERVICE_SESSIONS } from "./memory/summarize.js";
 import { registerCommunicationHooks } from "./communication.js";
 import { registerFeedbackReportHooks } from "./feedback-report.js";
 
@@ -355,6 +357,156 @@ export function loadMaestroConfig(file, dir) {
   } catch {
     return {};
   }
+}
+
+/**
+ * Пути к конфигу для тула `maestro_config`: env `MAESTRO_CONFIG` или
+ * `<root>/maestro.json` (parity с loadMaestroConfig).
+ * @param {string} root  Корень проекта.
+ * @returns {string}
+ */
+export function resolveConfigFile(root) {
+  return process.env.MAESTRO_CONFIG || path.join(root, "maestro.json");
+}
+
+/**
+ * Read-only тул `maestro_config` — санкционированный канал чтения
+ * параметров `maestro.json` в сессии (spec 2026-09-24, §3.1).
+ * Fail-closed guard: только top-level primary-сессии — deny: task-сессия
+ * (parentID), service-сессия (title `[maestro-memory]` / MEMORY_SERVICE_SESSIONS),
+ * session.get-ошибка или отсутствие sessionID (паттерн communication.js).
+ * Ответ — JSON-string, без redact (diff-merge требует правки значений
+ * пользователем, см. spec §3.1/§3.4). Аудит: `maestro_config:read` (result
+ * ok/file_missing/parse_error/section_missing), `maestro_config:access_denied`
+ * (reason task_session/service_session/session_unavailable).
+ * @param {{ client: object, root: string, log: object }} p
+ * @returns {object} tool-деф (description/args/execute)
+ */
+export function makeMaestroConfigTool({ client, root, log }) {
+  const guardCache = makeBoundedMap(1024); // sessionID → null (ok) | reason
+  const guard = async (sessionID) => {
+    if (!sessionID) return "session_unavailable";
+    if (MEMORY_SERVICE_SESSIONS.has(sessionID)) return "service_session";
+    // makeBoundedMap: API get/set/delete/size/clear (без has) — absent = undefined.
+    const cached = guardCache.get(sessionID);
+    if (cached !== undefined) return cached;
+    let reason;
+    try {
+      const resp = await client?.session?.get({ path: { id: sessionID } });
+      const data = resp?.data ?? resp;
+      if (!data) reason = "session_unavailable";
+      else if (data.parentID) reason = "task_session";
+      else if (
+        typeof data.title === "string" &&
+        data.title.startsWith("[maestro-memory]")
+      )
+        reason = "service_session";
+      else reason = null;
+    } catch {
+      reason = "session_unavailable"; // консервативно: ошибка → deny
+    }
+    guardCache.set(sessionID, reason);
+    return reason;
+  };
+  const deny = (sessionID, reason) => {
+    log?.info?.("maestro_config:access_denied", { sessionID, reason });
+    return "maestro_config: the tool is only available in top-level primary sessions";
+  };
+
+  return tool({
+    description:
+      "Read-only access to the maestro config file (maestro.json) — the sanctioned " +
+      "channel for reading maestro config parameters within a session. Argument " +
+      "section — dot-path to a section (e.g. memory, communication, " +
+      "sanitizer_whitelist); no argument — the whole config.",
+    args: {
+      section: tool.schema
+        .string()
+        .optional()
+        .describe(
+          "Dot-path to a section (memory, memory.embedding.model, …); no argument — the whole config",
+        ),
+    },
+    execute: async (args, ctx) => {
+      const sessionID = ctx?.sessionID;
+      const reason = await guard(sessionID);
+      if (reason) return deny(sessionID, reason);
+      const section = args?.section;
+      const file = resolveConfigFile(root);
+      if (!fs.existsSync(file)) {
+        log?.info?.("maestro_config:read", {
+          sessionID,
+          section: section ?? null,
+          result: "file_missing",
+        });
+        return JSON.stringify({ exists: false, config: {}, path: file });
+      }
+      let config;
+      try {
+        config = JSON.parse(fs.readFileSync(file, "utf8"));
+      } catch {
+        log?.info?.("maestro_config:read", {
+          sessionID,
+          section: section ?? null,
+          result: "parse_error",
+        });
+        return JSON.stringify({
+          exists: true,
+          config: {},
+          parse_error: true,
+          path: file,
+        });
+      }
+      if (section === undefined || section === null) {
+        log?.info?.("maestro_config:read", {
+          sessionID,
+          section: null,
+          result: "ok",
+        });
+        return JSON.stringify({ exists: true, config, path: file });
+      }
+      if (
+        typeof section !== "string" ||
+        section.startsWith(".") ||
+        section.endsWith(".") ||
+        section.split(".").some((seg) => seg.length === 0)
+      ) {
+        return `maestro_config: invalid section "${String(
+          section,
+        )}" (dot-path, non-empty segments, no leading/trailing dots)`;
+      }
+      let value = config;
+      for (const seg of section.split(".")) {
+        if (value !== null && typeof value === "object" &&
+            Object.hasOwn(value, seg)) {
+          value = value[seg];
+        } else {
+          log?.info?.("maestro_config:read", {
+            sessionID,
+            section,
+            result: "section_missing",
+          });
+          return JSON.stringify({
+            exists: true,
+            config: null,
+            section_found: false,
+            path: file,
+          });
+        }
+      }
+      log?.info?.("maestro_config:read", {
+        sessionID,
+        section,
+        result: "ok",
+      });
+      return JSON.stringify({
+        exists: true,
+        config: value,
+        section_found: true,
+        path: file,
+      });
+    },
+  });
 }
 
 /**
@@ -1149,7 +1301,10 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
   } catch (err) {
     log.error("feedback_report: init failed", { error: err instanceof Error ? err.message : String(err) });
   }
-  plugin.tool = { ...(memoryHooks.tool ?? {}) };
+  plugin.tool = {
+    ...(memoryHooks.tool ?? {}),
+    maestro_config: makeMaestroConfigTool({ client, root, log }),
+  };
   const chainHooks = (name) => {
     const a = commHooks[name];
     const b = memoryHooks[name];
