@@ -132,6 +132,8 @@ description: Сбор фактуры по прошлым процессам maes
   (по messages: user + assistant-блоки с nTools/toolMs/inferenceMs).
 - Скрипт сам вызывает `opencode export <Session ID>` и сам удаляет
   временный файл экспорта (транскрипт сессии на диске не остаётся).
+- **Сохрани stdout в temp-файл и переиспользуй** (3c/3d/шаблон) — НЕ
+  перезапускай скрипт: полный прогон с child fanout (cap 100) занимает 2–4 мин.
 - Требование: Node.js + CLI `opencode` в PATH. Опционально 2-й аргумент —
   путь к готовому export JSON (обход/отладка).
 - **Fallback:** в stdout `{"error":"invalid_export"}` / `{"error":"export_failed"}`
@@ -152,6 +154,10 @@ description: Сбор фактуры по прошлым процессам maes
 - `activeMs` (активное время = wall − user_wait; `null` без таймстампов);
 - `questionCount` (HITL-гейты); `reviewDispatches` (механический ориентир
   циклов ревью — title-хэвистика; истина — нарратив из диалога).
+- `children` (`"full"` | `"skipped"`): fast mode — флаг `--no-children`
+  (запуск ~5 c); при `"skipped"` — `tokensByAgent` пуст, атрибуция по агентам
+  недоступна. **По умолчанию — полный прогон**; `--no-children` — только если
+  атрибуция по агентам не нужна.
 
 Механика пишет строку в `.maestro/metrics/history.jsonl` (upsert по
 sessionID; эфемерное, gitignored — пользовательская база для статистики,
@@ -220,6 +226,9 @@ sessionID; эфемерное, gitignored — пользовательская �
 ### Итоговая статистика
 - **Токены (primary):** input <N> / output <N> / reasoning <N> / cache read <N> / cache write <N>; cost: <$X | — (провайдер без прайсинга)>
 - **Токены по агентам:**
+
+Если `metrics.children: "skipped"` — вместо таблицы: «Атрибуция по агентам
+недоступна (fast mode `--no-children`)».
 
 | Агент | Диспатчей* | Input | Output | Атрибуция |
 |---|---|---|---|---|
