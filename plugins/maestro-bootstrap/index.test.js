@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MaestroBootstrapPlugin, createBootstrapAdapter, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile, loadCommunicationConfig } from "./core.js";
+import { MaestroBootstrapPlugin, createBootstrapAdapter, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile, loadCommunicationConfig, loadFeedbackReportConfig } from "./core.js";
 import {
   detectPlainFlag,
   SOURCE_LABELS,
@@ -11,6 +11,11 @@ import {
   directiveText,
   registerCommunicationHooks,
 } from "./communication.js";
+import {
+  parseFeedbackReport,
+  directiveText as frDirectiveText,
+  registerFeedbackReportHooks,
+} from "./feedback-report.js";
 import opencodePlugin from "./index.js";
 
 function readLogs(dir, filePrefix = "maestro-bootstrap") {
@@ -2198,6 +2203,33 @@ describe("communication config (loadCommunicationConfig)", () => {
   });
 });
 
+describe("feedback_report config (loadFeedbackReportConfig)", () => {
+  it("ключ отсутствует → manual (дефолт)", () => {
+    assert.deepEqual(loadFeedbackReportConfig({}), { mode: "manual", explicit: false, invalid: false });
+  });
+  it("config отсутствует → manual (дефолт)", () => {
+    assert.deepEqual(loadFeedbackReportConfig(undefined), { mode: "manual", explicit: false, invalid: false });
+  });
+  it("auto explicit", () => {
+    assert.deepEqual(loadFeedbackReportConfig({ feedback_report: "auto" }), { mode: "auto", explicit: true, invalid: false });
+  });
+  it("manual explicit", () => {
+    assert.deepEqual(loadFeedbackReportConfig({ feedback_report: "manual" }), { mode: "manual", explicit: true, invalid: false });
+  });
+  it("disable explicit", () => {
+    assert.deepEqual(loadFeedbackReportConfig({ feedback_report: "disable" }), { mode: "disable", explicit: true, invalid: false });
+  });
+  it("невалидное (42) → manual + invalid", () => {
+    assert.deepEqual(loadFeedbackReportConfig({ feedback_report: 42 }), { mode: "manual", explicit: false, invalid: true });
+  });
+  it("невалидное ('nope') → manual + invalid", () => {
+    assert.deepEqual(loadFeedbackReportConfig({ feedback_report: "nope" }), { mode: "manual", explicit: false, invalid: true });
+  });
+  it("невалидное ('AUTO', регистр) → manual + invalid", () => {
+    assert.deepEqual(loadFeedbackReportConfig({ feedback_report: "AUTO" }), { mode: "manual", explicit: false, invalid: true });
+  });
+});
+
 describe("communication flag (detectPlainFlag)", () => {
   it("@maestro-init --plain → true", () => {
     assert.equal(detectPlainFlag('@maestro-init --plain "задача"'), true);
@@ -2409,6 +2441,114 @@ describe("communication hooks (system.transform matrix)", () => {
   });
 });
 
+describe("feedback-report config (parseFeedbackReport)", () => {
+  it("отсутствует → manual, не explicit", () => {
+    assert.deepEqual(parseFeedbackReport({}), { mode: "manual", explicit: false, invalid: false });
+  });
+  it("auto explicit", () => {
+    assert.deepEqual(parseFeedbackReport({ feedback_report: "auto" }), { mode: "auto", explicit: true, invalid: false });
+  });
+  it("невалидное → manual + invalid", () => {
+    assert.deepEqual(parseFeedbackReport({ feedback_report: "x" }), { mode: "manual", explicit: false, invalid: true });
+  });
+});
+
+describe("feedback-report directiveText", () => {
+  it("auto → строка-директива", () => {
+    assert.equal(frDirectiveText("auto"), "maestro.json → feedback_report: auto");
+  });
+  it("disable → строка-директива", () => {
+    assert.equal(frDirectiveText("disable"), "maestro.json → feedback_report: disable");
+  });
+});
+
+describe("feedback-report hooks (system.transform matrix)", () => {
+  function fakeClient(overrides = {}) {
+    const sessions = new Map([["s1", { parentID: null, title: "primary" }]]);
+    for (const [id, s] of Object.entries(overrides)) sessions.set(id, s);
+    return {
+      session: {
+        get: async ({ path: { id } }) => {
+          const s = sessions.get(id);
+          if (!s) throw new Error("no session");
+          return s;
+        },
+      },
+    };
+  }
+  function fakeLog() {
+    const calls = [];
+    const fn = (level) => (msg, extra) => calls.push({ level, msg, extra });
+    return { calls, info: fn("info"), warn: fn("warn"), error: fn("error"), debug: fn("debug") };
+  }
+  const transform = async (hooks, out, sessionID = "s1") => {
+    await hooks["experimental.chat.system.transform"]({ sessionID }, out);
+    return out.system;
+  };
+
+  it("auto → инъекция директивы", async () => {
+    const hooks = await registerFeedbackReportHooks({ client: fakeClient(), config: { feedback_report: "auto" }, log: fakeLog() });
+    const sys = await transform(hooks, { system: [] });
+    assert.equal(sys.length, 1);
+    assert.equal(sys[0], "maestro.json → feedback_report: auto");
+  });
+  it("disable → инъекция директивы", async () => {
+    const hooks = await registerFeedbackReportHooks({ client: fakeClient(), config: { feedback_report: "disable" }, log: fakeLog() });
+    const sys = await transform(hooks, { system: [] });
+    assert.equal(sys.length, 1);
+    assert.ok(sys[0].includes("feedback_report: disable"));
+  });
+  it("manual explicit → БЕЗ инъекции", async () => {
+    const hooks = await registerFeedbackReportHooks({ client: fakeClient(), config: { feedback_report: "manual" }, log: fakeLog() });
+    const sys = await transform(hooks, { system: [] });
+    assert.equal(sys.length, 0);
+  });
+  it("ключ отсутствует → БЕЗ инъекции", async () => {
+    const hooks = await registerFeedbackReportHooks({ client: fakeClient(), config: {}, log: fakeLog() });
+    const sys = await transform(hooks, { system: [] });
+    assert.equal(sys.length, 0);
+  });
+  it("невалидное → БЕЗ инъекции + warn feedback_report:config_fallback", async () => {
+    const log = fakeLog();
+    await registerFeedbackReportHooks({ client: fakeClient(), config: { feedback_report: "nope" }, log });
+    assert.ok(log.calls.some((c) => c.msg === "feedback_report:config_fallback" && c.extra.error_class === "invalid_value"));
+    const hooks2 = await registerFeedbackReportHooks({ client: fakeClient(), config: { feedback_report: "nope" }, log: fakeLog() });
+    const sys = await transform(hooks2, { system: [] });
+    assert.equal(sys.length, 0);
+  });
+  it("task-сессия (parentID) → без инъекции", async () => {
+    const hooks = await registerFeedbackReportHooks({
+      client: fakeClient({ s1: { parentID: "s0", title: "sub" } }),
+      config: { feedback_report: "auto" }, log: fakeLog() });
+    const sys = await transform(hooks, { system: [] });
+    assert.equal(sys.length, 0);
+  });
+  it("обёртка {data}: parentID в data → без инъекции", async () => {
+    const client = { session: { get: async () => ({ data: { parentID: "s0", title: "sub" } }) } };
+    const hooks = await registerFeedbackReportHooks({ client, config: { feedback_report: "auto" }, log: fakeLog() });
+    const sys = await transform(hooks, { system: [] });
+    assert.equal(sys.length, 0);
+  });
+  it("сервис-сессия [maestro-memory] (parentID пуст) → без инъекции", async () => {
+    const hooks = await registerFeedbackReportHooks({
+      client: fakeClient({ s1: { parentID: null, title: "[maestro-memory] summarize s1" } }),
+      config: { feedback_report: "auto" }, log: fakeLog() });
+    const sys = await transform(hooks, { system: [] });
+    assert.equal(sys.length, 0);
+  });
+  it("ошибка client.session.get → без инъекции (fail-soft)", async () => {
+    const hooks = await registerFeedbackReportHooks({ client: fakeClient(), config: { feedback_report: "auto" }, log: fakeLog() });
+    const sys = await transform(hooks, { system: [] }, "unknown");
+    assert.equal(sys.length, 0);
+  });
+  it("debug-лог directive_injected при инъекции", async () => {
+    const log = fakeLog();
+    const hooks = await registerFeedbackReportHooks({ client: fakeClient(), config: { feedback_report: "auto" }, log });
+    await transform(hooks, { system: [] });
+    assert.ok(log.calls.some((c) => c.msg === "feedback_report:directive_injected" && c.extra.sessionID === "s1"));
+  });
+});
+
 describe("communication wiring (MaestroBootstrapPlugin)", () => {
   let dir;
   before(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-comm-")); });
@@ -2439,6 +2579,45 @@ describe("communication wiring (MaestroBootstrapPlugin)", () => {
         client: { session: { get: async () => { throw new Error("x"); } } },
         config: { communication: v }, log });
       const hookInvalid = log.calls.includes("communication:config_fallback");
+      assert.equal(hookInvalid, coreInvalid, `desync для значения ${JSON.stringify(v)}`);
+    }
+  });
+});
+
+describe("feedback-report wiring (MaestroBootstrapPlugin)", () => {
+  let dir;
+  before(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-fr-")); });
+  after(() => { fs.rmSync(dir, { recursive: true, force: true }); });
+
+  it("feedback_report: auto → plugin-level system.transform инжектит директиву (chainHooks, 3-й источник)", async () => {
+    fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({ feedback_report: "auto" }));
+    const client = { session: { get: async () => ({ data: { parentID: null, title: "primary" } }) } };
+    const hooks = await MaestroBootstrapPlugin({ directory: dir, client });
+    assert.equal(typeof hooks["experimental.chat.system.transform"], "function");
+    const out = { system: [] };
+    await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, out);
+    assert.ok(out.system.some((s) => s.includes("feedback_report: auto")));
+  });
+
+  it("ключ отсутствует → без директивы (безопасный дефолт manual)", async () => {
+    const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), "fab-fr2-"));
+    fs.writeFileSync(path.join(dir2, "maestro.json"), JSON.stringify({}));
+    const client = { session: { get: async () => ({ data: { parentID: null, title: "primary" } }) } };
+    const hooks = await MaestroBootstrapPlugin({ directory: dir2, client });
+    const out = { system: [] };
+    await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, out);
+    assert.ok(!out.system.some((s) => s.includes("feedback_report")));
+    fs.rmSync(dir2, { recursive: true, force: true });
+  });
+
+  it("enum-синхронизация: invalid-детект loadFeedbackReportConfig и registerFeedbackReportHooks совпадают", async () => {
+    for (const v of ["auto", "manual", "disable", "AUTO", "nope", 42, null, ""]) {
+      const coreInvalid = loadFeedbackReportConfig({ feedback_report: v }).invalid;
+      const log = { calls: [], warn: (m) => log.calls.push(m), info: () => {}, error: () => {}, debug: () => {} };
+      await registerFeedbackReportHooks({
+        client: { session: { get: async () => { throw new Error("x"); } } },
+        config: { feedback_report: v }, log });
+      const hookInvalid = log.calls.includes("feedback_report:config_fallback");
       assert.equal(hookInvalid, coreInvalid, `desync для значения ${JSON.stringify(v)}`);
     }
   });

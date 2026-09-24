@@ -26,6 +26,7 @@ import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { classifyMemoryConfig } from "./memory/config.js";
 import { registerCommunicationHooks } from "./communication.js";
+import { registerFeedbackReportHooks } from "./feedback-report.js";
 
 const LOG_LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
 
@@ -384,6 +385,26 @@ export function loadCommunicationConfig(config) {
     return { mode: value, explicit: true, invalid: false };
   }
   return { mode: "plain", explicit: false, invalid: true };
+}
+
+const FEEDBACK_REPORT_MODES = new Set(["auto", "manual", "disable"]);
+
+/**
+ * Разбор `feedback_report` из maestro.json — режим отчёта ретроспективы
+ * (шаг 18.5 pipeline). Ключ отсутствует → "manual" (дефолт). Невалидное
+ * значение → soft fallback в дефолт + invalid: true (философия
+ * communication:config_fallback).
+ * @param {object} [config]  Parsed `maestro.json` (from loadMaestroConfig).
+ * @returns {{ mode: "auto"|"manual"|"disable", explicit: boolean, invalid: boolean }}
+ */
+export function loadFeedbackReportConfig(config) {
+  const value =
+    config && typeof config === "object" ? config.feedback_report : undefined;
+  if (value === undefined) return { mode: "manual", explicit: false, invalid: false };
+  if (typeof value === "string" && FEEDBACK_REPORT_MODES.has(value)) {
+    return { mode: value, explicit: true, invalid: false };
+  }
+  return { mode: "manual", explicit: false, invalid: true };
 }
 
 /**
@@ -1119,14 +1140,25 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
   } catch (err) {
     log.error("communication: init failed", { error: err instanceof Error ? err.message : String(err) });
   }
+  // Feedback report mode (auto/manual/disable): активен всегда (standalone-
+  // ключ enabled нет; дефолт — manual, директива не инжектится). Fail-soft,
+  // как communication.
+  let fbHooks = {};
+  try {
+    fbHooks = await registerFeedbackReportHooks({ client, config, log });
+  } catch (err) {
+    log.error("feedback_report: init failed", { error: err instanceof Error ? err.message : String(err) });
+  }
   plugin.tool = { ...(memoryHooks.tool ?? {}) };
   const chainHooks = (name) => {
     const a = commHooks[name];
     const b = memoryHooks[name];
-    if (!a && !b) return;
+    const c = fbHooks[name];
+    if (!a && !b && !c) return;
     plugin[name] = async (input, out) => {
       if (a) { try { await a(input, out); } catch {} }
       if (b) { try { await b(input, out); } catch {} }
+      if (c) { try { await c(input, out); } catch {} }
     };
   };
   chainHooks("chat.message");

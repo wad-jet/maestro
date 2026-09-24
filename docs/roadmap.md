@@ -10,6 +10,7 @@
   до реализации #101 (инструмент уже есть; double-masking в `memory_import` реализован).
 
 ## Волна 1 — Надёжность памяти + гигиена процессов (4.7.x)
+> Волна 1 закрыта релизом **4.8.0** (метка «4.7.x» — историческая; #113 — новая фича → minor-бамп 4.7.1 → 4.8.0).
 
 Порядок внутри волны: **#101 → #77** (dogfood-репо на sqlite — сценарий #77 для него
 не «горит»).
@@ -24,8 +25,12 @@
    сохранены» (spec 2026-09-23): loud-уведомления (per-session + process-level) +
    восстановление по требованию (`memory_reindex` full-reindex), sqlite-fallback —
    non-goal.
-3. **#113** — `@maestro-feedback-report`: режимы `auto/manual/disable` в `maestro.json`
-   (quick win к релизу). Дефолт — консервативно `manual` (M2), пока не готов #99.
+3. **#113** — `@maestro-feedback-report`: режимы `auto/manual/disable` в
+   `maestro.json`. **Выполнено (4.8.0, 2026-09-24)** — ключ `feedback_report`
+   (дефолт `manual`), плагин-директива в system-контексте (паттерн
+   `communication`), шаг 18.5 пайплайна (manual — подсказка / auto —
+   авто-сбор без HITL, fail-soft / disable — ничего); spec
+   `docs/superpowers/specs/2026-09-24-feedback-report-modes-design.md`.
 
 Параллельно (дёшево, не релизные обязательства):
 

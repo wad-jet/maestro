@@ -9,6 +9,17 @@
 
 ## [Unreleased]
 
+### Добавлено
+
+- **Режимы отчёта ретроспективы (4.8.0):** ключ `maestro.json →
+  feedback_report` (`"manual"` дефолт / `"auto"` / `"disable"`) — новый
+  шаг 18.5 пайплайна (после merge): manual — однострочная подсказка
+  команды; auto — авто-сбор отчёта без HITL (fail-soft); disable — ничего.
+  Механика — плагин инжектит строку-директиву в system-контекст (паттерн
+  `communication`); нет директивы → manual (безопасный дефолт, в т.ч.
+  старая версия плагина). Смена режима — перезапуск opencode. Регресс:
+  `regression/entries/2026-09-24-feedback-report-modes.md`.
+
 ## [2026-09-23]
 
 > **Версия 4.7.1** — Patch-релиз: fail-loud для memory layer — уведомление в сессию при сбое индексирования + full-reindex восстановление через `@maestro-memory-reindex`.

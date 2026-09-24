@@ -37,8 +37,8 @@
 
 | Маршрут | Описание |
 |---|---|
-| **Feature** (шаги 0–18) | Полный цикл: project context → pre-flight → дизайн (brainstorm primary + custodian Q/A) → spec → plan → SDD → docs → review → finish |
-| **Bugfix** (шаги 0–6 → D1–D7 → шаги 11–18) | Ресеч → гипотеза → probe → откат → plan → SDD → docs → review → finish |
+| **Feature** (шаги 0–18.5) | Полный цикл: project context → pre-flight → дизайн (brainstorm primary + custodian Q/A) → spec → plan → SDD → docs → review → finish → feedback report |
+| **Bugfix** (шаги 0–6 → D1–D7 → шаги 11–18.5) | Ресеч → гипотеза → probe → откат → plan → SDD → docs → review → finish → feedback report |
 | **Spike** (feasibility) | Короткий ресеч/прототип → рекомендация; без spec/plan/мержа; throwaway-код |
 
 ## 🧭 Ключевые понятия
