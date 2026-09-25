@@ -70,7 +70,7 @@
   12 (plan), 17 (pre-PR).
 - **Fix-loop** внутри шага 13: Task 2 прошёл BLOCKED → re-dispatch → review-fail →
   fix → re-review.
-- **Три слоя ревью**: spec review (шаг 9) → per-task (шаг 13) → final (шаг 16).
+- **Три слоя ревью**: spec review (шаг 9) → per-task (шаг 13) → final (шаг 16; первое ревью — параллель: `code-reviewer` + `sonnet`).
   Spec **пишет** primary (шаг 8, brainstorm + custodian Q/A), **ревьюит** `opus` (untrusted, шаг 9)
   — исключает self-review.
 - **Регрессия**: риски зафиксированы на шаге 12, сверены на шаге 13f.

@@ -24,7 +24,7 @@
 | `spec_formation` (шаг 8) | opus | `custodian` (trusted, Q/A по confidential) |
 | `spec_review` (шаг 9, после sanitize) | opus | `opus` |
 | `task_reviewer` (шаг 13, per-task) | sonnet | `sonnet` |
-| `code_review` (шаг 16) | opus | `code-reviewer` |
+| `code_review` (шаг 16) | opus (+ sonnet, первый раунд — параллель по `review.parallel`) | `code-reviewer` (+ `sonnet`) |
 | `implementer_mechanical` (шаг 13, 1-2 файла) | haiku | `haiku` |
 | `implementer_integration` (шаг 13, multi-file) | sonnet | `sonnet` |
 | `explain` (по запросу, примеры/метафоры) | fable | `fable` |

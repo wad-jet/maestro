@@ -244,7 +244,7 @@ bash-команд ненадёжно извлекаются).
 **двухролевыми**: генерируются **primary** (пишет spec из brainstorm + Q/A
 `custodian`, plan — через writing-plans) и читаются
 trusted `sanitizer`, но **потребляются untrusted**-субагентами — `opus` (spec
-review, шаг 9), implementer (`haiku`/`sonnet`, шаг 13), `code-reviewer` (шаг 16).
+review, шаг 9), implementer (`haiku`/`sonnet`, шаг 13), `code-reviewer` (+ `sonnet` в параллельном первом раунде, шаг 16).
 Если добавить эти пути в `confidential.paths`, untrusted-субагенты и primary
 получат жёсткий deny на чтение spec/plan, и **процесс планирования/реализации
 остановится** (untrusted не смогут читать исходники для своей работы). Защита
