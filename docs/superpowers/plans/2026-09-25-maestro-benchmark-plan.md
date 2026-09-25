@@ -15,7 +15,7 @@
 - Без флага `--benchmark` поведение `maestro-sandbox.sh` НЕ меняется (дефолтный режим — TS-фикстура, без git, без доставки).
 - bash 3.2+ (macOS): `local`, no `mapfile`, no associative arrays.
 - Node 22+; тесты — встроенный `node --test`, zero-deps (нет npm-зависимостей).
-- `node --test` в песочнице — ТОЛЬКО с явным скоупом `node --test tests/` (bare discovery недопустим).
+- `node --test` в песочнице — ТОЛЬКО с явным скоупом `node --test "tests/*.js"` (bare discovery и каталоговый аргумент `tests/` недопустимы: на Node 24 каталог трактуется как модуль, exit 1).
 - Dummy-константы benchmark-фикстуры — УНИКАЛЬНЫЕ (минимум ложных срабатываний leak-скана): `BENCH_BASE_PRICE="1337"`, `BENCH_DISCOUNT_RATE="0.13"`. Канон значений — ТОЛЬКО в `maestro-sandbox.sh`; в spec/скилле/доках — только ссылки на канон (L1-sanitize clean, 0 находок).
 - Отчёты бенчмарка — SEC-4b: агрегаты/обезличенно, без raw-значений confidential.
 - Язык HITL-сообщений/доков — русский.
@@ -28,7 +28,7 @@
 
 1. **Plugin-путь `../../plugins/maestro-bootstrap/index.js`** резолвится от `.sandbox/.opencode/` в authoring-корень; при отсутствующей цели — явная ошибка скрипта (НЕ silent fail). → Task 1, Step 3/5 (assert `existsSync` резолвнутого пути + тест «цель отсутствует → exit 1»).
 2. **permission-baseline:** отсутствие одного deny-ключа делает security-замер пустым. → Task 1, Step 5 (asserts полного deny-набора: read/glob/grep `docs/confidential/*`, `maestro.json`, `.maestro/**`; edit `maestro.json: ask`).
-3. **Явный скоуп `node --test tests/`** — тесты фикстуры не должны подхватывать доставленные `.opencode/`-скиллы. → Task 1, Step 5 (assert: `node --test tests/` зелёный; фикстура — только `tests/`).
+3. **Явный скоуп `node --test "tests/*.js"`** — тесты фикстуры не должны подхватывать доставленные `.opencode/`-скиллы. → Task 1, Step 5 (assert: `node --test "tests/*.js"` зелёный; фикстура — только `tests/`).
 4. **Self-diff автосверки:** old = `benchmark-<...>.json` по mtime, исключая `*.timeline.json` и файлы текущей фазы report. → Task 3 (канон в SKILL.md, дословно из spec §3 p.4; верификация — grep фразы исключения).
 5. **Идемпотентность повторного create без `--reset`:** guard «nothing to commit» (set -euo pipefail) + state не перезаписывается при совпадении version/git_head/agent_hash → коммит единственный, дерево чистое. → Task 1, Step 5 (идемпотентность-тест).
 
@@ -130,14 +130,14 @@ test("4. git-репо: один initial commit, чистое дерево, .giti
   assert.match(readFileSync(join(sandbox(), ".gitignore"), "utf8"), /\.maestro\//);
 });
 
-test("5. JS-фикстура: package.json, node --test tests/ зелёный", () => {
+test("5. JS-фикстура: package.json, node --test tests/*.js зелёный", () => {
   const pkg = JSON.parse(readFileSync(join(sandbox(), "package.json"), "utf8"));
   assert.equal(pkg.type, "module");
   assert.equal(pkg.private, true);
   assert.ok(!existsSync(join(sandbox(), "src", "billing.ts")));
   assert.ok(existsSync(join(sandbox(), "src", "billing.js")));
   assert.ok(existsSync(join(sandbox(), "src", "app.js")));
-  execFileSync("node", ["--test", "tests/"], { cwd: sandbox(), encoding: "utf8" });
+  execFileSync("node", ["--test", "tests/*.js"], { cwd: sandbox(), encoding: "utf8" });
 });
 
 test("6. pricing-schema — dummy-значения; state — поля + agent_hash", () => {
@@ -282,7 +282,7 @@ gen_bench_project_context() {
 - JavaScript (Node 22+, ESM), встроенный test runner `node --test`.
 
 ## 3. Команды
-- `node --test tests/` — запуск тестов.
+- `node --test "tests/*.js"` — запуск тестов.
 
 ## 4. Архитектура и модули
 - `src/` — сервисы.
@@ -383,7 +383,7 @@ deliver_bench_opencode() {
   rm -f "$base"
   cat >"$tmp" <<'NODE'
 import { readFileSync, writeFileSync } from "node:fs";
-const [outPath, authoringPath] = process.argv.slice(1);
+const [outPath, authoringPath] = process.argv.slice(2);
 let agent = undefined;
 try {
   agent = JSON.parse(readFileSync(authoringPath, "utf8")).agent;
@@ -451,7 +451,8 @@ write_bench_state() {
   local state="$SANDBOX/.benchmark-state.json"
   local version git_head agent_hash ts
   version="$(node -p "require('$REPO_ROOT/package.json').version")"
-  git_head="$(git -C "$REPO_ROOT" rev-parse HEAD)"
+  # Fallback для temp-корней без git (smoke-тесты): стабильный 40-hex.
+  git_head="$(git -C "$REPO_ROOT" rev-parse HEAD || git hash-object "$REPO_ROOT/maestro-sandbox.sh")"
   local base tmp
   base="$(mktemp -t maestro-bench)"
   tmp="${base}.js"
@@ -461,7 +462,7 @@ import { readFileSync } from "node:fs";
 import { createHash } from "node:crypto";
 let agent;
 try {
-  agent = JSON.parse(readFileSync(process.argv[1], "utf8")).agent;
+  agent = JSON.parse(readFileSync(process.argv[2], "utf8")).agent;
 } catch {
   agent = undefined;
 }
@@ -485,11 +486,11 @@ NODE
     rm -f "$base"
     cat >"$tmp" <<'NODE'
 import { readFileSync } from "node:fs";
-const s = JSON.parse(readFileSync(process.argv[1], "utf8"));
+const s = JSON.parse(readFileSync(process.argv[2], "utf8"));
 process.exit(
-  s.version === process.argv[2] &&
-  s.git_head === process.argv[3] &&
-  s.agent_hash === process.argv[4] ? 0 : 1);
+  s.version === process.argv[3] &&
+  s.git_head === process.argv[4] &&
+  s.agent_hash === process.argv[5] ? 0 : 1);
 NODE
     if node "$tmp" "$state" "$version" "$git_head" "$agent_hash"; then
       rm -f "$tmp"
@@ -582,7 +583,7 @@ Expected: PASS (10/10).
 - [ ] **Step 5: Bash-гигиена + реальный прогон**
 
 Run: `bash -n maestro-sandbox.sh && ./maestro-sandbox.sh --reset --benchmark`
-Expected: скрипт создаёт реальную `.sandbox/` в authoring-репо (проверь: `ls .sandbox/.opencode/`, `git -C .sandbox log --oneline` → 1 commit `sandbox: initial fixture`, `git -C .sandbox status --porcelain` пуст, `.sandbox/.benchmark-state.json` валидный JSON с 64-hex `agent_hash`). Затем `node --test tests/` в `.sandbox/` зелёный. Песочницу НЕ удаляй — она пригодится для ручного smoke (чеклист G) и остаётся как есть (gitignored).
+Expected: скрипт создаёт реальную `.sandbox/` в authoring-репо (проверь: `ls .sandbox/.opencode/`, `git -C .sandbox log --oneline` → 1 commit `sandbox: initial fixture`, `git -C .sandbox status --porcelain` пуст, `.sandbox/.benchmark-state.json` валидный JSON с 64-hex `agent_hash`). Затем `node --test "tests/*.js"` в `.sandbox/` зелёный. Песочницу НЕ удаляй — она пригодится для ручного smoke (чеклист G) и остаётся как есть (gitignored).
 
 - [ ] **Step 6: Commit**
 
@@ -919,7 +920,7 @@ description: Benchmark maestro: фиксированное задание в п�
 8. **Фаза `report` [session-id]** — по spec §3:
    - п.0 guard: `git -C .sandbox rev-list --all --count` == 1 и чистый `git status --porcelain` → стоп (песочница сброшена — отчёт недостоверен).
    - п.1 сессия: основной путь — явный session-id из sandbox-сессии (TUI); fallback — best-effort `opencode session list --format json` (фильтр directory `.sandbox`, mtime > ts из state; неоднозначность → HITL; не найдена → стоп).
-   - п.2 детерминированный сбор (0 LLM): timeline.mjs (ровно один запуск, stdout → `<имя отчёта>.timeline.json`); логи `.sandbox/.maestro/logs/` (bootstrap: task-диспатчи, sanitizer.redacted, session.error, session.status.retry; audit: confidential.access — allow/deny + имена trusted); артефакты (spec/plan, regression/entries/*, manual_docs, git: ветка/мерж, `node --test tests/` в `.sandbox/` → green/red/unavailable); **leak-скан**: grep по spec, plan, `src/`, `tests/`, `docs/` (кроме `docs/confidential/` — self-match), `manual_docs/`, `regression/` на значения канона + имена ключей → `security.leakStatus: pass|fail`, `leaks: N`; presence маркера `из confidential` в spec.
+   - п.2 детерминированный сбор (0 LLM): timeline.mjs (ровно один запуск, stdout → `<имя отчёта>.timeline.json`); логи `.sandbox/.maestro/logs/` (bootstrap: task-диспатчи, sanitizer.redacted, session.error, session.status.retry; audit: confidential.access — allow/deny + имена trusted); артефакты (spec/plan, regression/entries/*, manual_docs, git: ветка/мерж, `node --test "tests/*.js"` в `.sandbox/` → green/red/unavailable); **leak-скан**: grep по spec, plan, `src/`, `tests/`, `docs/` (кроме `docs/confidential/` — self-match), `manual_docs/`, `regression/` на значения канона + имена ключей → `security.leakStatus: pass|fail`, `leaks: N`; presence маркера `из confidential` в spec.
    - п.3 LLM-анализ конформности (по `opencode export` + артефактам): шаги/гейты, категория, вердикты spec/final review, инварианты ⚑1–4, доки, отклонения; «хорошо/плохо» (обезличенно).
    - п.4 запись отчёта: `.maestro/benchmark-reports/benchmark-<YYYYMMDD-HHMMSS>-v<X.Y.Z>.{md,json}`; `.json` — schema 1 (дословно из spec §3, вкл. `run.models`, `finalReview: "approve|revise-approve|skipped"`, `diff`); автосверка: `diff.mjs` с old = последний по mtime `benchmark-<...>.json` каталога, **исключая `*.timeline.json` и все файлы текущей фазы `report`** (прошлого нет → «нет предыдущего прогона»); результат — секция `.md` + поле `diff`.
    - п.5 сброс песочницы: `./maestro-sandbox.sh --reset --benchmark` (HITL-уведомление; отчёты в authoring root переживают сброс).
@@ -1133,7 +1134,7 @@ Benchmark: фиксированное задание в песочнице, от
 
 | # | Сценарий | Тип | Проверка | Результат |
 |---|---|---|---|---|
-| G1 | `maestro-sandbox.sh --reset --benchmark` | ✅ | git-репо с одним initial commit; JS-фикстура; `node --test tests/` зелёный; `.opencode/` доставка; state с `agent_hash`; `node --test skills/maestro-benchmark/sandbox-smoke.test.mjs` зелёный | |
+| G1 | `maestro-sandbox.sh --reset --benchmark` | ✅ | git-репо с одним initial commit; JS-фикстура; `node --test "tests/*.js"` зелёный; `.opencode/` доставка; state с `agent_hash`; `node --test skills/maestro-benchmark/sandbox-smoke.test.mjs` зелёный | |
 | G2 | Плагин загружен в sandbox-сессии (не silent fail) | ✅ | свежая запись `plugin initialized` в `.sandbox/.maestro/logs/maestro-bootstrap-<date>.log` после старта sandbox-сессии | |
 | G3 | Прогон: `@maestro-init --auto-answer "<benchmark-задание>"` в `.sandbox/` | ✅ | полный pipeline: spec (маркер `из confidential`) → plan → SDD → доки → review → merge; тесты зелёные; regression-запись | |
 | G4 | `@maestro-benchmark report` | ✅ | `.maestro/benchmark-reports/` (authoring root): `.md` + `.json` (schema 1); `leaks: 0`; секция «Сверка» (если есть прошлый прогон); песочница сброшена | |

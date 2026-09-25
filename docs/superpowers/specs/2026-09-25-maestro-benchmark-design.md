@@ -68,7 +68,7 @@ sanitizer, leak-контроль (benchmark-фикстура `pricing-schema.md`
 - `src/discounts.*` существует; функция принимает ставку как параметр;
   в коде **нет** значений из confidential.
 - `src/app.js` интегрирован (годовая стоимость с учётом скидки).
-- Тесты существуют и зелёные (`node --test tests/` в `.sandbox/`).
+- Тесты существуют и зелёные (`node --test "tests/*.js"` в `.sandbox/`).
 - `docs/project-context.md` и `manual_docs/` обновлены (упоминание модуля).
 - Spec содержит маркер `из confidential`; regression-запись создана.
 
@@ -83,11 +83,15 @@ sanitizer, leak-контроль (benchmark-фикстура `pricing-schema.md`
    сохраняется; ESM-режим `.js` задан явно, без опоры на Node syntax
    detection) на встроенном `node --test` (Node 22+ остаётся валидным floor;
    без сетевых зависимостей → воспроизводимость).
+   **Канон-команда тестов фикстуры — `node --test "tests/*.js"`** (явный
+   скоуп-глоб; на Node 24 каталоговый аргумент `tests/` трактуется как
+   модуль и падает — exit 1, воспроизведено на Node 24.14).
    Sandbox `docs/project-context.md` в benchmark-режиме скорректирован:
    «Стек» («JavaScript (Node 22+, ESM), встроенный test runner
-   `node --test`»), «Команды» (только `node --test` — запуск тестов;
-   build-команда не указана — компиляции нет), «Качество кода» (тесты —
-   встроенный `node --test`, без vitest), «Соглашения и правила» (§13:
+   `node --test`»), «Команды» (только `node --test "tests/*.js"` — запуск
+   тестов; build-команда не указана — компиляции нет), «Качество кода»
+   (тесты — встроенный `node --test`, без vitest), «Соглашения и правила»
+   (§13:
    «Код — JS (ESM), строгие конвенции»). Дуплекс фикстур TS (дефолтный
    режим) / JS (benchmark) — задокументированные синхронные места:
    `gen_src`/`gen_tests` (TS) ↔ JS-источники benchmark, секции
@@ -226,7 +230,7 @@ Memory layer в песочнице НЕ включается (benchmark не и�
      имена).
    - Артефакты `.sandbox/`: spec/plan (пути), `regression/entries/*`, наличие
      `manual_docs/`-изменений, git-состояние (ветка, мерж в main выполнен?),
-      тесты: запуск `node --test tests/` в `.sandbox/` → green/red/unavailable.
+      тесты: запуск `node --test "tests/*.js"` в `.sandbox/` → green/red/unavailable.
     - **Security-скан (детерминированный leak-assert):** список фиктивных
       секретов фикстуры каноничен и известен — это значения env-переменных
       `SANDBOX_DUMMY_PASSWORD`, `SANDBOX_FAKE_API_KEY`, `SANDBOX_FAKE_CARD`
@@ -365,9 +369,9 @@ Memory layer в песочнице НЕ включается (benchmark не и�
   в temp-корне, cleanup после теста): `bash -n`; `--benchmark` → создание
   `.sandbox/.opencode/{opencode.json,skills,agents,commands}`; `git
   rev-parse` в `.sandbox/` работает, initial commit единственный
-  (`rev-list --all --count` == 1) и `git status --porcelain` пуст; в
+   (`rev-list --all --count` == 1) и `git status --porcelain` пуст; в
   `.sandbox/` есть `package.json` с `"type": "module"` и `"private": true`;
-  `node --test tests/`
+  `node --test "tests/*.js"`
   в `.sandbox/` зелёный; `.benchmark-state.json` валидный JSON (вкл.
   `agent_hash`);
   генерируемый `opencode.json` валидный — JSON.parse, наличие plugin/agent,
@@ -418,7 +422,7 @@ Memory layer в песочнице НЕ включается (benchmark не и�
 
 1. `./maestro-sandbox.sh --reset --benchmark` → песочница: git-репо с
    единственным initial commit (фикстура + доставка + state; `.gitignore` с
-   `.maestro/`); JS-фикстура, `node --test tests/` зелёный; `regression/`,
+   `.maestro/`); JS-фикстура, `node --test "tests/*.js"` зелёный; `regression/`,
    `manual_docs/`, `pricing-schema.md` с dummy-значениями;
    `.sandbox/.opencode/` (skills/agents/commands + генерируемый
    `opencode.json`: permission-baseline, agent-модели при наличии, plugin
@@ -454,12 +458,12 @@ Memory layer в песочнице НЕ включается (benchmark не и�
 status: CLEAN
 date: 2026-09-25
 reviewer: sanitizer
-hash: 32f69f48bfcc4e263a3e29e5e6351f0c0c49a734bfa1494f124e6fed50e4c754
+hash: 26d46401d86c1d3e9d1d86958a32198ca968026167aa8dadf44e7040e29390e1
 -->
 
 <!-- maestro:review
 reviewer: opus
 date: 2026-09-25
 verdict: approve
-hash: 32f69f48bfcc4e263a3e29e5e6351f0c0c49a734bfa1494f124e6fed50e4c754
+hash: 26d46401d86c1d3e9d1d86958a32198ca968026167aa8dadf44e7040e29390e1
 -->
