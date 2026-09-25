@@ -86,7 +86,9 @@ test("5. JS-фикстура: package.json, node --test tests/*.js зелёны�
   assert.ok(!existsSync(join(sandbox(), "src", "billing.ts")));
   assert.ok(existsSync(join(sandbox(), "src", "billing.js")));
   assert.ok(existsSync(join(sandbox(), "src", "app.js")));
-  execFileSync("node", ["--test", "tests/*.js"], { cwd: sandbox(), encoding: "utf8" });
+  const env = { ...process.env };
+  delete env.NODE_TEST_CONTEXT;
+  execFileSync("node", ["--test", "tests/*.js"], { cwd: sandbox(), encoding: "utf8", env });
 });
 
 test("6. pricing-schema — dummy-значения; state — поля + agent_hash", () => {
