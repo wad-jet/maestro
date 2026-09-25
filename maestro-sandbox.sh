@@ -365,7 +365,7 @@ gen_bench_project_context() {
 - JavaScript (Node 22+, ESM), встроенный test runner `node --test`.
 
 ## 3. Команды
-- `node --test tests/` — запуск тестов.
+- `node --test "tests/*.js"` — запуск тестов.
 
 ## 4. Архитектура и модули
 - `src/` — сервисы.

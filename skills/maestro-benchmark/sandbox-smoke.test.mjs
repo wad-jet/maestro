@@ -79,14 +79,14 @@ test("4. git-репо: один initial commit, чистое дерево, .giti
   assert.match(readFileSync(join(sandbox(), ".gitignore"), "utf8"), /\.maestro\//);
 });
 
-test("5. JS-фикстура: package.json, node --test tests/ зелёный", () => {
+test("5. JS-фикстура: package.json, node --test tests/*.js зелёный", () => {
   const pkg = JSON.parse(readFileSync(join(sandbox(), "package.json"), "utf8"));
   assert.equal(pkg.type, "module");
   assert.equal(pkg.private, true);
   assert.ok(!existsSync(join(sandbox(), "src", "billing.ts")));
   assert.ok(existsSync(join(sandbox(), "src", "billing.js")));
   assert.ok(existsSync(join(sandbox(), "src", "app.js")));
-  execFileSync("node", ["--test", "tests/"], { cwd: sandbox(), encoding: "utf8" });
+  execFileSync("node", ["--test", "tests/*.js"], { cwd: sandbox(), encoding: "utf8" });
 });
 
 test("6. pricing-schema — dummy-значения; state — поля + agent_hash", () => {
