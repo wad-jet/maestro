@@ -7,7 +7,9 @@
 > Хронология составлена по истории authoring-репо `maestro-agent`. Даты
 > приблизительные (по коммитам).
 
-## [Unreleased]
+## [2026-09-25]
+
+> **Версия 4.11.0** — Minor-релиз: fast mode `--no-children` и чистый stderr в `timeline.mjs` — быстрый прогон `@maestro-feedback-report` (~секунды) без child-атрибуции (`metrics.children: "skipped"`); прогресс-шум CLI `opencode export` в stderr подавлен, при сбое — одна диагностическая строка с хвостом.
 
 ### Добавлено
 
@@ -19,8 +21,6 @@
   Known limitation: полный прогон ~2–4 мин при cap-100 child-сессиях;
   fast-прогон после full затирает атрибуцию в JSONL-строке (known behavior).
   Регресс: `regression/entries/2026-09-25-timeline-fast-mode.md`.
-
-## [2026-09-25]
 
 > **Версия 4.10.0** — Minor-релиз: раздел «Метрики пайплайна и Effort» в `@maestro-feedback-report` — итоговая статистика запуска (токены primary + по сабагентам, cost, активное время, HITL, retry, циклы ревью) и методология Effort без числового score; накопительная история `.maestro/metrics/history.jsonl`.
 
