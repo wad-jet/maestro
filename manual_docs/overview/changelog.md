@@ -13,6 +13,13 @@
 
 ### Добавлено
 
+- **#95 — параллельное первое финальное ревью:** шаг 16 — два независимых
+  диспатча (`code-reviewer` + `sonnet`) по правилу активации
+  (`maestro.json → review.parallel: auto|always|off`, дефолт `auto`) и
+  guard «одна модель»; расхождение вердиктов — арбитраж старшего (M3) по
+  C/I-находкам; контрольные раунды fix-loop — только `code-reviewer`;
+  переформулировка `agents/code-reviewer.md` (фокус/«что уже проверено»/
+  порог P1.1). Плагин — без изменений.
 - **Fast mode `--no-children` и чистый stderr в `timeline.mjs` (4.11.0):**
   быстрый прогон `@maestro-feedback-report` (~5 c) без child-атрибуции
   (`metrics.children: "skipped"`; по умолчанию — полный прогон); прогресс-шум

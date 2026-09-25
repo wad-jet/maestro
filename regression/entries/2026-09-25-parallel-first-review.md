@@ -1,0 +1,21 @@
+# Regression — parallel-first-review (#95)
+
+- **version:** 1
+- **feature:** параллельное первое финальное ревью (шаг 16) — два независимых диспатча (`code-reviewer` + `sonnet`), правило активации (`maestro.json → review.parallel: auto|always|off`, дефолт `auto`), guard «одна модель»; расхождение вердиктов — арбитраж старшего (M3) по C/I-находкам; контрольные раунды fix-loop — только `code-reviewer`; переформулировка `agents/code-reviewer.md` (фокус/«что уже проверено»/порог P1.1) + скопированный канон в диспатч sonnet; SKILL.md — «Случай A (зеркальный)», «Арбитраж (M3)», «Контрольные раунды fix-loop». Плагин — без изменений
+- **added:** 2026-09-25
+- **status:** active
+- **last_full_pass:** —
+- **risk:** LOW
+- **category:** скилл `maestro` (SKILL.md + implementer-prompt + agents/code-reviewer.md + agents/sonnet.md; process rules, 0 строк плагина)
+- **scenarios:**
+  - **тесты плагина** (коэксистенция; плагин не меняется):
+    - run: `node --test plugins/maestro-bootstrap/index.test.js`
+    - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent`
+    - expected: 250 pass / 0 fail
+  - **[Manual] dogfooding (собственный шаг 16):** параллельное ревью для фичи — детекция категории Сложная → 2 диспатча, анонс в чат, вердикт по правилу
+  - **grep-инварианты SKILL.md:** «Случай A (зеркальный)», «Арбитраж (M3)», «Контрольные раунды fix-loop»
+- **regressions:** ⚑1–4 не затрагиваются; шаги 9/13 не тронуты; плагин — 0 строк; `references/`-реорганизация — отдельная фича; #107 — отдельная фича
+- **SEC-4b:** N/A (process-правила; не меняется)
+- **plugin-version:** 4.12.0 (целевая; код плагина не меняется — 4.11.0)
+- **tests_total:** плагин 250
+- **links:** spec `docs/superpowers/specs/2026-09-25-parallel-first-review-design.md` | plan `docs/superpowers/plans/2026-09-25-parallel-first-review-plan.md` | changelog `[Unreleased]`
