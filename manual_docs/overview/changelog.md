@@ -7,6 +7,21 @@
 > Хронология составлена по истории authoring-репо `maestro-agent`. Даты
 > приблизительные (по коммитам).
 
+## [Unreleased]
+
+### Добавлено
+
+- **Benchmark для maestro:** фиксированное задание в песочнице
+  (`task_id: discount-module-v1`, `--auto-answer`) — `@maestro-benchmark
+  run/report/diff`; `maestro-sandbox.sh --benchmark` (JS-фикстура zero-deps,
+  git-инициализация, доставка skills/agents/commands + генерируемый
+  `opencode.json` с локальным plugin и agent-моделями, dummy-значения
+  pricing-schema, `.benchmark-state.json` с `agent_hash`); отчёт
+  `.maestro/benchmark-reports/benchmark-<ts>-v<ver>.{md,json}` (schema 1) +
+  детерминированная автосверка с прошлым прогоном (`diff.mjs`, 0 LLM;
+  `models_changed` — модель-конфаунд). Доки:
+  `manual_docs/how-to/benchmark.md`, справочник команд.
+
 ## [2026-09-25]
 
 > **Версия 4.12.0** — Minor-релиз: параллельное первое финальное ревью (шаг 16) — два независимых диспатча (`code-reviewer` + `sonnet`) по правилу активации (`review.parallel`, дефолт `auto`) и guard «одна модель»; расхождение вердиктов — арбитраж старшего (M3); контрольные раунды — только `code-reviewer`; переформулировка задачи ревью.

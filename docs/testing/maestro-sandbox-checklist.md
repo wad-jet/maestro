@@ -103,6 +103,19 @@
 | F15 | мульти-проект на centralized | ✅ | промоция одного проекта НЕ затрагивает записи другого (key-scoped) | |
 | F16 | heal (mainline_unresolved окно) | ✅ | записи транка, написанные при нерезолвнутом mainline, промоутятся после резолва | |
 
+## G. Benchmark (автоматизированный smoke)
+
+> `@maestro-benchmark`: фиксированное задание, отчёт, сверка.
+
+| # | Сценарий | Тип | Проверка | Результат |
+|---|---|---|---|---|
+| G1 | `maestro-sandbox.sh --reset --benchmark` | ✅ | git-репо с одним initial commit; JS-фикстура; `node --test "tests/*.js"` зелёный; `.opencode/` доставка; state с `agent_hash`; `node --test skills/maestro-benchmark/sandbox-smoke.test.mjs` зелёный | |
+| G2 | Плагин загружен в sandbox-сессии (не silent fail) | ✅ | свежая запись `plugin initialized` в `.sandbox/.maestro/logs/maestro-bootstrap-<date>.log` после старта sandbox-сессии | |
+| G3 | Прогон: `@maestro-init --auto-answer "<benchmark-задание>"` в `.sandbox/` | ✅ | полный pipeline: spec (маркер `из confidential`) → plan → SDD → доки → review → merge; тесты зелёные; regression-запись | |
+| G4 | `@maestro-benchmark report` | ✅ | `.maestro/benchmark-reports/` (authoring root): `.md` + `.json` (schema 1); `leaks: 0`; секция «Сверка» (если есть прошлый прогон); песочница сброшена | |
+| G5 | `@maestro-benchmark diff` | ✅ | таблица дельф (метрики + флаги same/regress/fix) в чате; при смене моделей — пометка `models_changed` | |
+| G6 | Сверка permission-baseline с каноном R1+R4 | ⚠️ | при изменении канона (maestro-assistant) сверить генерируемый `.sandbox/.opencode/opencode.json` с каноном (smoke-тест проверяет ключевые deny) | |
+
 ---
 
 ## Завершение QA

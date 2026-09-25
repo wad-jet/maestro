@@ -83,7 +83,7 @@
 ## 4. Архитектура
 
 - **`skills/`** — источники скиллов maestro (`maestro`, `maestro-setup`, `maestro-design`,
-  `maestro-assistant`, `maestro-feedback-report`, `manual-docs`).
+  `maestro-assistant`, `maestro-feedback-report`, `maestro-benchmark`, `manual-docs`).
 - **`agents/`** — промпты субагентов (`custodian`, `sanitizer`, `opus`, `sonnet`,
   `haiku`, `fable`, `code-reviewer`).
 - **`commands/`** — команды `@maestro-init`, `/maestro-setup`, `/maestro-design`, и др.
@@ -181,6 +181,12 @@
   activeMs, HITL, циклы ревью, JSONL-история).
 - **QA-чеклист (e2e-смоук):** `./maestro-sandbox.sh` создаёт `.sandbox/` (фиктивное
   целевое приложение), чеклист `docs/testing/maestro-sandbox-checklist.md`.
+- **Benchmark (process QA):** `@maestro-benchmark` (run/report/diff) —
+  фиксированное задание в песочнице + отчёт в `.maestro/benchmark-reports/` +
+  автосверка с прошлыми прогонами; smoke — `node --test
+  skills/maestro-benchmark/sandbox-smoke.test.mjs` (песочница `--benchmark`)
+  и `diff.test.mjs`; ручной smoke — чеклист секция G
+  (`docs/testing/maestro-sandbox-checklist.md`).
 - Команды тестирования зафиксированы в §14.
 
 ## 11. Развёртывание и окружения
@@ -242,3 +248,6 @@ OBSERVABILITY_COVERAGE_COMMAND: "none"
 
 ### Команды пайплайна
 - Шаг 18.5 — `@maestro-feedback-report`: режимы `auto/manual/disable` в `maestro.json` (канон `maestro-assistant`, плагин `feedback-report.js`, directive injection в system-контекст).
+- `@maestro-benchmark` — benchmark: фиксированное задание в песочнице, отчёт
+  прогона (`.maestro/benchmark-reports/`), сверка с прошлыми результатами
+  (run/report/diff; см. `manual_docs/how-to/benchmark.md`).
