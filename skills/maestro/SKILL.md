@@ -230,6 +230,12 @@ Interactive — агент комментирует находки по ходу
               действия при релизе) — в PROJECT_CONTEXT; гейт 17 показывает
               предлагаемую версию, шаг 18 после merge — bump (см. гейт 17 /
               шаг 18)
+            — **`review.parallel` (шаг 16):** `maestro.json → review.parallel`
+              читается на шаге 0 плагин-тулом `maestro_config` (кэш в переменной
+              сессии, паттерн PROJECT_CONTEXT); дефолт `auto` при отсутствии
+              ключа; невалидное → soft fallback `auto` + пометка
+              `review:config_fallback` в анонсе шага 16 (паттерн
+              `communication:config_fallback`).
 
       **Regression registry:** разрешить `REGISTRY_DIR` один раз на шаге 0
       (как maestro.json), кэшировать в переменной сессии:
@@ -1541,7 +1547,11 @@ Guard от петель диспатча (пустые/ошибочные рез
      spec-review (шаг 9) — `approve|revise|reject` + бакеты;
      task-reviewer (шаг 13) — `✅|❌|⚠️` + `Approved|Needs fixes`;
      re-review — `ADDRESSED|NOT ADDRESSED` + round-verdict;
-     code-reviewer (шаг 16) — `Approved|Needs fixes|Reject`;
+      code-reviewer (шаг 16) — `Approved|Needs fixes|Reject`;
+      sonnet@16 (параллельное первое ревью) — `Approved|Needs fixes|Reject`
+      + бакеты (как code-reviewer);
+      арбитраж@16 (M3) — «валидна/невалидна» по каждой C/I-находке sonnet +
+      итоговый вердикт;
      implementer — Status-контракт `DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT`
      + Files/Test/Commit.
    **Процедура наблюдения:** при пустом/ошибочном/прерванном результате диспатча
@@ -1987,7 +1997,7 @@ hash: <sha256 содержимого spec без блоков maestro:*>
 |---|---|---|---|---|---|---|
 | **(a) Spec Review** | spec | шаг 9, pre-spec-gate | HITL (автопредложение на сложных) | **opus** | бакеты + approve/revise/reject |
 | **(b) SDD task-reviewer** | diff одной задачи | шаг 13, per-task | авто после DONE | **sonnet**, по риску diff'а | ✅/❌/⚠️ + Approved/Needs fixes |
-| **(c) requesting-code-review** | diff всей ветки | шаг 16, post-impl | авто | **opus** | бакеты + Yes/No/With fixes |
+| **(c) requesting-code-review** | diff всей ветки | шаг 16, post-impl | авто (первое ревью — параллель: `code-reviewer` + `sonnet`, по правилу активации; контрольные раунды — только `code-reviewer`) | **opus** (+ sonnet, первый раунд) | бакеты + `Approved`/`Needs fixes`/`Reject` (sonnet@16 — тот же словарь; арбитраж M3 — «валидна/невалидна» по C/I-находке + итоговый вердикт) |
 
 - (a) — единственный gate **до кодирования**; оценивает spec (архитектура/риски), не код.
 - (b) — per-task код-гейт **во время** реализации; узкий scope.
@@ -1998,9 +2008,8 @@ hash: <sha256 содержимого spec без блоков maestro:*>
 
 **Инвариант вердиктов (P1.1):** во всех трёх контурах Minor-находки не
 обосновывают blocking-вердикт (`revise` / `Needs fixes`); ревью с открытыми
-находками только Minor возвращает approve/Approved. Словарь контура (c)
-(Yes/No/With fixes) эквивалентен словарю агента `code-reviewer.md`
-(Approved/Needs fixes/Reject).
+находками только Minor возвращает approve/Approved. Словарь контура (c) — словарь агента `code-reviewer.md`
+(`Approved`/`Needs fixes`/`Reject`); sonnet@16 — тот же словарь.
 
    **SCOPE NOTE (обязательно при неоднородном диапазоне):** если диапазон
    коммитов для ревью содержит вспомогательные коммиты вне скоупа задачи
