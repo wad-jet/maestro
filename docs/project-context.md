@@ -172,7 +172,7 @@
 - **Unit (плагин):** встроенный Node test runner — `node --test
   plugins/maestro-bootstrap/index.test.js` (250 тестов).
 - **Unit (скилл `maestro-feedback-report`):** `node --test
-  skills/maestro-feedback-report/timeline.test.mjs` (24 теста — агрегации
+  skills/maestro-feedback-report/timeline.test.mjs` (32 теста — агрегации
   таймлайна + `metrics`-блок `timeline.mjs`: токены primary/child-сессии,
   activeMs, HITL, циклы ревью, JSONL-история).
 - **QA-чеклист (e2e-смоук):** `./maestro-sandbox.sh` создаёт `.sandbox/` (фиктивное

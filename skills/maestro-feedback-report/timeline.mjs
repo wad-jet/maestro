@@ -4,9 +4,11 @@ import { join, sep, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 
-const args = process.argv.slice(2);
+const rawArgs = process.argv.slice(2);
+const noChildren = rawArgs.includes("--no-children");
+const args = rawArgs.filter((a) => a !== "--no-children");
 if (args.length < 1) {
-  process.stderr.write("Usage: timeline.mjs <sessionID> [path-to-export.json]\n");
+  process.stderr.write("Usage: timeline.mjs <sessionID> [path-to-export.json] [--no-children]\n");
   process.exit(1);
 }
 
@@ -18,6 +20,7 @@ const EXPORT_DIR = process.env.MAESTRO_TIMELINE_EXPORT_DIR || null;
 const CHILD_TIMEOUT_MS = Number(process.env.MAESTRO_CHILD_EXPORT_TIMEOUT_MS) > 0 ? Number(process.env.MAESTRO_CHILD_EXPORT_TIMEOUT_MS) : 30000;
 const CHILD_CONCURRENCY = 4;
 const CHILD_CAP = 100;
+const errTailOneLine = (t) => t.replace(/\r?\n/g, " ").trim().slice(-300) || "no stderr";
 
 async function exportSession(sessionID, timeoutMs) {
   if (EXPORT_DIR) {
@@ -46,8 +49,14 @@ async function exportSession(sessionID, timeoutMs) {
   }
   return await new Promise((resolve, reject) => {
     const tmpFile = join(tmpdir(), `maestro-child-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
-    const fd = openSync(tmpFile, "w");
-    const child = spawn("opencode", ["export", sessionID], { stdio: ["ignore", fd, "inherit"] });
+    const fd = openSync(tmpFile, "w", 0o600);
+    const child = spawn("opencode", ["export", sessionID], { stdio: ["ignore", fd, "pipe"] });
+    let errTail = "";
+    child.stderr.on("data", (d) => { errTail = (errTail + d).slice(-500); });
+    const fail = (e) => {
+      try { process.stderr.write(`[timeline] export failed: ${sessionID} — ${errTailOneLine(errTail)}\n`); } catch {}
+      reject(e);
+    };
     let done = false;
     const timer = setTimeout(() => {
       if (done) return;
@@ -55,20 +64,20 @@ async function exportSession(sessionID, timeoutMs) {
       try { child.kill("SIGKILL"); } catch {}
       try { closeSync(fd); } catch {}
       try { unlinkSync(tmpFile); } catch {}
-      reject(new Error("child_export_timeout"));
+      fail(new Error("child_export_timeout"));
     }, timeoutMs);
-    child.on("error", (e) => { if (done) return; done = true; clearTimeout(timer); try { closeSync(fd); } catch {}; try { unlinkSync(tmpFile); } catch {}; reject(e); });
+    child.on("error", (e) => { if (done) return; done = true; clearTimeout(timer); try { closeSync(fd); } catch {}; try { unlinkSync(tmpFile); } catch {}; fail(e); });
     child.on("exit", (code) => {
       if (done) return;
       done = true;
       clearTimeout(timer);
       try { closeSync(fd); } catch {}
-      if (code !== 0) { try { unlinkSync(tmpFile); } catch {}; reject(new Error("export_failed")); return; }
+      if (code !== 0) { try { unlinkSync(tmpFile); } catch {}; fail(new Error("export_failed")); return; }
       let raw;
-      try { raw = readFileSync(tmpFile, "utf-8"); } catch (e) { try { unlinkSync(tmpFile); } catch {}; reject(e); return; }
+      try { raw = readFileSync(tmpFile, "utf-8"); } catch (e) { try { unlinkSync(tmpFile); } catch {}; fail(e); return; }
       try { unlinkSync(tmpFile); } catch {}
-      if (!raw || !raw.trim()) { reject(new Error("export_failed")); return; }
-      try { resolve(JSON.parse(raw)); } catch { reject(new Error("invalid_export")); }
+      if (!raw || !raw.trim()) { fail(new Error("export_failed")); return; }
+      try { resolve(JSON.parse(raw)); } catch { fail(new Error("invalid_export")); }
     });
   });
 }
@@ -94,19 +103,25 @@ try {
     writeFileSync(shimPath, shimScript, { mode: 0o755 });
     try {
       await new Promise((resolve, reject) => {
-        const fd = openSync(tmpFile, "w");
+        const fd = openSync(tmpFile, "w", 0o600);
         const child = spawn("opencode", ["export", sessionID], {
-          stdio: ["ignore", fd, "inherit"],
+          stdio: ["ignore", fd, "pipe"],
         });
+        let errTail = "";
+        child.stderr.on("data", (d) => { errTail = (errTail + d).slice(-500); });
         child.on("exit", (code) => {
           closeSync(fd);
           if (code !== 0) {
+            process.stderr.write(`[timeline] export failed: ${sessionID} — ${errTailOneLine(errTail)}\n`);
             reject(new Error("export failed"));
           } else {
             resolve();
           }
         });
-        child.on("error", reject);
+        child.on("error", (e) => {
+          process.stderr.write(`[timeline] export failed: ${sessionID} — ${errTailOneLine(errTail)}\n`);
+          reject(e);
+        });
       });
       raw = readFileSync(tmpFile, "utf-8");
       if (!raw || !raw.trim()) {
@@ -305,58 +320,62 @@ const metrics = {
   activeMs: sessionDurationMs === null ? null : Math.max(0, sessionDurationMs - idleWaitMs),
   questionCount,
   reviewDispatches,
+  children: noChildren ? "skipped" : "full",
   tokensByAgent: {},
 };
 
-// --- metrics.tokensByAgent (child-экспорт) ---
-const agentBuckets = {};
-const uniqueChildren = new Map(); // sessionId -> agent (первое вхождение)
-for (const msg of messages) {
-  const parts = Array.isArray(msg.parts) ? msg.parts : [];
-  for (const p of parts) {
-    if (typeof p !== "object" || !p || p.type !== "tool" || p.tool !== "task") continue;
-    const st = p.state;
-    if (!st || st.status !== "completed") continue;
-    const sid = st.metadata && st.metadata.sessionId;
-    if (!sid || typeof sid !== "string") continue;
-    const agent = (st.input && st.input.subagent_type) || "unknown";
-    if (!agentBuckets[agent]) agentBuckets[agent] = { count: 0, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 0, failed: 0 };
-    agentBuckets[agent].count++;
-    if (!uniqueChildren.has(sid)) uniqueChildren.set(sid, agent);
-  }
-}
-
-const childEntries = [...uniqueChildren.entries()];
-const toRun = childEntries.slice(0, CHILD_CAP);
-for (const [sid, agent] of childEntries.slice(CHILD_CAP)) agentBuckets[agent].skipped++;
-
-await (async () => {
-  let idx = 0;
-  async function worker() {
-    while (idx < toRun.length) {
-      const i = idx++;
-      const [sid, agent] = toRun[i];
-      const b = agentBuckets[agent];
-      try {
-        const data = await exportSession(sid, CHILD_TIMEOUT_MS);
-        const t = data && data.info && data.info.tokens;
-        if (t && typeof t === "object") {
-          b.input += t.input || 0;
-          b.output += t.output || 0;
-          b.reasoning += t.reasoning || 0;
-          b.cacheRead += (t.cache && t.cache.read) || 0;
-          b.cacheWrite += (t.cache && t.cache.write) || 0;
-        }
-      } catch (e) {
-        if (e && e.message === "child_export_timeout") b.skipped++;
-        else b.failed++;
-      }
+if (!noChildren) {
+  // --- metrics.tokensByAgent (child-экспорт) ---
+  const agentBuckets = {};
+  const uniqueChildren = new Map(); // sessionId -> agent (первое вхождение)
+  for (const msg of messages) {
+    const parts = Array.isArray(msg.parts) ? msg.parts : [];
+    for (const p of parts) {
+      if (typeof p !== "object" || !p || p.type !== "tool" || p.tool !== "task") continue;
+      const st = p.state;
+      if (!st || st.status !== "completed") continue;
+      const sid = st.metadata && st.metadata.sessionId;
+      if (!sid || typeof sid !== "string") continue;
+      const agent = (st.input && st.input.subagent_type) || "unknown";
+      if (!agentBuckets[agent]) agentBuckets[agent] = { count: 0, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 0, failed: 0 };
+      agentBuckets[agent].count++;
+      if (!uniqueChildren.has(sid)) uniqueChildren.set(sid, agent);
     }
   }
-  await Promise.all(Array.from({ length: Math.min(CHILD_CONCURRENCY, toRun.length) }, () => worker()));
-})();
 
-metrics.tokensByAgent = agentBuckets;
+  const childEntries = [...uniqueChildren.entries()];
+  const toRun = childEntries.slice(0, CHILD_CAP);
+  for (const [sid, agent] of childEntries.slice(CHILD_CAP)) agentBuckets[agent].skipped++;
+
+  await (async () => {
+    let idx = 0;
+    async function worker() {
+      while (idx < toRun.length) {
+        const i = idx++;
+        const [sid, agent] = toRun[i];
+        const b = agentBuckets[agent];
+        try {
+          const data = await exportSession(sid, CHILD_TIMEOUT_MS);
+          const t = data && data.info && data.info.tokens;
+          if (t && typeof t === "object") {
+            b.input += t.input || 0;
+            b.output += t.output || 0;
+            b.reasoning += t.reasoning || 0;
+            b.cacheRead += (t.cache && t.cache.read) || 0;
+            b.cacheWrite += (t.cache && t.cache.write) || 0;
+          }
+        } catch (e) {
+          if (e && e.message === "child_export_timeout") b.skipped++;
+          else b.failed++;
+        }
+      }
+    }
+    await Promise.all(Array.from({ length: Math.min(CHILD_CONCURRENCY, toRun.length) }, () => worker()));
+  })();
+
+  metrics.tokensByAgent = agentBuckets;
+
+}
 
 const topOpsResult = topOps.sort((a, b) => b.durationMs - a.durationMs).slice(0, 10);
 const gapsResult = gaps.sort((a, b) => b.ms - a.ms).slice(0, 5);

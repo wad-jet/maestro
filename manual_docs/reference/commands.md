@@ -99,6 +99,8 @@ retry, циклы ревью (механический ориентир + нар
 без числового score (статистика + факторы влияния). Механика — `timeline.mjs`
 (0 LLM, concurrency 4 / cap 100 / таймаут 30 c, fail-soft); накопительная
 история — `.maestro/metrics/history.jsonl` (эфемерное, gitignored).
+  Fast mode `--no-children` (запуск ~5 c, без атрибуции по агентам;
+  `metrics.children: "skipped"`).
 Режим пайплайна (`maestro.json → feedback_report`: `manual` дефолт / `auto` /
 `disable`) управляет авто-вызовом на шаге 18.5; сама команда всегда
 интерактивна. Смена режима — перезапуск opencode.

@@ -1,0 +1,25 @@
+# Regression — timeline fast-mode (`--no-children`) + чистый stderr
+
+- **version:** 1
+- **feature:** `timeline.mjs` — флаг `--no-children` (fast mode: без child-атрибуции, новое поле `metrics.children: "full"|"skipped"`) + чистый stderr (прогресс-шум CLI `opencode export` подавляется; при сбое — ровно одна диагностическая строка `[timeline] export failed: <sessionID> — <tail>` (tail ≤ 300 c, anti-injection), fail-soft сохранён); tmp-экспорт 0o600. stdout-JSON-контракт без изменений (backward-compat)
+- **added:** 2026-09-25
+- **status:** active
+- **last_full_pass:** —
+- **risk:** LOW
+- **category:** скилл `maestro-feedback-report` (helper `timeline.mjs`, 0 LLM; тот же источник — `opencode export`); плагин НЕ меняется; отчёт — только агрегаты
+- **scenarios:**
+  - **[Auto] unit-тесты фичи** (timeline.test.mjs — 32: baseline + `metrics`-блок + fast-mode: поле `children` (full/skipped, regression-гард), порядок флага среди позиционных, usage, чистый stderr (успех — пуст, обе spawn-точки; сбой child/primary — ровно одна diag-строка с tail, anti-injection, stdout-JSON валиден), JSONL upsert full-после-fast (known behavior)):
+    - run: `node --test skills/maestro-feedback-report/timeline.test.mjs`
+    - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent`
+    - expected: 32 pass / 0 fail
+  - **тесты плагина** (коэксистенция; плагин не меняется):
+    - run: `node --test plugins/maestro-bootstrap/index.test.js`
+    - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent`
+    - expected: 250 pass / 0 fail
+  - **[Manual] живой прогон (AC #2):** на сессии `ses_f3815a664ffeVmICSkqQEpvxtW` (123 task-диспатча): полный прогон — `metrics.children: "full"`, `tokensByAgent` непуст (6 агентов: opus/sanitizer/haiku/sonnet/explore/code-reviewer; skipped 15 / failed 0 — атрибуция неполная, факт сессии), **stderr 0 байт**, длительность 1:13 (73 c); fast-прогон `--no-children` — `metrics.children: "skipped"`, `tokensByAgent: {}`, **stderr 0 байт**, длительность ~1,6 c. Выполнено 2026-09-25.
+  - **known limitations:** полный прогон ~2–4 мин при cap-100 child-сессиях (worst-case ~12 мин при виснущих child — pre-existing 4.10.0); fast-прогон после full затирает JSONL-строку (`children: "skipped"`, даунгрейд атрибуции — upsert по sessionID, known behavior)
+- **regressions:** ⚑1–4 не затрагиваются; существующие ключи stdout-JSON `timeline.mjs` — без изменений, добавлено поле `metrics.children` (backward-compat); плагин не меняется; `.maestro/metrics/history.jsonl` — эфемерное (gitignored, не коммитится). Non-goals: кэш child-экспортов, concurrency/cap/timeout, dead-code shim (follow-up), streaming JSONL, Error-классы
+- **SEC-4b:** stderr — диагностика оператора (не входит в отчёт, в отчёт не копируется); tmp-файлы 0o600 и удаляются; child-экспорт без `--sanitize`
+- **plugin-version:** 4.11.0 (целевая; код плагина не меняется — 4.9.0)
+- **tests_total:** timeline.test.mjs 32 / плагин 250
+- **links:** spec `docs/superpowers/specs/2026-09-25-timeline-fast-mode-design.md` | plan `docs/superpowers/plans/2026-09-25-timeline-fast-mode-plan.md` | changelog `[Unreleased]` → `4.11.0`
