@@ -50,7 +50,7 @@ project context, запускает pre-flight, определяет катег�
 | 14 | Docs | Обязательное обновление пользовательской документации: diff-сверка кода с manual_docs/; HITL только при расхождении. Coverage — на шаге 15 |
 | 15 | Checks | Тесты (TEST_COMMAND), e2e, coverage (docs/obs), lint |
 | 15a | Build | Проверка компиляции (BUILD_COMMAND) |
-| 16 | Code Review | Финальное ревью всей ветки (`code-reviewer`, opus-tier). Secret-scan diff. Трекинг issues: fixed / open + follow-up |
+| 16 | Code Review | Финальное ревью всей ветки. Первое ревью — параллель: `code-reviewer` (opus-tier) + `sonnet` (по `review.parallel`, дефолт `auto`; guard «одна модель»). Secret-scan diff. Расхождение вердиктов — арбитраж M3 (старший). Контрольные раунды — только `code-reviewer`. Трекинг issues: fixed / open + follow-up |
 | 17 | Pre-PR | Итоговая проверка: git log, тесты, coverage, открытые issues. Approve merge · Fix (→ шаг 13) · Cancel. **E2E-критерии приёмки** (если в спеке): прогнать или явно зафиксировать «пропущено, риск принят» — мягкий гейт, решение HITL |
 | 18 | Merge | Слияние feature-ветки в base-ветку. При fast-forward доп. тесты не нужны |
 | 18.5 | Feedback report (ретроспектива) | Режим по `maestro.json → feedback_report` (нет директивы → `manual`: одна строка-подсказка команды; `auto`: авто-сбор без HITL, fail-soft; `disable`: ничего) |
@@ -157,7 +157,10 @@ flowchart TB
 
 - **Spec Review (шаг 9):** до кодирования, оценивает архитектуру и риски spec.
 - **Task review (шаг 13):** per-task код-гейт во время реализации, узкий scope.
-- **Code Review (шаг 16):** финальный ревью всей ветки, ловит cross-task проблемы.
+- **Code Review (шаг 16):** финальный ревью всей ветки, ловит cross-task
+  проблемы. Первое ревью — параллель (`code-reviewer` + `sonnet`, правило
+  активации + guard «одна модель»); при расхождении вердиктов — арбитраж
+  старшего (M3); контрольные раунды — только `code-reviewer`.
 
 ### Реестр регрессии
 

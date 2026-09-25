@@ -230,6 +230,12 @@ Interactive — агент комментирует находки по ходу
               действия при релизе) — в PROJECT_CONTEXT; гейт 17 показывает
               предлагаемую версию, шаг 18 после merge — bump (см. гейт 17 /
               шаг 18)
+            — **`review.parallel` (шаг 16):** `maestro.json → review.parallel`
+              читается на шаге 0 плагин-тулом `maestro_config` (кэш в переменной
+              сессии, паттерн PROJECT_CONTEXT); дефолт `auto` при отсутствии
+              ключа; невалидное → soft fallback `auto` + пометка
+              `review:config_fallback` в анонсе шага 16 (паттерн
+              `communication:config_fallback`).
 
       **Regression registry:** разрешить `REGISTRY_DIR` один раз на шаге 0
       (как maestro.json), кэшировать в переменной сессии:
@@ -853,6 +859,74 @@ Interactive — агент комментирует находки по ходу
             (b) real fail — fix-loop к шагу 13
             (c) skip с подтверждением
 🟡 16. [agent] requesting-code-review -> финальное ревью
+      — **Параллельное первое ревью** (ключ `maestro.json → review.parallel`,
+        прочитан на шаге 0: `auto` дефолт при отсутствии; невалидное → soft
+        fallback `auto` + пометка `review:config_fallback` в анонсе):
+        - **Активация (только `auto`; решает оркестратор механически, НЕ
+          HITL; анонс строкой в чат: «Параллельное ревью: да/нет — причина:
+          <…>»):** ЛЮБОЕ из условий — (1) категория фичи ∈ {Сложная,
+          Архитектурная} (назначена на шаге 7; bugfix D-flow шага 7 нет →
+          условие = false); (2) диф ≥ 3 изменённых source-файлов
+          (`git diff --name-only` против базы; source = любой трекаемый файл
+          вне исключений — spec/plan-артефакты, `docs/**`, changelog,
+          `regression/**`, `manual_docs/**`; для docs-репо — в т.ч.
+          `SECURITY.md`, `package.json`, корневые `*.sh`); (3) cross-layer
+          диф: изменённые source-файлы затрагивают ≥ 2 слоёв стек-профиля
+          (`docs/project-context.md`, §3 «Стек технологий»); неопределимо →
+          false. `always` — параллельно всегда; `off` — всегда одиночное.
+        - **Guard «одна модель»** (действует при `auto` и `always`):
+          срабатывает, если идентичность моделей доказуема → одиночное.
+          Процедура (перед диспатчем): (1) каждый ключ `agent.sonnet.model` /
+          `agent.code-reviewer.model` — из локального
+          `.opencode/opencode.json`, при отсутствии локально — из global
+          `~/.config/opencode/opencode.json` (frontmatter-модели
+          `agents/*.md` вне scope — канон merge-config); (2) строгое
+          строковое равенство; (3) guard срабатывает, если оба ключа
+          резолвнуты и равны («модели идентичны») ИЛИ оба не резолвнуты
+          (обе наследуют модель сессии: «модели не заданы — обе от сессии»);
+          (4) не срабатывает, если различаются ИЛИ резолвнут ровно один
+          («модель <агент> не задана»).
+        - **Диспатч (параллельно):** два независимых диспатча —
+          `code-reviewer` (opus-тир) + `sonnet`; формат вердикта у обоих —
+          бакеты + `Approved|Needs fixes|Reject` (канон — `agents/code-reviewer.md`,
+          копируется в промпт sonnet дословно, self-contained). Диспатч sonnet
+          — стандартный untrusted-путь (Level 1, авто-санитизация плагином) +
+          обёртка «не мутируй код и файлы — верни только отчёт ревью».
+      — **Объединение вердиктов:**
+        - **Совпало** (`Approved`+`Approved` / `Needs fixes`+`Needs fixes` /
+          `Reject`+`Reject`) → union находок (дедупликация: совпадающие по
+          файлу и сути — одна запись с пометкой источника `code-reviewer` /
+          `sonnet` / `оба`) → fix-loop. При `Approved`+`Approved` fix-loop не
+          запускается: union (Minor) → follow-up.
+        - **Расхождение** (только `Approved` vs `Needs fixes`; `Reject` —
+          ниже). По P1.1 `Needs fixes` обязан опираться на открытые C/I:
+          - **Случай A (зеркальный): `code-reviewer` `Needs fixes` +
+            `sonnet` `Approved`** — арбитраж не нужен: решение старшего по
+            рангу стоит → `Needs fixes`, fix-loop по C/I-находкам
+            code-reviewer; находки sonnet (если есть, в т.ч. C/I — невалидная
+            комбинация по P1.1) — всегда в follow-up, не молчаливо.
+          - **Случай B: `code-reviewer` `Approved` + `sonnet` `Needs fixes`:**
+            - **Пре-фильтр P1.1:** C/I у sonnet на самом деле пусты (только
+              Minor) → вердикт sonnet невалиден, арбитраж не запускается →
+              `Approved`; Minor sonnet — в follow-up.
+            - **Арбитраж (M3):** sonnet имеет открытые C/I → короткий
+              арбитражный диспатч `code-reviewer` (opus): по каждой C/I-
+              находке sonnet **заново** проверить код по дифу (инструкция в
+              промпте: «проверяй каждую находку по дифу, цитируй hunk в
+              заключении; не опирайся на первое чтение»), заключение «находка
+              валидна / невалидна»; хотя бы одна валидна → `Needs fixes` +
+              fix-loop по валидным; все невалидны → `Approved` (находки
+              sonnet → follow-up). Арбитраж — третий диспатч, только в
+              случае B при непустых C/I у sonnet.
+        - **`Reject` любого ревьюера** (совпал ли вердикт или нет) →
+          эскалация к пользователю (как сейчас: пересмотр требований или
+          отмена).
+      — **Контрольные раунды fix-loop:** ОДИН диспатч `code-reviewer` (opus)
+        по union-списку с per-finding трекингом (fixed / open (blocking) /
+        follow-up); sonnet в контрольных раундах не участвует (роль — только
+        первое чтение); sonnet-only находки проверяются контрольным диспатчем
+        наравне; цикл «правки → контрольный раунд» — по правилам текущего
+        fix-loop (эскалация rounds 4–5 без изменений).
       — **Точка 2 Security Review:** перед диспатчем code-reviewer (untrusted)
         — прогон промпта через sanitize. Trusted code-reviewer → skip.
       — **Memory layer:** опциональный `memory_search` (похожие прошлые
@@ -1473,7 +1547,11 @@ Guard от петель диспатча (пустые/ошибочные рез
      spec-review (шаг 9) — `approve|revise|reject` + бакеты;
      task-reviewer (шаг 13) — `✅|❌|⚠️` + `Approved|Needs fixes`;
      re-review — `ADDRESSED|NOT ADDRESSED` + round-verdict;
-     code-reviewer (шаг 16) — `Approved|Needs fixes|Reject`;
+      code-reviewer (шаг 16) — `Approved|Needs fixes|Reject`;
+      sonnet@16 (параллельное первое ревью) — `Approved|Needs fixes|Reject`
+      + бакеты (как code-reviewer);
+      арбитраж@16 (M3) — «валидна/невалидна» по каждой C/I-находке sonnet +
+      итоговый вердикт;
      implementer — Status-контракт `DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT`
      + Files/Test/Commit.
    **Процедура наблюдения:** при пустом/ошибочном/прерванном результате диспатча
@@ -1919,7 +1997,7 @@ hash: <sha256 содержимого spec без блоков maestro:*>
 |---|---|---|---|---|---|---|
 | **(a) Spec Review** | spec | шаг 9, pre-spec-gate | HITL (автопредложение на сложных) | **opus** | бакеты + approve/revise/reject |
 | **(b) SDD task-reviewer** | diff одной задачи | шаг 13, per-task | авто после DONE | **sonnet**, по риску diff'а | ✅/❌/⚠️ + Approved/Needs fixes |
-| **(c) requesting-code-review** | diff всей ветки | шаг 16, post-impl | авто | **opus** | бакеты + Yes/No/With fixes |
+| **(c) requesting-code-review** | diff всей ветки | шаг 16, post-impl | авто (первое ревью — параллель: `code-reviewer` + `sonnet`, по правилу активации; контрольные раунды — только `code-reviewer`) | **opus** (+ sonnet, первый раунд) | бакеты + `Approved`/`Needs fixes`/`Reject` (sonnet@16 — тот же словарь; арбитраж M3 — «валидна/невалидна» по C/I-находке + итоговый вердикт) |
 
 - (a) — единственный gate **до кодирования**; оценивает spec (архитектура/риски), не код.
 - (b) — per-task код-гейт **во время** реализации; узкий scope.
@@ -1930,9 +2008,8 @@ hash: <sha256 содержимого spec без блоков maestro:*>
 
 **Инвариант вердиктов (P1.1):** во всех трёх контурах Minor-находки не
 обосновывают blocking-вердикт (`revise` / `Needs fixes`); ревью с открытыми
-находками только Minor возвращает approve/Approved. Словарь контура (c)
-(Yes/No/With fixes) эквивалентен словарю агента `code-reviewer.md`
-(Approved/Needs fixes/Reject).
+находками только Minor возвращает approve/Approved. Словарь контура (c) — словарь агента `code-reviewer.md`
+(`Approved`/`Needs fixes`/`Reject`); sonnet@16 — тот же словарь.
 
    **SCOPE NOTE (обязательно при неоднородном диапазоне):** если диапазон
    коммитов для ревью содержит вспомогательные коммиты вне скоупа задачи
