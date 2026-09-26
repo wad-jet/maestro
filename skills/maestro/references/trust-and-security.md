@@ -147,7 +147,7 @@ untrusted.
 ### Когда применяется
 
 На всех шагах, где происходит диспатч untrusted сабагента.
-Trust-уровень определяется по `maestro.json` (`references/trust-and-security.md`):
+Trust-уровень определяется по `maestro.json` (см. § Trust Model):
 
 | Шаг | Сабагент | Security Review |
 |---|---|---|
@@ -165,7 +165,7 @@ Trust-уровень определяется по `maestro.json` (`references/t
 
 1. Уровень 1 (плагин, Этап 2) — авто-маскирование, **без HITL**
 2. Уровень 2 (сабагент `sanitizer`) — пометки, при находке → HITL
-   (Трактовка Y, `references/trust-and-security.md`)
+   (Трактовка Y, см. § Security Review)
 3. Оригинальный контекст оркестратора **не изменяется** — санитайзер
    создаёт копию промпта для untrusted сабагента
 4. Аудит-лог: плагин пишет события sanitizer в общий лог
