@@ -25,7 +25,7 @@ description: Вход в pipeline maestro — сквозная реализац�
 `@maestro-init --auto-ai "…"` · `@maestro-init "…"` (manual).
 
 Правило парсинга: распознать флаг режима (если есть), **убрать его из текста задачи** (вместе с `--plain` — оба флага),
-передать выбранный режим в pipeline (см. секцию «Режимы запуска» в SKILL.md). Режим —
+передать выбранный режим в pipeline (см. `skills/maestro/references/hitl-gate-protocol.md`, п. 3в «Режимы запуска (авто-режимы)»). Режим —
 per-run, не персистится в `maestro.json`.
 
 ## Флаг `--plain` (простой язык)
@@ -53,8 +53,7 @@ per-run, не персистится в `maestro.json`.
 - После SDD (шаг 13) — per-task code коммиты
 - Финальное ревью (шаг 16) — диспатч code-reviewer
 - В Plan mode (ресеч, обсуждение фичи/багфикса, подготовка spec) и на ресече
-  bugfix — сначала `memory_search` по теме задачи (канон: SKILL.md, секция
-  «Memory layer (memory_search)»); память не включена → молча пропуск
+  bugfix — сначала `memory_search` по теме задачи (канон: `skills/maestro/references/memory-layer.md`); память не включена → молча пропуск
 
 ## Связанные команды
 
