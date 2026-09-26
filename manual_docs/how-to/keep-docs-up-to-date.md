@@ -38,6 +38,7 @@
 | Обновление/доставка до версии (skills + plugin, контроль) | `how-to/update-maestro.md` |
 | Security Review / sanitizer-сабагент | `explanation/agents-and-trust.md`, `reference/model-selection.md`, `reference/hitl-gates.md` |
 | Реестр регрессии | `how-to/use-regression-registry.md` |
+| Добавлен новый скилл/команда/агент | `maestro-install/agpack.yml` (канон доставки) + корневой `agpack.yml` (dogfooding) — иначе компонент не доставится в целевые приложения |
 | Шаг 14 (docs: diff-сверка, HITL при расхождении) | `explanation/pipeline-overview.md`, `tutorials/run-first-feature.md` |
 | `DOCS_COVERAGE_COMMAND` (fallback diff-сверка) | `explanation/project-context.md`, `skills/maestro/stack-detection.md` |
 | Правила наполнения/гигиены project-context.md (/maestro-setup, Задача 2, шаг 8.5) | `explanation/project-context.md` |

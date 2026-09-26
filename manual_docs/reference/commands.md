@@ -195,8 +195,8 @@ CLI через bash — при запросе восстановления бе�
 
 Benchmark: фиксированное задание в песочнице, отчёт прогона, сверка с
 прошлыми результатами. Фазы: `run` / `report [session-id]` / `diff [old.json]`.
-Отчёты — `.maestro/benchmark-reports/` (эфемерные). Подробности —
-[how-to: benchmark](../how-to/benchmark.md).
+Отчёты — `.maestro/benchmark-reports/` (эфемерные). **Статус: alpha** — не для
+широкого использования. Подробности — [how-to: benchmark](../how-to/benchmark.md).
 
 ## 💡 Примечания
 

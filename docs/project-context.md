@@ -158,12 +158,20 @@
   дефолт `auto`; guard «одна модель»); расхождение вердиктов — арбитраж
   старшего (M3); контрольные раунды — только `code-reviewer`.
 - **Доставка:** `agpack`/ручной перенос в целевые приложения.
+  **Новый компонент (скилл/команда/агент)** — обязательная регистрация в
+  каноне `maestro-install/agpack.yml` (skills листируются по-путно; commands/
+  agents — wholesale) + в корневом `agpack.yml` (dogfooding). Проверка —
+  `maestro-install/agpack-coverage.test.mjs` (входит в `npm test`).
 
 ## 9. Критерии приёмки качества
 
 - **DoD:** реализация по spec/plan, тесты зелёные, документация синхронизирована.
 - **Тесты плагина:** `node --test plugins/maestro-bootstrap/index.test.js` — без
   регрессий.
+- **Реестр доставки:** для фич, добавляющих новый скилл/команду/агента — запись
+  в `maestro-install/agpack.yml` (проверяется coverage-тестом; инцидент
+  4.13.0: `maestro-benchmark` не был зарегистрирован — команда доставлялась
+  без скилла).
 - **Синхронизация `manual_docs/`:** изменения скиллов/команд/агентов отражены в
   документации.
 - **Design-доки:** спеки — `docs/superpowers/specs/YYYY-MM-DD-<feature>-design.md`,
@@ -175,6 +183,9 @@
 
 - **Unit (плагин):** встроенный Node test runner — `node --test
   plugins/maestro-bootstrap/index.test.js` (250 тестов).
+- **Coverage (реестр доставки):** `maestro-install/agpack-coverage.test.mjs`
+  (в `npm test`) — каждый каталог `skills/` зарегистрирован в каноне
+  `maestro-install/agpack.yml`, нет stale-записей.
 - **Unit (скилл `maestro-feedback-report`):** `node --test
   skills/maestro-feedback-report/timeline.test.mjs` (32 теста — агрегации
   таймлайна + `metrics`-блок `timeline.mjs`: токены primary/child-сессии,

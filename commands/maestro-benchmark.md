@@ -1,5 +1,5 @@
 ---
-description: Benchmark maestro: фиксированное задание в песочнице, отчёт прогона в .maestro/benchmark-reports/, сверка с прошлыми результатами
+description: Benchmark maestro (alpha — не для широкого использования): фиксированное задание в песочнице, отчёт прогона в .maestro/benchmark-reports/, сверка с прошлыми результатами
 ---
 
 # @maestro-benchmark
