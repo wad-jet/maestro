@@ -7,7 +7,9 @@
 > Хронология составлена по истории authoring-репо `maestro-agent`. Даты
 > приблизительные (по коммитам).
 
-## [Unreleased]
+## [2026-09-26]
+
+> **Версия 4.13.0** — Minor-релиз: benchmark для maestro — фиксированное задание в песочнице (`--auto-answer`), отчёт прогона в `.maestro/benchmark-reports/` (MD+JSON, schema 1), детерминированная автосверка с прошлым прогоном (`diff.mjs`, 0 LLM) и явная сверка с любым прошлым; `maestro-sandbox.sh --benchmark` (доставка локальной версии, state-маркер с `agent_hash`).
 
 ### Добавлено
 
@@ -20,7 +22,8 @@
   `.maestro/benchmark-reports/benchmark-<ts>-v<ver>.{md,json}` (schema 1) +
   детерминированная автосверка с прошлым прогоном (`diff.mjs`, 0 LLM;
   `models_changed` — модель-конфаунд). Доки:
-  `manual_docs/how-to/benchmark.md`, справочник команд.
+  `manual_docs/how-to/benchmark.md`, справочник команд. Регресс:
+  `regression/entries/2026-09-25-maestro-benchmark.md`.
 
 ## [2026-09-25]
 
