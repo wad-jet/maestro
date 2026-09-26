@@ -132,6 +132,10 @@ sanitizer, leak-контроль (benchmark-фикстура `pricing-schema.md`
    - `.sandbox/.opencode/opencode.json` — скрипт **генерирует целиком**
      (merge-базы нет: базовый sandbox-конфиг скриптом не создаётся, authoring
      `.opencode/opencode.json` — gitignored). Состав:
+     - **`$schema`** — `https://opencode.ai/config.json` (первый ключ;
+       opencode при старте сессии дописывает его автоматически —
+       предварительная вставка делает авто-правку no-op и не «грязнит»
+       фикстуру; чистое дерево — условие run-свежести и report-guard);
      - **permission-baseline** — канон «Глобальные deny (R1+R4)» из
        `skills/maestro-assistant/SKILL.md`, скрипт пишет его literal: read —
        deny `docs/confidential/*`, `maestro.json`, `.maestro/**` (кроме
@@ -205,10 +209,13 @@ Memory layer в песочнице НЕ включается (benchmark не и�
 
 **Фаза `report` [session-id]** (в authoring-сессии):
 
-0. **Предварительный guard:** фикстура нетронута
-   (`git -C .sandbox rev-list --all --count` == 1 и чистое
-   `git status --porcelain`) → стоп с пояснением: песочница сброшена,
-   отчёт по завершённой сессии недостоверен (артефакты прогона отсутствуют).
+0. **Предварительный guard (присутствие артефактов прогона):** фикстура в
+   НЕТРОнутом состоянии — `git -C .sandbox rev-list --all --count` == 1 и
+   чистое `git status --porcelain` → **стоп** с пояснением: артефакты
+   прогона отсутствуют (прогон не состоялся или песочница сброшена после
+   прогона) — отчёт недостоверен. Артефакты присутствуют (коммиты > 1 и/или
+   не закоммиченные изменения) → продолжить; незавершённые прогоны тоже
+   измеряются (путь `finalReview: "skipped"`).
 1. **Определение sandbox-сессии:** основной путь — явный session-id,
    скопированный пользователем из самой sandbox-сессии (TUI /
    `opencode session list` в sandbox-окружении). Fallback — best-effort
@@ -458,12 +465,12 @@ Memory layer в песочнице НЕ включается (benchmark не и�
 status: CLEAN
 date: 2026-09-25
 reviewer: sanitizer
-hash: 26d46401d86c1d3e9d1d86958a32198ca968026167aa8dadf44e7040e29390e1
+hash: 62b8dd39189ca88e349d20f89bd4b1fce1cdd626575a4c0e0df248479bf1c465
 -->
 
 <!-- maestro:review
 reviewer: opus
 date: 2026-09-25
 verdict: approve
-hash: 26d46401d86c1d3e9d1d86958a32198ca968026167aa8dadf44e7040e29390e1
+hash: 62b8dd39189ca88e349d20f89bd4b1fce1cdd626575a4c0e0df248479bf1c465
 -->
