@@ -5,7 +5,7 @@ description: Регрессионный прогон по реестру рис�
 # @regression
 
 Прогон регрессии по реестру рисков. Команда standalone — НЕ часть pipeline
-шага 15. Дизайн: `docs/regression-flow.md`; секция «Regression Registry» в SKILL.md.
+шага 15. Дизайн: `docs/regression-flow.md`; `skills/maestro/references/regression-registry.md`.
 
 ## Триггеры
 

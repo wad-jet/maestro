@@ -78,7 +78,7 @@ STATUS: CLEAN | FINDINGS_FOUND
 
 - `STATUS: CLEAN` — чувствительных данных не найдено, промпт уходит как есть.
 - `STATUS: FINDINGS_FOUND` → оркестратор показывает находки пользователю,
-  запускает HITL-гейт (см. SKILL.md → Security Review):
+  запускает HITL-гейт (см. `skills/maestro/references/trust-and-security.md` → Security Review):
   `(a) вычистить и продолжить` / `(b) продолжить как есть (принять риск)` /
   `(c) стоп`.
 

@@ -471,8 +471,8 @@ memory_search(query: string, {limit?, date_from?, date_to?, author?, project?, s
 
 ### Использование в pipeline (правило)
 
-Скилл maestro содержит канон-правило (SKILL.md, секция «Memory layer
-(memory_search)»): на точках принятия решений pipeline агент **сначала**
+Скилл maestro содержит канон-правило (`skills/maestro/references/memory-layer.md`):
+на точках принятия решений pipeline агент **сначала**
 уточняет контекст через `memory_search`.
 
 | Точка | Обязательность |
