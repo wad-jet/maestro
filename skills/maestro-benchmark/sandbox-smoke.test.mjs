@@ -53,9 +53,10 @@ test("1. --benchmark создаёт доставку .opencode/", () => {
   assert.ok(existsSync(join(sandbox(), ".opencode", "commands")));
 });
 
-test("2. opencode.json: baseline + agent + plugin", () => {
+test("2. opencode.json: $schema + baseline + agent + plugin", () => {
   const cfg = JSON.parse(
     readFileSync(join(sandbox(), ".opencode", "opencode.json"), "utf8"));
+  assert.equal(cfg.$schema, "https://opencode.ai/config.json");
   assert.equal(cfg.plugin[0], "../../plugins/maestro-bootstrap/index.js");
   assert.equal(cfg.agent.haiku.model, "stub/model-x");
   assert.equal(cfg.permission.read["docs/confidential/*"], "deny");

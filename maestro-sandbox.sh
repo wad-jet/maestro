@@ -472,6 +472,7 @@ try {
   agent = JSON.parse(readFileSync(authoringPath, "utf8")).agent;
 } catch {}
 const cfg = {
+  $schema: "https://opencode.ai/config.json",
   permission: {
     read: {
       "*": "allow",
