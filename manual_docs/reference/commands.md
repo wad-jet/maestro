@@ -33,7 +33,7 @@
 
 **Memory layer:** в Plan mode (ресеч, обсуждение фичи/багфикса, подготовка
 spec) и на ресече bugfix — сначала `memory_search` по теме задачи (канон —
-SKILL.md, секция «Memory layer (memory_search)», детали —
+`skills/maestro/references/memory-layer.md`, детали —
 [Память maestro](memory.md)); память не включена → молча пропуск.
 
 ### `/regression`

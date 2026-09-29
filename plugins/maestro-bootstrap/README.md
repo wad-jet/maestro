@@ -29,7 +29,7 @@
 
 ## Санитайзинг промптов (sanitize)
 
-Правила детекта — Context Sanitizer (см. `skills/maestro/SKILL.md`):
+Правила детекта — Context Sanitizer (см. `skills/maestro/references/trust-and-security.md`):
 
 1. **Secrets из окружения** — имена (case-insensitive: `API_KEY`, `apiKey`,
    `api_key`) с keywords `SECRET`, `KEY`, `TOKEN`, `PASSWORD`, `CREDENTIAL`,

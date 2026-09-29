@@ -9,6 +9,29 @@
 
 ## [2026-09-26]
 
+> **Версия 4.14.0** — Minor-релиз: SKILL.md → `references/*.md` (главы канона, −50% контекста запуска)
+
+### Изменено
+
+- **Разложение SKILL.md на скелет + главы канона (4.14.0):** `skills/maestro/SKILL.md`
+  переформатирован в скелет (~1190 строк, −50% от 2400) — Гейт 0, Overview,
+  When to Use, Feature Classification, Pipeline 0–18.5, Pre-flight,
+  Интеграция, Обработка сбоев, Anti-patterns, Ограничения; 14 секций
+  (`##`) вынесены в **10 глав** `skills/maestro/references/`
+  (hitl-gate-protocol, model-selection, trust-and-security, polyrepo,
+  example-workflow, spec-review, debug-subpipeline, regression-registry,
+  memory-layer, file-path-conventions). Скелет содержит указатели формата
+  «— **<Тема>:** читать `references/<file>.md` … (канон)» в точках
+  использования; сабагент-промты (custodian/implementer/spec-review) —
+  self-contained, без опоры на канон-главы. Пререквизит для #107
+  (review-by-artifact-type). Паритет: 2145 base-строк, 35 исключений
+  (2 inline-указателя + 24 замены + 9 перелинковки глав), 0 ошибок.
+  Sweep: 17+ ссылок-канонов обновлены в 11 файлах (AGENTS.md, SECURITY.md,
+  commands, skills, manual_docs, plugin-README, agents). Regression:
+  `regression/entries/2026-09-26-skillmd-references-reorg.md`.
+
+## [2026-09-26]
+
 > **Версия 4.13.1** — Patch-релиз: восстановление доставки `@maestro-benchmark` (скилл не был зарегистрирован в каноне `maestro-install/agpack.yml` — команда доставлялась без скилла) + два дефекта фичи, выявленных первым живым прогоном. Бенчмарк получил статус **alpha** (не для широкого использования).
 
 ### Исправлено

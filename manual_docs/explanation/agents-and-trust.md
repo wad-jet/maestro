@@ -24,8 +24,7 @@
 
 `sonnet` и `opus` на точках принятия решений (ресеч, интеграционные решения,
 Spec Review/архитектура) сначала уточняют контекст через `memory_search`
-(память не включена → молча пропускают); канон — SKILL.md maestro, секция
-«Memory layer (memory_search)», детали — [Память maestro](../reference/memory.md).
+(память не включена → молча пропускают); канон — `skills/maestro/references/memory-layer.md`, детали — [Память maestro](../reference/memory.md).
 
 ## 📖 Модель доверия
 

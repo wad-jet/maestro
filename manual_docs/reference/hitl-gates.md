@@ -146,4 +146,4 @@ offer, docs-шаг) — диспатч батчами через `auto-ai-decisi
 
 - [Запуск первой фичи](../tutorials/run-first-feature.md)
 - [Запуск багфикса](../how-to/run-a-bugfix.md)
-- Техническая деталь: `skills/maestro/SKILL.md` → секция «HITL Gate Protocol»
+- Техническая деталь: `skills/maestro/references/hitl-gate-protocol.md`
