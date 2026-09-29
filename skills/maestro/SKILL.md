@@ -127,6 +127,12 @@ Interactive — агент комментирует находки по ходу
 - superpowers:systematic-debugging — поиск и анализ багов (debug sub-pipeline)
 - перед любым task-диспатчем — `references/model-selection.md` (tier, anti-loop, dispatch)
 
+**Загрузка `maestro-assistant` по ходу pipeline (OP-5):** при возникновении вопроса настройки
+конфигурации/процессов maestro загружает `maestro-assistant` полностью через `skill` tool (как
+init), следует его правилам, затем решает и продолжает pipeline (без консультативной петли).
+Перед загрузкой — probe наличия скилла; если скилл отсутствует — мягкое предупреждение
+«assistant не установлен, правила конфигурации недоступны», pipeline продолжается (не блокирует).
+
 — **Example Workflow:** читать `references/example-workflow.md` из каталога скилла maestro (канон).
 
 ## When to Use
@@ -1100,37 +1106,15 @@ Interactive — агент комментирует находки по ходу
 - Создаёт ветку (`feature/<kebab-case>` / `fix/<kebab-case>` / `hotfix/<kebab-case>` по inline-конвенции + `git checkout -b`)
 - Опционально — worktree (`using-git-worktrees`)
 
-## Интеграция с существующими скиллами
-
-| Фаза | Скилл/Инструмент |
-|---|---|
-| Дизайн | `custodian` сабагент (trusted) — Q/A-брокер по confidential: отвечает primary агрегатами (без значений); spec пишет primary |
-| План | `writing-plans` |
-| Ветка | inline-конвенция `feature/<kebab-case>` / `fix/<kebab-case>` / `hotfix/<kebab-case>` (определяет имя ветки) |
-| Изоляция | `using-git-worktrees` (worktree) / `git checkout -b` (простая ветка) |
-| Имплементация | `subagent-driven-development` + `test-driven-development` |
-| Документация | `manual-docs` (локальный скил репозитория) — обязательный шаг 14, diff-сверка; coverage на шаге 15 |
-| Ревью | `requesting-code-review` |
-| Завершение | `finishing-a-development-branch`, `git-commit` |
-| Регрессия | `@regression` (standalone, по запросу) — реестр рисков `regression/` (в git) |
-| Конфигурация/процессы | `maestro-assistant` (загружается по ходу pipeline при вопросах настройки конфигурации/структуры/процессов) |
-
-**Загрузка `maestro-assistant` по ходу pipeline (OP-5):** при возникновении вопроса настройки
-конфигурации/процессов maestro загружает `maestro-assistant` полностью через `skill` tool (как
-init), следует его правилам, затем решает и продолжает pipeline (без консультативной петли).
-Перед загрузкой — probe наличия скилла; если скилл отсутствует — мягкое предупреждение
-«assistant не установлен, правила конфигурации недоступны», pipeline продолжается (не блокирует).
-
 ## Обработка сбоев
 
 | Ситуация | Действие |
 |---|---|
 | **HITL шаг 2: skip (interactive)** | Pre-flight пропускается: bugfix → D1; feature → шаг 5 (имя ветки). В efficient (b) — отмена → STOP. Cleanup не требуется (ветка ещё не создана). |
 | **HITL шаг 1.5: отмена (1.5c)** | STOP — pipeline завершён. Пользователь отказался от запуска. |
-| **Spec gate: revise (10b)** | re-dispatch `opus` (untrusted) для правок, оркестратор применяет их к spec (Ур.1, Слой 5); повторный Spec Review (шаг 9); после контрольного ревью с пустыми C/I-бакетами (только Minor) — fast-path: гейт 10 с дефолтом (a) Approve без нового раунда (Minor → spec-follow-up). При необходимости confidential-контекста — HITL: (a) trusted `custodian` (Q/A-агрегат) / (b) follow-up. Повторный 8.6 только при вовлечении trusted-контура (OQ-2). |
+| **Spec review: revise (10b)** | re-dispatch `opus` (untrusted) для правок, оркестратор применяет их к spec (Ур.1, Слой 5); повторный Spec Review (шаг 9); после контрольного ревью с пустыми C/I-бакетами (только Minor) — fast-path: гейт 10 с дефолтом (a) Approve без нового раунда (Minor → spec-follow-up); при необходимости confidential-контекста — HITL: (a) trusted `custodian` (Q/A-агрегат) / (b) follow-up; повторный 8.6 только при вовлечении trusted-контура (OQ-2). |
 | **Внешний spec невалидный (шаг 7d)** | Пустой / нечитаемый / не содержит требований → HITL: (a) создать заново через шаг 8 (brainstorm primary + custodian Q/A) / (b) указать другой путь / (c) отмена |
 | **Plan gate: revise (12b)** | Вернуться к шагу 11 (writing-plans), доработать план |
-| **Spec review: revise** | re-dispatch `opus` для правок, оркестратор применяет их (Ур.1); повторить review (шаг 9); после контрольного ревью с пустыми C/I-бакетами (только Minor) — fast-path: гейт 10 с дефолтом (a) Approve (Minor → spec-follow-up); 8.6 только при trusted-контуре (OQ-2). |
 | **Spec review: reject** | Эскалация к пользователю: пересмотр требований или отмена фичи |
 | **`custodian`/`sanitizer`: `confidential:deny`** | Агент untrusted (проверить `maestro.json` → `trust`: absent/`false`) — он non-functional без доверия. Предупредить: "custodian/sanitizer не trusted (проверьте `maestro.json` → `trust`), без доверия агент не может выполнять свою роль" → HITL: (a) обновить конфиг и перезапустить / (b) стоп. Правка `maestro.json` — через нативный `edit`-ask (HITL) или bash (read-тул deny-ится нативным permission-слоем). Не ретраить как обычную ошибку сабагента. |
 | **Gate: отмена (шаги 7c, 10c, 12c, 17c, D7b)** | STOP + cleanup: удалить feature-ветку (`git branch -D <branch>`) и worktree (`git worktree remove <path>`), если создан. Решение оставить в `regression/cancelled-features.md` (в git) для последующей архивации. **Regression cleanup:** если `entries/<YYYY-MM-DD-<feature>>.md` существует → `git mv entries/X.md released/X.md`, `status: cancelled`, `released: <дата>`, дописать решение в `regression/cancelled-features.md` и закоммитить оба файла (`chore(regression): <feature> cancelled`) (только после шага 12a; до 12a entry ещё не создан — no-op). |
@@ -1139,7 +1123,7 @@ init), следует его правилам, затем решает и про
 | **Implementer: DONE_WITH_CONCERNS** | Оркестратор читает concerns; если correctness/scope — адресовать до review |
 | **Plan quality check fail** | Исправить plan (переписать через Write), повторно проверить |
 | **Coverage-тесты fail** | Implementer фиксит -> re-run -> если 2 раза fail, эскалация к пользователю |
-| **Build check fail** | **Fix-loop:** (1) диагностировать ошибку сборки, (2) исправить, (3) перезапустить build, (4) перейти к code review. Если fix-loop не помогает — эскалация к пользователю |
+| **Build check fail** | **Fix-loop (первая линия):** (1) диагностировать ошибку сборки, (2) исправить, (3) перезапустить build, (4) перейти к code review. Если fix-loop не помогает — **HITL:** (a) fix context — обновить команду сборки — (b) real fail — диагностика + fix-loop — (c) skip с подтверждением |
 | **Pre-flight: dirty tree (сценарий B)** | Спросить: worktree / commit+checkout / stash+checkout / отмена |
 | **Pre-flight: на feature-ветке (сценарий C)** | Спросить: switch+worktree / switch+checkout / ветвиться отсюда / отмена |
 | **Pre-flight: в worktree (сценарий D)** | Спросить: выйти+новый worktree / ветвиться отсюда / отмена |
@@ -1151,11 +1135,7 @@ init), следует его правилам, затем решает и про
 | **Command not detected (Tier 3)** | HITL: (a) указать вручную — (b) пропустить с подтверждением — (c) отмена pipeline. **Молчаливый skip недопустим.** |
 | **Command ambiguous (несколько кандидатов детекта)** | HITL: выбор из списка → silent persist в project-context.md (секция 14) |
 | **Command failed at runtime (не сборка)** | HITL: (a) fix context — обновить запись в project-context.md — (b) real fail — fix-loop к шагу 13 — (c) skip с подтверждением |
-| **Build check fail** | HITL: (a) fix context — обновить команду сборки — (b) real fail — диагностика + fix-loop — (c) skip с подтверждением |
 | **Baseline tests: flaky/deterministic fail** | Повторить 2 раза — если повторяется → Вариант A |
-| **Probe: гипотеза не подтвердилась (шаг D6)** | Вернуться к D1, новая гипотеза |
-| **Probe: откат probe не удался (шаг D5)** | Ручной revert: `git checkout <файл>` или эскалация к пользователю |
-| **Probe: .probe-changes.md не найден (шаг D5)** | Использовать `git diff` для идентификации probe-изменений; восстановить список вручную |
 | **Project Context file not found (шаг 0)** | Создать через HITL-диалог по 14 категориям (включая секцию 14 — Commands) |
 | **Project Context outdated (шаг 0)** | Показать diff изменений, запросить обновление |
 | **Project Context skipped (шаг 0c)** | Все последующие шаги работают без контекста. Запись в лог: `project-context: skipped` |
