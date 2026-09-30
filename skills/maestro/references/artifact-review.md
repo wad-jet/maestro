@@ -50,7 +50,7 @@ guard «одна модель», M3-арбитраж) и P1.1 (Minor не бло
    текстовых расширений) → при наличии — HITL-гейт D5; **затем** детект типов
    по оставшейся (текстовой) части дифа → анонс.
 6. **Вне детекта — вспомогательные артефакты процесса maestro** (список
-   зеркалит SCOPE NOTE `references/spec-review.md`): `docs/superpowers/specs/**`,
+   частично пересекается с SCOPE NOTE `references/spec-review.md`): `docs/superpowers/specs/**`,
    `docs/superpowers/plans/**`, changelog (`manual_docs/overview/changelog.md`),
    `regression/**`. Они не дают типов, не попадают в анонс, критерии типов
    к ним не применяются. `docs/**` (кроме superpowers) и `manual_docs/**`
@@ -87,12 +87,16 @@ feature-флаги задокументированы» → активные к�
 `ts`, `tsx`, `jsx`, `css`, `scss`, `html`, `htm`, `xml`, `svg`, `sql`, `sh`,
 `bash`, `zsh`, `py`, `rb`, `go`, `rs`, `java`, `kt`, `c`, `h`, `cpp`, `hpp`,
 `cs`, `php`, `toml`, `ini`, `cfg`, `conf`, `lock`, `env`, `example`,
-`gitignore`, `gitattributes`, `editorconfig`, `dockerfile`, `makefile`;
-безрасширенные имена (закрытый перечень): `LICENSE`, `LICENSE.*`, `Gemfile`,
-`Rakefile`, `Procfile`, `Jenkinsfile`. **Всё, что вне allowlist (в т.ч.
-прочие файлы без расширения) → бинарный** (deny-by-default: неизвестный
-формат не проходит молча). Расширение списка — по мере реальных прогонов
-(эта глава).
+`gitignore`, `gitattributes`, `editorconfig`, `dockerfile`, `makefile`.
+**Безрасширенные имена** (закрытый перечень; проверяются **до** извлечения
+расширения — имя файла без точки целиком): `LICENSE`, `LICENSE.*`
+(name-паттерн: любое расширение после `LICENSE.`, напр. `LICENSE.MIT`),
+`Gemfile`, `Rakefile`, `Procfile`, `Jenkinsfile`, `Dockerfile`, `Makefile`.
+**Всё, что вне allowlist (в т.ч. прочие файлы без расширения) → бинарный**
+(deny-by-default: неизвестный формат не проходит молча). Расширение списка —
+по мере реальных прогонов (эта глава).
+
+> Метка «D5» — ID дизайн-решения спеки #107 (не шаг debug-сабпайплайна D1–D7).
 
 Порядок: проверка бинарности → HITL-гейт (если есть) → детект типов по
 текстовой части (D2) → анонс (зафиксировано в D2, правило 5).

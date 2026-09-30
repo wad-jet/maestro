@@ -1,7 +1,16 @@
 # Spec: шаг 16 — ревью по типу артефакта (#107, 4.16.0)
 
-Статус: draft → Spec Review → гейт 10
+Статус: принята гейтом 10 (подписи: sanitize CLEAN + review approve)
 Спека: `docs/superpowers/specs/2026-09-30-review-by-artifact-type-design.md`
+
+**Редакция (2026-09-30, финальное ревью ветки — Needs fixes → fix-loop):**
+D5 — в безрасширенный перечень добавлены `Dockerfile`, `Makefile`
+(contradiction D5↔D2: файлы без точки проходили бинарный гейт вопреки
+сценарию «Dockerfile → config»); `LICENSE.*` — name-паттерн, проверяется до
+извлечения расширения (кромка `LICENSE.MIT`). D8 — sweep-исключения
+дополнены (внешний superpowers-шаблон, stale-строки *.sh, §8 «(ex …)»).
+Хэш в подписях stale — осознанно (изменение после принятия; документ
+остается снимком решения + фиксацией фикса).
 
 ## Контекст / проблема
 
@@ -131,11 +140,14 @@ Spike (эта сессия, 2026-09-30) — дизайн-решения зафи
   `htm`, `xml`, `svg`, `sql`, `sh`, `bash`, `zsh`, `py`, `rb`, `go`, `rs`,
   `java`, `kt`, `c`, `h`, `cpp`, `hpp`, `cs`, `php`, `toml`, `ini`, `cfg`,
   `conf`, `lock`, `env`, `example`, `gitignore`, `gitattributes`,
-  `editorconfig`, `dockerfile`, `makefile`; безрасширенные имена (закрытый
-  перечень): `LICENSE`, `LICENSE.*`, `Gemfile`, `Rakefile`, `Procfile`,
-  `Jenkinsfile`. **Всё, что вне allowlist (в т.ч. прочие файлы без
-  расширения) → бинарный** (deny-by-default: неизвестный формат не проходит
-  молча). Расширение списка — по мере реальных прогонов (канон-глава).
+  `editorconfig`, `dockerfile`, `makefile`; **безрасширенные имена**
+  (закрытый перечень; проверяются **до** извлечения расширения — имя файла
+  без точки целиком): `LICENSE`, `LICENSE.*` (name-паттерн: любое расширение
+  после `LICENSE.`, напр. `LICENSE.MIT`), `Gemfile`, `Rakefile`, `Procfile`,
+  `Jenkinsfile`, `Dockerfile`, `Makefile`. **Всё, что вне allowlist (в т.ч.
+  прочие файлы без расширения) → бинарный** (deny-by-default: неизвестный
+  формат не проходит молча). Расширение списка — по мере реальных прогонов
+  (канон-глава).
 - Порядок: проверка бинарности → HITL-гейт (если есть) → детект типов по
   текстовой части (D2) → анонс (зафиксировано в D2 п.5).
 - HITL-гейт (контентный; поведение по режимам: **manual / auto-answer —
@@ -233,13 +245,19 @@ sql) — имя `code-reviewer` вводит в заблуждение. Аген
     их не трогают (вне их scope). Митигация: migration note в changelog
     4.16.0 + строка в `manual_docs/how-to/update-maestro.md`. Dogfood-репо:
     обновить локальный merge-config + `maestro.json`.
-- Критерий приёмки (сweep): `grep -rn "code-reviewer"` по живым поверхностям
-  (skills/, commands/, agents/, manual_docs/, plugins/maestro-bootstrap/
-  README.md, README.md, AGENTS.md, docs/project-context.md, maestro.json,
-  *.sh) — **0 попаданий**, кроме исторических (`specs/`,
-  `docs/superpowers/`, `regression/`, changelog-секции до 4.16.0) и
-  тест-фикстуры `plugins/maestro-bootstrap/index.test.js` (строковый ключ,
-  плагин не меняется).
+ - Критерий приёмки (сweep): `grep -rn "code-reviewer"` по живым поверхностям
+   (skills/, commands/, agents/, manual_docs/, plugins/maestro-bootstrap/
+   README.md, README.md, AGENTS.md, docs/project-context.md, maestro.json,
+   *.sh) — **0 попаданий**, кроме: исторических (`specs/`,
+   `docs/superpowers/`, `regression/`, changelog-секции до 4.16.0);
+   тест-фикстуры `plugins/maestro-bootstrap/index.test.js` (строковый ключ,
+   плагин не меняется); migration-note-упоминаний вида «code-reviewer →
+   reviewer» (changelog 4.16.0, `update-maestro.md`, `docs/project-context.md`
+   §8 «(ex code-reviewer)»); stale-очистки в `maestro-install.sh`/
+   `maestro-update.sh` (по дизайн (a)); ссылки на **внешний** шаблон
+   superpowers `requesting-code-review/code-reviewer.md`
+   (`references/model-selection.md` — pre-existing, файл внешнего пакета,
+   не переименовывается).
 
 Изменений в плагине **нет** (процессная фича: скиллы/агенты/доки).
 
