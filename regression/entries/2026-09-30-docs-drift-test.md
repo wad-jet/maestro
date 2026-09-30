@@ -13,7 +13,7 @@
     |---|---|---|
     | D1a — версия в AGENTS.md | метка `(~N строк, X.Y.Z)` в `AGENTS.md` vs version `package.json` | violation (exit 1) |
     | D1b — версия в project-context.md | строка `` `X.Y.Z` (единая для скиллов и плагина`` в `docs/project-context.md` vs version | violation |
-    | D1c — stale-версия в manual_docs/README | semver-скан `manual_docs/**` (кроме `changelog.md`) + `README.md` по строкам + allowlist-категории («Миграция (»/«(ex », «не переименовывается», даты «(2026-», IP, «пример/закрыл/устаревший», скобки-атрибуция, blockquote `^>`) | violation (3 planted в fixture: README 7.7.7, how-to 6.6.6, reference 5.5.5) |
+    | D1c — stale-версия в manual_docs/README | semver-скан `manual_docs/**` (кроме `changelog.md`) + `README.md` по строкам + allowlist-категории («Миграция (»/«(ex », «не переименовывается», даты «(ГГГГ-ММ», IP, «пример/закрыл/устаревший», скобки-атрибуция, blockquote `^>`) | violation (3 planted в fixture: README 7.7.7, how-to 6.6.6, reference 5.5.5) |
     | D2 — stale-имя поверх | контентный скан STALE_NAMES (`code-reviewer`, `maestro-new`, `maestro-init.sh`, `feature-agent`, `feature-agent-bootstrap`) по строкам поверхностей + allowlist-категории; поиск по именам файлов НЕТ | violation при найденном stale-имени |
     | D3 — счётчик «~N строк» | метка «~N строк» vs `wc -l` ±50 | violation при расхождении |
     | D4 — статус roadmap ↔ changelog | «Выполнено/реализовано (X.Y.Z)» roadmap/TODO ↔ версии changelog | violation при найденном stale-статусе |
@@ -31,8 +31,9 @@
 ## Dogfooding
 
 Реальный дрейф «сейчас 3.2.0» (README строка 80, при факте 4.16.0) найден при
-разработке (task-ревью первого прохода — фикс IMPORTANT: allowlist-категория
-«сейчас » была подогнана под эту строку) и исправлен (de0568b). Дрейф-чекер этот
+разработке: task-ревью первого прохода (IMPORTANT) поймало, что черновая
+allowlist-категория «сейчас » подгонялась под эту строку (в коммиты не
+попала — удалена), версия убрана из README (de0568b). Дрейф-чекер этот
 кейс **не** детектирует: строка маскируется allowlist-правилами `^>` (blockquote)
 и скобок-атрибуции — подтверждено экспериментом (base-README + HEAD-тест → 0
 нарушений). См. FU3.
