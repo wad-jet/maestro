@@ -310,5 +310,11 @@ Breaking-аспект: ключ merge-config `agent.code-reviewer.model` → sta
 <!-- maestro:sanitize
 status: CLEAN
 date: 2026-09-30
-hash: 4bf23eb2182666fd9fc58e5e60d19c9a4e9cfdd254c98fe2981db1be80a16f5d
---> 
+hash: f506fbfc345a36dc2677ce2bb29acce8cc080c1022f320de6718080ab0f06f69
+-->
+<!-- maestro:review
+reviewer: opus
+date: 2026-09-30
+verdict: approve
+hash: f506fbfc345a36dc2677ce2bb29acce8cc080c1022f320de6718080ab0f06f69
+-->
