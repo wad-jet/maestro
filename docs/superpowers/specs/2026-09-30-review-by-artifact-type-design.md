@@ -187,3 +187,9 @@ Spike (эта сессия, 2026-09-30) — дизайн-решения зафи
 
 **4.16.0** (minor: новое процессное правило скилла). Бамп: `package.json`,
 `package-lock.json`, `docs/project-context.md` §3 (строка версии).
+
+<!-- maestro:sanitize
+status: CLEAN
+date: 2026-09-30
+hash: 4bf23eb2182666fd9fc58e5e60d19c9a4e9cfdd254c98fe2981db1be80a16f5d
+--> 
