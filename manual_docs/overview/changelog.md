@@ -9,6 +9,30 @@
 
 ## [2026-09-30]
 
+> **Версия 4.17.0** — Minor-релиз: детерминированный дрейф-чекер доков (D1–D4), `maestro-install/docs-drift.test.mjs` в `npm test`.
+
+### Добавлено
+
+- **Детерминированный дрейф-чекер доков (4.17.0):** тест
+  `maestro-install/docs-drift.test.mjs` в `npm test` — 4 проверочных
+  сценария: D1 версии (метка `(~N строк, X.Y.Z)` в `AGENTS.md`; версионная
+  строка в `docs/project-context.md`; semver-скан `manual_docs/**` (кроме
+  `changelog.md`) + `README.md`), D2 устаревшие имена (STALE_NAMES vs
+  поверхности, категории allowlist), D3 счётчик-метка «~N строк» vs `wc -l`,
+  D4 статусы «Выполнено/реализовано (X.Y.Z)» в roadmap/TODO ↔ changelog.
+  Дрейф = failing test. Правила: AGENTS.md (Gotchas — Docs drift),
+  `keep-docs-up-to-date.md` (автоматизация) — `changelog.md` исключён из
+  D1c целиком (история версий).
+- **Правило на merge:** обновить статус issue в `docs/roadmap.md` и отметку
+  в `TODO.md` (зафиксировано в AGENTS.md + keep-docs-up-to-date.md).
+
+### Исправлено
+
+- **README — убрано встроенное значение версии** (дрейф найден дрейф-чекером:
+  стояло `3.2.0` при факте `4.16.0` — stale-значение, найдено D1).
+
+## [2026-09-30]
+
 > **Версия 4.16.0** — Minor-релиз: шаг 16 — ревью по типу артефакта (`code`/`docs`/`config`/`sql`): механический детект по дифу, built-in-критерии + §9-override, бинарный HITL-гейт (D5), параллельное первое ревью — только `code`; **rename агента `code-reviewer` → `reviewer`** (migration note: ключ merge-config `agent.code-reviewer.model` → stale)
 
 ### Добавлено
