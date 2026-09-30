@@ -47,7 +47,8 @@
    > выбор бэкенда, `identity_env`/`namespace`, `retention_days`, `report`,
    > внешний embedder) штатно выполняется `/maestro-assistant` — он читает канон
    > скилла `maestro-assistant`, сформирует diff-merge, добавит обязательное
-   > нативное permission-правило и пройдёт HITL-гейт. Подробнее — раздел
+   > нативное permission-правило и пройдёт HITL-гейт (HITL — human-in-the-loop,
+   > ручное подтверждение). Подробнее — раздел
    > «Настройка через `/maestro-assistant`» ниже.
 
 2. Запустить opencode один раз — плагин выполнит **self-provisioning**: создаст
@@ -160,7 +161,8 @@
 
 - **Identity обязательна** (иначе память off + лог): `identity` → `identity_env`
   → git `user.name`. Identity — подпись записей (`author`), **не access-control**:
-  любой член команды с ключом читает всю память проекта. Per-account RBAC —
+  любой член команды с ключом читает всю память проекта. Per-account RBAC
+  (role-based access control) —
   server-side задача, вне scope плагина.
 - **Решение «локально vs удалённо» — только `storage.type`** (`sqlite` =
   локально; `qdrant`/`pgvector` = удалённо). Ключ `centralized_confidential`
@@ -299,15 +301,18 @@ commit-узлам (head-хеши, ветки, тиры).
 
 - **`mainline_unresolved`** — mainline не резолвнут (override именует
   несуществующую ветку, либо ни remote HEAD, ни `init.defaultBranch`, ни резерв
-  `main`/`master`/`develop` не подтвердились локально). Поведение: при **неявном**
-  (дефолтном) `scope` — branch-context эффективно off, **flat recall** (идентично
-  `branch_context: false`); при **явном `scope: "branch"`** — degraded-режим
-  (general merged=1 + собственные unmerged experience, чужие unmerged исключены).
-  В обоих случаях — warn в лог; промоушен-проход пропускается. Как диагностировать: warn
-  `memory: mainline_unresolved` в `.maestro/logs/maestro-bootstrap-<дата>.log`
-  и/или строка «Диагностика: mainline_unresolved» в выдаче `@maestro-memory`.
-  Исправление: задать `memory.mainline` явно (см. gitflow-guidance в
-  [Память maestro (reference)](../reference/memory.md)).
+  `main`/`master`/`develop` не подтвердились локально):
+  - Поведение: при **неявном** (дефолтном) `scope` — branch-context
+    эффективно off, **flat recall** (идентично
+    `branch_context: false`); при **явном `scope: "branch"`** — degraded-режим
+    (general merged=1 + собственные unmerged experience, чужие unmerged
+    исключены).
+  - В обоих случаях — warn в лог; промоушен-проход пропускается.
+   - Как диагностировать: warn `memory:mainline_unresolved` в
+     `.maestro/logs/maestro-memory-<дата>.log` и/или строка
+     «Диагностика: mainline_unresolved» в выдаче `@maestro-memory`.
+  - Исправление: задать `memory.mainline` явно (см. gitflow-guidance в
+    [Память maestro (reference)](../reference/memory.md)).
 - **`unmasked_branch_metadata`** — централизованный бэкенд + непустые
   `confidential.paths`: имена веток (`branch`/`head`/`merged` — git-структурные
   поля, исключение из маскирования) уходят на сервер. Это документированный

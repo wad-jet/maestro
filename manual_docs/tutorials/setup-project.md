@@ -46,8 +46,9 @@
    - `.gitignore` — весь `.maestro/` и `.opencode/`;
    - `regression/` — структуру реестра рисков.
 4. **Каталоги** — `.maestro/`, `docs/superpowers/{specs,plans}/`.
-5. **Проверки** — скилы superpowers (предложит установить через HITL), плагин
-   `maestro-bootstrap` (не блокер).
+ 5. **Проверки** — скилы superpowers (предложит установить через HITL —
+    human-in-the-loop, ручное подтверждение), плагин
+    `maestro-bootstrap` (не блокер).
 
 > Полный JSON-канон `maestro.json` и правила вывода секций — в скилле `maestro-assistant`
 > (`skills/maestro-assistant/SKILL.md`). Настройка конфигурации/структуры/контекста после
