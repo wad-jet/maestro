@@ -7,6 +7,31 @@
 > Хронология составлена по истории authoring-репо `maestro-agent`. Даты
 > приблизительные (по коммитам).
 
+## [2026-09-30]
+
+> **Версия 4.15.0** — Minor-релиз: скилл `maestro-memory` — канон промтов команд `@maestro-memory*`
+
+### Добавлено
+
+- **Скилл `maestro-memory`:** канон промтов команд `@maestro-memory*`.
+  Промты 5 команд (527 строк) вынесены из `commands/maestro-memory*.md` в
+  `skills/maestro-memory/`: ядро SKILL.md (единый Гейт доступности —
+  config-first: `maestro_config` → union-чтение
+  `memory.{enabled,storage.type,module_dir}` → классификация
+  `disabled_reason` → `memory_probe`-диагностика; SEC-4b; указатели
+  команда → reference) + 5 `references/<команда>.md` (off-секция — первая
+  секция). Команды — тонкие лоадеры (~10 строк); имена, frontmatter и
+  выводные форматы не изменены. Чинит висячие «см. `@maestro-memory`» в
+  prune/reindex/backup (ранее неразрешимые кросс-ссылки → канон-гейт в
+  контексте каждой команды). Доставка: `maestro-install/agpack.yml` +
+  `agpack.yml`; guard: `maestro-install/commands-skill-coverage.test.mjs` +
+  `skills/maestro-memory/references-coverage.test.mjs` (лимит ядра 120 строк).
+  Честная метрика: per-invocation контекст команды растёт на ядро; выигрыш —
+  относительно наивного единого SKILL.md (~570 строк на команду) и дедуп
+  самого динамичного гейта. Паритет: 0 ошибок (405 base-строк, 39
+  исключений, см. regression entry). Regression:
+  `regression/entries/2026-09-30-maestro-memory-skill.md`.
+
 ## [2026-09-29]
 
 > **Версия 4.14.1** — Patch-релиз: гигиена скелета — дедуп/растворение дубликатов, rationale «Почему это важно» → `manual_docs`
