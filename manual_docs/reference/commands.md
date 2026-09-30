@@ -149,23 +149,26 @@ primary-сессия при чтении того же файла получае
 false`), «конфиг-невалиден» (честная причина по `disabled_reason`) и «плагин
 недоступен» (`enabled: true` + инструмент недоступен → перезапустить opencode).
 Блок **«Не индексированные сессии: N»** — cap 20 строк; N>0 — предложить
-`@maestro-memory-reindex` (явные session_id из списка).
-Подробнее — [Память](../reference/memory.md).
+`@maestro-memory-reindex` (явные session_id из списка). Реализация — скилл
+`maestro-memory` (tool: skill): ядро (канон гейта доступности) +
+`references/status.md`. Подробнее — [Память](../reference/memory.md).
 
 ### `@maestro-memory-report`
 
 Генерация самодостаточного статического HTML-отчёта по memory layer
 (агрегаты, timeline-гистограмма, кластеры, commit-граф по head с тирами; SEC-4b) в
-`.maestro/memory-report-<YYYYMMDD-HHMMSS>.html` с авто-preview в браузере (отключается `memory.report.preview: false`). При отсутствии секции `Узлы графа (M):` в выводе `memory_stats_detail` (устаревший плагин) — предупреждение и упрощённый session-level граф. При недоступном `memory_stats_detail` команда ветвится по секции `memory`, прочитанной плагин-тулом `maestro_config` (сам тул недоступен → «перезапустите opencode / обновите плагин (≥ 4.9.0)», конфиг не читается, bash-fallback запрещён): `enabled: false` → «Память выключена»; `enabled: true` + конфиг-невалиден → честная причина по `disabled_reason`; `enabled: true` + sqlite + плагин загружен/актуален → **fallback** на прямое чтение sqlite (упрощённый HTML с плашкой «Плагин недоступен», только агрегаты, `include_text` не поддерживается); `enabled: true` + qdrant/pgvector → «Плагин недоступен; бэкенд централизованный — fallback невозможен». Подробнее —
-[Память](../reference/memory.md).
+`.maestro/memory-report-<YYYYMMDD-HHMMSS>.html` с авто-preview в браузере (отключается `memory.report.preview: false`). При отсутствии секции `Узлы графа (M):` в выводе `memory_stats_detail` (устаревший плагин) — предупреждение и упрощённый session-level граф. При недоступном `memory_stats_detail` команда ветвится по секции `memory`, прочитанной плагин-тулом `maestro_config` (сам тул недоступен → «перезапустите opencode / обновите плагин (≥ 4.9.0)», конфиг не читается, bash-fallback запрещён): `enabled: false` → «Память выключена»; `enabled: true` + конфиг-невалиден → честная причина по `disabled_reason`; `enabled: true` + sqlite + плагин загружен/актуален → **fallback** на прямое чтение sqlite (упрощённый HTML с плашкой «Плагин недоступен», только агрегаты, `include_text` не поддерживается); `enabled: true` + qdrant/pgvector → «Плагин недоступен; бэкенд централизованный — fallback невозможен». Реализация — скилл
+`maestro-memory` (tool: skill): ядро (канон гейта доступности) +
+`references/report.md`. Подробнее — [Память](../reference/memory.md).
 
 ### `@maestro-memory-prune`
 
 HITL-утилизация брошенных/unknown записей памяти: листинг по категориям
 надёжности git-якоря (remote-merged/remote-alive/local-only/dead/unknown) →
 подтверждение → удаление строго по явным `session_ids`/`heads` (host-guard на
-централизованных бэкендах). Permission `ask`. Подробнее —
-[Память](../reference/memory.md).
+централизованных бэкендах). Permission `ask`. Реализация — скилл
+`maestro-memory` (tool: skill): ядро (канон гейта доступности) +
+`references/prune.md`. Подробнее — [Память](../reference/memory.md).
 
 ### `@maestro-memory-reindex`
 
@@ -177,7 +180,9 @@ HITL-бэкфилл памяти (v3.5.0, fail-loud 4.7.1): листинг ка�
 **Полный re-index (full-reindex):** явный `session_id` с отсутствующей/stale-
 записью → LLM-summarize из сессии + сброс permanent-skip; статусы:
 `indexed`/`unattributed`/`no_new_messages`/`not_found`/`skip_service`/
-`failed: <класс>`. Permission `ask`. Подробнее — [Память](../reference/memory.md).
+`failed: <класс>`. Permission `ask`. Реализация — скилл
+`maestro-memory` (tool: skill): ядро (канон гейта доступности) +
+`references/reindex.md`. Подробнее — [Память](../reference/memory.md).
 
 ### `@maestro-memory-backup`
 
@@ -187,8 +192,9 @@ backup / restore (merge, дефолт) / restore --replace (аварийно: я
 предупреждение + отдельное HITL-подтверждение; удаление всей памяти — только
 после успешной fail-closed-валидации бэкапа) / отмена. Команда не вызывает
 CLI через bash — при запросе восстановления без opencode показывает
-инструкцию ручного запуска (`backup-cli.js`). Permission `ask`. Подробнее —
-[Память](../reference/memory.md) и
+инструкцию ручного запуска (`backup-cli.js`). Permission `ask`. Реализация — скилл
+`maestro-memory` (tool: skill): ядро (канон гейта доступности) +
+`references/backup.md`. Подробнее — [Память](../reference/memory.md) и
 [Бэкап и восстановление памяти](../how-to/memory-backup-restore.md).
 
 ### `@maestro-benchmark`
