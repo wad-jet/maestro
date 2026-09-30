@@ -396,7 +396,7 @@ OpenCode — enforced в ядре, в отличие от merge-конфига `
 
 **Оси Tier и Trust ортогональны.** Trusted — атрибут безопасности, не мощность.
 
-- **Tier (мощность, Ось A):** custodian→opus, opus→opus, code-reviewer→opus,
+- **Tier (мощность, Ось A):** custodian→opus, opus→opus, reviewer→opus,
   haiku→haiku, sonnet→sonnet, fable→fable, sanitizer→своя.
 - **Trust (доверие, Ось B):** custodian ✅ + sanitizer ✅ trusted; остальные untrusted.
 
@@ -428,7 +428,7 @@ merge-конфиге — `.opencode/opencode.json` или global), пользо�
 | `haiku` | haiku | 0.0 |
 | `sonnet` | sonnet | 0.1 |
 | `opus` | opus | 0.1 |
-| `code-reviewer` | opus | 0.2 |
+| `reviewer` | opus | 0.2 |
 | `fable` | fable | 0.7 |
 | `custodian` | opus | 0.1 |
 | `sanitizer` | своя | 0.0 |
@@ -440,7 +440,7 @@ merge-конфиге — `.opencode/opencode.json` или global), пользо�
   задана), иначе — дефолт по tier.
 
 > **Централизованный вариант (рекомендуется).** Настроить `agent.{custodian,haiku,
-> sonnet,opus,fable,code-reviewer,sanitizer}` (model + temperature) один раз в
+> sonnet,opus,fable,reviewer,sanitizer}` (model + temperature) один раз в
 > global-конфиге `~/.config/opencode/opencode.json` — новые проекты наследуют
 > значения, М1 предлагает «оставить текущую (из global)» первым вариантом.
 > Подробнее: `manual_docs/tutorials/setup-project.md`.

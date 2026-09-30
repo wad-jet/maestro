@@ -52,7 +52,7 @@ description: Use when the user asks for help configuring maestro, organizing pro
   },
   "sanitizer_whitelist": {
     "rules": { "env_secret": true, "data_field": true, "env_file": true, "db_credential": true, "ledger_entry": true, "private_key": true, "auth_header": true },
-    "by_agent": { "code-reviewer": [] },
+    "by_agent": { "reviewer": [] },
     "patterns": [],
     "extra_fields": [],
     "extra_uri_schemes": []

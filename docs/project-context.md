@@ -85,7 +85,7 @@
 - **`skills/`** — источники скиллов maestro (`maestro`, `maestro-setup`, `maestro-design`,
   `maestro-assistant`, `maestro-feedback-report`, `maestro-benchmark`, `manual-docs`).
 - **`agents/`** — промпты субагентов (`custodian`, `sanitizer`, `opus`, `sonnet`,
-  `haiku`, `fable`, `code-reviewer`).
+  `haiku`, `fable`, `reviewer`).
 - **`commands/`** — команды `@maestro-init`, `/maestro-setup`, `/maestro-design`, и др.
 - **`plugins/maestro-bootstrap/`** — плагин: санитайзинг промптов,
   confidential-контур, observability-логи.
@@ -149,14 +149,14 @@
 ## 8. Команда и процессы
 
 - **Git flow:** ветки `feature/<kebab-case>` для фич/багфиксов; master/main — стабильная.
-- **Ревью:** code review через `code-reviewer`/opus на ключевых шагах пайплайна.
+- **Ревью:** code review через `reviewer`/opus на ключевых шагах пайплайна.
   С 2026-09-03 (P1.1+P1.2): Minor-находки не обосновывают blocking-вердикт во
   всех трёх контурах; на spec-гейте контрольное ревью с пустыми
   Critical/Important бакетами → fast-path Approve (Minor → follow-up).
   С 4.12.0 (#95): финальное ревью (шаг 16) — параллельное первое
-  (`code-reviewer` + `sonnet`, ключ `maestro.json → review.parallel`,
+  (`reviewer` + `sonnet`, ключ `maestro.json → review.parallel`,
   дефолт `auto`; guard «одна модель»); расхождение вердиктов — арбитраж
-  старшего (M3); контрольные раунды — только `code-reviewer`.
+  старшего (M3); контрольные раунды — только `reviewer`.
 - **Доставка:** `agpack`/ручной перенос в целевые приложения.
   **Новый компонент (скилл/команда/агент)** — обязательная регистрация в
   каноне `maestro-install/agpack.yml` (skills листируются по-путно; commands/

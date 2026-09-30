@@ -1,5 +1,5 @@
 ---
-description: Финальное code review ветки: git diff, история коммитов, анализ кода
+description: Финальное ревью ветки по типу артефакта: git diff, история коммитов, анализ (code/docs/config/sql)
 mode: subagent
 hidden: false
 permission:

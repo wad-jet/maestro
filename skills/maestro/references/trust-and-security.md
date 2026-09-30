@@ -39,7 +39,7 @@
 | `haiku` | untrusted | |
 | `sonnet` | untrusted | |
 | `opus` | untrusted | Spec review + правки на Revise. **Если указан trusted (`trust.opus: true`)** — Слои 2 (маскирование промпта) и 3-5 (confidential-deny / нативный permission-слой / Ур.1) для него НЕ действуют: opus получает промпт как есть и доступ к файлам по конфигу; гарантия «opus не видит confidential» снимается. Это осознанное решение конфигурации (пользователь расширил доверие). Рекомендация — не помечать opus trusted; при необходимости фиксировать с пониманием последствий. |
-| `code-reviewer` | untrusted | |
+| `reviewer` | untrusted | |
 | `fable` | untrusted | |
 | `custodian` | **trusted** | Q/A-брокер по confidential (шаг 8): читает confidential-источники, отвечает primary агрегатами (тип/ограничение/чувствительность/связь) БЕЗ raw-значений. Его промпт при диспатче не санизируется. Если `trust: false`/absent — агент **non-functional** (confidential deny + sanitize промпта); не fallback, а блокировка роли. |
 | `sanitizer` | **trusted** | Security review: единственный, кому разрешено видеть сырые данные (чтобы пометить). Его промпт при диспатче не санизируется — рекурсии нет. Если `trust: false`/absent — агент **non-functional** (рекурсия: промпт санизируется до него); не fallback. |
@@ -155,7 +155,7 @@ Trust-уровень определяется по `maestro.json` (см. § Trus
 | Шаг 9 — Spec Review | `opus` | Применяется (untrusted) |
 | Шаг 13 — SDD implementer | `haiku` / `sonnet` | Применяется (untrusted) |
 | Шаг 13 — SDD task-reviewer | `sonnet` | Применяется (untrusted) |
-| Шаг 16 — Code Review | `code-reviewer` | Применяется (untrusted) |
+| Шаг 16 — Code Review | `reviewer` | Применяется (untrusted) |
 | (внутри Security Review) | `sanitizer` | **Skip** (trusted — видит сырые данные для пометок) |
 
 Если сабагент отмечен как trusted в `maestro.json` — sanitize промпта

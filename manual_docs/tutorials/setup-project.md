@@ -140,7 +140,7 @@ roadmap, как в Варианте A.
 | `custodian` | opus (confidential Q/A broker) | ✅ |
 | `sanitizer` | своя модель (security review) | ✅ |
 | `opus` | opus (spec review) | ❌ |
-| `code-reviewer` | opus (code review) | ❌ |
+| `reviewer` | opus (code review) | ❌ |
 | `haiku` | haiku (механические задачи) | ❌ |
 | `sonnet` | sonnet (интеграционные задачи) | ❌ |
 | `fable` | fable (примеры/метафоры) | ❌ |
@@ -155,7 +155,7 @@ roadmap, как в Варианте A.
 |---|---|---|---|
 | haiku | механические: 1-2 файла, трансляция, юнит-тесты | низкий reasoning, следование spec | `haiku` |
 | sonnet | интеграционные: multi-file, отладка, pattern matching | средний reasoning + контекст | `sonnet` |
-| opus | архитектура, spec, дизайн-решения, ревью | высокий reasoning/дизайн-суждение | `custodian` (confidential Q/A, **trusted**), `opus`-агент (spec review, untrusted), `code-reviewer` (code review, untrusted) |
+| opus | архитектура, spec, дизайн-решения, ревью | высокий reasoning/дизайн-суждение | `custodian` (confidential Q/A, **trusted**), `opus`-агент (spec review, untrusted), `reviewer` (code review, untrusted) |
 | fable | примеры, метафоры, пояснения | модальность, не мощность | `fable` |
 | своя (sanitizer) | security-пометка: поиск/маркировка чувствительных данных | **вне tier-класса**: точность + доверие (trusted), не мощность | `sanitizer` |
 
@@ -210,7 +210,7 @@ roadmap, как в Варианте A.
 
 #### Вариант: глобальная настройка по тирам (рекомендуется)
 
-Настроить `agent.{custodian,haiku,sonnet,opus,fable,code-reviewer,sanitizer}`
+Настроить `agent.{custodian,haiku,sonnet,opus,fable,reviewer,sanitizer}`
 (model + temperature) один раз в `~/.config/opencode/opencode.json` — новые
 проекты наследуют значения через merge-конфигурацию OpenCode.
 
@@ -221,7 +221,7 @@ roadmap, как в Варианте A.
     "haiku": { "model": "akash/Qwen/Qwen3.6-35B-A3B", "temperature": 0.0 },
     "sonnet": { "model": "akash/deepseek-ai/DeepSeek-V4-Flash", "temperature": 0.1 },
     "opus": { "model": "akash/zai-org/GLM-5.2", "temperature": 0.1 },
-    "code-reviewer": { "model": "akash/deepseek-ai/DeepSeek-V4-Flash-0731", "temperature": 0.2 },
+    "reviewer": { "model": "akash/deepseek-ai/DeepSeek-V4-Flash-0731", "temperature": 0.2 },
     "fable": { "model": "akash/deepseek-ai/DeepSeek-V4-Flash", "temperature": 0.7 },
     "custodian": { "model": "akash/Qwen/Qwen3.6-35B-A3B", "temperature": 0.1 },
     "sanitizer": { "model": "akash/Qwen/Qwen3.6-35B-A3B", "temperature": 0.0 }
@@ -245,7 +245,7 @@ roadmap, как в Варианте A.
 | `haiku` | haiku | `akash/Qwen/Qwen3.6-35B-A3B` | 0.0 |
 | `sonnet` | sonnet | `akash/deepseek-ai/DeepSeek-V4-Flash` | 0.1 |
 | `opus` | opus | `akash/zai-org/GLM-5.2` | 0.1 |
-| `code-reviewer` | opus | `akash/deepseek-ai/DeepSeek-V4-Flash-0731` | 0.2 |
+| `reviewer` | opus | `akash/deepseek-ai/DeepSeek-V4-Flash-0731` | 0.2 |
 | `fable` | fable | `akash/deepseek-ai/DeepSeek-V4-Flash` | 0.7 |
 | `custodian` | opus | (модель opus-tier) | 0.1 |
 | `sanitizer` | своя | (безопасная/дефолтная) | 0.0 |
@@ -270,7 +270,7 @@ roadmap, как в Варианте A.
 **Что делает проверка:**
 
 1. **Диспатч всех 7 сабагентов** — `custodian`, `haiku`, `sonnet`, `opus`, `fable`,
-   `code-reviewer`, `sanitizer` — через `task`-тул реальным диспатчем. Каждому
+   `reviewer`, `sanitizer` — через `task`-тул реальным диспатчем. Каждому
    агенту даётся одинаковая тривиальная задача: «Верни ровно одно слово OK и своё
    имя агента. Не используй инструменты».
 2. **Сводная таблица статусов** — по каждому агенту `OK / FAIL`:

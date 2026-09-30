@@ -19,7 +19,7 @@
 | `sonnet` | Интеграционные задачи | да |
 | `opus` | Архитектурные решения, Spec Review + правки на Revise (применяет оркестратор) | нет (read-only) |
 | `fable` | Примеры, метафоры | нет (read-only) |
-| `code-reviewer` | Финальное ревью ветки | нет (только git diff/log) |
+| `reviewer` | Финальное ревью ветки | нет (только git diff/log) |
 | `sanitizer` | Security review — поиск и пометка чувствительных данных | нет (read-only) |
 
 `sonnet` и `opus` на точках принятия решений (ресеч, интеграционные решения,
@@ -243,7 +243,7 @@ bash-команд ненадёжно извлекаются).
 **двухролевыми**: генерируются **primary** (пишет spec из brainstorm + Q/A
 `custodian`, plan — через writing-plans) и читаются
 trusted `sanitizer`, но **потребляются untrusted**-субагентами — `opus` (spec
-review, шаг 9), implementer (`haiku`/`sonnet`, шаг 13), `code-reviewer` (+ `sonnet` в параллельном первом раунде, шаг 16).
+review, шаг 9), implementer (`haiku`/`sonnet`, шаг 13), `reviewer` (+ `sonnet` в параллельном первом раунде, шаг 16).
 Если добавить эти пути в `confidential.paths`, untrusted-субагенты и primary
 получат жёсткий deny на чтение spec/plan, и **процесс планирования/реализации
 остановится** (untrusted не смогут читать исходники для своей работы). Защита

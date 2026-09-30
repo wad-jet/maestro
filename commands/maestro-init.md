@@ -5,7 +5,7 @@ description: Вход в pipeline maestro — сквозная реализац�
 # @maestro-init
 
 Загрузи skill `maestro` (tool: skill) и следуй pipeline из SKILL.md.
-Координируй субагентов (custodian, haiku, sonnet, opus, fable, code-reviewer, sanitizer)
+Координируй субагентов (custodian, haiku, sonnet, opus, fable, reviewer, sanitizer)
 на каждом этапе.
 
 Работает в любой primary-сессии — привязки к конкретному агенту нет.
@@ -51,7 +51,7 @@ per-run, не персистится в `maestro.json`.
 - Режим запуска задаётся флагом (см. выше) и передаётся в pipeline как per-run параметр
 - После утверждения плана (шаг 12) — один коммит `docs: design + plan for <feature-name>`
 - После SDD (шаг 13) — per-task code коммиты
-- Финальное ревью (шаг 16) — диспатч code-reviewer
+- Финальное ревью (шаг 16) — диспатч reviewer
 - В Plan mode (ресеч, обсуждение фичи/багфикса, подготовка spec) и на ресече
   bugfix — сначала `memory_search` по теме задачи (канон: `skills/maestro/references/memory-layer.md`); память не включена → молча пропуск
 
