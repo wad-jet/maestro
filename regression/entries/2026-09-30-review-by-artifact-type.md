@@ -34,4 +34,9 @@
 
 ## Dogfooding
 
-_(заполнит оркестратор после шага 16: анонс набора типов, dispatch parallel/single, блок активных критерий в промптах)_
+Финальное ревью этой ветки (шаг 16, 2026-09-30) проведено по новым правилам:
+
+- **Детект:** диф `d183da9..HEAD` — набор **{code, config, docs}** (`*.sh` → code; `maestro.json` → config; `*.md` → docs; вне детекта — `docs/superpowers/{specs,plans}`, changelog, `regression/**`, правило 6); бинарных файлов нет → D5-гейт не сработал.
+- **Диспатч:** параллельный путь #95 (категория Сложная; guard «одна модель» не сработал: `agent.sonnet.model` ≠ `agent.reviewer.model`). Senior-роль — `opus` (тип `reviewer` активируется после перезапуска opencode — ограничение сессии, не отклонение от канона).
+- **Блок активных критерий** (built-in code/docs/config + §9 override: «указатели/ссылки в manual_docs резолвятся по имени файла») передан в оба промпта.
+- **Результат:** 2×`Needs fixes` (union: 0C/2I) → fix-loop (D5-кромка Dockerfile/Makefile/LICENSE.*, sweep-исключения, Minor) → контрольный раунд.
