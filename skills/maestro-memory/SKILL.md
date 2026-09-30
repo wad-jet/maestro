@@ -22,38 +22,32 @@ reference (конвенция).
 
 ## Гейт доступности (config-first; устойчивая нумерация 1.1–1.4)
 
-### 1.1 Гейт `maestro_config` (доступность инструментов)
+### 1.1 Гейт `maestro_config`
 
-Попробуй вызвать инструмент `memory_stats_detail` (без параметров). Если вернул
-данные → состояние `enabled`, продолжай к reference-флоу своей команды.
-Если `memory_stats_detail` недоступен:
-
-- **Гейт `maestro_config`:** если плагин-тул `maestro_config` тоже
-  **недоступен** → вывод «Перезапустите opencode / обновите плагин
-  maestro-bootstrap (≥ 4.9.0)» (дистинкция по `.maestro/plugin-version`:
-  `< 4.9.0` → «плагин устарел — обновите и перезапустите opencode»; свежей
-  init-записи в `.maestro/logs/` нет → «плагин не загружен — перезапустите
-  opencode»). **Конфиг НЕ читать (bash-fallback запрещён).** Состояние —
-  «плагин недоступен».
-- Если `maestro_config` доступен → прочитай секцию `memory` через тул
-  (`section: "memory"`, native `ask`) — см. 1.2.
+Плагин-тул `maestro_config` (native `ask`). Если **недоступен** →
+вывод «Перезапустите opencode / обновите плагин
+maestro-bootstrap (≥ 4.9.0)» (дистинкция по `.maestro/plugin-version`:
+`< 4.9.0` → «плагин устарел — обновите и перезапустите opencode»; свежей
+init-записи в `.maestro/logs/` нет → «плагин не загружен — перезапустите
+opencode»). **Конфиг НЕ читать (bash-fallback запрещён).** Состояние —
+«плагин недоступен» (off-секция reference). Если доступен → 1.2.
 
 ### 1.2 Единственное чтение секции `memory` (union)
 
 Прочитай секцию `memory` **один раз** (плагин-тул `maestro_config`,
 `section: "memory"`, native `ask`): `memory.enabled`, `memory.storage.type`,
-`memory.module_dir` (`module_dir` — для sqlite-fallback отчёта). Повторное
-чтение конфига запрещено (single-read; один `ask` в happy-path).
+`memory.module_dir` (`module_dir` — для sqlite-fallback отчёта). Чтение
+выполняется **всегда** — включая enabled-путь (config-first): reference
+опираются на «секцию, прочитанную гейтом». Повторное чтение конфига
+запрещено (single-read; один `ask` в happy-path).
 
-### 1.3 Классификация `disabled_reason`
+### 1.3 Классификация `disabled_reason` (только при disabled)
 
 `memory.enabled: false` → состояние «disabled» (`explicitly_disabled`).
-`memory.enabled: true` + конфиг валиден + `memory_stats_detail` недоступен →
-состояние «плагин недоступен» (см. 1.1) — НЕ «память выключена».
 `memory.enabled: true` + конфиг-невалиден → состояние «disabled», честная
 причина по `disabled_reason`.
 
-Причину (`disabled_reason`) определи по прочитанной секции `memory`: отсутствие секции `memory` →
+Причину (`disabled_reason`) определи по секции `memory`, прочитанной в 1.2: отсутствие секции `memory` →
 `no_memory_section`; `memory.enabled: false` → `explicitly_disabled`; невалидные ключи
 (`retention_days`, `similarity_threshold`, `storage.type`, `branch_context`, `mainline`,
 `storage.pgvector.text_search_config`, `embedding`, `probe_cooldown_min`, `artifact_globs`) → соответствующий код (`*_invalid`);
@@ -84,9 +78,17 @@ embedder-причины: невалидная секция `embedding` (в т.ч
 - `FAIL` (soft) — сеть/таймаут провайдера; проверь `embedding.base_url` и доступность эндпоинта;
 - `OK` — embedder доступен; причина off — в другом `disabled_reason` (см. 1.3).
 
-**Итог гейта:** `enabled` → reference-флоу своей команды; «disabled»
-(+ reason-код из 1.3) или «плагин недоступен» → off-секция reference
-своей команды (первая `##`-секция).
+**Итог гейта (состояние):**
+- `maestro_config` недоступен (1.1) → «плагин недоступен» (сообщение уже
+  выведено в 1.1) → off-секция reference.
+- `memory.enabled: false` (1.3) → «disabled» (`explicitly_disabled`) →
+  off-секция reference.
+- `memory.enabled: true` + конфиг-невалиден (1.3) → «disabled» (+ reason-код
+  из 1.3, диагностика 1.4) → off-секция reference.
+- `memory.enabled: true` + конфиг валиден → вызови `memory_stats_detail`
+  (без параметров) — данные нужны reference-флоу: вернул данные → состояние
+  `enabled` → reference-флоу своей команды; недоступен → «плагин недоступен»
+  (НЕ «память выключена») → off-секция reference.
 
 ## SEC-4b (общее правило)
 
