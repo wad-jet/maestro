@@ -80,6 +80,15 @@
    дрейф — не покрывается, по первому реальному случаю), FU3/FU4 (allowlist-классы).
    Regression: `regression/entries/2026-09-30-docs-drift-test.md`.
 2. **#97** — читабельность manual_docs + зафиксировать правила в скиле manual_docs.
+   **Выполнено (4.18.0, 2026-09-30):** секция «Читабельность» в
+   `skills/manual-docs/SKILL.md` (правила R1–R6 + before/after-пример, пункт в
+   «Правило 3») + реформат 7 страниц (структура: лиды/списки/разбиение стен;
+   факты дословно; заголовки не тронуты; построчный wall-scan 9 стен → 0,
+   blindspot-скан 6 мультистрочных буллетов → 0). Known limitation: построчный
+   wall-scan не ловит мультистрочные буллеты (blind-spot) — защита: ручной
+   blindspot-скан + FU2 (перманентный wall-check в `npm test`). FU: FU1
+   (reference-страницы — отдельным пасом), FU2 (wall-check в `npm test`).
+   Regression: `regression/entries/2026-09-30-manual-docs-readability.md`.
 3. **#103** — актуальность regression-entries. M6: обновление entries при прогоне
    пайплайна (на шаге ревью), а не отдельной рутиной.
 4. **#87 (правки)** — по результату спайка, если не требует breaking.
