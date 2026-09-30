@@ -104,8 +104,8 @@ Spike (эта сессия, 2026-09-30) — дизайн-решения зафи
 
 ### D4. Агенты и промпты
 
-- Агенты не меняются: `code-reviewer` (opus-тир) — senior; `sonnet` —
-  параллельное первое (только `code`, D6).
+- Агенты (по ролям) не меняются: senior-ревьюер (opus-тир) — `reviewer`
+  (переименование — D8); `sonnet` — параллельное первое (только `code`, D6).
 - `agents/code-reviewer.md`: новый короткий раздел «Ревью по типу
   артефакта»: ревью ведётся по типу/набору типов и критериям, **переданным в
   промпте диспатча**; если поле не передано — тип `code`, built-in-критерии
@@ -158,16 +158,47 @@ Spike (эта сессия, 2026-09-30) — дизайн-решения зафи
 |---|---|
 | `skills/maestro/references/artifact-review.md` | **новая** глава канона: типы, правила детекта (D2), built-in критерии (D3) + мини-пример override, allowlist текстовых расширений (D5), диспатч-матрица (D4/D6). Формат под существующие тесты: заголовок `# … (глава)`, строка «Канон:», упоминание в SKILL.md (anti-orphan) |
 | `skills/maestro/SKILL.md` (шаг 16) | компактная механика: детект → анонс → выбор dispatch (parallel/single) → критерии → pointer на reference (~15–20 строк, без дублирования таблиц) |
-| `agents/code-reviewer.md` | раздел «Ревью по типу артефакта» (D4) |
+| `agents/code-reviewer.md` → `agents/reviewer.md` | **rename** (git mv, D8) + новый description + раздел «Ревью по типу артефакта» (D4) |
+| `.opencode/opencode.json` (dogfood, gitignored) | ключ модели: `agent.code-reviewer.model` → `agent.reviewer.model` |
 | `skills/maestro-setup/init-context.md` | категория 9: подсекция «критерии ревью по типу артефакта (опц.; built-in-дефолты — канон maestro `references/artifact-review.md`)» (M4); категория 3: опциональный слот «Миграции (каталоги): <пути>» (вход детекта `sql`, D2) |
 | `skills/maestro/references/hitl-gate-protocol.md` | регистрация нового гейта (D5) в полном перечне + поведение по режимам (manual/auto-answer — HITL; auto-ai — ИИ с журналом, recommended (a)) |
 | `skills/maestro/references/spec-review.md` | одна строка в «Границах ревью»: первое ревью шага 16 — параллельно только для типа `code` |
 | `AGENTS.md` | список глав канона: 10 → 11 (`artifact-review.md`) |
-| `manual_docs/` | `explanation/pipeline-overview.md` (шаг 16), `reference/hitl-gates.md` (HITL бинарных), `reference/config.md` (переопределение `review.parallel: always` для не-code типов), `reference/model-selection.md` (строка), `explanation/project-context.md` (категории 3/9), `overview/changelog.md` (4.16.0, буллит с явным упоминанием переопределения `always`) |
+| `manual_docs/` | `explanation/pipeline-overview.md` (шаг 16 + rename), `reference/hitl-gates.md` (HITL бинарных + rename), `reference/config.md` (переопределение `review.parallel: always` для не-code типов), `reference/model-selection.md` (строка + rename), `explanation/agents-and-trust.md` (rename), `explanation/project-context.md` (категории 3/9), `how-to/update-maestro.md` (строка миграции `agent.code-reviewer.model` → `agent.reviewer.model`), `overview/changelog.md` (4.16.0: буллит переопределения `always` + migration note rename) |
 | `docs/project-context.md` | §8 — строка о процессе ревью (dogfooding-авторинг), §9 — собственная подсекция критериев (живая проверка override-пути) |
 | `docs/roadmap.md` | #107 → выполнено (версия 4.16.0) |
 | `regression/entries/2026-09-30-review-by-artifact-type.md` | entry (риск LOW, сценарии детекта, FU) |
 | `TODO.md` (строка 123) | отметка при merge |
+
+### D8. Переименование агента `code-reviewer` → `reviewer`
+
+Обоснование: после #107 агент ревьюит все типы артефакта (code/docs/config/
+sql) — имя `code-reviewer` вводит в заблуждение. Агентов по типам **не
+плодится**: один нейтральный агент, тип + критерии — в промпте диспатча (D4).
+
+Поверхность rename:
+
+- `agents/code-reviewer.md` → `agents/reviewer.md` (git mv; description:
+  «Финальное ревью ветки по типу артефакта: git diff, история коммитов,
+  анализ (code/docs/config/sql)»).
+- `skills/maestro/SKILL.md` (шаг 16): `subagent_type=code-reviewer` →
+  `reviewer`; guard «одна модель» (D6/#95) читает `agent.reviewer.model`
+  (вместо `agent.code-reviewer.model`).
+- `manual_docs/`: `explanation/agents-and-trust.md`, `reference/
+  model-selection.md`, `explanation/pipeline-overview.md`, `reference/
+  hitl-gates.md` (все упоминания `code-reviewer`).
+- `docs/project-context.md` §8 (строка о процессе ревью).
+- **Миграция (breaking для merge-config целевых проектов):** ключ
+  `agent.code-reviewer.model` в `.opencode/opencode.json` / global
+  `opencode.json` целевого проекта становится stale → override модели
+  молча отваливается (агент берёт модель по умолчанию). Митигация:
+  migration note в changelog 4.16.0 + строка в `manual_docs/how-to/
+  update-maestro.md` («переименование `code-reviewer` → `reviewer`:
+  обновите ключ `agent.*.model`»). Dogfood-репо: обновить локальный
+  merge-config (`.opencode/opencode.json`).
+- Stale-зеркало: `.opencode/agents/code-reviewer.md` в целевых проектах —
+  ручная чистка (agpack старые имена не удаляет; правило AGENTS.md —
+  grep остатков + удаление stale).
 
 Изменений в плагине **нет** (процессная фича: скиллы/агенты/доки).
 
@@ -196,6 +227,7 @@ Spike (эта сессия, 2026-09-30) — дизайн-решения зафи
 | Self-contained-промпт code-reviewer ломается | раздел D4 — короткий, без встраивания таблиц; критерии — в промпте диспатча |
 | Дрейф built-in критериев vs §9 | precedence задокументирован (override); built-in — канон reference (одна точка) |
 | Крупный docs/config-only диф — одиночное ревью, одна слепая зона | §9-override (проект может ужесточить), `Reject`-эскалация, HITL-коррекция типа до диспатча; обоснование D6 — не только «малые дифы», но и отсутствие кодовой слепой зоны для таких типов |
+| Rename: `agent.code-reviewer.model` в merge-config целевых проектов молча отваливается | migration note в changelog + строка в `update-maestro.md`; dogfood-репо — обновить локально; sweep-проверка (grep `code-reviewer` по репо на гейте 17) |
 
 ## Тесты и критерии приёмки
 
@@ -224,8 +256,11 @@ Spike (эта сессия, 2026-09-30) — дизайн-решения зафи
 
 ## Версионный bump (шаг 18)
 
-**4.16.0** (minor: новое процессное правило скилла). Бамп: `package.json`,
-`package-lock.json`, `docs/project-context.md` §3 (строка версии).
+**4.16.0** (minor: новое процессное правило скилла + rename агента).
+Breaking-аспект: ключ merge-config `agent.code-reviewer.model` → stale
+(override молча отваливается) — **migration notes** в changelog 4.16.0 +
+строка в `update-maestro.md` (D8). Бамп: `package.json`, `package-lock.json`,
+`docs/project-context.md` §3 (строка версии).
 
 <!-- maestro:sanitize
 status: CLEAN
