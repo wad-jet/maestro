@@ -458,7 +458,7 @@ init), следует его правилам, затем решает и про
          **0 находок** — оркестратор прогоняет содержимое spec-файла через
          sanitize, а не только промпт диспатча. При `FINDINGS_ACCEPTED`
          (вариант (b)) spec принимается как есть: untrusted ревьюеры
-         (opus/implementer/code-reviewer) читают spec/plan/diff по нативным
+         (opus/implementer/reviewer) читают spec/plan/diff по нативным
          permissions opencode — чувствительные данные не уходят молча
          (маскирование Ур.1 остаётся).
        — После `CLEAN` или (a)/(b) оркестратор **штампует подпись
@@ -862,6 +862,17 @@ init), следует его правилам, затем решает и про
             (b) real fail — fix-loop к шагу 13
             (c) skip с подтверждением
 🟡 16. [agent] requesting-code-review -> финальное ревью
+      — **Ревью по типу артефакта (#107, 4.16.0):** тип/набор типов дифа
+        ветки детектируется механически до диспатча (закрытые списки правил
+        — в главе канона): порядок — бинарность (HITL-гейт D5) → детект по
+        текстовой части → анонс строкой «Тип артефакта: <набор> (правило:
+        <сводно>)»; HITL-коррекция возможна только ДО диспатча. Диспатч:
+        `code` в наборе → параллельное первое ревью (блок ниже); набор
+        ⊆ {docs, config, sql} → всегда одиночное (`reviewer`) независимо от
+        `review.parallel`. Активные критерии (built-in | project-context §9
+        override) — оркестратор добавляет блоком «Тип артефакта: …; Активные
+        критерии: …» в промпт диспатча (`reviewer` И `sonnet`).
+      — **Ревью по типу артефакта:** читать `references/artifact-review.md` из каталога скилла maestro (канон).
       — **Параллельное первое ревью** (ключ `maestro.json → review.parallel`,
         прочитан на шаге 0: `auto` дефолт при отсутствии; невалидное → soft
         fallback `auto` + пометка `review:config_fallback` в анонсе):
@@ -877,10 +888,12 @@ init), следует его правилам, затем решает и про
           диф: изменённые source-файлы затрагивают ≥ 2 слоёв стек-профиля
           (`docs/project-context.md`, §3 «Стек технологий»); неопределимо →
           false. `always` — параллельно всегда; `off` — всегда одиночное.
+          Исключение (#107, тип артефакта): набор ⊆ {docs, config, sql} →
+          всегда одиночное, независимо от `review.parallel` (блок выше).
         - **Guard «одна модель»** (действует при `auto` и `always`):
           срабатывает, если идентичность моделей доказуема → одиночное.
           Процедура (перед диспатчем): (1) каждый ключ `agent.sonnet.model` /
-          `agent.code-reviewer.model` — из локального
+          `agent.reviewer.model` — из локального
           `.opencode/opencode.json`, при отсутствии локально — из global
           `~/.config/opencode/opencode.json` (frontmatter-модели
           `agents/*.md` вне scope — канон merge-config); (2) строгое
@@ -890,30 +903,30 @@ init), следует его правилам, затем решает и про
           (4) не срабатывает, если различаются ИЛИ резолвнут ровно один
           («модель <агент> не задана»).
         - **Диспатч (параллельно):** два независимых диспатча —
-          `code-reviewer` (opus-тир) + `sonnet`; формат вердикта у обоих —
-          бакеты + `Approved|Needs fixes|Reject` (канон — `agents/code-reviewer.md`,
+          `reviewer` (opus-тир) + `sonnet`; формат вердикта у обоих —
+          бакеты + `Approved|Needs fixes|Reject` (канон — `agents/reviewer.md`,
           копируется в промпт sonnet дословно, self-contained). Диспатч sonnet
           — стандартный untrusted-путь (Level 1, авто-санитизация плагином) +
           обёртка «не мутируй код и файлы — верни только отчёт ревью».
       — **Объединение вердиктов:**
         - **Совпало** (`Approved`+`Approved` / `Needs fixes`+`Needs fixes` /
           `Reject`+`Reject`) → union находок (дедупликация: совпадающие по
-          файлу и сути — одна запись с пометкой источника `code-reviewer` /
+          файлу и сути — одна запись с пометкой источника `reviewer` /
           `sonnet` / `оба`) → fix-loop. При `Approved`+`Approved` fix-loop не
           запускается: union (Minor) → follow-up.
         - **Расхождение** (только `Approved` vs `Needs fixes`; `Reject` —
           ниже). По P1.1 `Needs fixes` обязан опираться на открытые C/I:
-          - **Случай A (зеркальный): `code-reviewer` `Needs fixes` +
+          - **Случай A (зеркальный): `reviewer` `Needs fixes` +
             `sonnet` `Approved`** — арбитраж не нужен: решение старшего по
             рангу стоит → `Needs fixes`, fix-loop по C/I-находкам
-            code-reviewer; находки sonnet (если есть, в т.ч. C/I — невалидная
+            reviewer; находки sonnet (если есть, в т.ч. C/I — невалидная
             комбинация по P1.1) — всегда в follow-up, не молчаливо.
-          - **Случай B: `code-reviewer` `Approved` + `sonnet` `Needs fixes`:**
+          - **Случай B: `reviewer` `Approved` + `sonnet` `Needs fixes`:**
             - **Пре-фильтр P1.1:** C/I у sonnet на самом деле пусты (только
               Minor) → вердикт sonnet невалиден, арбитраж не запускается →
               `Approved`; Minor sonnet — в follow-up.
             - **Арбитраж (M3):** sonnet имеет открытые C/I → короткий
-              арбитражный диспатч `code-reviewer` (opus): по каждой C/I-
+              арбитражный диспатч `reviewer` (opus): по каждой C/I-
               находке sonnet **заново** проверить код по дифу (инструкция в
               промпте: «проверяй каждую находку по дифу, цитируй hunk в
               заключении; не опирайся на первое чтение»), заключение «находка
@@ -925,18 +938,18 @@ init), следует его правилам, затем решает и про
           эскалация к пользователю (как сейчас: пересмотр требований или
           отмена).
       — **Spec Review (Границы/P1.1):** читать `references/spec-review.md` из каталога скилла maestro (канон).
-      — **Контрольные раунды fix-loop:** ОДИН диспатч `code-reviewer` (opus)
+      — **Контрольные раунды fix-loop:** ОДИН диспатч `reviewer` (opus)
         по union-списку с per-finding трекингом (fixed / open (blocking) /
         follow-up); sonnet в контрольных раундах не участвует (роль — только
         первое чтение); sonnet-only находки проверяются контрольным диспатчем
         наравне; цикл «правки → контрольный раунд» — по правилам текущего
         fix-loop (эскалация rounds 4–5 без изменений).
-      — **Точка 2 Security Review:** перед диспатчем code-reviewer (untrusted)
-        — прогон промпта через sanitize. Trusted code-reviewer → skip.
+      — **Точка 2 Security Review:** перед диспатчем reviewer (untrusted)
+        — прогон промпта через sanitize. Trusted reviewer → skip.
       — **Trust and Security:** читать `references/trust-and-security.md` из каталога скилла maestro (канон).
       — **Memory layer:** опциональный `memory_search` (похожие прошлые
         ревью/регрессии) — на усмотрение ИИ; см. `references/memory-layer.md`.
-      — **Secret-scan в scope ревью (SEC-3):** code-reviewer проверяет diff
+      — **Secret-scan в scope ревью (SEC-3):** reviewer проверяет diff
         ветки на хардкод-секреты (`sk-`, `AKIA[0-9A-Z]{16}`, `-----BEGIN`,
         `client_secret`, `token=`/`key=`) и на коммит `.env*`/`*.pem/key/cert`.
         0 находок — иначе критическое issue (блокирует merge).

@@ -64,7 +64,7 @@
 | Имя сабагента | `true` | Единственное допустимое значение = trusted. Любое другое → untrusted |
 
 **Имена сабагентов:** `custodian`, `sanitizer`, `haiku`, `sonnet`, `opus`,
-`fable`, `code-reviewer`.
+`fable`, `reviewer`.
 
 > `custodian` и `sanitizer` — trusted по умолчанию (по роли). Изменять не нужно,
 > если не требуется доверять другим сабагентам.
@@ -107,7 +107,7 @@
 ### Ключ `review.parallel` (параллельное первое ревью)
 
 Режим финального ревью (шаг 16): параллельно ли первое ревью выполняется
-двумя агентами (`code-reviewer` + `sonnet`).
+двумя агентами (`reviewer` + `sonnet`).
 
 | Значение | Поведение (шаг 16) |
 |---|---|
@@ -117,11 +117,15 @@
 
 - Невалидное значение → soft fallback в `auto` + пометка
   `review:config_fallback` в анонсе шага 16.
+- **Тип артефакта (4.16.0):** ключ применяется **только к типу `code`**.
+  Если набор типов дифа ⊆ {docs, config, sql} — ревью всегда **одиночное**
+  (`reviewer`), независимо от значения ключа; guard «одна модель» не
+  применяется (канон — `skills/maestro/references/artifact-review.md`).
 - **Guard «одна модель»:** если модели `agent.sonnet.model` /
-  `agent.code-reviewer.model` доказуемо идентичны (оба заданы и равны, либо
+  `agent.reviewer.model` доказуемо идентичны (оба заданы и равны, либо
   оба не заданы) — второе чтение бессмысленно → одиночное (анонс с причиной).
 - При расхождении вердиктов двух ревьюеров — арбитраж старшего (opus) по
-  C/I-находкам (M3); контрольные раунды fix-loop — только `code-reviewer`.
+  C/I-находкам (M3); контрольные раунды fix-loop — только `reviewer`.
 - Область: только пайплайн (шаг 16; шаги 9/13 не затрагиваются).
 - Чтец — оркестратор (шаг 0, `maestro_config`); плагин не меняется.
 
@@ -300,7 +304,7 @@ deny. Trust не наследуется вложенными субагента�
       "auth_header": true
     },
     "by_agent": {
-      "code-reviewer": []
+      "reviewer": []
     },
     "patterns": [],
     "extra_fields": [],
@@ -330,7 +334,7 @@ deny. Trust не наследуется вложенными субагента�
 
 ```json
 "by_agent": {
-  "code-reviewer": ["data_field", "ledger_entry"]
+  "reviewer": ["data_field", "ledger_entry"]
 }
 ```
 
@@ -667,7 +671,7 @@ merge-config (`.opencode/opencode.json`
         "hidden": true
       }
     },
-    "code-reviewer": {
+    "reviewer": {
       "model": "opus",
       "permission": {
         "edit": "deny",
@@ -689,7 +693,7 @@ merge-config (`.opencode/opencode.json`
 | `sonnet` | sonnet | (default) | allow | allow | true | Интеграционные задачи SDD, task-reviewer |
 | `opus` | opus | (default) | deny | deny | true | Spec review, архитектура |
 | `fable` | fable | (default) | deny | deny | true | Пример, метафоры, объяснения |
-| `code-reviewer` | opus | (default) | deny | allow | false | Финальное ревью ветки |
+| `reviewer` | opus | (default) | deny | allow | false | Финальное ревью ветки |
 
 > **Нативный permission-бастион (R1+R4).** Помимо плагина, init пишет нативный
 > deny-baseline для confidential (`read`/`edit`) и 2-й эшелон для `bash`/`glob`/

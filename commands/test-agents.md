@@ -2,7 +2,7 @@
 description: Проверить всех сабагентов maestro реальным диспатчем — каждой модели даётся тестовая задача
 ---
 Проверь все 7 сабагентов maestro **реальным диспатчем**: `custodian`, `haiku`,
-`sonnet`, `opus`, `fable`, `code-reviewer`, `sanitizer`.
+`sonnet`, `opus`, `fable`, `reviewer`, `sanitizer`.
 
 Для каждого агента:
 
@@ -25,7 +25,7 @@ description: Проверить всех сабагентов maestro реаль
 | sonnet | OK / FAIL | <—> |
 | opus | OK / FAIL | <—> |
 | fable | OK / FAIL | <—> |
-| code-reviewer | OK / FAIL | <—> |
+| reviewer | OK / FAIL | <—> |
 | sanitizer | OK / FAIL | <—> |
 
 Правила заполнения:

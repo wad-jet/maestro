@@ -23,7 +23,7 @@
 |---|---|---|
 | **Haiku** (Быстрая/дешёвая) | Механические task-и: 1-2 файла, полный spec, трансляция+тесты | `haiku` |
 | **Sonnet** (средняя/сбалансированная) | Интеграционные task-и: multi-file, pattern matching, debugging | `sonnet` |
-| **Opus** (наиболее мощная) | Архитектура, spec formation, design judgment, final whole-branch review | `custodian` (Q/A по confidential), `opus` (spec review), `code-reviewer` (code review). На Revise (шаг 10b) `opus` **выдаёт структурированные правки**, а не пишет в файл (`edit: deny` сохраняется) |
+| **Opus** (наиболее мощная) | Архитектура, spec formation, design judgment, final whole-branch review | `custodian` (Q/A по confidential), `opus` (spec review), `reviewer` (code review). На Revise (шаг 10b) `opus` **выдаёт структурированные правки**, а не пишет в файл (`edit: deny` сохраняется) |
 | **Fable** (креативная) | Примеры, метафоры, аналогии, пояснения в стиле историй | `fable` |
 
 ### Шаг → Tier (встроенный `step_to_tier`)
@@ -34,7 +34,7 @@
 | `spec_review` (шаг 9) | opus | `opus` (untrusted; на Revise-цикле выдаёт правки, применяет оркестратор) |
 | `security_review` (шаг 8.6) | sanitizer | `sanitizer` (trusted) |
 | `task_reviewer` (шаг 13, per-task) | sonnet | `sonnet` |
-| `code_review` (шаг 16) | opus | `code-reviewer` |
+| `code_review` (шаг 16) | opus | `reviewer` |
 | `implementer_mechanical` (шаг 13, 1-2 файла) | haiku | `haiku` |
 | `implementer_integration` (шаг 13, multi-file) | sonnet | `sonnet` |
 | `explain` (по запросу, примеры/метафоры) | fable | `fable` |
@@ -75,19 +75,19 @@ read-only, применяет оркестратор.
 | `sonnet` | `.opencode/agents/sonnet.md` + `agent.sonnet.model` (`.opencode/opencode.json`/global) |
 | `opus` | `.opencode/agents/opus.md` + `agent.opus.model` (`.opencode/opencode.json`/global) |
 | `custodian` | `.opencode/agents/custodian.md` + `agent.custodian.model` (`.opencode/opencode.json`/global) |
-| `code-reviewer` | `.opencode/agents/code-reviewer.md` + `agent.code-reviewer.model` (`.opencode/opencode.json`/global) |
+| `reviewer` | `.opencode/agents/reviewer.md` + `agent.reviewer.model` (`.opencode/opencode.json`/global) |
 | `fable` | `.opencode/agents/fable.md` + `agent.fable.model` (`.opencode/opencode.json`/global) |
 | `sanitizer` | `.opencode/agents/sanitizer.md` + `agent.sanitizer.model` (`.opencode/opencode.json`/global) |
 
-Все под-агенты, кроме `code-reviewer`, объявлены `hidden: true` — не показываются
-в `@`-меню, вызываются только программно через `task` tool. `code-reviewer`
+Все под-агенты, кроме `reviewer`, объявлены `hidden: true` — не показываются
+в `@`-меню, вызываются только программно через `task` tool. `reviewer`
 (`hidden: false`) виден в `@`-меню — standalone-ревью доступно напрямую.
 
 - `permission` — `haiku`/`sonnet` могут редактировать файлы и запускать bash
   (имплементация), `opus`/`fable`/`sanitizer` — read-only без bash (ревью,
   объяснения, security-пометки). **`opus` сохраняет `edit: deny` на Revise-цикле:
   он выдаёт структурированные правки, а применяет их к spec оркестратор**,
-  `code-reviewer` — `bash: allow` (git
+  `reviewer` — `bash: allow` (git
   diff/log/show), `edit: deny` (без мутаций), `custodian` — `edit: deny`
   (Q/A-брокер, не пишет spec), `bash: deny` (без запуска команд), `task: deny`
   (без вложенных сабагентов).
@@ -95,7 +95,7 @@ read-only, применяет оркестратор.
   (один уровень вложенности).
 
 **При диспатче:** оркестратор по таблице «Шаг → Tier» определяет нужный tier,
-маппит tier → имя агента (`haiku`/`sonnet`/`opus`/`custodian`/`code-reviewer`/`fable`/`sanitizer`),
+маппит tier → имя агента (`haiku`/`sonnet`/`opus`/`custodian`/`reviewer`/`fable`/`sanitizer`),
 диспатчит через `task` tool с `subagent_type` = имени агента. Доступность модели
 обеспечивает провайдер OpenCode — отдельная проверка не требуется.
 
@@ -143,9 +143,9 @@ Guard от петель диспатча (пустые/ошибочные рез
      spec-review (шаг 9) — `approve|revise|reject` + бакеты;
      task-reviewer (шаг 13) — `✅|❌|⚠️` + `Approved|Needs fixes`;
      re-review — `ADDRESSED|NOT ADDRESSED` + round-verdict;
-      code-reviewer (шаг 16) — `Approved|Needs fixes|Reject`;
+      reviewer (шаг 16) — `Approved|Needs fixes|Reject`;
       sonnet@16 (параллельное первое ревью) — `Approved|Needs fixes|Reject`
-      + бакеты (как code-reviewer);
+      + бакеты (как reviewer);
       арбитраж@16 (M3) — «валидна/невалидна» по каждой C/I-находке sonnet +
       итоговый вердикт;
      implementer — Status-контракт `DONE|DONE_WITH_CONCERNS|BLOCKED|NEEDS_CONTEXT`
@@ -204,7 +204,7 @@ global). Поэтому оркестратор
 | `Subagent (general-purpose): model: sonnet` | `implementer_integration` | `sonnet` |
 | `Subagent (general-purpose): model: sonnet` | `task_reviewer` | `sonnet` |
 | `Subagent (general-purpose): model: opus` (или без model) | `spec_review` | `opus` |
-| `Subagent (general-purpose): model: opus` (или без model) | `code_review` | `code-reviewer` |
+| `Subagent (general-purpose): model: opus` (или без model) | `code_review` | `reviewer` |
 
 **Правила трансляции:**
 1. Поле `model:` в SDD-шаблонах **игнорируется** — агент определяется по `step_to_tier`.

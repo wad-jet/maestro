@@ -9,6 +9,47 @@
 
 ## [2026-09-30]
 
+> **Версия 4.16.0** — Minor-релиз: шаг 16 — ревью по типу артефакта (`code`/`docs`/`config`/`sql`): механический детект по дифу, built-in-критерии + §9-override, бинарный HITL-гейт (D5), параллельное первое ревью — только `code`; **rename агента `code-reviewer` → `reviewer`** (migration note: ключ merge-config `agent.code-reviewer.model` → stale)
+
+### Добавлено
+
+- **#107 — ревью по типу артефакта (шаг 16, 4.16.0):** типы
+  `code`/`docs`/`config`/`sql` — свойство дифа ветки (набор типов, дедуп);
+  механический детект по закрытым детерминированным спискам (оркестратор, до
+  диспатча, анонс «Тип артефакта: <набор> (правило: <сводно>)»; HITL-коррекция
+  только до диспатча); критерии — built-in (канон) + override из
+  `project-context.md` §9 (по-пунктный merge, приоритет §9 — пункт §9 заменяет
+  соответствующий built-in-пункт, остальные остаются); нетекстовые (бинарные)
+  артефакты — HITL-гейт D5 (закрытый allowlist текстовых расширений,
+  deny-by-default; варианты (a) ИИ-ревью текстовой части / (b) кодовый канон /
+  (c) стоп; рекомендуемый — (a)); параллельное первое ревью (#95) — **только
+  для типа `code`** (набор ⊆ {docs, config, sql} — всегда одиночное независимо
+  от `review.parallel`). Новый блок диспатча «Тип артефакта: …; Активные
+  критерии: …» — в промпт `reviewer` И `sonnet`. Канон: новая 11-я глава
+  `skills/maestro/references/artifact-review.md`; шаблон
+  `init-context.md` — категория 9 (критерии по типу, опц.) и категория 3
+  (слот «Миграции (каталоги)», вход детекта `sql`). Regression:
+  `regression/entries/2026-09-30-review-by-artifact-type.md`.
+
+### Изменено
+
+- **Rename агента `code-reviewer` → `reviewer`:** после #107 агент ревьюит все
+  типы артефакта — имя `code-reviewer` ввело в заблуждение.
+  `agents/code-reviewer.md` → `agents/reviewer.md` (new description);
+  поверхность — SKILL.md (шаг 16), канон-главы, `maestro-setup`/
+  `maestro-assistant`, команды, `maestro.json` (`sanitizer_whitelist.by_agent`).
+  **Migration note (целевые проекты):** переименуйте ключ
+  `agent.code-reviewer.model` в merge-config (`.opencode/opencode.json` /
+  global) на `agent.reviewer.model` — stale-ключ **молча отваливается**
+  (модель-override перестаёт применяться, в т.ч. guard «одна модель»); в
+  `maestro.json` — `sanitizer_whitelist.by_agent.code-reviewer` → `reviewer`.
+  Stale-зеркало `.opencode/agents/code-reviewer.md` чистят
+  `maestro-install.sh`/`maestro-update.sh` (секции stale-очистки).
+- **`review.parallel: always`** — уточнение: применяется только к типу `code`;
+  docs/config/sql — всегда одиночное ревью (4.16.0).
+
+## [2026-09-30]
+
 > **Версия 4.15.0** — Minor-релиз: скилл `maestro-memory` — канон промтов команд `@maestro-memory*`
 
 ### Добавлено

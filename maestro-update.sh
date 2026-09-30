@@ -288,7 +288,8 @@ info "запускаю 'agpack sync'..."
 "$AGPACK" sync
 
 # --- 3a. Очистка stale-артефактов (agpack не прунит) ---
-rm -rf .opencode/commands/maestro.md .opencode/skills/maestro-init .opencode/commands/maestro-new.md .opencode/skills/maestro-new
+# .opencode/agents/code-reviewer.md — stale после rename code-reviewer -> reviewer (4.16.0)
+rm -rf .opencode/commands/maestro.md .opencode/skills/maestro-init .opencode/commands/maestro-new.md .opencode/skills/maestro-new .opencode/agents/code-reviewer.md
 
 # --- 4. Очистка кэша плагина OpenCode ---------------------------------------
 

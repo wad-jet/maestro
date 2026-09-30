@@ -14,7 +14,7 @@
 |---|---|
 | **Скилл `maestro`** | Спецификация pipeline (фичи / багфиксы / баг-дебаг) — `skills/maestro/SKILL.md` |
 | **Команда `/maestro-init`** | Точка входа в пайплайн — загружает скилл и стартует pipeline |
-| **Субагенты** | `custodian`, `haiku`, `sonnet`, `opus`, `fable`, `code-reviewer`, `sanitizer` |
+| **Субагенты** | `custodian`, `haiku`, `sonnet`, `opus`, `fable`, `reviewer`, `sanitizer` |
 | **Плагин** | `maestro-bootstrap` — санитайзинг промптов, audit-логи |
 | **Память (опционально)** | Memory layer плагина — векторная память сессий (`memory_search`, авто-вспоминание); включается секцией `memory` в `maestro.json` |
 | **Команды** | `/maestro-init`, `/maestro-setup`, `/maestro-design`, `/regression`, `/test-agents` |
@@ -146,7 +146,7 @@ Trusted по роли: `custodian` + `sanitizer` (обоим доступен `d
 | `custodian` | opus (Q/A-брокер по confidential) | ✅ |
 | `sanitizer` | своя модель (security review) | ✅ |
 | `opus` | opus (spec review) | ❌ |
-| `code-reviewer` | opus (code review) | ❌ |
+| `reviewer` | opus (code review) | ❌ |
 | `haiku` | haiku (механические задачи) | ❌ |
 | `sonnet` | sonnet (интеграционные задачи) | ❌ |
 | `fable` | fable (примеры/метафоры) | ❌ |
@@ -155,7 +155,7 @@ Trusted по роли: `custodian` + `sanitizer` (обоим доступен `d
 уровням конфигурации (merge), с приоритетом project > global.
 
 **Рекомендуемый способ — централизованная глобальная настройка.** Настроить
-`agent.{custodian,haiku,sonnet,opus,fable,code-reviewer,sanitizer}` (model +
+`agent.{custodian,haiku,sonnet,opus,fable,reviewer,sanitizer}` (model +
 `temperature`) один раз в `~/.config/opencode/opencode.json` — новые проекты
 наследуют значения, `/maestro-setup` предлагает «оставить из global» первым
 вариантом. Project `.opencode/opencode.json` переопределяет global при нужде в
@@ -176,7 +176,7 @@ Trusted по роли: `custodian` + `sanitizer` (обоим доступен `d
 модель доступна — командой `/test-agents`:
 
 - диспатч каждого из 7 сабагентов (`custodian`, `haiku`, `sonnet`, `opus`, `fable`,
-  `code-reviewer`, `sanitizer`) тривиальной тестовой задачей «верни OK и своё имя»;
+  `reviewer`, `sanitizer`) тривиальной тестовой задачей «верни OK и своё имя»;
 - сводная таблица `OK / FAIL` по каждому агенту с причиной при ошибке (недоступна
   модель, ошибка провайдера, таймаут);
 - дополнительно проверяется confidential-инвариант: trusted-агент читает
@@ -229,7 +229,7 @@ qdrant/pgvector. Управление: `memory_forget`, `memory_export`/`memory_
 ## Структура
 
 ```
-agents/          — конфиги субагентов (custodian, haiku, sonnet, opus, fable, code-reviewer, sanitizer)
+agents/          — конфиги субагентов (custodian, haiku, sonnet, opus, fable, reviewer, sanitizer)
 commands/        — @command конфиги (/maestro-init, /maestro-setup, /regression, /test-agents)
 plugins/         — maestro-bootstrap (ESM-плагин: sanitize, observability)
 skills/          — скиллы (maestro, maestro-setup, maestro-design, manual-docs — generic user-docs)

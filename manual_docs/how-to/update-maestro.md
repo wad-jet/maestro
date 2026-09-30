@@ -139,6 +139,14 @@ rm -rf ~/.cache/opencode/packages/maestro-bootstrap@git+https:...
 > компонент (skill/command/agent) релиза добавляется в `maestro-install/agpack.yml`.
 > Этот же канон читает и `maestro-install.sh` при первичной установке — единый
 > источник зависимостей для обоих скриптов.
+>
+> **Миграция (4.16.0): агент `code-reviewer` → `reviewer`.** Обновите ключ
+> `agent.code-reviewer.model` в merge-config (`.opencode/opencode.json` /
+> global) на `agent.reviewer.model` (stale-ключ молча отваливается — модель
+> override перестаёт применяться) и `sanitizer_whitelist.by_agent.code-reviewer`
+> в `maestro.json` на `reviewer`. Stale-зеркало
+> `.opencode/agents/code-reviewer.md` очистят `maestro-install.sh`/
+> `maestro-update.sh` автоматически.
 
 ### Шаг 3: Контроль обновления
 

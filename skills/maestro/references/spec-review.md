@@ -104,18 +104,19 @@ hash: <sha256 содержимого spec без блоков maestro:*>
 |---|---|---|---|---|---|---|
 | **(a) Spec Review** | spec | шаг 9, pre-spec-gate | HITL (автопредложение на сложных) | **opus** | бакеты + approve/revise/reject |
 | **(b) SDD task-reviewer** | diff одной задачи | шаг 13, per-task | авто после DONE | **sonnet**, по риску diff'а | ✅/❌/⚠️ + Approved/Needs fixes |
-| **(c) requesting-code-review** | diff всей ветки | шаг 16, post-impl | авто (первое ревью — параллель: `code-reviewer` + `sonnet`, по правилу активации; контрольные раунды — только `code-reviewer`) | **opus** (+ sonnet, первый раунд) | бакеты + `Approved`/`Needs fixes`/`Reject` (sonnet@16 — тот же словарь; арбитраж M3 — «валидна/невалидна» по C/I-находке + итоговый вердикт) |
+| **(c) requesting-code-review** | diff всей ветки | шаг 16, post-impl | авто (первое ревью — параллель: `reviewer` + `sonnet`, по правилу активации; контрольные раунды — только `reviewer`) | **opus** (+ sonnet, первый раунд) | бакеты + `Approved`/`Needs fixes`/`Reject` (sonnet@16 — тот же словарь; арбитраж M3 — «валидна/невалидна» по C/I-находке + итоговый вердикт) |
 
 - (a) — единственный gate **до кодирования**; оценивает spec (архитектура/риски), не код.
 - (b) — per-task код-гейт **во время** реализации; узкий scope.
 - (c) — финальный код-гейт **после** реализации; широкий scope (вся ветка),
   ловит cross-task проблемы, которые (b) не видит.
+- Первое ревью шага 16 — параллельно только для типа `code` (#107, 4.16.0; канон — `references/artifact-review.md`).
 - Концептуально пересекается только «correctness + test strategy», но на разных
   объектах (spec vs код). Реальное code-review-пересечение (b)+(c) — намеренное.
 
 **Инвариант вердиктов (P1.1):** во всех трёх контурах Minor-находки не
 обосновывают blocking-вердикт (`revise` / `Needs fixes`); ревью с открытыми
-находками только Minor возвращает approve/Approved. Словарь контура (c) — словарь агента `code-reviewer.md`
+находками только Minor возвращает approve/Approved. Словарь контура (c) — словарь агента `reviewer.md`
 (`Approved`/`Needs fixes`/`Reject`); sonnet@16 — тот же словарь.
 
    **SCOPE NOTE (обязательно при неоднородном диапазоне):** если диапазон

@@ -14,7 +14,7 @@
 |---|---|---|
 | **Haiku** (быстрая/дешёвая) | Механические task-и: 1-2 файла, полный spec, трансляция+тесты | `haiku` |
 | **Sonnet** (средняя/сбалансированная) | Интеграционные task-и: multi-file, pattern matching, debugging | `sonnet` |
-| **Opus** (наиболее мощная) | Архитектура, spec formation, design judgment, final whole-branch review | `custodian` (Q/A по confidential), `opus` (spec review), `code-reviewer` (code review). На Revise `opus` выдаёт правки, применяет оркестратор |
+| **Opus** (наиболее мощная) | Архитектура, spec formation, design judgment, final whole-branch review | `custodian` (Q/A по confidential), `opus` (spec review), `reviewer` (code review). На Revise `opus` выдаёт правки, применяет оркестратор |
 | **Fable** (креативная) | Примеры, метафоры, аналогии, пояснения в стиле историй | `fable` |
 
 ## 📖 Шаг → Tier
@@ -24,7 +24,7 @@
 | `spec_formation` (шаг 8) | opus | `custodian` (trusted, Q/A по confidential) |
 | `spec_review` (шаг 9, после sanitize) | opus | `opus` |
 | `task_reviewer` (шаг 13, per-task) | sonnet | `sonnet` |
-| `code_review` (шаг 16) | opus (+ sonnet, первый раунд — параллель по `review.parallel`) | `code-reviewer` (+ `sonnet`) |
+| `code_review` (шаг 16) | opus (+ sonnet, первый раунд — параллель по `review.parallel`; только для типа `code`, 4.16.0) | `reviewer` (+ `sonnet`) |
 | `implementer_mechanical` (шаг 13, 1-2 файла) | haiku | `haiku` |
 | `implementer_integration` (шаг 13, multi-file) | sonnet | `sonnet` |
 | `explain` (по запросу, примеры/метафоры) | fable | `fable` |
@@ -45,7 +45,7 @@
 | `sonnet` | `agents/sonnet.md` | edit+bash | Интеграционные, multi-file, отладка |
 | `opus` | `agents/opus.md` | read-only | Spec Review (ревьюит спецификацию, прошедшую проверку `sanitizer` — Ур.1 плагин + Ур.2 сабагент), security audit, архитектура. На Revise — правки, применяет оркестратор |
 | `fable` | `agents/fable.md` | read-only | Примеры, метафоры, пояснения. Диспатчится по запросу (шаг `explain`), не автоматически в pipeline |
-| `code-reviewer` | `agents/code-reviewer.md` | bash+read (без edit) | Финальное ревью ветки |
+| `reviewer` | `agents/reviewer.md` | bash+read (без edit) | Финальное ревью ветки |
 | `sanitizer` | `agents/sanitizer.md` | read-only | Security review — поиск и пометка чувствительных данных |
 
 **Когда использовать `fable`** (по запросу, шаг `explain`):
@@ -53,7 +53,7 @@
 - предложить аналогию для нестандартной идеи;
 - пояснить сложный абстрактный термин через пример/«историю».
 
-Все субагенты, кроме `code-reviewer`, объявлены `hidden: true`
+Все субагенты, кроме `reviewer`, объявлены `hidden: true`
 (вызываются только программно через `task` tool). `task: deny` — субагенты не
 диспатчат вложенные под-агенты (один уровень вложенности).
 
@@ -75,7 +75,7 @@ OpenCode:    task(subagent_type="haiku", prompt="...")
 
 - **Tier (мощность) и Trust (доверие) — ортогональные оси.** Trusted — атрибут
   безопасности, не мощность.
-- **Tier:** custodian→opus, opus→opus, code-reviewer→opus, haiku→haiku, sonnet→sonnet,
+- **Tier:** custodian→opus, opus→opus, reviewer→opus, haiku→haiku, sonnet→sonnet,
   fable→fable, **sanitizer→своя**.
 - **Trust:** `custodian` и `sanitizer` — trusted (в `maestro.json`); остальные —
   untrusted. `custodian` и `sanitizer` — **разные агенты**, оба trusted. Модели могут
@@ -124,7 +124,7 @@ tier-подсказка.
 | `haiku` | haiku | 0.0 |
 | `sonnet` | sonnet | 0.1 |
 | `opus` | opus | 0.1 |
-| `code-reviewer` | opus | 0.2 |
+| `reviewer` | opus | 0.2 |
 | `fable` | fable | 0.7 |
 | `custodian` | opus | 0.1 |
 | `sanitizer` | своя | 0.0 |

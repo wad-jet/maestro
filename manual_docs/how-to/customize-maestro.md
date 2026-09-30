@@ -16,7 +16,7 @@
 ```
 skills/maestro/SKILL.md        ← спецификация pipeline (главный файл)
 skills/maestro/*.md            ← custodian-prompt, implementer-prompt, spec-review-prompt, stack-detection
-agents/*.md                    ← конфиги агентов (custodian, haiku, sonnet, opus, fable, code-reviewer, sanitizer)
+agents/*.md                    ← конфиги агентов (custodian, haiku, sonnet, opus, fable, reviewer, sanitizer)
 commands/*.md                  ← конфиги @command
 plugins/maestro-bootstrap/     ← ESM-плагин OpenCode
 ```
