@@ -59,6 +59,8 @@
 D4 статусы «Выполнено/реализовано (X.Y.Z)» в roadmap/TODO ↔ changelog.
 Дрейф = failing test. **Правило на merge:** обновить статус issue в
 `docs/roadmap.md` и отметку в `TODO.md` (зафиксировано в AGENTS.md).
+**Bump версии** = `package.json` + `docs/project-context.md` + метка
+`(~N строк, X.Y.Z)` в `AGENTS.md` (иначе D1a/D1b красные).
 
 ## 💡 Как найти, что изменилось
 
