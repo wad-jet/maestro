@@ -49,6 +49,19 @@
 > (`manual_docs/reference/config.md` таблицы, README плагина), держа синхронно с
 > правилами парсинга плагина (`loadMaestroConfig` и др.).
 
+## 🤖 Автоматизация: детерминированный дрейф-чекер
+
+`maestro-install/docs-drift.test.mjs` (в `npm test`, 4.17.0) — детерминированная
+проверка встроенных фактов в доках без LLM: D1 версии (метка `(~N строк, X.Y.Z)`
+в `AGENTS.md`; версионная строка в `docs/project-context.md`; semver-скан
+`manual_docs/**` (кроме `changelog.md`) + `README.md`), D2 устаревшие имена
+(STALE_NAMES vs поверхности), D3 счётчик-строк «~N строк» vs `wc -l`,
+D4 статусы «Выполнено/реализовано (X.Y.Z)» в roadmap/TODO ↔ changelog.
+Дрейф = failing test. **Правило на merge:** обновить статус issue в
+`docs/roadmap.md` и отметку в `TODO.md` (зафиксировано в AGENTS.md).
+**Bump версии** = `package.json` + `docs/project-context.md` + метка
+`(~N строк, X.Y.Z)` в `AGENTS.md` (иначе D1a/D1b красные).
+
 ## 💡 Как найти, что изменилось
 
 1. Сравните `skills/maestro/SKILL.md` с тем, что описано в `manual_docs/`.

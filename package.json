@@ -10,7 +10,7 @@
     "url": "https://github.com/wad-jet/maestro.git"
   },
   "scripts": {
-    "test": "node --test plugins/maestro-bootstrap/index.test.js maestro-install/agpack-coverage.test.mjs maestro-install/commands-skill-coverage.test.mjs skills/maestro/references-coverage.test.mjs skills/maestro-memory/references-coverage.test.mjs",
+    "test": "node --test plugins/maestro-bootstrap/index.test.js maestro-install/agpack-coverage.test.mjs maestro-install/commands-skill-coverage.test.mjs maestro-install/docs-drift.test.mjs skills/maestro/references-coverage.test.mjs skills/maestro-memory/references-coverage.test.mjs",
     "test:memory": "node --test 'plugins/maestro-bootstrap/memory/**/*.test.js'"
   },
   "devDependencies": {
