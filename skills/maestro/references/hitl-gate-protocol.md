@@ -45,6 +45,11 @@ Feature:
   Critical/Important при незакрытых повторах → (a) Approve / (b) продолжить /
   (c) follow-up оставшиеся) (см. шаг 10b)
 - Шаг 12 — plan утверждён (approve/revise/cancel)
+- Шаг 16 — нетекстовые (бинарные) артефакты в дифе (D5, #107):
+  (a) ИИ-ревью текстовой части дифа, бинарные — ручное / (b) ИИ-ревью всего
+  дифа по кодовому канону, бинарные игнорируются / (c) стоп — контентный;
+  manual/auto-answer — HITL; auto-ai — решение ИИ с журналом решений,
+  fallback (a) (контент — `references/artifact-review.md`)
 - Шаг 17 — pre-PR (approve merge/fix/cancel)
 - Security Review (Точка 2) — при находке sanitizer перед untrusted-диспатчем
   (вычистить и продолжить / продолжить как есть (принять риск) / стоп)
