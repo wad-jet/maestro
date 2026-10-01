@@ -1,6 +1,6 @@
 # Regression Registry (глава)
 
-> Канон: regression-registry. Грузится из `skills/maestro/SKILL.md` на шаги 0/15/17.
+> Канон: regression-registry. Грузится из `skills/maestro/SKILL.md` на шаги 0/11/13f/15/17.
 > Читается оркестратором (имеющим SKILL.md в контексте); внутри главы
 > допускаются ссылки «см. SKILL.md, <секция скелета>» и на другие главы.
 
