@@ -47,6 +47,7 @@ project context, запускает pre-flight, определяет катег�
 | 11 | Plan | Создание плана задач: tasks, **Spec Coverage Matrix** (требования спеки → задачи), Project Context Changes, spec-follow-up, regression risk; self-check (файлы-цели, grep-команды, план-тесты vs spec) |
 | 12 | Plan gate | Approve (коммит spec+plan+regression-entry) · Revise · Cancel |
 | 13 | SDD | Реализация: субагенты haiku/sonnet по сложности, per-task review (sonnet), progress log; **production-путь в тестах** — минимум один интеграционный тест через production-конструктор (без ручной подстановки `deps.*`/логгера) на каждый публичный «шов» |
+| 13f | Regression reconciliation | После реализации: сверка entry фичи с кодом (existence, исполняемость `run:`; расхождения → HITL a/b/c) + **cross-entry reconciliation чужих entries (4.19.0)** — выбор на шаге 11, existence/diff-проверки, `active` — через HITL, `verified` — только отчёт |
 | 14 | Docs | Обязательное обновление пользовательской документации: diff-сверка кода с manual_docs/; HITL только при расхождении. Coverage — на шаге 15 |
 | 15 | Checks | Тесты (TEST_COMMAND), e2e, coverage (docs/obs), lint |
 | 15a | Build | Проверка компиляции (BUILD_COMMAND) |
