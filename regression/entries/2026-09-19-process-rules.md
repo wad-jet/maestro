@@ -8,7 +8,7 @@
 - **scenarios:**
   - **Прерванное ревью возобновляется:** (SKILL.md Anti-loop п.5):
     - run: отмена зависшего диспатча ревью → обязательное ревью пере-диспатчится
-    - run: grep "≠ отказ от ревью" skills/maestro/SKILL.md → ≥1
+    - run: grep "≠ отказ от ревью" skills/maestro/references/model-selection.md → ≥1
   - **Комментарий ≠ команда:** (гейт 10):
     - run: «Внеси правки» в обсуждении спеки → применяется к спеке, НЕ к коду
     - run: grep "Внеси правки" skills/maestro/SKILL.md manual_docs/reference/hitl-gates.md → ≥1
