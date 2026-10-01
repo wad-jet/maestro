@@ -5,7 +5,7 @@ description: Регрессионный прогон по реестру рис�
 # @regression
 
 Прогон регрессии по реестру рисков. Команда standalone — НЕ часть pipeline
-шага 15. Дизайн: `docs/regression-flow.md`; `skills/maestro/references/regression-registry.md`.
+шага 15. Канон: `skills/maestro/references/regression-registry.md` (глава regression-registry).
 
 ## Триггеры
 
@@ -49,6 +49,7 @@ description: Регрессионный прогон по реестру рис�
 
 ## Статус-эффекты (только для `full`)
 
+- **Entry без automated-сценариев:** статус НЕ меняется (не верифицируется вакуумно); предупреждение в выводе «skipped: no automated scenarios» (vacuous-full guard)
 - Все automated-сценарии записи pass:
   - active → `status: verified`, `last_full_pass: <дата>` (запись остаётся в `entries/`)
   - verified → refresh `last_full_pass`
