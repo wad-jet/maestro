@@ -681,6 +681,13 @@ init), следует его правилам, затем решает и про
         `path:line` + `run:` (готовая точечная команда, резолв по
         `**Service:**` + Tier-модели) + `workdir:`. Manual-проверки —
         как `[Manual]`.
+        - **Cross-entry selection (#103, 4.19.0):** «под угрозой» entries —
+          `regression/entries/`, чьи цели сценариев (`path` → file-аргумент
+          `run:`) пересекаются с file-set плана (cap ≤ 5; порядок: число
+          пересекающихся сценариев desc, тир `added` desc). Механика — читать
+          `references/regression-registry.md`, «Cross-entry reconciliation
+          (13f)» (канон). Результат — секция `## Cross-Entry Reconciliation`
+          в плане. Пересечений нет → no-op.
       Если есть → исправить до gate (переписать через Write, не Edit)
 🟡 12. -- HITL GATE: plan утверждён --
       **Авто-режимы:** auto-answer — авто (a) Approve при выполнении P1.3
@@ -766,9 +773,21 @@ init), следует его правилам, затем решает и про
             - (a) обновить entry: перегенерировать `run:`/`path:line` по факту
             - (b) пометить сценарий `[Manual]` (тест не автоматизирован)
             - (c) удалить сценарий из entry
-         4. Reconciliation — отдельный хук, не перегенерация всей entry
-            (статус и `last_full_pass` сохраняются). Если entry не создана
-            (не было risk-сценариев на шаге 11) — шаг пропускается
+          4. Reconciliation — отдельный хук, не перегенерация всей entry
+             (статус и `last_full_pass` сохраняются). Если **own-entry** не
+             создана (не было risk-сценариев на шаге 11) — **own-entry часть**
+             пропускается; cross-entry часть (п.5) — свой no-op при пустом
+             списке selection
+          5. **Cross-entry reconciliation (#103, 4.19.0):** по списку из шага 11
+             (пересчёт по фактическому диффу, union с планом) — existence/diff-
+             проверки чужих entries (категории A/B). `active` — мутации через
+             HITL a/b/c (один гейт на все entries); `verified` — read-only,
+             расхождения — в отчёт. 0 запусков чужих тестов (carve-out:
+             bounded-запуск одного сценария при выборе (a) по числовому
+             ожиданию). Пустой active-entry запрещён → cancelled через
+             HITL (carve-out).
+             Механика — читать `references/regression-registry.md`, «Cross-entry
+             reconciliation (13f)» (канон). Пустой список selection → no-op.
       g. **Production-путь в тестах (обязательно):** на каждый публичный «шов»
          модуля (событие, хук, регистрация конструктора) — минимум один
          интеграционный тест через **production-конструктор** (реальный путь

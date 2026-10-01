@@ -1,6 +1,6 @@
 # Regression Registry (глава)
 
-> Канон: regression-registry. Грузится из `skills/maestro/SKILL.md` на шаги 0/15/17.
+> Канон: regression-registry. Грузится из `skills/maestro/SKILL.md` на шаги 0/11/13f/15/17.
 > Читается оркестратором (имеющим SKILL.md в контексте); внутри главы
 > допускаются ссылки «см. SKILL.md, <секция скелета>» и на другие главы.
 
@@ -10,8 +10,8 @@
 модулях, какими сценариями это проверяется. Cross-feature агрегация —
 через команду `@regression` (см. `commands/regression.md`).
 
-**Дизайн:** `docs/regression-flow.md` (источник истины). Pipeline встраивает
-3 хука: анализ (шаг 11), запись (шаг 12a), reconciliation (шаг 13f).
+**Канон** — эта глава. Pipeline встраивает 3 хука: анализ (шаг 11), запись
+(шаг 12a), reconciliation (шаг 13f).
 
 ### Структура (реестр в git)
 
@@ -25,7 +25,9 @@ $REGISTRY_DIR = $(git rev-parse --show-toplevel)/regression
 - Реестр закоммичен в git (корень репо). Per-worktree остаётся `.maestro/`
    (в `.gitignore` целиком)
 - `1 файл = 1 фича` — sharded append-only: конфликт параллельных pipeline
-  невозможен по построению, flock не нужен
+  маловероятен по построению (исключение — cross-entry reconciliation 13f,
+  обновляющий чужой entry; при merge-конфликте — повторная reconciliation
+  после мержа), flock не нужен
 - Параллельные worktree: каждая фича коммитит свой entry в свою ветку;
   `@regression full/release` корректен на main после мержа веток
 - Статус-мутации (`verified`/демоция/release/purge/cancel) → авто-коммит
@@ -69,7 +71,13 @@ verified ── @regression release ──→ released
 active ── отмена (Gate: отмена) ──→ released (status: cancelled)
 ```
 
+- Cross-entry-обновления (13f, #103): `active` — только сценарии
+  (локации/команды/ожидания), статусы не меняются (carve-out: empty-entry →
+  `cancelled` через HITL); `verified` — read-only чек (расхождения — в отчёт
+  13f), мутации — только через `@regression`
 - `full` — единственный авторитет для `verified`; `smoke` статусы не меняет
+- `full` на entry **без automated-сценариев** не верифицирует: статус не
+  меняется, предупреждение в выводе (vacuous-full guard)
 - Прогон и релиз развязаны: `full` ставит `verified`, перенос — только
   явный `@regression release`
 - Проект на паузе: `entries/` не трогается никогда; purge работает только
@@ -77,7 +85,61 @@ active ── отмена (Gate: отмена) ──→ released (status: canc
 - Семантика статусов — без git (нет детекта мержей/diff). Персистентность —
   в git: каждая мутация статуса коммитится авто-коммитом
 
+
 ### Команда
 
 `@regression smoke|full [active] [--timeout <сек>] | release | purge [days=30] | purge preview`
 — подробности в `commands/regression.md`.
+
+### Cross-entry reconciliation (13f) (#103, 4.19.0)
+
+#### Selection (шаг 11)
+
+- Источник — `regression/entries/`: `active` — мутации, `verified` —
+  read-only чек; entry текущей фичи — исключена
+- **Цель сценария** (repo-relative) — каскад:
+  1. `path` (файл-часть, без `:line`);
+  2. иначе file-аргумент `run:` (`grep`/`sed` — **последний** file-аргумент,
+     не паттерн; `node --test <file>` — файл; `npm run <script>` — манифест
+     сервиса/корня);
+  3. ни `path`, ни file-аргумент — сценарий не выбирается (prose — known
+     limitation); module-хинты «`(SKILL.md):`» не матчатся
+- Пересечение с file-set плана (файлы задач + `## Project Context Changes` +
+  path-резолвящиеся risk-модули); каталог-префиксы допустимы; пересечений нет → no-op
+- **Cap ≤ 5** (порядок: число пересекающихся сценариев desc, тир `added` desc);
+  остаток — в вывод 13f + progress-лог, не блокирует
+- Результат — секция `## Cross-Entry Reconciliation` в плане (видна на гейте 12)
+
+#### Сверка (шаг 13f)
+
+- Пересечение пересчитывается по фактическому диффу; берётся **union** со
+  списком плана (защита от дрейфа имплементации)
+- **Existence — по ВСЕМ automated-сценариям** выбранного entry: цель —
+  `test -f`; отсутствует → **A** (локус/цель отсутствует)
+- **Diff-условные — по пересекающимся** (файл цели в диффе):
+  - `path:line` — строка ≠ описанию (дрейф; **LLM-суждение** оркестратора,
+    помечено) → **A**
+  - числовое ожидание `→ N pass` / `→ N fail` / `→ 0` → **B** (stale)
+- **0 запусков чужих тестов** (граница M6); carve-out — bounded-запуск
+  одного сценария при решении (a)
+
+#### HITL (решение)
+
+- Факт расхождения — без HITL. Решение — **один гейт на все entries**
+  (entry → сценарий → категория → a/b/c):
+  - **(a)** обновить — локация: перегенерация **чтением файла**; число:
+    **один bounded-запуск** этого сценария (carve-out); `run:` — по новой локации
+  - **(b)** `[Manual]`; **(c)** удалить сценарий
+- Auto-режимы: manual/auto-answer — гейт; auto-ai — решение ИИ с журналом
+  (неуверенность → (a) + запись в журнал)
+- **Пустой active-entry запрещён** — HITL: (a) перенос в `released/` со
+  `status: cancelled` + `released: <дата>` (+ `cancelled-features.md`,
+  формат гейта отмены) — единственный статус-переход хука
+
+#### Границы мутации
+
+- Только локации/команды/ожидания сценариев; НЕ: `status`, `last_full_pass`,
+  `released`, `added`, `risk`, `version`, `feature` (новых полей нет)
+- `verified` — read-only: расхождения — в отчёт 13f, без HITL/мутаций
+- Авто-коммит — только путь entry: `chore(regression): <feature> entry
+  reconciled by <текущая-фича>`; no-op: пустой список selection
