@@ -7,6 +7,65 @@
 > Хронология составлена по истории authoring-репо `maestro-agent`. Даты
 > приблизительные (по коммитам).
 
+## [2026-10-01]
+
+> **Версия 4.19.0** — Minor-релиз: cross-entry reconciliation — пайплайн (шаги 11/13f) поддерживает актуальность чужих regression-entries при прогоне фичи.
+
+### Добавлено
+
+- **Cross-entry reconciliation (#103, 4.19.0):** пайплайн поддерживает
+  актуальность чужих (не текущей фичи) regression-entries. Шаг 11 —
+  **cross-entry selection**: «под угрозой» entries — `regression/entries/`,
+  чьи цели сценариев (каскад `path` → file-аргумент `run:`) пересекаются
+  с file-set плана (cap ≤ 5; результат — секция
+  `## Cross-Entry Reconciliation` в плане, видна на гейте 12). Шаг 13f —
+  **сверка чужих entries** (пересчёт по фактическому диффу, union с
+  планом): existence — по всем automated-сценариям (цель — `test -f`) +
+  diff-условные — по пересекающимся (дрейф `path:line` — категория A;
+  числовые ожидания `→ N pass/fail/0` — категория B). `active` —
+  обновление через HITL (a/b/c: обновить / `[Manual]` / удалить),
+  `verified` — read-only чек (расхождения — в отчёт 13f, без
+  HITL/мутаций). **0 запусков чужих тестов** (carve-out — bounded-запуск
+  одного сценария при обновлении числа по (a)); границы мутации — только
+  локации/команды/ожидания сценариев (`status`, `last_full_pass`,
+  `released`, `added`, `risk`, `version`, `feature` — не трогаются);
+  единственный статус-переход — пустой active-entry → `cancelled` (HITL,
+  `released/` + `cancelled-features.md`); авто-коммит — только путь entry
+  (`chore(regression): <feature> entry reconciled by <текущая-фича>`).
+  Механика — новая секция «Cross-entry reconciliation (13f)» в каноне
+  `skills/maestro/references/regression-registry.md`; скелет SKILL.md —
+  компактные указатели (шаги 11/13f). Regression:
+  `regression/entries/2026-10-01-regression-entries-freshness.md`.
+
+### Изменено
+
+- **Канон `skills/maestro/references/regression-registry.md`:** новая
+  секция «Cross-entry reconciliation (13f)» (selection/сверка/HITL/
+  границы мутации); уточнение шардинга (конфликт параллельных pipeline
+  маловероятен по построению, а не невозможен — cross-entry
+  reconciliation обновляет чужой entry; при merge-конфликте — повторная
+  reconciliation после мержа); vacuous-full guard (`full` на entry
+  **без automated-сценариев** не верифицирует — статус не меняется,
+  предупреждение в выводе); fix битой ссылки `docs/regression-flow.md`
+  («Канон — эта глава»); «Жизненный цикл» — cross-entry-обновления
+  (active — только сценарии, carve-out empty→cancelled; verified —
+  read-only, мутации — только через `@regression`).
+- **`commands/regression.md`:** vacuous-full guard (в начало списка
+  «Статус-эффекты (только для `full`)» — entry без automated-сценариев:
+  статус не меняется, «skipped: no automated scenarios») + fix той же
+  битой ссылки.
+- **SKILL.md (скелет):** шаг 11 — подпункт «Cross-entry selection»;
+  шаг 13f — пункт 5 «Cross-entry reconciliation» (указатели на главу);
+  skip-предложение ограничено own-entry частью.
+- **manual_docs:** `how-to/use-regression-registry.md` (новая секция
+  «Актуальность entries (cross-entry reconciliation)»),
+  `explanation/pipeline-overview.md` (строка шага 13f в таблице).
+- **Known limitation:** prose-сценарии без машинных целей (ни `path`, ни
+  file-аргумент `run:`) не выбираются хуком (семантическое устаревание
+  таких сценариев не покрывается механически); verified-entries —
+  обновление best-effort (гарантированного момента нет — штатно:
+  `@regression full` → fail → демоция на `active` → следующий прогон).
+
 ## [2026-09-30]
 
 > **Версия 4.18.0** — Minor-релиз: читабельность manual_docs — правила R1–R6 в скилле `manual-docs` + реформат 7 страниц (структура, факты дословно).

@@ -91,6 +91,18 @@
    Regression: `regression/entries/2026-09-30-manual-docs-readability.md`.
 3. **#103** — актуальность regression-entries. M6: обновление entries при прогоне
    пайплайна (на шаге ревью), а не отдельной рутиной.
+   **Выполнено (4.19.0, 2026-10-01):** cross-entry reconciliation — шаг 11
+   (selection «под угрозой» entries: цели сценариев `path` →
+   file-аргумент `run:` ∩ file-set плана, cap ≤ 5) + шаг 13f (сверка чужих
+   entries: existence + diff-условные, категории A/B; `active` — обновление
+   через HITL, `verified` — read-only чек; 0 запусков чужих тестов —
+   carve-out: bounded-запуск одного сценария при обновлении числа). M6
+   соблюдён: обновление при прогоне, не отдельная рутина. Known
+   limitation: prose-сценарии без машинных целей не выбираются;
+   verified-entries — best-effort. Dogfooding: entry
+   `regression/entries/2026-09-19-process-rules.md` обновлён в рамках этой
+   фичи (13f, коммит `chore(regression)`). Regression:
+   `regression/entries/2026-10-01-regression-entries-freshness.md`.
 4. **#87 (правки)** — по результату спайка, если не требует breaking.
 
 ## 5.0 (major) — только чистка (C1)
