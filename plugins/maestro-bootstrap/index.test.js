@@ -676,6 +676,77 @@ describe("maestro-bootstrap sanitize (Context Sanitizer, Level 1)", () => {
     const res = sanitize(`Bearer ${jwt} token=${jwt} session=${jwt}`);
     assert.doesNotMatch(res.text, /eyJhbGci/);
   });
+
+  // --- T2 (D3): H-1 unquoted PII, H-2 JSON-auth, H-3 ENCRYPTED-PEM,
+  // --- D3(s) полный escape extra_uri_schemes (4.21.0) ---
+  it("H-1: unquoted PII-значения у кураторских полей маскируются (email/phone/iban)", () => {
+    const res = sanitize("email: john@doe.com phone: +7-900-123-45-67 iban: DE89370400440532013000");
+    assert.ok(res.count > 0, "unquoted-значения маскируются (до D3 — только quoted/числа)");
+    assert.doesNotMatch(res.text, /john@doe\.com/);
+    assert.doesNotMatch(res.text, /\+7-900-123-45-67/);
+    assert.doesNotMatch(res.text, /DE89370400440532013000/);
+    assert.match(res.text, /<redacted>/);
+  });
+
+  it("H-1: quoted-варианты по-прежнему маскируются (анти-регрессия)", () => {
+    const res = sanitize('{"email": "j@d.com", "phone": "+7-900-000-00-00"}');
+    assert.equal(res.count, 2);
+    assert.doesNotMatch(res.text, /j@d\.com/);
+    assert.doesNotMatch(res.text, /\+7-900-000-00-00/);
+    assert.match(res.text, /"email": <redacted>/);
+  });
+
+  it("H-2: JSON-auth-заголовок маскируется целиком — имя НЕ сохраняется (семантика redact())", () => {
+    const res = sanitize('"Authorization": "Bearer ghp_abc123def456"');
+    assert.equal(res.count, 1);
+    assert.doesNotMatch(res.text, /ghp_abc123def456/);
+    assert.doesNotMatch(res.text, /Authorization/, "весь матч → <redacted>, имя заголовка не сохраняется");
+    // Фактическая семантика regex из спеки: матч начинается с имени (\b),
+    // ведущая кавычка перед именем — вне матча; закрывающая кавычка значения
+    // поглощается токеном `[^\s,;]+`.
+    assert.equal(res.text, '"<redacted>');
+  });
+
+  it("H-2: Authorization c токеном и , -разделителем — маскируется только токен (no over-mask)", () => {
+    const res = sanitize("Authorization: Bearer tok, X: y");
+    assert.equal(res.count, 1);
+    assert.doesNotMatch(res.text, /\btok\b/);
+    assert.match(res.text, /<redacted>, X: y/, "X: y задет не должна быть");
+  });
+
+  it("H-3: ENCRYPTED-PEM маскируется (ENCRYPTED в альтернации BEGIN и END)", () => {
+    const res = sanitize(
+      "-----BEGIN ENCRYPTED PRIVATE KEY-----\nMIIE...\n-----END ENCRYPTED PRIVATE KEY-----",
+    );
+    assert.equal(res.count, 1);
+    assert.doesNotMatch(res.text, /MIIE/);
+    assert.doesNotMatch(res.text, /ENCRYPTED/);
+    assert.match(res.text, /<redacted>/);
+  });
+
+  it("H-3: стандартные PEM (RSA/OPENSSH/без типа) по-прежнему маскируются (анти-регрессия)", () => {
+    for (const type of ["RSA ", "OPENSSH ", ""]) {
+      const pem = `-----BEGIN ${type}PRIVATE KEY-----\nMIIE...\n-----END ${type}PRIVATE KEY-----`;
+      const res = sanitize(pem);
+      assert.ok(res.count >= 1, `PEM ${type || "(без типа)"} маскируется`);
+      assert.doesNotMatch(res.text, /MIIE/);
+    }
+  });
+
+  it("D4.5 (D3(s)): extra_uri_schemes [\"bad(\"] — строка провалидирована D1, regex строится, sanitize не бросает", () => {
+    const { section, warnings } = validateWhitelist({ extra_uri_schemes: ["bad("] });
+    assert.deepEqual(section.extra_uri_schemes, ["bad("], "D1 строку не отбрасывает (строка, не-пустая)");
+    assert.equal(warnings.length, 0);
+    const opts = resolveSanitizeOptions(section, "haiku");
+    let res;
+    // До D3(s): escapeScheme экранировал только `?` → `new RegExp` бросал
+    // SyntaxError (`bad(` — несбалансированная скобка) на каждом диспатче.
+    // После: полный escapeRegex — regex валиден, `bad\(` просто не матчит.
+    assert.doesNotThrow(() => { res = sanitize("postgres://user:pass@host/db", opts); });
+    assert.equal(res.count, 1, "дефолтные схемы работают как раньше");
+    assert.match(res.text, /<redacted>/);
+    assert.doesNotMatch(res.text, /pass@/);
+  });
 });
 
 describe("maestro-bootstrap sanitizer hook (Level 1 in tool.execute.before)", () => {

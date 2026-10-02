@@ -142,8 +142,14 @@ function buildDataFieldsRegex(fields) {
   }
   const alt = alts.map(escapeRegex).join("|");
   // \b перед именем (start/после "_"/кавычки/non-word), `\w*` после — суффиксы.
+  // H-1 (4.21.0): value-альтернация + unquoted-токен `[^\s"'<>|,;]+` — маскирует
+  // значение до пробела/кавычки/разделителя у кураторских полей
+  // (`email: john@doe.com`, `phone: +7-900-…`, `iban: DE89…` — до D3 не ловились).
+  // FP-обоснование: имена из DEFAULT_SENSITIVE_FIELDS чувствительны по
+  // определению — согласуется с SECRET_COLON (для keyword-имён уже [^\s,;]+).
+  // Побочно закрывается `amount: -100` (H-10-фрагмент).
   return new RegExp(
-    `\\b["']?(?:${alt})\\w*["']?\\s*:\\s*("[^"]*"|'[^']*'|\\d[\\d.,]*)`,
+    `\\b["']?(?:${alt})\\w*["']?\\s*:\\s*("[^"]*"|'[^']*'|\\d[\\d.,]*|[^\\s"'<>|,;]+)`,
     "gi",
   );
 }
@@ -180,7 +186,12 @@ const DEFAULT_URI_SCHEMES = [
 // Connection string (key=value) с паролем: host=db password=secret.
 const CONN_PASSWORD = /\b(?:password|passwd|pwd)\s*=\s*("[^"]*"|'[^']*'|[^\s;]+)/gi;
 
-const escapeScheme = (s) => s.replace(/\?/g, "\\?");
+// D3(s) (4.21.0): полный escape через escapeRegex — раньше экранировался
+// только `?`, а, например, `extra_uri_schemes: ["bad("]` строил невалидный
+// regex (SyntaxError при `new RegExp` → сбой sanitize на каждом диспатче).
+// Любой строковый элемент теперь строит валидный regex-литерал (просто не
+// матчит ничего) — последний SyntaxError-триггер H-4 закрыт.
+const escapeScheme = (s) => escapeRegex(s);
 
 /**
  * Build the `db_credential` URI regex from a list of schemes.
@@ -201,14 +212,20 @@ function buildDbUriRegex(schemes) {
 
 // PEM-блоки: -----BEGIN <type> PRIVATE KEY----- ... -----END ...-----.
 // `i`-флаг — регистронезависимо (BEGIN/PRIVATE KEY в любом регистре).
+// H-3 (4.21.0): `ENCRYPTED ` в альтернации типов В ОБЕИХ половинах (BEGIN и
+// END) — до D3 блок `ENCRYPTED PRIVATE KEY` не маскировался.
 const PRIVATE_KEY =
-  /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----/gi;
+  /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY-----/gi;
 
 // --- Auth headers (rule `auth_header`) -------------------------------------
 
 // Authorization / X-API-Key и т.п.: Bearer/Basic токены.
+// H-2 (4.21.0): `["']?` после имени и перед значением — JSON-обёртка
+// (`"Authorization": "Bearer …"`) до D3 не маскировалась (кавычка ломала
+// `\s*:\s*`). Семантика redact() НЕ меняется: весь матч → <redacted>, имя
+// заголовка не сохраняется; `,`-разделители не растут over-mask.
 const AUTH_HEADER =
-  /\b(?:Authorization|X-API-Key|Proxy-Authorization|X-Auth-Token)\s*:\s*(?:Bearer\s+|Basic\s+|Token\s+)?[^\s,;]+/gi;
+  /\b(?:Authorization|X-API-Key|Proxy-Authorization|X-Auth-Token)["']?\s*:\s*["']?(?:Bearer\s+|Basic\s+|Token\s+)?[^\s,;]+/gi;
 
 // --- Colon-separated secrets (SEC-1b) --------------------------------------
 
