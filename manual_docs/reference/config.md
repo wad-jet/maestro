@@ -254,12 +254,14 @@ deny. Trust не наследуется вложенными субагента�
 | `sanitizer.redacted` | warn | `tool`, `agent`, `redacted` |
 | `sanitizer.all_rules_disabled` | warn | `tool`, `agent` |
 | `sanitizer.unsafe_patterns` | warn | `count` |
+| `sanitizer.invalid_config` | warn | `fields` (имена полей), `count` — валидация `sanitizer_whitelist` при init (4.21.0; только имена/типы — SEC-4b) |
 
 **События аудит-лога** (формат строки ниже):
 
 | `msg` | Уровень | Доп. поля |
 |---|---|---|
 | `confidential.access` | info (allow) / warn (deny) | `tool`, `action`, `agent`, `target` |
+| `sanitizer.failed` | warn | `tool`, `agent` — сбой маскирования, fail-closed (4.21.0) |
 
 Структура записи аудит-лога (JSON):
 
@@ -281,6 +283,9 @@ deny. Trust не наследуется вложенными субагента�
 - `confidential.access` — доступ к confidential-пути. `action: "allow"` — trusted-
   субагент читал/писал (уровень `info`); `action: "deny"` — заблокировано для
   untrusted/primary или trusted с `trusted.<tool>: deny` (уровень `warn`).
+- `sanitizer.failed` — сбой маскирования при task-диспатче (fail-closed, 4.21.0):
+  диспатч untrusted сабагента блокируется (промпт не уходит), уровень
+  `warn`; поля — `tool`, `agent` (без содержимого промпта).
 
 Каталоги логов задаются env: bootstrap — `MAESTRO_BOOTSTRAP_LOG_DIR`, аудит —
 `MAESTRO_AUDIT_LOG_DIR` (по умолчанию оба `<project>/.maestro/logs`). Сбой записи
@@ -320,12 +325,12 @@ deny. Trust не наследуется вложенными субагента�
 | Правило | Тип данных | Описание |
 |---|---|---|
 | `env_secret` | `SECRET`, `KEY`, `TOKEN`, `PASSWORD`, `CREDENTIAL`, `PASS`, `AUTH`, `DSN`, `CERT`, `SALT`, `SIGNATURE`, `NONCE` | Переменные окружения и colon-значения вида `KEY: value` или `KEY=value` |
-| `data_field` | Финансовые (`amount`, `salary`, `iban`, `cvv`, `vat`, `balance`…), PII (`phone`, `email`, `inn`, `snils`, `passport`…), credentials (`client_secret`, `api_key`, `password`…) | Чувствительные поля в JSON/fixtures/примерах данных |
+| `data_field` | Финансовые (`amount`, `salary`, `iban`, `cvv`, `vat`, `balance`…), PII (`phone`, `email`, `inn`, `snils`, `passport`…), credentials (`client_secret`, `api_key`, `password`…) | Чувствительные поля в JSON/fixtures/примерах данных, включая unquoted-значения (`email: john@doe.com`, 4.21.0) |
 | `env_file` | — | Упоминания файлов `.env`, `.env.*` |
 | `db_credential` | `postgres://`, `mysql://`, `sftp://`, `ssh://`, `ldap://`, `clickhouse://`, `mongodb://` и др. с встроенными credentials; строки с `password=...` | Connection strings и URI-схемы |
 | `ledger_entry` | — | Проводки (покрываются rule `data_field`, оставлен как маркер — no-op) |
-| `private_key` | `-----BEGIN ... PRIVATE KEY-----` | PEM-блоки приватных ключей |
-| `auth_header` | `Authorization: Bearer ...`, `X-API-Key: ...` | Auth-заголовки и standalone JWT tokens |
+| `private_key` | `-----BEGIN ... PRIVATE KEY-----`, включая `ENCRYPTED PRIVATE KEY` (4.21.0) | PEM-блоки приватных ключей |
+| `auth_header` | `Authorization: Bearer ...`, `X-API-Key: ...`, включая JSON-форму `"Authorization": "Bearer ..."` (4.21.0) | Auth-заголовки и standalone JWT tokens |
 
 #### `by_agent`
 
@@ -369,6 +374,36 @@ deny. Trust не наследуется вложенными субагента�
 ```json
 "extra_uri_schemes": ["kafka", "custom-proto", "zookeeper"]
 ```
+
+#### Валидация при init и fail-closed (4.21.0)
+
+Секция валидируется **один раз при init** плагина: невалидные значения
+отбрасываются (валидные сохраняются) + warn `sanitizer.invalid_config` в
+bootstrap-лог (ровно один при init; в событии — только имена полей и типы
+проблем, без значений — SEC-4b).
+
+Отбрасываются: не-строки и пустые строки в `patterns`/`extra_fields`/
+`extra_uri_schemes` (напр., `extra_fields: [123]` → элемент отброшен;
+`patterns: [[]]` — более не молчаливый bypass), не-массив вместо поля,
+неизвестные ключи и не-boolean значения в `rules` (такой ключ **не**
+подавляет правило), не-объект `rules`/`by_agent` и не-массив value в
+`by_agent`.
+
+`extra_uri_schemes` — полный escape: любой строковый элемент строит валидный
+regex (ранее `["bad("]` вызывал SyntaxError на каждом диспатче).
+
+**Fail-closed (4.21.0):** сбой маскирования при task-диспатче (untrusted) →
+`sanitizer.failed` в аудит-лог + **блокировка диспатча** (previously fail-open:
+ошибка проглатывалась, промпт уходил в сабагента несанитизированным).
+Title-ветка (логирование): сбой не ломает сессию — title `<unavailable>`.
+
+#### Known limitations (зона Level-2 / 5.0)
+
+Level-1 не покрывает: context-less секреты без «ключ: значение» (AIza…,
+xoxb-, bare `sk-proj-`), XML `<password>`, 2-сегментный JWT, URI-схемы вне
+списка по умолчанию (oracle/rediss/mariadb/snowflake — расширяются через
+`extra_uri_schemes`), multi-line значения. Кандидаты Level-2 / 5.0 — по
+анализу #117 (`docs/superpowers/analysis/2026-10-01-sanitizer-whitelist.md`).
 
 ### Секция `memory` (опциональный memory layer)
 

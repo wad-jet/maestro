@@ -98,6 +98,18 @@
 
 - **Плагин `maestro-bootstrap`:** confidential deny (по имени/структуре сессии,
   fail-closed), sanitize промпта (Уровень 1, авто-маскирование), аудит-лог.
+  **Sanitizer Level-1 — fail-closed (4.21.0, эскалация #117-разбора):**
+  (а) валидация `sanitizer_whitelist` при init — невалидные элементы
+  отбрасываются + warn `sanitizer.invalid_config` (ровно один при init; в warn
+  только имена полей/типы — SEC-4b; закрывает тихий bypass
+  `patterns: [[]]` (H-5), подавление SEC-7 мусорным ключом (H-7) и
+  throw-триггеры конфига (H-4)); (б) сбой маскирования на task-диспатче
+  (untrusted) → audit `sanitizer.failed` + блокировка диспатча (до 4.21.0 —
+  fail-open: ошибка проглатывалась, промпт уходил несанитизированным;
+  осознанное изменение security-поведения). Расширенное покрытие Level-1:
+  unquoted-значения PII-полей, JSON-auth-заголовки, PEM `ENCRYPTED PRIVATE
+  KEY` (H-1/H-2/H-3), полный escape URI-схем (любой строковый элемент
+  `extra_uri_schemes` строит валидный regex).
 - **Правило подписей (P7):** в fast-track (шаг 7d) подпись spec =
   provenance-рекомендация, не основание авто-пропуска 8.6/9 (для 7d-входов
   8.6 выполняется всегда, кроме HITL-заверения при валидной `CLEAN`).
@@ -133,6 +145,13 @@
   плагина (оставшаяся половина R2/R3) — Этап B после V1.
 - **Доверие по имени, не по модели.** Действует при нескомпрометированном конфиге.
 - **Один уровень вложенности.** Trust не наследуется вложенными сабагентами.
+- **Sanitizer Level-1 — known limitations (зона Level-2 / 5.0).** H-1/H-2/H-3
+  закрыты в 4.21.0 (unquoted PII, JSON-auth, ENCRYPTED-PEM). Level-1 не
+  покрывает: context-less секреты без «ключ: значение» (AIza…, xoxb-, bare
+  `sk-proj-`), XML `<password>`, 2-сегментный JWT, URI-схемы вне списка
+  (oracle/rediss/mariadb/snowflake — расширяются через `extra_uri_schemes`),
+  multi-line значения. Кандидаты Level-2 (5.0) — по анализу #117
+  (`docs/superpowers/analysis/2026-10-01-sanitizer-whitelist.md`).
 - **P5-гейт — инструкция (не enforcement).** Жёсткий STOP исполняется
   оркестратором (LLM); нативного механизма «нет плагина → запретить» нет; обход
   гейта не покрыт тестами (осознанный scope).
