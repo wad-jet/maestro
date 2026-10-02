@@ -520,6 +520,102 @@ export function loadWhitelist(config) {
   return section && typeof section === "object" ? section : {};
 }
 
+/**
+ * D1 (4.21.0, H-4/H-5/H-7): строгая валидация секции `sanitizer_whitelist`.
+ * Вызывается ОДИН раз при init (после loadWhitelist): невалидные элементы
+ * отбрасываются, валидные — сохраняются. Валидированный объект уходит в
+ * замыкание хуков; `resolveSanitizeOptions` остаётся чистым резолвером по
+ * провалидированным данным (не дублирует валидацию).
+ *
+ * Правила (soft-fallback-паттерн memory:config_fallback, но для security-
+ * механизма warn обязан быть явным — см. init):
+ *  - `rules` — только объект; ключи только из RULE_NAMES; значения только
+ *    boolean. Не-объект → секция игнорируется (дефолты ON) + warn;
+ *    неизвестный ключ / не-boolean → элемент игнорируется (дефолт ON) + warn.
+ *  - `by_agent` — только объект; value каждого агента — только массив строк
+ *    из известных имён правил. Не-объект / не-массив value / не-строка /
+ *    неизвестное имя → элемент(ы) игнорируются + warn.
+ *  - `patterns` / `extra_fields` / `extra_uri_schemes` — только массивы
+ *    строк. Не-массив → поле игнорируется + warn; не-строки и пустые строки
+ *    → элемент отбрасывается + warn (footgun: пустая альтернатива в regex =
+ *    mass-over-mask; H-5).
+ *
+ * @param {object} [section]  Секция из loadWhitelist.
+ * @returns {{ section: object, warnings: {field: string, type: string}[] }}
+ *   Провалидированная секция + предупреждения {field, type} — только имена
+ *   полей и тип проблемы, БЕЗ значений элементов (SEC-4b: элементы могут
+ *   быть чувствительными).
+ */
+export function validateWhitelist(section) {
+  const warnings = [];
+  const warn = (field, type) => warnings.push({ field, type });
+  if (section === undefined || section === null) return { section: {}, warnings };
+  if (typeof section !== "object" || Array.isArray(section)) {
+    return { section: {}, warnings: [{ field: "sanitizer_whitelist", type: "not_object" }] };
+  }
+  const out = {};
+
+  // rules: объект / известные имена / boolean.
+  if (section.rules !== undefined) {
+    if (section.rules !== null && typeof section.rules === "object" && !Array.isArray(section.rules)) {
+      const rules = {};
+      for (const [name, value] of Object.entries(section.rules)) {
+        if (RULE_NAMES.includes(name) && typeof value === "boolean") rules[name] = value;
+        else if (!RULE_NAMES.includes(name)) warn("rules", "unknown_key");
+        else warn("rules", "not_boolean");
+      }
+      out.rules = rules;
+    } else {
+      warn("rules", "not_object"); // секция игнорируется — дефолты ON
+    }
+  }
+
+  // by_agent: объект / массивы строк-известных имён правил.
+  if (section.by_agent !== undefined) {
+    if (section.by_agent !== null && typeof section.by_agent === "object" && !Array.isArray(section.by_agent)) {
+      const byAgent = {};
+      for (const [agent, names] of Object.entries(section.by_agent)) {
+        if (!Array.isArray(names)) {
+          warn("by_agent", "not_array"); // агент игнорируется
+          continue;
+        }
+        const valid = [];
+        for (const n of names) {
+          if (typeof n === "string" && RULE_NAMES.includes(n)) valid.push(n);
+          else warn("by_agent", "unknown_name");
+        }
+        byAgent[agent] = valid;
+      }
+      out.by_agent = byAgent;
+    } else {
+      warn("by_agent", "not_object");
+    }
+  }
+
+  // Строковые массивы: patterns / extra_fields / extra_uri_schemes.
+  for (const field of ["patterns", "extra_fields", "extra_uri_schemes"]) {
+    const value = section[field];
+    if (value === undefined) continue;
+    if (!Array.isArray(value)) {
+      warn(field, "not_array"); // поле игнорируется
+      continue;
+    }
+    const valid = [];
+    for (const item of value) {
+      if (typeof item !== "string") {
+        warn(field, "non_string");
+      } else if (item === "") {
+        warn(field, "empty_string");
+      } else {
+        valid.push(item);
+      }
+    }
+    out[field] = valid;
+  }
+
+  return { section: out, warnings };
+}
+
 const COMMUNICATION_MODES = new Set(["plain", "professional"]);
 
 /**
@@ -1023,7 +1119,17 @@ export function makeBoundedMap(max = 1024) {
   };
 }
 
-export const MaestroBootstrapPlugin = async ({ directory, client }) => {
+/**
+ * Фабрика плагина.
+ * @param {string} [directory]  Корень проекта.
+ * @param {object} [client]  OpenCode SDK client.
+ * @param {(prompt: string, opts: object) => {text: string, count: number}}
+ *   [sanitizeImpl]  Test-seam: инъектируемая реализация маскирования
+ *   (precedent injectable-швов: getGitConfig(root, exec)). По умолчанию —
+ *   реальный `sanitize`; используется в tool.execute.before (task-ветка) и
+ *   tool.execute.after (title-ветка).
+ */
+export const MaestroBootstrapPlugin = async ({ directory, client, sanitizeImpl = sanitize }) => {
   const root = directory || process.cwd();
   const version = readPluginVersion();
   const log = makeLogger(root);
@@ -1045,7 +1151,19 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
     filterEnv: "MAESTRO_MEMORY",
   });
   const config = loadMaestroConfig(undefined, root);
-  const whitelist = loadWhitelist(config);
+  // D1 (4.21.0, H-4/H-5/H-7): валидация whitelist — ОДИН раз при init
+  // (soft-fallback, как memory:config_fallback): невалидные элементы
+  // отбрасываются с ЯВНЫМ warn (security-механизм не молчит). В warn только
+  // имена полей и типы проблем, без значений (SEC-4b). Валидированный объект
+  // уходит в замыкание хуков — диспатчи работают по чистым данным.
+  const validatedWhitelist = validateWhitelist(loadWhitelist(config));
+  const whitelist = validatedWhitelist.section;
+  if (validatedWhitelist.warnings.length > 0) {
+    log.warn("sanitizer.invalid_config", {
+      fields: validatedWhitelist.warnings.map((w) => w.field),
+      count: validatedWhitelist.warnings.length,
+    });
+  }
   const confidential = loadConfidentialConfig(config);
   const trustedAgents = loadTrustConfig(config);
   // SEC-6: если whitelist-`patterns` содержит значения, которые сами матчатся
@@ -1182,7 +1300,29 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
                 agent,
               });
             }
-            const res = sanitize(output.args.prompt, opts);
+            // D2 (4.21.0, H-4): fail-closed — сбой маскирования БЛОКИРУЕТ
+            // диспатч (до фикса ошибка проглатывалась внешним catch, и промпт
+            // уходил в сабагента несанитизированным).
+            let res;
+            try {
+              res = sanitizeImpl(output.args.prompt, opts);
+            } catch (cause) {
+              // Security-событие — ТОЛЬКО в audit-лог (без дублей в
+              // bootstrap, конвенция выше); видимый сигнал даёт сам throw.
+              auditLog.warn("sanitizer.failed", {
+                sessionID: input.sessionID,
+                callID: input.callID,
+                tool: input.tool,
+                agent,
+              });
+              const err = new Error(
+                `[sanitizer:failed] Маскирование не выполнено — диспатч в ${agent} заблокирован. ` +
+                  `Проверьте sanitizer_whitelist в maestro.json`,
+              );
+              err.sanitizerFailed = true;
+              err.cause = cause;
+              throw err;
+            }
             if (res.count > 0) {
               output.args.prompt = res.text;
               log.warn("sanitizer.redacted", {
@@ -1207,9 +1347,10 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
           });
         }
       } catch (err) {
-        if (err?.confidential) {
-          // Confidential-нарушение — обязано дойти до OpenCode (реальный
-          // блок), не замалчиваться логгером.
+        if (err?.confidential || err?.sanitizerFailed) {
+          // Confidential-нарушение / сбой маскирования (D2) — обязаны
+          // дойти до OpenCode (реальный блок), не замалчиваться логгером
+          // (иначе fail-open сохранялся).
           throw err;
         }
         log.error("tool.execute.before: error", {
@@ -1236,7 +1377,15 @@ export const MaestroBootstrapPlugin = async ({ directory, client }) => {
         if (output?.title) {
           const agent = input.args?.subagent_type || input.args?.model || "unknown";
           const opts = resolveSanitizeOptions(whitelist, agent);
-          extra.title = sanitize(String(output.title), opts).text;
+          let title;
+          try {
+            title = sanitizeImpl(String(output.title), opts).text;
+          } catch {
+            // D2: title-ветка — не диспатч, сбой маскирования не ломает
+            // сессию (fail-soft): title просто не логируется.
+            title = "<unavailable>";
+          }
+          extra.title = title;
         }
         const isEmptySubagentResult =
           input.tool === "task" &&

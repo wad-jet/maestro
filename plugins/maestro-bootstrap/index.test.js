@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MaestroBootstrapPlugin, createBootstrapAdapter, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile, loadCommunicationConfig, loadFeedbackReportConfig, makeMaestroConfigTool, resolveConfigFile } from "./core.js";
+import { MaestroBootstrapPlugin, createBootstrapAdapter, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, validateWhitelist, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile, loadCommunicationConfig, loadFeedbackReportConfig, makeMaestroConfigTool, resolveConfigFile } from "./core.js";
 import {
   detectPlainFlag,
   SOURCE_LABELS,
@@ -2805,6 +2805,272 @@ describe("maestro_config tool (read-only maestro.json, spec 2026-09-24)", () => 
       assert.equal(out.config.custom, true);
     } finally {
       delete process.env.MAESTRO_CONFIG;
+    }
+  });
+});
+
+// =============================================================================
+// Sanitizer Hardening T1 (4.21.0): D1 — валидация sanitizer_whitelist при init
+// (H-4/H-5/H-7) + D2 — fail-closed на сбое маскирования.
+// Spec: docs/superpowers/specs/2026-10-01-sanitizer-hardening-design.md
+// =============================================================================
+
+describe("sanitizer hardening T1 (D1: validateWhitelist)", () => {
+  it("H-5: patterns [[]] → элемент отброшен + warn; маскирование по validated-opts работает", () => {
+    const { section, warnings } = validateWhitelist({ patterns: [[]] });
+    assert.deepEqual(section.patterns, []);
+    assert.ok(warnings.some((w) => w.field === "patterns"), "warn по patterns");
+    const opts = resolveSanitizeOptions(section, "haiku");
+    const res = sanitize("POSTGRES_PASSWORD=x", opts);
+    assert.ok(res.count > 0, "маскирование работает (bypass H-5 закрыт)");
+  });
+
+  it("H-4: extra_fields [123]/[\"\"] и extra_uri_schemes [\"\"] → отброшены; sanitize не бросает", () => {
+    const { section, warnings } = validateWhitelist({
+      extra_fields: [123, ""],
+      extra_uri_schemes: [""],
+    });
+    assert.deepEqual(section.extra_fields, []);
+    assert.deepEqual(section.extra_uri_schemes, []);
+    assert.ok(warnings.some((w) => w.field === "extra_fields" && w.type === "non_string"));
+    assert.ok(warnings.some((w) => w.field === "extra_fields" && w.type === "empty_string"));
+    assert.ok(warnings.some((w) => w.field === "extra_uri_schemes" && w.type === "empty_string"));
+    // Без валидации sanitize бросил бы (buildDataFieldsRegex: f.includes —
+    // не функция для числа). Провалидированные opts — без ошибок.
+    const opts = resolveSanitizeOptions(section, "haiku");
+    let res;
+    assert.doesNotThrow(() => { res = sanitize('{"amount": 1}', opts); });
+    assert.match(res.text, /<redacted>/);
+  });
+
+  it("H-7: rules с typo-ключом → отброшен; 7×false + мусорный truthy-ключ → allRulesDisabled === true", () => {
+    const { section, warnings } = validateWhitelist({
+      rules: {
+        auth_headers: true, // typo-ключ (H-7)
+        bogus: true,        // мусорный truthy-ключ
+        env_secret: false, data_field: false, env_file: false,
+        db_credential: false, ledger_entry: false, private_key: false,
+        auth_header: false,
+      },
+    });
+    assert.ok(!Object.hasOwn(section.rules, "auth_headers"), "typo-ключ отброшен");
+    assert.ok(!Object.hasOwn(section.rules, "bogus"), "мусорный ключ отброшен");
+    assert.equal(Object.keys(section.rules).length, 7);
+    assert.equal(warnings.filter((w) => w.field === "rules").length, 2);
+    assert.equal(
+      allRulesDisabled(resolveSanitizeOptions(section, "haiku")),
+      true,
+      "SEC-7 работает: все 7 правил выключены (мусор не подавляет warn)",
+    );
+  });
+
+  it("D1: rules не-объект → секция игнорируется (дефолты ON) + warn", () => {
+    const { section, warnings } = validateWhitelist({ rules: "off" });
+    assert.ok(!("rules" in section), "секция игнорируется");
+    assert.ok(warnings.some((w) => w.field === "rules" && w.type === "not_object"));
+    assert.equal(
+      allRulesDisabled(resolveSanitizeOptions(section, "haiku")),
+      false,
+      "дефолты ON",
+    );
+  });
+
+  it("H-7: by_agent с не-массив value → warn/игнор (data_field НЕ выключается)", () => {
+    const { section, warnings } = validateWhitelist({ by_agent: { haiku: "data_field" } });
+    assert.deepEqual(section.by_agent, {});
+    assert.ok(warnings.some((w) => w.field === "by_agent" && w.type === "not_array"));
+    const opts = resolveSanitizeOptions(section, "haiku");
+    assert.equal(opts.rules.data_field, true, "data_field не выключен");
+  });
+
+  it("D1: by_agent с неизвестным именем / не-строкой → элементы отброшены + warn", () => {
+    const { section, warnings } = validateWhitelist({
+      by_agent: { haiku: ["data_field", "nope", 42] },
+    });
+    assert.deepEqual(section.by_agent, { haiku: ["data_field"] });
+    assert.equal(warnings.filter((w) => w.field === "by_agent").length, 2);
+  });
+
+  it("D1: валидная секция проходит без изменений, без warn", () => {
+    const valid = {
+      rules: { env_secret: false },
+      by_agent: { haiku: ["data_field"] },
+      patterns: ["safe_value"],
+      extra_fields: ["custom_field"],
+      extra_uri_schemes: ["crm"],
+    };
+    const { section, warnings } = validateWhitelist(valid);
+    assert.deepEqual(section, valid);
+    assert.equal(warnings.length, 0);
+  });
+
+  it("D1: не-массив patterns/extra_fields/extra_uri_schemes → поле игнорируется + warn", () => {
+    const { section, warnings } = validateWhitelist({
+      patterns: "x",
+      extra_fields: 42,
+      extra_uri_schemes: null,
+    });
+    assert.ok(!("patterns" in section));
+    assert.ok(!("extra_fields" in section));
+    assert.ok(!("extra_uri_schemes" in section));
+    assert.equal(warnings.filter((w) => w.type === "not_array").length, 3);
+  });
+});
+
+describe("sanitizer hardening T1 (D1: init-валидация, plugin)", () => {
+  let dir, savedEnv;
+  const ENV = [
+    "MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL",
+    "MAESTRO_BOOTSTRAP_LOG_DIR", "MAESTRO_AUDIT_LOG_DIR", "MAESTRO_CONFIG",
+  ];
+
+  before(() => {
+    savedEnv = {};
+    for (const k of ENV) { savedEnv[k] = process.env[k]; delete process.env[k]; }
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-hard-d1-"));
+  });
+
+  after(() => {
+    for (const k of ENV) {
+      if (savedEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedEnv[k];
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("H-5: patterns [[]] через plugin — промпт диспатча маскируется", async () => {
+    const d = path.join(dir, "h5");
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, "maestro.json"), JSON.stringify({
+      sanitizer_whitelist: { patterns: [[]] },
+    }));
+    const h = await MaestroBootstrapPlugin({ directory: d });
+    const output = { args: { subagent_type: "haiku", prompt: "Check POSTGRES_PASSWORD=s3cr3t" } };
+    await h["tool.execute.before"]({ tool: "task", sessionID: "s-h5", callID: "c-h5" }, output);
+    assert.doesNotMatch(output.args.prompt, /s3cr3t/, "H-5: промпт замаскирован");
+    assert.match(output.args.prompt, /<redacted>/);
+  });
+
+  it("warn sanitizer.invalid_config — ровно 1 при init (N диспатчей → всё ещё 1)", async () => {
+    const d = path.join(dir, "warn");
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, "maestro.json"), JSON.stringify({
+      sanitizer_whitelist: { patterns: [[]], extra_fields: [123] },
+    }));
+    const h = await MaestroBootstrapPlugin({ directory: d });
+    let entries = readLogs(d).filter((e) => e.msg === "sanitizer.invalid_config");
+    assert.equal(entries.length, 1, "ровно один warn при init");
+    // SEC-4b: в warn только имена полей и тип, без значений элементов.
+    assert.ok(entries[0].fields.every((f) => f === "patterns" || f === "extra_fields"));
+    assert.ok(entries[0].fields.includes("patterns"));
+    assert.ok(entries[0].fields.includes("extra_fields"));
+    assert.equal(entries[0].count, 2);
+    // N диспатчей → warn не повторяется (валидация — один раз при init).
+    for (let i = 0; i < 3; i++) {
+      const out = { args: { subagent_type: "haiku", prompt: `hello ${i}` } };
+      await h["tool.execute.before"]({ tool: "task", sessionID: "s-w", callID: `c-w-${i}` }, out);
+    }
+    entries = readLogs(d).filter((e) => e.msg === "sanitizer.invalid_config");
+    assert.equal(entries.length, 1, "warn не на каждом диспатче");
+  });
+});
+
+describe("sanitizer hardening T1 (D2: fail-closed)", () => {
+  // Test-seam: фабрика принимает sanitizeImpl (default — реальный sanitize).
+  // Бросающая реализация форсирует сбой маскирования (H-4).
+  const ENV = [
+    "MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL",
+    "MAESTRO_BOOTSTRAP_LOG_DIR", "MAESTRO_AUDIT_LOG_DIR", "MAESTRO_CONFIG",
+  ];
+  let savedEnv;
+  let auditDir;
+
+  // Чтение audit-JSONL из явного каталога (MAESTRO_AUDIT_LOG_DIR → tmp),
+  // по образцу readLogs.
+  function readAudit() {
+    const files = fs.existsSync(auditDir) ? fs.readdirSync(auditDir) : [];
+    const out = [];
+    for (const f of files) {
+      if (!f.includes("maestro-audit")) continue;
+      for (const line of fs.readFileSync(path.join(auditDir, f), "utf8").split("\n")) {
+        if (line.trim()) out.push(JSON.parse(line));
+      }
+    }
+    return out;
+  }
+
+  async function makeThrowingHooks() {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), "fab-hard-fc-"));
+    const h = await MaestroBootstrapPlugin({
+      directory: d,
+      sanitizeImpl: () => { throw new Error("boom"); },
+    });
+    return { d, h };
+  }
+
+  before(() => {
+    savedEnv = {};
+    for (const k of ENV) { savedEnv[k] = process.env[k]; delete process.env[k]; }
+    auditDir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-hard-fc-audit-"));
+    process.env.MAESTRO_AUDIT_LOG_DIR = auditDir;
+  });
+
+  after(() => {
+    for (const k of ENV) {
+      if (savedEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedEnv[k];
+    }
+    fs.rmSync(auditDir, { recursive: true, force: true });
+  });
+
+  it("сбой sanitize в task-ветке → диспатч заблокирован + audit sanitizer.failed", async () => {
+    const { d, h } = await makeThrowingHooks();
+    try {
+      const output = { args: { subagent_type: "haiku", prompt: "Check POSTGRES_PASSWORD=s3cr3t" } };
+      await assert.rejects(
+        h["tool.execute.before"]({ tool: "task", sessionID: "s-fc1", callID: "fc-1" }, output),
+        (err) => {
+          assert.match(err.message, /\[sanitizer:failed\]/);
+          assert.match(err.message, /haiku/);
+          assert.match(err.message, /sanitizer_whitelist/);
+          assert.equal(err.sanitizerFailed, true, "маркер на ошибке");
+          return true;
+        },
+      );
+      // Аудит-запись (security-фактура сбойного маскирования).
+      const e = readAudit().find((x) => x.msg === "sanitizer.failed" && x.callID === "fc-1");
+      assert.ok(e, "audit-запись sanitizer.failed должна существовать");
+      assert.equal(e.sessionID, "s-fc1");
+      assert.equal(e.agent, "haiku");
+      // Audit-only: дубль в bootstrap-лог не пишется (конвенция).
+      const bootstrap = readLogs(d).filter((x) => x.msg === "sanitizer.failed");
+      assert.equal(bootstrap.length, 0, "security-событие не дублируется в bootstrap");
+    } finally {
+      fs.rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it("title-ветка (after): сбой sanitize → title <unavailable>, без throw", async () => {
+    const { d, h } = await makeThrowingHooks();
+    try {
+      // before без prompt — call регистрируется (toolCalls), сбой маскирования
+      // в этой ветке не возникает.
+      await h["tool.execute.before"](
+        { tool: "task", sessionID: "s-fc2", callID: "fc-t1" },
+        { args: { subagent_type: "haiku", description: "impl" } },
+      );
+      await assert.doesNotReject(
+        h["tool.execute.after"](
+          { tool: "task", sessionID: "s-fc2", callID: "fc-t1", args: { subagent_type: "haiku" } },
+          { title: "report API_KEY=leak123", output: "ok", metadata: {} },
+        ),
+        "сбой маскирования title не ломает сессию",
+      );
+      const e = readLogs(d).find((x) => x.msg === "tool.execute.after" && x.callID === "fc-t1");
+      assert.ok(e, "запись tool.execute.after должна существовать");
+      assert.equal(e.title, "<unavailable>", "title не логируется (fail-soft)");
+    } finally {
+      fs.rmSync(d, { recursive: true, force: true });
     }
   });
 });
