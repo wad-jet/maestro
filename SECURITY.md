@@ -150,7 +150,8 @@
   покрывает: context-less секреты без «ключ: значение» (AIza…, xoxb-, bare
   `sk-proj-`), XML `<password>`, 2-сегментный JWT, URI-схемы вне списка
   (oracle/rediss/mariadb/snowflake — расширяются через `extra_uri_schemes`),
-  multi-line значения. Кандидаты Level-2 (5.0) — по анализу #117
+  multi-line значения, multi-token значения одной строки (маскируется первый
+  токен). Кандидаты Level-2 (5.0) — по анализу #117
   (`docs/superpowers/analysis/2026-10-01-sanitizer-whitelist.md`).
 - **P5-гейт — инструкция (не enforcement).** Жёсткий STOP исполняется
   оркестратором (LLM); нативного механизма «нет плагина → запретить» нет; обход

@@ -402,7 +402,8 @@ Title-ветка (логирование): сбой не ломает сесси
 Level-1 не покрывает: context-less секреты без «ключ: значение» (AIza…,
 xoxb-, bare `sk-proj-`), XML `<password>`, 2-сегментный JWT, URI-схемы вне
 списка по умолчанию (oracle/rediss/mariadb/snowflake — расширяются через
-`extra_uri_schemes`), multi-line значения. Кандидаты Level-2 / 5.0 — по
+`extra_uri_schemes`), multi-line значения, multi-token значения одной строки
+(маскируется первый токен: `address: <redacted> Main St`). Кандидаты Level-2 / 5.0 — по
 анализу #117 (`docs/superpowers/analysis/2026-10-01-sanitizer-whitelist.md`).
 
 ### Секция `memory` (опциональный memory layer)
