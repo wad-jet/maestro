@@ -63,6 +63,9 @@
    **Эскалация выполнена (4.21.0, 2026-10-01):** H-4/H-5 (fail-closed +
    валидация) + H-1/H-2/H-3 (3 формы Level-1) — фича «sanitizer hardening»,
    regression `regression/entries/2026-10-01-sanitizer-hardening.md`.
+   **HITL-решения §8.2–8.3 выполнены (4.22.0, 2026-10-01):** понимания-слой
+   `sanitizer_whitelist` в config.md + pre-work notice (шаг 0) + notice на
+   гейте 8.6 — regression `regression/entries/2026-10-01-pre-work-notice.md`.
 
 ## Волна 2 — Качество пайплайна (4.8.x)
 > Метка «4.8.x» — историческая (версия ушла на 4.9.0 — read-tool-фича; #109/#115 → 4.10.0).
