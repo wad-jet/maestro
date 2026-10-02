@@ -474,32 +474,53 @@ runtime-правки не активны до перезапуска opencode» 
 
 **Правила детекта (Context Sanitizer):**
 
+Маска всегда — `<redacted>`; для env-секретов и полей данных имя ключа
+сохраняется (`API_KEY=<redacted>`, `password: <redacted>`), для URI/PEM/
+заголовков — весь матч → `<redacted>`.
+
 1. **Secrets из окружения** — имена (любой регистр) с `SECRET`, `KEY`, `TOKEN`,
    `PASSWORD`, `CREDENTIAL`, `PASS`, `AUTH`, `DSN`, `CERT`, `SALT`,
-   `SIGNATURE`, `NONCE` → `<redacted:env.NAME>`.
+   `SIGNATURE`, `NONCE` → `ИМЯ=<redacted>` (имя переменной сохраняется,
+   значение — `<redacted>`); то же для colon-стиля: `password: <redacted>`.
 2. **Чувствительные поля данных** — финансовые (`amount`, `salary`, `iban`,
    `card_number`, `cvv`, `vat`, `total_amount`, ...), PII (personal
    identifiable data — персональные данные) (`phone`, `email`, `inn`,
-   `snils`, `passport`, ...), бизнес-поля → `<redacted>`. Детект
-   регистронезависим; суффиксы (`amountValue`, `amount_value`) и camelCase-
-   варианты snake-полей (`cardNumber`) покрываются; список расширяем через
-   `extra_fields` в whitelist.
-3. **Файлы .env / .env.\*** → `<redacted:.env file>`.
+   `snils`, `passport`, ...), бизнес-поля → `имя_поля: <redacted>` (имя поля
+   сохраняется). Значения — с кавычками, числовые и **unquoted** (4.21.0):
+   `email: john@doe.com` → `email: <redacted>`, `phone: +7-900-…`,
+   `iban: DE89…`. Детект регистронезависим; суффиксы
+   (`amountValue`, `amount_value`) и camelCase-варианты snake-полей
+   (`cardNumber`) покрываются; список расширяем через `extra_fields` в
+   whitelist.
+3. **Файлы .env / .env.\*** → `<redacted>`.
 4. **SFTP/DB credentials** — URI-схемы (`sftp://`, `postgresql://`, `mysql://`,
    `ssh://`, `ldap://`, `clickhouse://`, ..., регистронезависимо) с credentials
-   и connection-string params (`password=...`, `pwd=...`) →
-   `<redacted:connection>`. Схемы расширяемы через `extra_uri_schemes`.
-5. **Private keys** — PEM-блоки `-----BEGIN ... PRIVATE KEY-----`
+   и connection-string params (`password=...`, `pwd=...`) → `<redacted>` (весь
+   матч). Схемы расширяемы через `extra_uri_schemes`; любой строковый
+   элемент строит валидный regex — полный escape (4.21.0).
+5. **Private keys** — PEM-блоки `-----BEGIN ... PRIVATE KEY-----`, включая
+   `ENCRYPTED PRIVATE KEY` (4.21.0, в обеих половинах — BEGIN и END)
    (регистронезависимо) → `<redacted>`.
-6. **Auth headers** — `Authorization: Bearer ...`, `X-API-Key: ...` → `<redacted>`.
+6. **Auth headers** — `Authorization: Bearer ...`, `X-API-Key: ...`, включая
+   JSON-форму `"Authorization": "Bearer ..."` (4.21.0) → `<redacted>` (весь
+   матч).
 7. **Raw ledger entries** → маскинг полей из п.2.
 
 Что **не** фильтруется: агрегированные данные, схемы БД без данных, код и
-конфиги (кроме `.env`), имена таблиц/колонок.
+конфиги (кроме `.env`), имена таблиц/колонок. Known limitations Level-1
+(4.21.0, зона Level-2 / 5.0): context-less секреты без «ключ: значение»
+(AIza…, xoxb-, bare `sk-proj-`), XML `<password>`, 2-сегментный JWT,
+URI-схемы вне списка (oracle/rediss/mariadb/snowflake), multi-line значения.
 
 **Аудит-лог:** плагин пишет события sanitizer в
-`.maestro/logs/maestro-bootstrap-<date>.log` с маркерами `sanitizer.redacted`
-(что замаскировано, без содержимого).
+`.maestro/logs/maestro-bootstrap-<date>.log`: `sanitizer.redacted` (что
+замаскировано, без содержимого), `sanitizer.all_rules_disabled`,
+`sanitizer.unsafe_patterns`. Новые (4.21.0): `sanitizer.invalid_config` —
+валидация `sanitizer_whitelist` при init (один раз; только имена полей/типы
+— SEC-4b) и `sanitizer.failed` — сбой маскирования (аудит-лог
+`maestro-audit-<date>.log`): **fail-closed** — диспатч untrusted блокируется
+(было fail-open: промпт уходил несанитизированным); title-ветка —
+`<unavailable>`, сессия не ломается.
 
 ## 🔗 Связанные разделы
 

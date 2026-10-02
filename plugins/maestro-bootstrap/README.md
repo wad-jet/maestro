@@ -33,26 +33,30 @@
 
 1. **Secrets из окружения** — имена (case-insensitive: `API_KEY`, `apiKey`,
    `api_key`) с keywords `SECRET`, `KEY`, `TOKEN`, `PASSWORD`, `CREDENTIAL`,
-   `PASS`, `AUTH`, `DSN`, `CERT`, `SALT`, `SIGNATURE`, `NONCE` и их значения →
-   `<redacted>`. Покрывает однословные (`TOKEN=`, `KEY=`, `SECRET=`) и
-   colon-стиль (`password: x`, `API_KEY: x`) (SEC-1/SEC-1b).
+   `PASS`, `AUTH`, `DSN`, `CERT`, `SALT`, `SIGNATURE`, `NONCE` →
+   `ИМЯ=<redacted>` (имя сохраняется, значение — `<redacted>`). Покрывает
+   однословные (`TOKEN=`, `KEY=`, `SECRET=`) и colon-стиль
+   (`password: <redacted>`, `API_KEY: <redacted>`) (SEC-1/SEC-1b).
 2. **Чувствительные поля данных** — расширенный список (финансовые: `amount`,
    `salary`, `iban`, `card_number`, `cvv`, `vat`, `total_amount` и т.д.; PII:
    `phone`, `email`, `inn`, `snils`, `passport` и т.д.; credentials:
    `client_secret`, `api_key`, `secret_key`, `password`, `secret` и т.д.) →
-   `<redacted>`. Детект регистронезависим; `\w*`-суффиксы (`amountValue`,
-   `amount_value`) и camelCase-варианты snake-полей (`cardNumber`) покрываются
-   автоматически. Ловит JSON-ключи `"password": "x"` (SEC-1b).
+   `имя: <redacted>` (имя сохраняется). Детект регистронезависим; `\w*`-
+   суффиксы (`amountValue`, `amount_value`) и camelCase-варианты snake-полей
+   (`cardNumber`) покрываются автоматически. Ловит JSON-ключи
+   `"password": "x"` (SEC-1b) и **unquoted**-значения
+   (`email: john@doe.com`, `phone: +7-900-…` — 4.21.0).
 3. **Файлы .env / .env.\*** → `<redacted>`.
 4. **SFTP/DB credentials** — URI-схемы (`postgres://`, `mysql://`, `ssh://`,
    `ldap://`, `clickhouse://`, `http://`, `https://` и др., регистронезависимо) с
    встроенными credentials (в т.ч. анонимный user `postgres://:pass@host`, SEC-1b),
    а также connection-string params `password=...`, `pwd=...` → `<redacted>`.
-5. **Private keys** — PEM-блоки `-----BEGIN ... PRIVATE KEY-----`
+5. **Private keys** — PEM-блоки `-----BEGIN ... PRIVATE KEY-----`, включая
+   `ENCRYPTED PRIVATE KEY` (4.21.0, в обеих половинах — BEGIN и END)
    (регистронезависимо) → `<redacted>`.
-6. **Auth headers** — `Authorization: Bearer ...`, `X-API-Key: ...` →
-   `<redacted>`; также standalone JWT (`header.payload.signature`) вне заголовка
-   (SEC-1b).
+6. **Auth headers** — `Authorization: Bearer ...`, `X-API-Key: ...`, включая
+   JSON-форму `"Authorization": "Bearer ..."` (4.21.0) → `<redacted>`; также
+   standalone JWT (`header.payload.signature`) вне заголовка (SEC-1b).
 7. **Raw ledger entries** — покрываются rule `data_field` (те же поля).
 
 Whitelist — секция `sanitizer_whitelist` в `maestro.json` (см. ниже).
@@ -73,6 +77,19 @@ Whitelist — секция `sanitizer_whitelist` в `maestro.json` (см. ниж
 - `extra_fields` — дополнительные чувствительные поля данных (проект-специфичные),
   добавляются к дефолтному списку.
 - `extra_uri_schemes` — дополнительные URI-схемы для credentials-детекта.
+
+**Валидация при init (4.21.0):** невалидные элементы секции (не-строки/пустые
+в `patterns`/`extra_fields`/`extra_uri_schemes`, неизвестные ключи и не-boolean
+в `rules`, не-массив value в `by_agent`, не-массив вместо поля) отбрасываются
+(валидные сохраняются) + warn `sanitizer.invalid_config` ровно один при init
+(в событии — только имена полей/типы, без значений — SEC-4b).
+`extra_uri_schemes` — полный escape: любой строковый элемент строит валидный
+regex (ранее `["bad("]` вызывал SyntaxError на каждом диспатче).
+
+**Fail-closed (4.21.0):** сбой маскирования при task-диспатче (untrusted) →
+`sanitizer.failed` в аудит-лог + блокировка диспатча (до 4.21.0 — fail-open:
+ошибка проглатывалась, промпт уходил в сабагента несанитизированным).
+Title-ветка: сбой → `<unavailable>`, сессия не ломается.
 
 ### Секция `confidential`
 
@@ -111,6 +128,9 @@ Security-фактура по доступу пишется в **отдельны
   субагент читал/писал, уровень `info`) или `action: "deny"` (блокировка для
   untrusted/primary, уровень `warn`). Включает `agent` (имя trusted-агента) и
   `target` (только `basename`, SEC-5).
+- `sanitizer.failed` — сбой маскирования при task-диспатче (4.21.0,
+  fail-closed): диспатч untrusted сабагента блокируется; поля `tool`, `agent`
+  (без содержимого промпта).
 Структура записи (JSON):
 
 ```json
@@ -354,6 +374,7 @@ logs/, feedback-reports/, plugin-version); конфиг проекта — `maes
 - `session.error` — ошибка/прерывание модели (warn)
 - `session.status.retry` — перезапрос модели (warn)
 - `sanitizer.redacted` — замаскировано N чувствительных элементов в промпте task (warn)
+- `sanitizer.invalid_config` — невалидные элементы `sanitizer_whitelist` отброшены при init (warn; имена полей/типы, SEC-4b; 4.21.0)
 - `communication:flag_plain` — детект `--plain`-флага в `@maestro-init` (info)
 - `communication:config_fallback` — невалидное значение `communication`, fallback в `plain` (warn)
 - `communication:directive_injected` — директива простого языка инжектирована в system (debug)

@@ -9,6 +9,49 @@
 
 ## [2026-10-01]
 
+> **Версия 4.21.0** — Minor-релиз: sanitizer hardening — fail-closed-семантика Level-1 (эскалация #117-разбора, H-4/H-5 + H-1/H-2/H-3).
+
+### Добавлено
+
+- **Валидация `sanitizer_whitelist` при init (H-4/H-5/H-7):** невалидные
+  значения отбрасываются (валидные сохраняются) + warn
+  `sanitizer.invalid_config` ровно один раз при init (в событии — только
+  имена полей и типы проблем, без значений — SEC-4b): не-строки/пустые
+  строки в `patterns`/`extra_fields`/`extra_uri_schemes`, неизвестные ключи
+  и не-boolean значения в `rules`, не-массив value в `by_agent`. Закрывает
+  тихий bypass `patterns: [[]]` (H-5), подавление SEC-7 мусорным ключом
+  (H-7) и throw-триггеры конфига (H-4).
+- **Fail-closed на сбое маскирования (H-4):** сбой маскирования при
+  task-диспатче (untrusted) → audit `sanitizer.failed` (аудит-лог) +
+  блокировка диспатча (throw `[sanitizer:failed] …`, rethrow-паритет с
+  confidential-deny). Title-ветка: сбой → `<unavailable>`, сессия не
+  ломается.
+- **Три формы Level-1 (H-1/H-2/H-3):** (а) unquoted-значения PII-полей
+  (`email: john@doe.com`, `phone: +7-900-…`, `iban: DE89…`); (б)
+  JSON-auth-заголовки (`"Authorization": "Bearer …"`); (в) PEM
+  `ENCRYPTED PRIVATE KEY` (в обеих половинах). + полный escape URI-схем —
+  `extra_uri_schemes: ["bad("]` более не ломает regex (SyntaxError-триггер
+  H-4 закрыт). Тесты: 285/285 (266 baseline + 19 новых).
+
+### Изменено
+
+- **Семантика fail-open → fail-closed (осознанное изменение
+  security-поведения):** до 4.21.0 ошибка маскирования проглатывалась —
+  промпт уходил в untrusted сабагента несанитизированным (полная потеря
+  защиты без сигнала). Теперь сбой маскирования блокирует диспатч;
+  валидация конфига выполняется при init, не на каждом диспатче.
+
+### Known limitation (зона Level-2 / 5.0)
+
+- **Level-1 не покрывает:** context-less секреты без «ключ: значение»
+  (AIza…, xoxb-, bare `sk-proj-`), XML `<password>`, 2-сегментный JWT,
+  URI-схемы вне списка (oracle/rediss/mariadb/snowflake — расширяются
+  через `extra_uri_schemes`), multi-line значения. Кандидаты Level-2 /
+  5.0 — по анализу #117
+  (`docs/superpowers/analysis/2026-10-01-sanitizer-whitelist.md`).
+
+## [2026-10-01]
+
 > **Версия 4.20.0** — Minor-релиз: вопрос-тул (question tool) — подача всех HITL-гейтов с закрытым набором вариантов через панель; текст — только free input.
 
 ### Добавлено
