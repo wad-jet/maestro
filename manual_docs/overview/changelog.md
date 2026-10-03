@@ -38,6 +38,25 @@
 ### Known limitation
 
 - Термины «локальная (изолированная) модель» и `trust` (роль сабагента) —
+
+## 5.0 (major)
+
+> **Чистка:** back-compat, sanitizer hardening, runtime-верификация permissions.
+
+### Удалено
+
+- **Back-compat migration из `.sh`-скриптов (#91):**
+  - `maestro-install.sh`: блок миграции `skills/maestro-init|maestro-new →
+    skills/maestro-setup` в agpack.yml целевого проекта
+  - `maestro-install.sh`, `maestro-update.sh`: `rm -rf` stale-артефактов
+    (`.opencode/commands/maestro.md`, `.opencode/skills/maestro-init`,
+    `.opencode/commands/maestro-new.md`, `.opencode/skills/maestro-new`,
+    `.opencode/agents/code-reviewer.md`)
+  - `maestro-update.sh`: функция `drop_old_init()` и все референсы
+    `skills/maestro-init` / `skills/maestro-new` в merge-add agpack.yml
+  - `skills/maestro/SKILL.md`: комментарий «backward compat» (§14 Commands)
+
+- (migration notes — см. секцию ниже)
   разные понятия; в текстах notice разделены явно.
 
 ## [2026-10-01]
