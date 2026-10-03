@@ -740,8 +740,7 @@ init), следует его правилам, затем решает и про
            * Передать в dispatch context: workdir + resolved commands
          - Если Service не задан → root поведение:
            * `workdir` = repo root
-           * Commands из `### Default (root)` в секции 14 Commands
-           * (текущее поведение — backward compat)
+            * Commands из `### Default (root)` в секции 14 Commands
       d. Per task: dispatch implementer-субагента (implementer-prompt.md) -> **обязательный** task review
           — implementer-prompt.md находится в `skills/maestro/implementer-prompt.md`
           — **Точка 2 Security Review:** перед диспатчем implementer (и

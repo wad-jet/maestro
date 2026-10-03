@@ -180,25 +180,6 @@ def parse_section(text, section):
             cur = None
     return recs
 
-# Rename-aware: безусловно удалить устаревшие записи skills/maestro-init и skills/maestro-new (M-5/M-9)
-def drop_old_init(lines):
-    out = []
-    i = 0
-    while i < len(lines):
-        if re.match(r"^\s{4}-\s*url:\s*\S+", lines[i]):
-            j = i + 1
-            is_old = False
-            while j < len(lines) and (lines[j].strip().startswith("path:") or lines[j].strip() == "" or lines[j].startswith("-")):
-                if re.match(r"^\s{6}path:\s*skills/(maestro-init|maestro-new)\s*$", lines[j]):
-                    is_old = True
-                j += 1
-            if is_old:
-                i = j
-                continue
-        out.append(lines[i])
-        i += 1
-    return out
-
 # Парсим канон по секциям.
 canon_sections = {}
 for sec in ("skills", "commands", "agents"):
@@ -215,10 +196,6 @@ try:
 except OSError as e:
     sys.stderr.write("maestro-update: не могу прочитать agpack.yml: %s\n" % e)
     sys.exit(1)
-
-_lines_before_drop = lines
-lines = drop_old_init(lines)
-dropped_init = (lines != _lines_before_drop)
 
 def section_range(lines, section):
     """Найти диапазон строк секции `dependencies.<section>` (индексы вставки)."""
@@ -245,8 +222,6 @@ for sec, recs in canon_sections.items():
         m = re.match(r"^\s{6}path:\s*(\S+)", ln)
         if m:
             existing.add(m.group(1).strip("\"'"))
-    existing.discard("skills/maestro-init")
-    existing.discard("skills/maestro-new")
     if start is None:
         # Секции нет — вставить новую после `dependencies:`.
         dep_i = next((i for i, ln in enumerate(lines) if re.match(r"^dependencies:\s*$", ln)), None)
@@ -255,7 +230,7 @@ for sec, recs in canon_sections.items():
         # Собрать блок вставки корректно.
         add = ["  %s:" % sec]
         for r in recs:
-            if r["path"] in ("skills/maestro-init", "skills/maestro-new") or r["path"] in existing:
+            if r["path"] in existing:
                 continue
             add.append("    - url: %s" % r["url"])
             add.append("      path: %s" % r["path"])
@@ -265,7 +240,7 @@ for sec, recs in canon_sections.items():
         continue
     add = []
     for r in recs:
-        if r["path"] in ("skills/maestro-init", "skills/maestro-new") or r["path"] in existing:
+        if r["path"] in existing:
             continue
         add.append("    - url: %s" % r["url"])
         add.append("      path: %s" % r["path"])
@@ -273,7 +248,7 @@ for sec, recs in canon_sections.items():
         lines[start + 1:start + 1] = add
         changed = True
 
-if changed or dropped_init:
+if changed:
     with open("agpack.yml", "w", encoding="utf-8") as f:
         f.write("\n".join(lines) + "\n")
     print("maestro-update: agpack.yml дополнен/обновлён каноническими записями")
@@ -286,10 +261,6 @@ fi
 
 info "запускаю 'agpack sync'..."
 "$AGPACK" sync
-
-# --- 3a. Очистка stale-артефактов (agpack не прунит) ---
-# .opencode/agents/code-reviewer.md — stale после rename code-reviewer -> reviewer (4.16.0)
-rm -rf .opencode/commands/maestro.md .opencode/skills/maestro-init .opencode/commands/maestro-new.md .opencode/skills/maestro-new .opencode/agents/code-reviewer.md
 
 # --- 4. Очистка кэша плагина OpenCode ---------------------------------------
 

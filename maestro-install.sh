@@ -161,33 +161,10 @@ else
   fi
 fi
 
-# --- 3a. Миграция agpack.yml (rename skills/maestro-init|maestro-new -> skills/maestro-setup) ---
-if [ -f "agpack.yml" ]; then
-  python3 - <<'PY'
-path = "agpack.yml"
-with open(path, "r", encoding="utf-8") as f:
-    text = f.read()
-target = '      path: skills/maestro-setup'
-changed = False
-for old in ('      path: skills/maestro-init', '      path: skills/maestro-new'):
-    if old in text:
-        text = text.replace(old, target)
-        changed = True
-if changed:
-    with open(path, "w", encoding="utf-8") as f:
-        f.write(text)
-    print("maestro-install: agpack.yml: skills/maestro-init|maestro-new -> skills/maestro-setup")
-PY
-fi
-
 # --- 4. agpack sync ----------------------------------------------------------
 
 info "запускаю 'agpack sync'..."
 "$AGPACK" sync
-
-# --- 4a. Очистка stale-артефактов (agpack не прунит) ---
-# .opencode/agents/code-reviewer.md — stale после rename code-reviewer -> reviewer (4.16.0)
-rm -rf .opencode/commands/maestro.md .opencode/skills/maestro-init .opencode/commands/maestro-new.md .opencode/skills/maestro-new .opencode/agents/code-reviewer.md
 
 # --- 5. Регистрация плагина maestro-bootstrap (идемпотентно) ------------------
 
