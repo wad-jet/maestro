@@ -7,6 +7,14 @@
 > Хронология составлена по истории authoring-репо `maestro-agent`. Даты
 > приблизительные (по коммитам).
 
+## [5.1.0] — 2026-10-03
+
+### Добавлено
+- **Security: trusted paths** (L21) — guard на доступ к персональным/системным путям (`~/`, `/etc`, `/private`) через `custodian` (trusted-модель).
+  - Новый конфиг-ключ: `maestro.json.trusted_paths.enabled` / `custom`
+  - Audit-события: `trusted_path.access`, `trusted_path.deny`
+  - Fail-closed, default-классы: `user_home`, `etc`, `private_osx`, `etc_unix_passwd`
+
 ## [2026-10-01]
 
 > **Версия 4.22.0** — Minor-релиз: прозрачность защиты данных — pre-work notice + понимания-слой sanitizer_whitelist (HITL-решения #117-разбора, §8.2–8.3).

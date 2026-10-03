@@ -971,7 +971,7 @@ const TRUSTED_PATH_CLASSES = {
   user_home: /^~(\/|$)/,                    // ~/  или ~user/
   etc: /^\/etc(\/|$)/,                      // /etc  или /etc/xxx
   private_osx: /^\/private(\/|$)/,          // /private  или /private/xxx
-  etc_unix_passwd: /^\/etc\/(passwd|shadow|group|hosts)(\.\w+)?(\.bak)?$/, // частные файлы
+  etc_unix_passwd: /^\/etc\/(passwd|shadow|group|hosts)(\/|$)/, // частные файлы
 };
 
 /**

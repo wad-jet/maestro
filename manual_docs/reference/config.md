@@ -12,7 +12,7 @@
 
 Консолидированный конфиг в корне проекта. Коммитится
 в git — он описывает security-политику и trust-модель проекта. Файл состоит из
-нескольких секций: `trust`, `confidential`, `sanitizer_whitelist`, `communication` (опц.), `feedback_report` (опц.), `review.parallel` (опц.), `memory` (опц.).
+нескольких секций: `trust`, `confidential`, `trusted_paths`, `sanitizer_whitelist`, `communication` (опц.), `feedback_report` (опц.), `review.parallel` (опц.), `memory` (опц.).
 
 Путь к файлу resolves в таком порядке:
 1. Переменная окружения `MAESTRO_CONFIG`
@@ -27,6 +27,45 @@
 > `maestro.json` и правила вывода секций из контекста живут в скилле `maestro-assistant`
 > (`skills/maestro-assistant/SKILL.md`) — единый источник, доступный `/maestro-setup`,
 > `@maestro-init` и HITL-консультациям. Ниже — человеческие справочные таблицы по секциям.
+
+### Секция `trusted_paths` (5.1)
+
+> **Статус:** 5.1 (L21)
+
+Ограничивает доступ к персональным/системным путям машины (`~/`, `/etc`, `/private`, …).
+Путь блокируется для primary и untrusted-сабагентов; `custodian` (trusted) — получает `allow`.
+
+```json
+{
+  "trusted_paths": {
+    "enabled": true,
+    "custom": [
+      // Пример: "~/my-secure-data/**"
+    ]
+  }
+}
+```
+
+- `enabled` — `true` (по умолчанию) / `false` (отключает guard). `false` — только для отладки.
+- `custom` — массив glob-масок для расширения default-классов (нижний регистр, case-insensitive).
+
+**Default-классы** (закрытый список, не конфигурируется):
+
+| Класс | Паттерн | Примеры |
+|---|---|---|
+| `user_home` | `~/**` | `~/secrets/keys.txt` |
+| `etc` | `/etc/**` | `/etc/ssl/certs` |
+| `private_osx` | `/private/**` | `/private/var` |
+| `etc_unix_passwd` | `/etc/(passwd|shadow|...)` | `/etc/shadow` |
+
+**Правила:**
+- Применяется к `read`/`write`/`edit` (bash — нативные permissions opencode).
+- `custodian` → `allow` + audit log `trusted_path.access`.
+- Untrusted / primary → `deny` + ошибка `[trusted-path:deny]`.
+- Fail-closed: guard включён по умолчанию.
+- `.maestro/plugin-version` исключён.
+
+**SEC-4b:** audit log содержит только агрегаты (`basename`, `action`, `agent`), без содержимого файлов.
 
 ### Версия плагина
 
