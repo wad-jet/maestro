@@ -964,6 +964,98 @@ export function isPluginMetaFile(root, target) {
   return t === ".maestro/plugin-version";
 }
 
+// --- Trusted paths (personal/system directories outside project) -----------
+
+// Default-классы путей, закрытый список.
+const TRUSTED_PATH_CLASSES = {
+  user_home: /^~(\/|$)/,                    // ~/  или ~user/
+  etc: /^\/etc(\/|$)/,                      // /etc  или /etc/xxx
+  private_osx: /^\/private(\/|$)/,          // /private  или /private/xxx
+  etc_unix_passwd: /^\/etc\/(passwd|shadow|group|hosts)(\.\w+)?(\.bak)?$/, // частные файлы
+};
+
+/**
+ * Classify a target path against default trusted classes.
+ * @param {string} target  Raw path from tool args (may be absolute or relative).
+ * @returns {string[]|null}  List of matched class names, or null if none.
+ */
+export function classifyTargetPath(target) {
+  if (typeof target !== "string" || !target) return null;
+  const matches = [];
+  for (const [name, re] of Object.entries(TRUSTED_PATH_CLASSES)) {
+    if (re.test(target)) matches.push(name);
+  }
+  return matches.length > 0 ? matches : null;
+}
+
+/**
+ * Check whether a target path matches a custom glob pattern.
+ * Simple prefix matching for `~/` patterns; exact match for others.
+ * Case-insensitive for cross-platform safety.
+ * @param {string} target  Raw path from tool args.
+ * @param {string} pattern  Custom glob pattern (e.g. "~/my-data/**", "~/Documents").
+ * @returns {boolean}
+ */
+export function matchCustomPath(target, pattern) {
+  if (typeof target !== "string" || typeof pattern !== "string" || !target || !pattern) return false;
+  const lowerTarget = target.toLowerCase();
+  const lowerPattern = pattern.toLowerCase();
+  // Expand ~ in pattern if present (for matching).
+  // Simple prefix match: "~/data" matches "~/data/anything" or "~".
+  if (lowerPattern.includes("**")) {
+    // Glob pattern: strip "**" and check prefix.
+    const prefix = lowerPattern.replace(/\*\*/g, "");
+    return lowerTarget.startsWith(prefix);
+  }
+  // Exact or prefix match (without glob).
+  return lowerTarget === lowerPattern || lowerTarget.startsWith(lowerPattern + "/");
+}
+
+/**
+ * Check whether a target path falls within trusted-path classes.
+ * Combines default-class classification + custom-pattern matching.
+ * Fail-closed: unknown target → false.
+ * @param {string} target  Raw path from tool args.
+ * @param {string[]} [customPatterns]  Custom trusted paths from maestro.json.
+ * @returns {{ isTrusted: boolean, classes: string[], reason: string }}
+ */
+export function isTrustedPathTarget(target, customPatterns = []) {
+  if (typeof target !== "string" || !target) return { isTrusted: false, classes: [], reason: "empty" };
+
+  // 1. Check default classes.
+  const defaultClasses = classifyTargetPath(target);
+  if (defaultClasses) {
+    return { isTrusted: true, classes: defaultClasses, reason: "default_class" };
+  }
+
+  // 2. Check custom patterns.
+  if (customPatterns.length > 0) {
+    for (const pattern of customPatterns) {
+      if (matchCustomPath(target, pattern)) {
+        return { isTrusted: true, classes: ["custom"], reason: "custom_pattern" };
+      }
+    }
+  }
+
+  return { isTrusted: false, classes: [], reason: "not_matched" };
+}
+
+/**
+ * Extract the trusted_paths config from a parsed maestro config.
+ * @param {object} config  Parsed `maestro.json`.
+ * @returns {{ enabled: boolean, custom: string[] }}
+ */
+export function loadTrustedPathsConfig(config) {
+  const section = config?.trusted_paths;
+  const defaults = { enabled: true, custom: [] };
+  if (!section || typeof section !== "object") return defaults;
+  const enabled = section.enabled === false ? false : true; // default true
+  const custom = Array.isArray(section.custom) ? section.custom : [];
+  // Filter non-strings.
+  const validCustom = custom.filter((p) => typeof p === "string" && p.length > 0);
+  return { enabled, custom: validCustom };
+}
+
 /**
  * Check whether a target path falls within any confidential pattern.
  * Confidential — security-граница: матчинг case-insensitive (APFS/NTFS могут
