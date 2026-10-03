@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MaestroBootstrapPlugin, createBootstrapAdapter, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, validateWhitelist, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile, loadCommunicationConfig, loadFeedbackReportConfig, makeMaestroConfigTool, resolveConfigFile } from "./core.js";
+import { MaestroBootstrapPlugin, createBootstrapAdapter, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, validateWhitelist, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile, loadCommunicationConfig, loadFeedbackReportConfig, makeMaestroConfigTool, resolveConfigFile, classifyTargetPath, matchCustomPath, isTrustedPathTarget, loadTrustedPathsConfig } from "./core.js";
 import {
   detectPlainFlag,
   SOURCE_LABELS,
@@ -3143,5 +3143,345 @@ describe("sanitizer hardening T1 (D2: fail-closed)", () => {
     } finally {
       fs.rmSync(d, { recursive: true, force: true });
     }
+  });
+});
+
+describe("maestro-bootstrap trusted_paths classification", () => {
+  it("classifies ~/ paths as user_home", () => {
+    assert.deepEqual(classifyTargetPath("~/secrets/keys.txt"), ["user_home"]);
+  });
+
+  it("classifies ~/ as user_home (root home)", () => {
+    assert.deepEqual(classifyTargetPath("~/"), ["user_home"]);
+  });
+
+  it("classifies /etc as etc", () => {
+    assert.deepEqual(classifyTargetPath("/etc"), ["etc"]);
+  });
+
+  it("classifies /etc/shadow as etc and etc_unix_passwd", () => {
+    const result = classifyTargetPath("/etc/shadow");
+    assert.ok(result.includes("etc"));
+    assert.ok(result.includes("etc_unix_passwd"));
+  });
+
+  it("classifies /etc/passwd as etc and etc_unix_passwd", () => {
+    const result = classifyTargetPath("/etc/passwd");
+    assert.ok(result.includes("etc"));
+    assert.ok(result.includes("etc_unix_passwd"));
+  });
+
+  it("classifies /etc/group as etc and etc_unix_passwd", () => {
+    const result = classifyTargetPath("/etc/group");
+    assert.ok(result.includes("etc"));
+    assert.ok(result.includes("etc_unix_passwd"));
+  });
+
+  it("classifies /etc/hosts as etc and etc_unix_passwd", () => {
+    const result = classifyTargetPath("/etc/hosts");
+    assert.ok(result.includes("etc"));
+    assert.ok(result.includes("etc_unix_passwd"));
+  });
+
+  it("classifies /private/var as private_osx", () => {
+    assert.deepEqual(classifyTargetPath("/private/var"), ["private_osx"]);
+  });
+
+  it("classifies /private/etc as private_osx", () => {
+    assert.deepEqual(classifyTargetPath("/private/etc"), ["private_osx"]);
+  });
+
+  it("returns null for non-classified paths", () => {
+    assert.equal(classifyTargetPath("src/app.ts"), null);
+    assert.equal(classifyTargetPath("/usr/local/bin"), null);
+    assert.equal(classifyTargetPath("/tmp/test"), null);
+  });
+
+  it("returns null for empty/invalid input", () => {
+    assert.equal(classifyTargetPath(""), null);
+    assert.equal(classifyTargetPath(undefined), null);
+    assert.equal(classifyTargetPath(42), null);
+  });
+});
+
+describe("maestro-bootstrap matchCustomPath", () => {
+  it("matches ~/my-data prefix with glob **", () => {
+    assert.equal(matchCustomPath("~/my-data/file.txt", "~/my-data/**"), true);
+  });
+
+  it("matches ~/my-data prefix without glob", () => {
+    assert.equal(matchCustomPath("~/my-data/file.txt", "~/my-data"), true);
+  });
+
+  it("matches ~/my-data exactly", () => {
+    assert.equal(matchCustomPath("~/my-data", "~/my-data"), true);
+  });
+
+  it("does not match unrelated path", () => {
+    assert.equal(matchCustomPath("~/other/file.txt", "~/my-data/**"), false);
+  });
+
+  it("is case-insensitive", () => {
+    assert.equal(matchCustomPath("~/MY-DATA/file.txt", "~/my-data/**"), true);
+  });
+
+  it("returns false for empty inputs", () => {
+    assert.equal(matchCustomPath("", "~/data"), false);
+    assert.equal(matchCustomPath("~/data", ""), false);
+  });
+});
+
+describe("maestro-bootstrap isTrustedPathTarget", () => {
+  it("matches default class ~/ paths", () => {
+    const r = isTrustedPathTarget("~/secrets");
+    assert.equal(r.isTrusted, true);
+    assert.ok(r.classes.includes("user_home"));
+    assert.equal(r.reason, "default_class");
+  });
+
+  it("matches default class /etc/shadow paths", () => {
+    const r = isTrustedPathTarget("/etc/shadow");
+    assert.equal(r.isTrusted, true);
+    assert.ok(r.classes.includes("etc_unix_passwd"));
+  });
+
+  it("matches default class /private paths", () => {
+    const r = isTrustedPathTarget("/private/tmp");
+    assert.equal(r.isTrusted, true);
+    assert.ok(r.classes.includes("private_osx"));
+  });
+
+  it("matches custom patterns alongside defaults", () => {
+    // ~/secure-data матчит user_home (default) + custom-паттерн — default优先
+    const r = isTrustedPathTarget("~/secure-data/file.txt", ["~/secure-data/**"]);
+    assert.equal(r.isTrusted, true);
+    assert.ok(r.classes.includes("user_home"));
+    assert.equal(r.reason, "default_class");
+  });
+
+  it("returns not_matched for non-trusted paths", () => {
+    const r = isTrustedPathTarget("src/app.ts");
+    assert.equal(r.isTrusted, false);
+    assert.equal(r.reason, "not_matched");
+  });
+
+  it("returns empty for invalid input", () => {
+    const r = isTrustedPathTarget("");
+    assert.equal(r.isTrusted, false);
+    assert.equal(r.reason, "empty");
+  });
+
+  it("returns empty for null input", () => {
+    const r = isTrustedPathTarget(null);
+    assert.equal(r.isTrusted, false);
+    assert.equal(r.reason, "empty");
+  });
+});
+
+describe("maestro-bootstrap loadTrustedPathsConfig", () => {
+  it("returns defaults when section missing", () => {
+    const c = loadTrustedPathsConfig({});
+    assert.equal(c.enabled, true);
+    assert.deepEqual(c.custom, []);
+  });
+
+  it("returns defaults when section null", () => {
+    const c = loadTrustedPathsConfig({ trusted_paths: null });
+    assert.equal(c.enabled, true);
+    assert.deepEqual(c.custom, []);
+  });
+
+  it("respects enabled: false", () => {
+    const c = loadTrustedPathsConfig({ trusted_paths: { enabled: false } });
+    assert.equal(c.enabled, false);
+    assert.deepEqual(c.custom, []);
+  });
+
+  it("respects enabled: true explicit", () => {
+    const c = loadTrustedPathsConfig({ trusted_paths: { enabled: true } });
+    assert.equal(c.enabled, true);
+  });
+
+  it("parses custom patterns", () => {
+    const c = loadTrustedPathsConfig({ trusted_paths: { custom: ["~/my-data/**", "~/secure"] } });
+    assert.deepEqual(c.custom, ["~/my-data/**", "~/secure"]);
+  });
+
+  it("filters non-string custom entries", () => {
+    const c = loadTrustedPathsConfig({ trusted_paths: { custom: ["~/valid", 42, "", "~/also-valid"] } });
+    assert.deepEqual(c.custom, ["~/valid", "~/also-valid"]);
+  });
+
+  it("returns defaults when trusted_paths is not an object", () => {
+    const c = loadTrustedPathsConfig({ trusted_paths: "invalid" });
+    assert.equal(c.enabled, true);
+    assert.deepEqual(c.custom, []);
+  });
+});
+
+describe("maestro-bootstrap trusted_paths enforcement", () => {
+  let dir, hooks, savedLogEnv;
+  const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR"];
+
+  function makeClient(sessions) {
+    return {
+      session: {
+        get: async ({ path }) => {
+          const rec = sessions[path.id];
+          if (!rec) throw new Error("not found");
+          return { data: rec.session };
+        },
+        messages: async ({ path }) => {
+          const rec = sessions[path.id];
+          if (!rec) return { data: [] };
+          return { data: rec.messages };
+        },
+      },
+    };
+  }
+
+  const rootSessions = {
+    root: { session: { id: "root" }, messages: [] },
+    childTrusted: {
+      session: { id: "childTrusted", parentID: "root" },
+      messages: [{ info: { role: "assistant", mode: "custodian" }, parts: [] }],
+    },
+    childUntrusted: {
+      session: { id: "childUntrusted", parentID: "root" },
+      messages: [{ info: { role: "assistant", mode: "haiku" }, parts: [] }],
+    },
+  };
+
+  before(async () => {
+    savedLogEnv = {};
+    for (const k of LOG_ENV) { savedLogEnv[k] = process.env[k]; delete process.env[k]; }
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-tp-enf-"));
+    fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({
+      trust: { custodian: true },
+    }));
+    hooks = await MaestroBootstrapPlugin({ directory: dir, client: makeClient(rootSessions) });
+  });
+
+  after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    for (const k of LOG_ENV) {
+      if (savedLogEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedLogEnv[k];
+    }
+  });
+
+  it("denies primary read of ~/ path (fail-closed)", async () => {
+    const out = { args: { filePath: "~/secrets/keys.txt" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "tp-root" }, out),
+      /trusted-path:deny/,
+    );
+  });
+
+  it("denies untrusted subagent read of /etc/passwd", async () => {
+    const out = { args: { filePath: "/etc/passwd" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "childUntrusted", callID: "tp-untrusted" }, out),
+      /trusted-path:deny/,
+    );
+  });
+
+  it("allows trusted subagent (custodian) read of ~/ path", async () => {
+    const out = { args: { filePath: "~/secrets/keys.txt" } };
+    await hooks["tool.execute.before"]({ tool: "read", sessionID: "childTrusted", callID: "tp-trusted" }, out);
+    assert.ok(true);
+  });
+
+  it("denies write to ~/ path for primary", async () => {
+    const out = { args: { filePath: "~/notes.txt", content: "hi" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "write", sessionID: "root", callID: "tp-write" }, out),
+      /trusted-path:deny/,
+    );
+  });
+
+  it("does not block non-trusted paths (src/app.ts)", async () => {
+    const out = { args: { filePath: "src/app.ts" } };
+    await hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "tp-normal" }, out);
+    assert.ok(true);
+  });
+
+  it("does not block /tmp paths (not in default classes)", async () => {
+    const out = { args: { filePath: "/tmp/test.txt" } };
+    await hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "tp-tmp" }, out);
+    assert.ok(true);
+  });
+});
+
+describe("maestro-bootstrap trusted_paths disabled", () => {
+  it("when trusted_paths.enabled=false, ~/ read is allowed", async () => {
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-tp-disable-"));
+    try {
+      fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({
+        trusted_paths: { enabled: false },
+      }));
+      const hooks = await MaestroBootstrapPlugin({ directory: dir });
+      const out = { args: { filePath: "~/secrets.txt" } };
+      await hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "tp-off" }, out);
+      assert.ok(true, "trusted_path guard disabled — ~/ read allowed");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("maestro-bootstrap trusted_paths audit log", () => {
+  let dir, hooks, savedLogEnv;
+  const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR"];
+
+  function makeClient(sessions) {
+    return {
+      session: {
+        get: async ({ path }) => {
+          const rec = sessions[path.id];
+          if (!rec) throw new Error("not found");
+          return { data: rec.session };
+        },
+        messages: async ({ path }) => {
+          const rec = sessions[path.id];
+          if (!rec) return { data: [] };
+          return { data: rec.messages };
+        },
+      },
+    };
+  }
+
+  const rootSessions = {
+    childTrusted: {
+      session: { id: "childTrusted", parentID: "root" },
+      messages: [{ info: { role: "assistant", mode: "custodian" }, parts: [] }],
+    },
+  };
+
+  before(async () => {
+    savedLogEnv = {};
+    for (const k of LOG_ENV) { savedLogEnv[k] = process.env[k]; delete process.env[k]; }
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-tp-audit-"));
+    fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({
+      trust: { custodian: true },
+    }));
+    hooks = await MaestroBootstrapPlugin({ directory: dir, client: makeClient(rootSessions) });
+  });
+
+  after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    for (const k of LOG_ENV) {
+      if (savedLogEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedLogEnv[k];
+    }
+  });
+
+  it("logs trusted_path.allow for custodian read of ~/ path", async () => {
+    const out = { args: { filePath: "~/secrets/keys.txt" } };
+    await hooks["tool.execute.before"]({ tool: "read", sessionID: "childTrusted", callID: "tp-a1" }, out);
+    const e = readLogs(dir, "maestro-audit").find((x) => x.callID === "tp-a1");
+    assert.ok(e, "audit entry exists");
+    assert.ok(e.msg === "trusted_path.access" || e.msg === "confidential.access", "audit msg matches");
+    assert.equal(e.action, "allow");
   });
 });
