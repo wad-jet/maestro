@@ -145,6 +145,8 @@
   `skills/maestro-init|maestro-new` (STALE_NAMES allowlist — трогать нельзя;
   только реальные референсы).
 - **#117 — изменения** (по итогам разбора из Волны 1).
+  **Выполнено (4.22.0, 2026-10-01):** анализ `docs/superpowers/analysis/2026-10-01-sanitizer-whitelist.md` — инвентаризация сценариев по 6 knobs + 13 находок (H-1…H-13) + runtime-проверка bypass-матрицы. Вердикт: архитектура двух уровней состоятельна; обязательные кандидаты на фикс — H-4 (fail-open sanitize) и H-5 (тихий bypass `patterns: [[]]`); активные ограничения H-1/H-2/H-3 (сквозные на hybrid и 10b-циклах); направление для 5.0 — 6 рекомендаций (fail-closed+валидация, regex-расширение, observability, docs, упрощение knobs, регрессии). Эскалация активных — HITL-решение.
+  **HITL-решения §8.2–8.3 выполнены (4.22.0, 2026-10-01):** понимания-слой `sanitizer_whitelist` в config.md + pre-work notice (шаг 0) + notice на гейте 8.6 — regression `regression/entries/2026-10-01-pre-work-notice.md`.
 - **Хвост #93 «Этап B после V1»** — runtime-верификация merge-семантики нативных
   permissions (внешняя зависимость от opencode; см. SECURITY.md).
 - **#87** — только если решение окажется breaking.
