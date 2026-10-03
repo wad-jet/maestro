@@ -149,6 +149,13 @@
   **HITL-решения §8.2–8.3 выполнены (4.22.0, 2026-10-01):** понимания-слой `sanitizer_whitelist` в config.md + pre-work notice (шаг 0) + notice на гейте 8.6 — regression `regression/entries/2026-10-01-pre-work-notice.md`.
 - **Хвост #93 «Этап B после V1»** — runtime-верификация merge-семантики нативных
   permissions (внешняя зависимость от opencode; см. SECURITY.md).
+  **Выполнено V1 (2026-09-20):** merge-семантика верифицирована в fixture
+  `.sandbox/` — per-agent allow перекрывает global deny, trusted-агенты
+  (`custodian`/`sanitizer`) читают `docs/confidential/*` и `maestro.json`
+  поверх глобального deny. Regression entry:
+  `regression/entries/2026-09-20-p2-8-followup.md`. Этап B (код плагина:
+  удаление `resolveIsTrustedSubagent`, `confGlobMatch` из enforcement;
+  retiring `access_policy`) — отдельная фича, зависит от Eтапа A реализации.
 - **#87** — только если решение окажется breaking.
 
 > Закрыт (C2): #93 «разбор access_policy» уже реализован (2026-09-16,
