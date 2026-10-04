@@ -151,8 +151,11 @@ description: Сбор фактуры по прошлым процессам maes
   все task-части), токены child-сессий (`input/output/reasoning/cacheRead/cacheWrite`), `skipped`/`failed`
   (over-cap/таймаут/сбой child-экспорта — пометка «атрибуция неполная»);
 - `activeMs` (активное время = wall − user_wait; `null` без таймстампов);
-- `questionCount` (HITL-гейты); `reviewDispatches` (механический ориентир
-  циклов ревью — title-хэвистика; истина — нарратив из диалога).
+- `machineActiveMs` (машинное время = toolTimeMs + inferenceMs);
+- `hitlWaitMs` (ожидание пользователя = idleWaitMs);
+- `userIdleMs` (остаток: wall − machineActiveMs − hitlWaitMs);
+- `questionCount` (HITL-гейты); `reviewCycles` (structured: [{ round, titleShort, sessionId }]);
+- `validation` (self-validation: `{ totalMs, sum, delta }`);
 - `children` (`"full"` | `"skipped"`): fast mode — флаг `--no-children`
   (запуск ~5 c); при `"skipped"` — `tokensByAgent` пуст, атрибуция по агентам
   недоступна. **По умолчанию — полный прогон**; `--no-children` — только если
@@ -160,7 +163,13 @@ description: Сбор фактуры по прошлым процессам maes
 
 Механика пишет строку в `.maestro/metrics/history.jsonl` (upsert по
 sessionID; эфемерное, gitignored — пользовательская база для статистики,
-анализ — вне команды).
+анализ — вне команды). Читаемые из history.jsonl поля: `sessionID`, `date`,
+`metrics` (полный блок), `machineActiveMs`, `hitlWaitMs`, `userIdleMs`,
+`validation`.
+
+**Предпочтительный источник:** если `history.jsonl` существует и запись с
+текущим `sessionID` найдена — читать из неё (единый источник). Иначе —
+fallback: stdout `timeline.mjs` из 3c.
 
 **Fallback:** блок `metrics` отсутствует (export сбой) → «Нет данных по
 метрикам: <причина>» (паттерн 3c).
@@ -221,6 +230,7 @@ sessionID; эфемерное, gitignored — пользовательская �
 ## Метрики пайплайна и Effort
 > Источник: `metrics`-блок `timeline.mjs` (0 LLM) + bootstrap-лог (retry, 3a)
 > + ход диалога (нарратив). Только агрегаты (SEC-4b).
+> Предпочтительно читать из `.maestro/metrics/history.jsonl` (upsert по sessionID).
 
 ### Итоговая статистика
 - **Токены (primary):** input <N> / output <N> / reasoning <N> / cache read <N> / cache write <N>; cost: <$X | — (провайдер без прайсинга)>
@@ -236,9 +246,39 @@ sessionID; эфемерное, gitignored — пользовательская �
 \* диспатчей с известной child-сессией; может быть меньше таблицы «Агенты» (3c).
 Атрибуция: «полная», если `skipped = 0` И `failed = 0`; иначе — «неполная: skipped N / failed M» с числами из `metrics.tokensByAgent`.
 
-- **Активное время:** <H ч M мин> (доля <P>% от wall-длительности сессии)
-- **HITL:** question-гейтов <N>; retry-повторов: <из 3a>
-- **Циклы ревью:** механический ориентир — <reviewDispatches>; по ходу диалога: <LLM: сколько фактических циклов ревью/фиксов и почему (сколько раундов до approve, где откат)>
+### Активное время
+
+| Компонент | Время | Доля от wall |
+|---|---|---|
+| **Machine-active** (toolMs + inferenceMs) | <machineActiveMs> | <P1%> |
+| **HITL-wait** (ожидание пользователя) | <hitlWaitMs> | <P2%> |
+| **User-idle** (остаток) | <userIdleMs> | <P3%> |
+
+> Формат времени: `X ч Y мин` (округление вниз). Если < 1 мин: `X сек`.
+> `null` → «—».
+
+### Self-validation
+
+- **Wall duration:** <totalMs>
+- **Sum (machineActiveMs + hitlWaitMs):** <sum>
+- **Delta:** <delta> — <«OK» (delta = 0) / «расхождение: <delta> мс»>
+
+### HITL и ревью
+- **HITL-гейтов:** <questionCount>; **retry-повторов:** <из 3a>
+
+### Циклы ревью
+
+Если `metrics.reviewCycles` пуст или `metrics.children: "skipped"`:
+«Нет данных по ревью».
+
+Иначе — таблица:
+
+| Раунд | Title (short) |
+|---|---|
+| <round> | <titleShort> |
+
+> `reviewCycles` — structured данные из task-диспатчей (title, первые 80 символов).
+> Механический `reviewDispatches` (regex-хэвистика) НЕ используется.
 
 ### Effort (методология)
 > Effort = итоговая статистика + нормализованное активное время + факторы
