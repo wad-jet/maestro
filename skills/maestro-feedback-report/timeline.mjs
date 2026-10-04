@@ -171,6 +171,15 @@ const sessionModel = typeof info.model === "string"
     ? `${info.model.providerID}/${info.model.modelID}`
     : null);
 
+function normalizeModel(infoModel) {
+  if (!infoModel) return null;
+  if (typeof infoModel === "string") return infoModel;
+  if (typeof infoModel === "object" && infoModel && infoModel.providerID && infoModel.modelID) {
+    return `${infoModel.providerID}/${infoModel.modelID}`;
+  }
+  return null;
+}
+
 const allTs = messages.map(m => m.info && m.info.time && m.info.time.created).filter(t => typeof t === "number");
 const sessionStart = allTs.length ? Math.min(...allTs) : null;
 const sessionEnd = allTs.length ? Math.max(...allTs) : null;
@@ -376,7 +385,7 @@ if (!noChildren) {
       const sid = st.metadata && st.metadata.sessionId;
       if (!sid || typeof sid !== "string") continue;
       const agent = (st.input && st.input.subagent_type) || "unknown";
-      if (!agentBuckets[agent]) agentBuckets[agent] = { count: 0, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 0, failed: 0 };
+      if (!agentBuckets[agent]) agentBuckets[agent] = { count: 0, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 0, failed: 0, models: [] };
       agentBuckets[agent].count++;
       if (!uniqueChildren.has(sid)) uniqueChildren.set(sid, agent);
     }
@@ -402,6 +411,11 @@ if (!noChildren) {
             b.reasoning += t.reasoning || 0;
             b.cacheRead += (t.cache && t.cache.read) || 0;
             b.cacheWrite += (t.cache && t.cache.write) || 0;
+          }
+          // Extract and normalize child session model
+          const childModel = normalizeModel(data && data.info && data.info.model);
+          if (childModel && !b.models.includes(childModel)) {
+            b.models.push(childModel);
           }
         } catch (e) {
           if (e && e.message === "child_export_timeout") b.skipped++;
@@ -479,6 +493,10 @@ try {
     hitlWaitMs,
     userIdleMs,
     validation: metrics.validation,
+    sessionModel: sessionModel,
+    agentsModels: Object.fromEntries(
+      Object.entries(metrics.tokensByAgent || {}).map(([k, v]) => [k, v.models || []])
+    ),
   });
   // unique tmp (pid+ts) — parallel processes don't overwrite each other; same dir → atomic rename
   const kept = valid.filter((l) => {
