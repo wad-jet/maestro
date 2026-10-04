@@ -35,11 +35,9 @@
    - ✅ **решено (2026-10-04):** heartbeat-check existence/emptiness audit-log, status в секции "Безопасность"
 
 8. ~~**Feedback-report: U4 — небlocking фидбек-гейт в auto-режиме**~~
-   - Impact: MEDIUM | Feasibility: HIGH | Sec: —
-   - Обоснование: одна строка в шаге 18.5; исторически 3 фидбека трижды меняли продукт, сейчас — 0 после auto-режима
-   - Status: spike
+   - ✅ **решено (2026-10-04):** info-line для комментариев, не-блокирующий подход
 
-9. **Feedback-report: U10 — TL;DR-блок + дедупликация фактуры между секциями**
+9. ~~**Feedback-report: U10 — TL;DR-блок + дедупликация фактуры между секциями**~~
    - Impact: MEDIUM | Feasibility: HIGH | Sec: —
    - Обоснование: 10-02 — 335 строк; одни и те же 3 бага в 3 секциях; выжимка есть в HITL команды, не в файле
    - Status: spike
