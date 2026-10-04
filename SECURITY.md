@@ -112,8 +112,7 @@
   `extra_uri_schemes` строит валидный regex).
 - **Правило подписей (P7):** в fast-track (шаг 7d) подпись spec =
   provenance-рекомендация, не основание авто-пропуска 8.6/9 (для 7d-входов
-   8.6 выполняется всегда, кроме HITL-заверения при валидной `CLEAN`).
-- **Trusted paths (5.1, L21):** guard на `read`/`write`/`edit` для персональных/системных путей (`~/`, `/etc`, `/private`, custom) — fail-closed, trusted-модель по имени агента. `custodian` → allow + audit `trusted_path.access`; untrusted/primary → deny + `[trusted-path:deny]`. SEC-4b: агрегаты (basename, action, agent), без содержимого файлов.
+  8.6 выполняется всегда, кроме HITL-заверения при валидной `CLEAN`).
 - **Нативный permission-бастион OpenCode (R1+R4+R2-конфиг, Этап A):**
   `/maestro-setup` пишет в merge-config deny-baseline для `docs/confidential/*` +
   built-in паттернов (`read`/`edit`) и эвристические deny для `bash`/`glob`/`grep` —
