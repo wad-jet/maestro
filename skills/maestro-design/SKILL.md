@@ -49,8 +49,7 @@ description: Use to produce design, spec, scaffold and roadmap for a project aft
 (scaffold) и roadmap для проекта, у которого уже есть setup (`/maestro-setup`):
 `docs/project-context.md` и конфигурация maestro.
 
-**Разделение:** `/maestro-setup` — только setup (контекст + конфиг + проверки).
-Дизайн, scaffold и roadmap — здесь, в `/maestro-design`.
+**Разделение:** `/maestro-setup` — быстрый старт (конфиг + проверки). Проект-контекст может быть создан на этом шаге (опционально). Дизайн, scaffold и roadmap — здесь, в `/maestro-design`.
 
 **Язык:** все HITL-вопросы, варианты и сообщения пользователю — только на русском.
 
@@ -64,32 +63,34 @@ description: Use to produce design, spec, scaffold and roadmap for a project aft
 
 ## Предусловия
 
-### Предусловие 0. Проверка, что выполнен `/maestro-setup`
+### Предусловие 0. Проверка `/maestro-setup`
 
-Если проект **новый** или в нём **ранее не применялся** скилл `maestro`, сначала
-проверить, выполнялась ли команда `/maestro-setup`. Признаки того, что init **был**
-выполнен:
+Проверить признаки init:
+- `docs/project-context.md` существует?
+- `maestro.json` существует (`test -f maestro.json`)?
+- `.maestro/last-run.md` существует (`test -f`/`cat` через bash)?
 
-- `docs/project-context.md` существует;
-- `maestro.json` существует (конфигурация maestro) — `test -f maestro.json`
-  (existence-only; `read`-тул нативно denied, параметры — тулом `maestro_config`);
-- `.maestro/last-run.md` существует (свод setup) — проверка через bash
-  (`test -f`/`cat`), нативный deny по `.maestro/**`.
+**Если ни один не найден** (project не проходил setup) → warning (НЕ блокировать):
+"setup не выполнен. Контекст может быть неполным. Для полного setup выполните `/maestro-setup`."
+Продолжить с ограничениями или: (b) пропустить и продолжить.
 
-**Если хотя бы один признак отсутствует** (проект не проходил init) → HITL:
-- (a) выполнить `/maestro-setup` (setup: контекст + конфиг + проверки) **перед**
-  `/maestro-design`;
-- (b) пропустить и продолжить `/maestro-design` (дизайн без полного setup);
-- (c) отмена.
+**Если хотя бы один найден** → warning informational: "setup выполнен частично; project-context.md может отсутствовать."
+Продолжить.
 
-> **Рекомендация — (a).** `/maestro-design` зависит от `docs/project-context.md`
-> и конфигурации maestro. Без init дизайн может строиться на неполном контексте.
+> **Рекомендация** — перед дизайном создать project-context.md через шаг «Project Context» ниже.
+
+### Project Context (опциональный)
+
+Если `docs/project-context.md` отсутствует — предложить:
+- (a) опросить context (14 категорий из `init-context.md`)
+- (b) продолжить без context
+- При (a): загрузить `init-context.md`, опросить все 14 категорий, создать файл
+- При (b): НЕ создавать placeholder; записать статус `context: deferred` в `.maestro/last-run.md`
 
 ### Другие предусловия
 
-- `/maestro-setup` выполнен: есть `docs/project-context.md` (источник контекста).
-- **Модели агентов наследуются** из `.opencode/opencode.json` или global
-  (настроены на init или вручную).
+- `/maestro-setup` выполнен частично или полностью (project-context.md опционален).
+- **Модели агентов наследуются** из `.opencode/opencode.json` или global.
   `/maestro-design` **НЕ переспрашивает модели.**
 
 ## Шаг (a). План и дизайн проекта (архитектура)
@@ -154,8 +155,8 @@ description: Use to produce design, spec, scaffold and roadmap for a project aft
 
 | Ситуация | Действие |
 |---|---|
-| project-context.md отсутствует (init не выполнялся) | HITL: (a) выполнить `/maestro-setup` / (b) продолжить без / (c) отмена (Предусловие 0) |
-| init выполнен, но project-context.md всё равно нет | Сообщить: запустите `/maestro-setup` сначала |
-| spec: revise | Вернуться к дизайн-диалогу (повторить brainstorm primary + custodian Q/A при необходимости), повторить |
+| project-context.md отсутствует | Warning informational; продолжить (контекст из user story) или создать через шаг "Project Context" |
+| setup частично выполнен | Продолжить с ограниченным контекстом; предложить создать context через "Project Context" |
+| spec: revise | Вернуться к дизайн-диалогу (повторить brainstorm primary + custodian Q/A при необходимости) |
 | scaffold: BUILD/TEST упал | HITL: fix-loop / skip с подтверждением |
 | Модели агентов не настроены | Предупредить; предложить настроить `agent.*` в `.opencode/opencode.json` или global |
