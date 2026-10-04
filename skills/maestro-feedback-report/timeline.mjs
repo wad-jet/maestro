@@ -22,6 +22,22 @@ const CHILD_CONCURRENCY = 4;
 const CHILD_CAP = 100;
 const errTailOneLine = (t) => t.replace(/\r?\n/g, " ").trim().slice(-300) || "no stderr";
 
+function formatMs(ms) {
+  if (ms === null || ms === undefined) return "—";
+  if (ms < 0) return "0 сек";
+  if (ms < 60_000) {
+    return `${Math.floor(ms / 1000)} сек`;
+  }
+  if (ms < 3_600_000) {
+    const mins = Math.floor(ms / 60_000);
+    const secs = Math.floor((ms % 60_000) / 1000);
+    return secs > 0 ? `${mins} мин ${secs} сек` : `${mins} мин`;
+  }
+  const hours = Math.floor(ms / 3_600_000);
+  const mins = Math.floor((ms % 3_600_000) / 60_000);
+  return mins > 0 ? `${hours} ч ${mins} мин` : `${hours} ч`;
+}
+
 async function exportSession(sessionID, timeoutMs) {
   if (EXPORT_DIR) {
     // fixture-mode: <dir>/<id>.json — данные; <dir>/<id>.hang — сон max(timeoutMs*5, 2000) мс (эмуляция зависания)
@@ -283,6 +299,7 @@ let mInput = 0, mOutput = 0, mReasoning = 0, mCacheRead = 0, mCacheWrite = 0;
 let costSum = 0, costSeen = false;
 let questionCount = 0;
 let reviewDispatches = 0;
+const reviewCycles = [];
 const REVIEW_RE = /\breview\b|ревью/i;
 
 for (const msg of messages) {
@@ -306,10 +323,21 @@ for (const msg of messages) {
       const st = p.state;
       if (st && st.status === "completed" && typeof st.title === "string" && REVIEW_RE.test(st.title)) {
         reviewDispatches++;
+        reviewCycles.push({
+          round: reviewDispatches,
+          titleShort: st.title.slice(0, 80),
+          sessionId: st.metadata && st.metadata.sessionId,
+        });
       }
     }
   }
 }
+
+const machineActiveMs = toolTimeMs + inferenceMs;
+const hitlWaitMs = idleWaitMs;
+const userIdleMs = sessionDurationMs !== null && sessionDurationMs >= machineActiveMs + hitlWaitMs
+  ? sessionDurationMs - (machineActiveMs + hitlWaitMs)
+  : 0;
 
 const metrics = {
   tokens: {
@@ -318,10 +346,21 @@ const metrics = {
     cost: costSeen ? costSum : null,
   },
   activeMs: sessionDurationMs === null ? null : Math.max(0, sessionDurationMs - idleWaitMs),
+  machineActiveMs: sessionDurationMs === null ? null : machineActiveMs,
+  hitlWaitMs: sessionDurationMs === null ? null : hitlWaitMs,
+  userIdleMs: sessionDurationMs === null ? null : userIdleMs,
   questionCount,
   reviewDispatches,
   children: noChildren ? "skipped" : "full",
   tokensByAgent: {},
+  validation: sessionDurationMs === null
+    ? null
+    : {
+        totalMs: sessionDurationMs,
+        sum: machineActiveMs + hitlWaitMs,
+        delta: Math.abs(sessionDurationMs - (machineActiveMs + hitlWaitMs)),
+      },
+  reviewCycles,
 };
 
 if (!noChildren) {
@@ -436,6 +475,10 @@ try {
     sessionID: sessionID || info.id,
     date: new Date().toISOString().slice(0, 10),
     metrics,
+    machineActiveMs,
+    hitlWaitMs,
+    userIdleMs,
+    validation: metrics.validation,
   });
   // unique tmp (pid+ts) — parallel processes don't overwrite each other; same dir → atomic rename
   const kept = valid.filter((l) => {

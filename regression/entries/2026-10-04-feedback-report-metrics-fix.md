@@ -1,0 +1,25 @@
+# Regression — feedback-report metrics fix (U2+U3 + U6+U8)
+
+- **version:** 1
+- **feature:** починка метрик feedback-report: разделение active time (machineActiveMs/hitlWaitMs/userIdleMs), self-validation, unified humanizer formatMs(), structured reviewCycles[], машинно-читаемый слой из history.jsonl
+- **added:** 2026-10-04
+- **status:** active
+- **last_full_pass:** —
+- **risk:** LOW
+- **category:** skills/maestro-feedback-report/timeline.mjs + SKILL.md — новые поля metrics, обновлённый шаблон отчёта
+- **scenarios:**
+  - **unit-тесты фичи** (timeline.test.mjs +38 новых):
+    - run: `node --test skills/maestro-feedback-report/timeline.test.mjs`
+    - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent`
+  - **regression-тесты плагина** (285 baseline):
+    - run: `npm test`
+    - workdir: `/Users/odemidov/Documents/dev/github/maestro-agent`
+  - **[Manual] разделение активного времени:** отчёт содержит таблицу machine-active / HITL-wait / user-idle с процентами; humanizer: `X ч Y мин` или `X сек`; `null` → `—`
+  - **[Manual] self-validation:** блок с totalMs/sum/delta; delta = 0 при корректных данных, delta > 0 при наличии userIdleMs
+  - **[Manual] таблица ревью-вердиктов:** из `reviewCycles[]` (round/titleShort), вместо нарратива `reviewDispatches`
+  - **[Manual] history.jsonl:** новые поля `machineActiveMs`, `hitlWaitMs`, `userIdleMs`, `validation`; upsert по sessionID
+  - **[Manual] backward compatibility:** старые потребители не сломаются — добавлены поля, существующие не изменены
+- **regressions:** ⚑1–4 не затрагиваются; формат истории jsonl расширяется (additive-only); SKILL.md шаблон обновлён, но fallback-логика сохраняется
+- **plugin-version:** 5.0.0
+- **tests_total:** timeline 38 pass / плагин 285 pass
+- **links:** spec `docs/superpowers/specs/2026-10-04-feedback-report-metrics-fix-design.md` | plan `docs/superpowers/plans/2026-10-04-feedback-report-metrics-fix-plan.md`
