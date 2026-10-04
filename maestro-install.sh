@@ -219,7 +219,7 @@ PY
 if [[ -t 0 ]]; then
   read -r -p "Подключить memory layer (опциональная векторная память сессий)? (y/N) " memory_yn || true
   memory_yn_lower="$(printf '%s' "$memory_yn" | tr '[:upper:]' '[:lower:]')"
-  if [[ "$memory_yn_lower" == "y" ]]; then
+  if [[ "$memory_yn_lower" == y* ]]; then
     if [[ -n "${XDG_DATA_HOME:-}" ]]; then
       memory_data_dir="$XDG_DATA_HOME/maestro"
     elif [[ "$(uname)" == "Darwin" ]]; then
