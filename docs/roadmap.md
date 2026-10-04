@@ -28,10 +28,8 @@
 5. ~~**Feature: `maestro-feedback-report` — U1: пересоздавать отчёт по sessionID**~~
    - ✅ **решено (2026-10-04):** одна сессия = один файл, archive+superseded, пользовательский фидбек verbatim, slice numbering
 
-6. **Feedback-report: U9 — модель агента в таблицах + предупреждение одинаковых моделей**
-   - Impact: MEDIUM | Feasibility: HIGH | Sec: MEDIUM
-   - Обоснование: `sessionModel` уже в timeline.mjs, но не рендерится; одинаковые модели у trusted/untrusted = SEC-2 обход silent; 22-09: 4 агента с одной моделью, токены +40%
-   - Status: spike
+6. ~~**Feedback-report: U9 — модель агента в таблицах + предупреждение одинаковых моделей**~~
+   - ✅ **решено (2026-10-04):** normalizeModel(), models[] per agent, history.jsonl sessionModel/agentsModels, колонки Модель, warnings (наследование, shared model, P4-gigiena)
 
 7. **Feedback-report: U5 — heartbeat аудит-лога (нет событий vs файл не создан)**
    - Impact: HIGH | Feasibility: MEDIUM | Sec: MEDIUM
