@@ -390,6 +390,38 @@ function checkD4(repoRoot) {
   return violations;
 }
 
+// ============================================================
+// D5 — pipeline compliance: инвариантные маркеры в SKILL.md и auto-ai-prompt
+// ============================================================
+
+function checkD5(repoRoot) {
+  const violations = [];
+  const skill = read("skills/maestro/SKILL.md", repoRoot);
+
+  // 1. Gate 17 всегда HITL (⚑1)
+  if (!skill.includes("Всегда HITL (⚑1)")) {
+    violations.push("SKILL.md: gate 17 не содержит «Всегда HITL (⚑1)»");
+  }
+
+  // 2. Step 18: условие bump — «Версионирование: да»
+  if (!skill.includes("Версионирование: да")) {
+    violations.push("SKILL.md: step 18 не ссылается на условие bump «Версионирование: да»");
+  }
+
+  // 3. Simple feature line: «после SDD — шаги 14–18.5 для всех категорий»
+  if (!skill.includes("14–18.5")) {
+    violations.push("SKILL.md: простая фича не содержит указание «14–18.5 для всех категорий»");
+  }
+
+  // 4. auto-ai-decision-prompt.md: hard-rule merge/push (⚑1)
+  const aiPrompt = read("skills/maestro/auto-ai-decision-prompt.md", repoRoot);
+  if (!aiPrompt.includes("⚑1") || !aiPrompt.includes("merge") || !aiPrompt.includes("HITL_REQUIRED")) {
+    violations.push("auto-ai-decision-prompt.md: нет hard-rule ⚑1 для merge/push");
+  }
+
+  return violations;
+}
+
 // Fixtures
 // ============================================================
 
@@ -459,6 +491,13 @@ function createFixtures() {
   const updateSh = join(TMP_DIR, "maestro-update.sh");
   const originalUpdateSh = read("maestro-update.sh", ROOT);
   writeFileSync(updateSh, originalUpdateSh);
+  // D5 fixture: auto-ai-decision-prompt.md (пока без маркера → violation)
+  const aiFixDir = join(TMP_DIR, "skills", "maestro");
+  if (!existsSync(aiFixDir)) mkdirSync(aiFixDir, { recursive: true });
+  writeFileSync(
+    join(aiFixDir, "auto-ai-decision-prompt.md"),
+    "## Hard Rules\n1. Security rule only\n"
+  );
 }
 
 // ============================================================
@@ -521,6 +560,36 @@ test("docs-drift fixtures: каждый check возвращает наруше�
     d4.some((v) => v.includes("7.7.7") && v.includes("changelog")),
     `D4 fixture violation: ${JSON.stringify(d4)}`
   );
+  // D5 — pipeline compliance: все маркеры отсутствуют в fixture → violation
+  const d5 = checkD5(TMP_DIR);
+  assert.ok(
+    d5.some((v) => v.includes("SKILL.md")),
+    `D5 fixture violation (SKILL.md): ${JSON.stringify(d5)}`
+  );
+  assert.ok(
+    d5.some((v) => v.includes("auto-ai-decision-prompt")),
+    `D5 fixture violation (auto-ai-prompt): ${JSON.stringify(d5)}`
+  );
+  // D5 real repo fixture: добавить маркеры в fixture SKILL.md и auto-ai-prompt
+  const skillFix = join(TMP_DIR, "skills", "maestro", "SKILL.md");
+  writeFileSync(
+    skillFix,
+    new Array(1172).join("line\n") +
+    "🟡 17. -- HITL GATE: pre-PR\nВсегда HITL (⚑1)\n" +
+    "🟢 18. [agent] finishing\nBump версии (если project context §3: Версионирование: да)\n" +
+    "Простая фича: после SDD шаги 14–18.5 для всех категорий\n"
+  );
+  const aiFixDir = join(TMP_DIR, "skills", "maestro");
+  writeFileSync(
+    join(aiFixDir, "auto-ai-decision-prompt.md"),
+    "## Hard Rules\n1. **Merge/push hard-rule (⚑1).** Decisions on merge — HITL_REQUIRED.\n"
+  );
+  const d5fix = checkD5(TMP_DIR);
+  assert.deepEqual(
+    d5fix,
+    [],
+    `D5 real fixture should pass after markers added: ${JSON.stringify(d5fix)}`
+  );
 });
 
 test("docs-drift real repo: 0 нарушений", () => {
@@ -546,6 +615,11 @@ test("docs-drift real repo: 0 нарушений", () => {
   if (d4.length) {
     totalViolations += d4.length;
     all = all.concat(d4);
+  }
+  const d5 = checkD5(ROOT);
+  if (d5.length) {
+    totalViolations += d5.length;
+    all = all.concat(d5);
   }
 
   assert.deepEqual(

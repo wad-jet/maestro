@@ -155,7 +155,7 @@ init), следует его правилам, затем решает и про
 | Категория | Примеры | Pipeline | Spec Review | SDD | Модель SDD |
 |---|---|---|---|---|---|
 | **Trivial fix** (1-2 строки) | Typos, config tweak, rename, single-line bugfix | TDD + commit напрямую; pipeline не запускается | Нет | Нет | — |
-| **Простая фича** | Новый simple endpoint, UI-компонент без стейта, добавление поля к existing DTO | Шаги 2-7 → gate: простая (Bounded) → короткий дизайн в чате → HITL-гейт 7b (аппрув) → SDD (шаг 13) | Нет (пропускается) | 1-2 task-а без review-package | **Haiku** |
+| **Простая фича** | Новый simple endpoint, UI-компонент без стейта, добавление поля к existing DTO | Шаги 2-7 → gate: простая (Bounded) → короткий дизайн в чате → HITL-гейт 7b (аппрув) → SDD (шаг 13) → **после SDD — шаги 14–18.5 для всех категорий** (docs sync, tests, final review, gate 17, bump, feedback) | Нет (пропускается) | 1-2 task-а без review-package | **Haiku** |
 | **Сложная фича** | Новая сущность с миграцией, multi-step flow, новый публичный endpoint с auth/rate-limiting | Полный pipeline: шаги 2-7 → spec (8) → опц. Spec Review (9) → gate (10) → план (11-12) → SDD (13). **Fast-track** (шаг 7d): внешний spec вместо шага 8 | Рекомендован | Multi-task, review-package per task | **Sonnet** (**Opus** для key task) |
 | **Архитектурная фича** | Новая таблица + сервис + контроллер + тесты, новый middleware, breaking change, cross-module refactoring | Полный pipeline + обязательный Spec Review | **Обязателен** | Multi-task, review-package per task, redesign после review если verdict `revise` | **Opus** |
 
@@ -1024,7 +1024,7 @@ init), следует его правилам, затем решает и про
         не выполняется. Fast-forward = HEAD feature-ветки становится
         HEAD base-ветки — diff идентичен, тесты уже пройдены на шаге 15.
         Проверка: `git merge-base --is-ancestor HEAD <base-branch>`.
-      — **Bump версии (если на гейте 17 была строка версии):** выполнить по
+      — **Bump версии (если на гейте 17 была строка версии; выполняется только если project context §3: `Версионирование: да`):** выполнить по
         правилам project context: новая версия, changelog-секция
         `## [YYYY-MM-DD]` + строка `> **Версия X.Y.Z** — <кратко>` (буллиты
         `[Unreleased]` переезжают в секцию релиза), синхронизация файлов,
@@ -1187,6 +1187,8 @@ init), следует его правилам, затем решает и про
 | **Run tests post-commit** | Commit с failing tests pollutes git history |
 | **Рационализировать «тут простой fix, тесты потом» | Простые fix'и ломают базис для всех последующих задач — тесты ДО фикса |
 | **Пропускать task-review при SDD** | Без review имплементация отклоняется от спецификации незаметно. Каждый task — review. |
+| **Merge/push в main без ветки и гейта 17** | Нарушение ⚑1: ветка (шаги 5-6) обеспечивает isolation, гейт 17 — единственная точка approval merge. Прямой merge/push в main без branch-gate 17 = нарушение pipeline. |
+| **Завершать feature до шага 18.5, гейт 17 не пройден** | Feature не завершён до финального review + bump + feedback. Merge/push до гейта 17 запрещены. |
 | **Chain-approval: принимать "continue" за approval всех последующих gates** | Gate X+1 не имеет ответа пользователя. Каждый gate — отдельный вопрос, "continue" переводит только на следующий шаг. **Единственное исключение — явные флаги авто-режимов `--auto-answer`/`--auto-ai`** (п. 3в): они дают предварительное согласие на весь прогон, но только на гейты из перечня 3в. Всегда HITL (в т.ч. в auto-ai): гейты 10/17, чувствительные изменения (⚑1–4). Контентные вопросы и security-гейты — HITL в manual/auto-answer; в auto-ai — контент решает ИИ, security — гибрид (только risk-reducing дефолты). |
 | **Re-asking confirmed facts during implementation** | После D6 (гипотеза подтверждена) и шага 12 (план утверждён) ответы на ключевые вопросы уже установлены. Повторные вопросы в ходе реализации — потеря времени и признак неполной гипотезы. Если неясность возникла — вернуться к D1 для новой гипотезы, а не продолжать с вопросами. |
 | **Silently skip tests/build when command not detected** | Пропуск тестов или сборки без явного подтверждения пользователя — скатывание к anti-pattern «Skip baseline test check». Tier 3 (HITL-эскалация) обязателен. |

@@ -36,14 +36,15 @@ CONFIDENCE: high | medium | low
 2. **Sensitive contracts (⚑4).** If a question touches external API contracts of
    integrations, inter-service contracts, breaking changes, or foundational business-logic
    rules → return `HITL_REQUIRED` for that question. Do not decide contract changes.
-3. **Invariant gates are not yours.** Gates 10 (spec acceptance) and 17 (merge) are
+3. **Merge/push hard-rule (⚑1).** Decisions on merge or push to base branch are **never** auto-accepted — gate 17 is a hard pause. Always return `HITL_REQUIRED` for any question involving merge/push timing, bypassing the pre-PR gate, or direct-to-main push without branch.
+4. **Invariant gates are not yours.** Gates 10 (spec acceptance) and 17 (merge) are
    always human — never decide them, never advise auto-passing them.
-4. **Conservative fallback.** When evidence is inconclusive, prefer the **more complete
+5. **Conservative fallback.** When evidence is inconclusive, prefer the **more complete
    path** (longer, safer option) — the same choice auto-answer would recommend. Do not
    guess in favor of cutting corners.
-5. **No fabrication.** If context is insufficient, return `HITL_REQUIRED` with a note
+6. **No fabrication.** If context is insufficient, return `HITL_REQUIRED` with a note
    on what evidence is missing — do not invent facts.
-6. **Sensitive values.** You receive only sanitized context. Do not echo or request
+7. **Sensitive values.** You receive only sanitized context. Do not echo or request
    raw secrets, tokens, or confidential values.
 
 ## Tier Guidance
