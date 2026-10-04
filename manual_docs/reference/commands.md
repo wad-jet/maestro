@@ -54,22 +54,22 @@ spec) и на ресече bugfix — сначала `memory_search` по тем
 
 ### `/maestro-setup`
 
-Setup-фаза bootstrap нового проекта: `docs/project-context.md` (14 категорий),
-конфигурация maestro (`maestro.json`, плагин+модели в `.opencode/opencode.json`
-или global, `.gitignore` — весь `.maestro/` и `.opencode/`), каталоги pipeline
-(`.maestro/` — весь в `.gitignore`,
-`docs/superpowers/{specs,plans}/`),
-`regression/` структура. Использует скилл `maestro-setup`.
-Проверяет предусловия: `AGENTS.md` (встроенный `/init`), скилы superpowers
-(предлагает установку через HITL), плагин `maestro-bootstrap` (не блокер).
+Быстрый старт: проверка предусловий, конфигурация (`maestro.json` + permissions
++ модели + `.gitignore` + `regression/`), структура каталогов. `docs/project-context.md`
+(14 категорий из `init-context.md`) — **опциональный** финальный шаг (может быть
+создан позже через `/maestro-design`). Использует скилл `maestro-setup`.
+Проверяет: `AGENTS.md` (встроенный `/init`), скилы superpowers (предлагает
+установку через HITL), плагин `maestro-bootstrap` (не блокер).
 
 ### `/maestro-design`
 
-Дизайн/архитектура, scaffold и roadmap после `/maestro-setup`:
+Дизайн/архитектура, scaffold и roadmap — после `/maestro-setup` или самостоятельно
+(project-context.md может отсутствовать; будет warning, но не блокировка):
 - (a) spec через **primary brainstorm (superpowers:brainstorming) + custodian Q/A (trusted)** → spec пишет primary → `docs/superpowers/specs/YYYY-MM-DD-<project>-design.md`; опц. spec-review (`opus`).
 - (b) scaffold — каркас кода через `implementer-prompt.md` (TDD), диспатч `haiku`/`sonnet`.
 - (c) `docs/roadmap.md` (MVP + этапы).
 Модели агентов наследуются из `.opencode/opencode.json` или global (не переспрашивает).
+Если `project-context.md` отсутствует — шаг «Project Context» (опциональный) для создания; pipeline продолжает работу.
 
 ### `/maestro-feedback-report`
 
