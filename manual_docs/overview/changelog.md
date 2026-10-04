@@ -7,6 +7,29 @@
 > Хронология составлена по истории authoring-репо `maestro-agent`. Даты
 > приблизительные (по коммитам).
 
+## [Unreleased]
+
+> **Версия 5.0.0** — Major: чистка + стабилизация (back-compat cleanup, install fixes, terminology, sanitizer knobs).
+
+### Изменено (BREAKING)
+
+- **#117:** `sanitizer_whitelist` — удаление no-op rule `ledger_entry` и переименование `patterns` → `allow_values`. Старый ключ `patterns` → warn при init, секция с `patterns` игнорируется (fail-loud, без авто-миграции). Требуется обновление `maestro.json`.
+- **#117:** `DEFAULT_RULES` — удалена запись `ledger_entry: true` из 7 правил детекта.
+
+### Исправлено
+
+- **#L7:** `maestro-install.sh` — bash 3.2 совместимость (macOS): `read` error handling + `tr` вместо `${var,,}` (bash 4.0+). Скрипт больше не падает при ответе `y` на вопрос memory layer.
+- **#L9:** `maestro-install.sh` — `chmod +x` для `maestro-update.sh` после fetch (исполняемый флаг).
+
+### Обновлено
+
+- **#L15:** Терминология шага 16: `Code Review` → `Artifact Review` (`agents/reviewer.md`, `trust-and-security.md`, `pipeline-overview.md`, STALE_NAMES).
+- **#93:** Этап B (удаление enforcement-кода) — deferred, отдельная future-фича. V1 (merge-семантика) выполнен.
+
+### Добавлено
+
+- **STALE_NAMES:** `Code Review` добавлен в доки-дрейф-чек (D2) для предотвращения повторения термина.
+
 ## [2026-10-01]
 
 > **Версия 4.22.0** — Minor-релиз: прозрачность защиты данных — pre-work notice + понимания-слой sanitizer_whitelist (HITL-решения #117-разбора, §8.2–8.3).

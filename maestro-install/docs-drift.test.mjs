@@ -167,6 +167,7 @@ function checkD1(repoRoot) {
 // Миграции не удаляем — доки-история в changelog защищена allowlist'ом.
 const STALE_NAMES = [
   "code-reviewer", // бывший агент ревью
+  "Code Review", // терминология шага 16 → Artifact Review (4.16.0+, 5.0)
   "maestro-new", // бывший /команда и скилл (→ maestro-setup)
   "maestro-init.sh", // бывший установочный скрипт (→ maestro-install.sh)
   "feature-agent", // бывший primary-агент (→ maestro)

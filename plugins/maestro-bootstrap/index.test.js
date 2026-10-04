@@ -560,7 +560,7 @@ describe("maestro-bootstrap sanitize (Context Sanitizer, Level 1)", () => {
 
   it("allRulesDisabled detects full rule-off for an agent (SEC-7)", () => {
     const allOff = resolveSanitizeOptions(
-      { rules: { env_secret: false, data_field: false, env_file: false, db_credential: false, ledger_entry: false, private_key: false, auth_header: false } },
+      { rules: { env_secret: false, data_field: false, env_file: false, db_credential: false, private_key: false, auth_header: false } },
       "haiku",
     );
     assert.equal(allRulesDisabled(allOff), true);
@@ -2887,10 +2887,10 @@ describe("maestro_config tool (read-only maestro.json, spec 2026-09-24)", () => 
 // =============================================================================
 
 describe("sanitizer hardening T1 (D1: validateWhitelist)", () => {
-  it("H-5: patterns [[]] → элемент отброшен + warn; маскирование по validated-opts работает", () => {
-    const { section, warnings } = validateWhitelist({ patterns: [[]] });
-    assert.deepEqual(section.patterns, []);
-    assert.ok(warnings.some((w) => w.field === "patterns"), "warn по patterns");
+  it("H-5: allow_values [[]] → элемент отброшен + warn; маскирование по validated-opts работает", () => {
+    const { section, warnings } = validateWhitelist({ allow_values: [[]] });
+    assert.deepEqual(section.allow_values, []);
+    assert.ok(warnings.some((w) => w.field === "allow_values"), "warn по allow_values");
     const opts = resolveSanitizeOptions(section, "haiku");
     const res = sanitize("POSTGRES_PASSWORD=x", opts);
     assert.ok(res.count > 0, "маскирование работает (bypass H-5 закрыт)");
@@ -2914,19 +2914,19 @@ describe("sanitizer hardening T1 (D1: validateWhitelist)", () => {
     assert.match(res.text, /<redacted>/);
   });
 
-  it("H-7: rules с typo-ключом → отброшен; 7×false + мусорный truthy-ключ → allRulesDisabled === true", () => {
+  it("H-7: rules с typo-ключом → отброшен; 6×false + мусорный truthy-ключ → allRulesDisabled === true", () => {
     const { section, warnings } = validateWhitelist({
       rules: {
         auth_headers: true, // typo-ключ (H-7)
         bogus: true,        // мусорный truthy-ключ
         env_secret: false, data_field: false, env_file: false,
-        db_credential: false, ledger_entry: false, private_key: false,
+        db_credential: false, private_key: false,
         auth_header: false,
       },
     });
     assert.ok(!Object.hasOwn(section.rules, "auth_headers"), "typo-ключ отброшен");
     assert.ok(!Object.hasOwn(section.rules, "bogus"), "мусорный ключ отброшен");
-    assert.equal(Object.keys(section.rules).length, 7);
+    assert.equal(Object.keys(section.rules).length, 6);
     assert.equal(warnings.filter((w) => w.field === "rules").length, 2);
     assert.equal(
       allRulesDisabled(resolveSanitizeOptions(section, "haiku")),
@@ -2966,7 +2966,7 @@ describe("sanitizer hardening T1 (D1: validateWhitelist)", () => {
     const valid = {
       rules: { env_secret: false },
       by_agent: { haiku: ["data_field"] },
-      patterns: ["safe_value"],
+      allow_values: ["safe_value"],
       extra_fields: ["custom_field"],
       extra_uri_schemes: ["crm"],
     };
@@ -2975,13 +2975,13 @@ describe("sanitizer hardening T1 (D1: validateWhitelist)", () => {
     assert.equal(warnings.length, 0);
   });
 
-  it("D1: не-массив patterns/extra_fields/extra_uri_schemes → поле игнорируется + warn", () => {
+  it("D1: не-массив allow_values/extra_fields/extra_uri_schemes → поле игнорируется + warn", () => {
     const { section, warnings } = validateWhitelist({
-      patterns: "x",
+      allow_values: "x",
       extra_fields: 42,
       extra_uri_schemes: null,
     });
-    assert.ok(!("patterns" in section));
+    assert.ok(!("allow_values" in section));
     assert.ok(!("extra_fields" in section));
     assert.ok(!("extra_uri_schemes" in section));
     assert.equal(warnings.filter((w) => w.type === "not_array").length, 3);
@@ -3026,14 +3026,14 @@ describe("sanitizer hardening T1 (D1: init-валидация, plugin)", () => {
     const d = path.join(dir, "warn");
     fs.mkdirSync(d, { recursive: true });
     fs.writeFileSync(path.join(d, "maestro.json"), JSON.stringify({
-      sanitizer_whitelist: { patterns: [[]], extra_fields: [123] },
+      sanitizer_whitelist: { allow_values: [[]], extra_fields: [123] },
     }));
     const h = await MaestroBootstrapPlugin({ directory: d });
     let entries = readLogs(d).filter((e) => e.msg === "sanitizer.invalid_config");
     assert.equal(entries.length, 1, "ровно один warn при init");
     // SEC-4b: в warn только имена полей и тип, без значений элементов.
-    assert.ok(entries[0].fields.every((f) => f === "patterns" || f === "extra_fields"));
-    assert.ok(entries[0].fields.includes("patterns"));
+    assert.ok(entries[0].fields.every((f) => f === "allow_values" || f === "extra_fields"));
+    assert.ok(entries[0].fields.includes("allow_values"));
     assert.ok(entries[0].fields.includes("extra_fields"));
     assert.equal(entries[0].count, 2);
     // N диспатчей → warn не повторяется (валидация — один раз при init).

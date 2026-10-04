@@ -84,7 +84,7 @@ export function getGitConfig(root, exec = execSync) {
 // Категории правил детекта чувствительных данных.
 const RULE_NAMES = [
   "env_secret", "data_field", "env_file", "db_credential",
-  "ledger_entry", "private_key", "auth_header",
+  "private_key", "auth_header",
 ];
 
 const DEFAULT_RULES = {
@@ -92,7 +92,6 @@ const DEFAULT_RULES = {
   data_field: true,
   env_file: true,
   db_credential: true,
-  ledger_entry: true,
   private_key: true,
   auth_header: true,
 };
@@ -529,7 +528,7 @@ export function makeMaestroConfigTool({ client, root, log }) {
 /**
  * Extract the sanitizer whitelist from a parsed maestro config.
  * @param {object} config  Parsed `maestro.json` (from loadMaestroConfig).
- * @returns {{ rules?: object, by_agent?: object, patterns?: string[],
+ * @returns {{ rules?: object, by_agent?: object, allow_values?: string[],
  *   extra_fields?: string[], extra_uri_schemes?: string[] }}
  */
 export function loadWhitelist(config) {
@@ -552,7 +551,7 @@ export function loadWhitelist(config) {
  *  - `by_agent` — только объект; value каждого агента — только массив строк
  *    из известных имён правил. Не-объект / не-массив value / не-строка /
  *    неизвестное имя → элемент(ы) игнорируются + warn.
- *  - `patterns` / `extra_fields` / `extra_uri_schemes` — только массивы
+ *  - `allow_values` / `extra_fields` / `extra_uri_schemes` — только массивы
  *    строк. Не-массив → поле игнорируется + warn; не-строки и пустые строки
  *    → элемент отбрасывается + warn (footgun: пустая альтернатива в regex =
  *    mass-over-mask; H-5).
@@ -609,8 +608,12 @@ export function validateWhitelist(section) {
     }
   }
 
-  // Строковые массивы: patterns / extra_fields / extra_uri_schemes.
-  for (const field of ["patterns", "extra_fields", "extra_uri_schemes"]) {
+  // Строковые массивы: allow_values / extra_fields / extra_uri_schemes.
+   // 5.0 BREAKING: `patterns` → `allow_values`. Старый ключ — warn + игнор.
+   if (Object.hasOwn(section, "patterns")) {
+     warn("patterns", "deprecated_rename"); // удалён в 5.0, использовать `allow_values`
+   }
+   for (const field of ["allow_values", "extra_fields", "extra_uri_schemes"]) {
     const value = section[field];
     if (value === undefined) continue;
     if (!Array.isArray(value)) {

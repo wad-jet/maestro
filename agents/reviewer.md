@@ -8,7 +8,7 @@ permission:
   task: deny
 ---
 
-Ты — Code Reviewer для финального ревью ветки перед merge.
+Ты — Artifact Reviewer для финального ревью ветки перед merge.
 
 ## Что уже проверено (контекст — не переоценивай)
 

@@ -217,8 +217,9 @@ PY
 # --- 5a. Memory layer (опционально) ------------------------------------------
 
 if [[ -t 0 ]]; then
-  read -r -p "Подключить memory layer (опциональная векторная память сессий)? (y/N) " memory_yn
-  if [[ "${memory_yn,,}" == "y" ]]; then
+  read -r -p "Подключить memory layer (опциональная векторная память сессий)? (y/N) " memory_yn || true
+  memory_yn_lower="$(printf '%s' "$memory_yn" | tr '[:upper:]' '[:lower:]')"
+  if [[ "$memory_yn_lower" == "y" ]]; then
     if [[ -n "${XDG_DATA_HOME:-}" ]]; then
       memory_data_dir="$XDG_DATA_HOME/maestro"
     elif [[ "$(uname)" == "Darwin" ]]; then
@@ -240,9 +241,9 @@ fi
 
 # --- 6. Загрузка maestro-update.sh (идемпотентно, всегда перезаписывает) -----
 
-if fetch "$MAESTRO_UPDATE_RAW_URL" "maestro-update.sh"; then
-  info "maestro-update.sh загружен."
-elif command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1; then
+  if fetch "$MAESTRO_UPDATE_RAW_URL" "maestro-update.sh" && chmod +x "maestro-update.sh"; then
+    info "maestro-update.sh загружен и помечен как исполняемый."
+  elif command -v curl >/dev/null 2>&1 || command -v wget >/dev/null 2>&1; then
   warn "не удалось загрузить maestro-update.sh: продолжаю без него — скачайте вручную: $MAESTRO_UPDATE_RAW_URL"
 else
   warn "не найден 'curl'/'wget' — maestro-update.sh не загружен. Скачайте вручную: $MAESTRO_UPDATE_RAW_URL"

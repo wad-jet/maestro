@@ -155,7 +155,7 @@ Trust-уровень определяется по `maestro.json` (см. § Trus
 | Шаг 9 — Spec Review | `opus` | Применяется (untrusted) |
 | Шаг 13 — SDD implementer | `haiku` / `sonnet` | Применяется (untrusted) |
 | Шаг 13 — SDD task-reviewer | `sonnet` | Применяется (untrusted) |
-| Шаг 16 — Code Review | `reviewer` | Применяется (untrusted) |
+| Шаг 16 — Artifact Review | `reviewer` | Применяется (untrusted) |
 | (внутри Security Review) | `sanitizer` | **Skip** (trusted — видит сырые данные для пометок) |
 
 Если сабагент отмечен как trusted в `maestro.json` — sanitize промпта

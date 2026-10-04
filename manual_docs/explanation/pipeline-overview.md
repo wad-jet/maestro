@@ -51,12 +51,12 @@ project context, запускает pre-flight, определяет катег�
 | 14 | Docs | Обязательное обновление пользовательской документации: diff-сверка кода с manual_docs/; HITL только при расхождении. Coverage — на шаге 15 |
 | 15 | Checks | Тесты (TEST_COMMAND), e2e, coverage (docs/obs), lint |
 | 15a | Build | Проверка компиляции (BUILD_COMMAND) |
-| 16 | Code Review (по типу артефакта) | Финальное ревью всей ветки по типу/набору типов артефакта (`code`/`docs`/`config`/`sql`). Детали — после таблицы |
+| 16 | Artifact Review (по типу артефакта) | Финальное ревью всей ветки по типу/набору типов артефакта (`code`/`docs`/`config`/`sql`). Детали — после таблицы |
 | 17 | Pre-PR | Итоговая проверка: git log, тесты, coverage, открытые issues. Approve merge · Fix (→ шаг 13) · Cancel. **E2E-критерии приёмки** (если в спеке): прогнать или явно зафиксировать «пропущено, риск принят» — мягкий гейт, решение HITL |
 | 18 | Merge | Слияние feature-ветки в base-ветку. При fast-forward доп. тесты не нужны |
 | 18.5 | Feedback report (ретроспектива) | Режим по `maestro.json → feedback_report` (нет директивы → `manual`: одна строка-подсказка команды; `auto`: авто-сбор без HITL, fail-soft; `disable`: ничего) |
 
-**Шаг 16 (Code Review) — детали:**
+**Шаг 16 (Artifact Review) — детали:**
 
 - Типы артефакта — механический детект по дифу; канон —
   `skills/maestro/references/artifact-review.md`.
@@ -95,7 +95,7 @@ flowchart TB
   Step13 --> Step14["14: Docs"]
   Step14 --> Step15a["15: Checks — тесты / покрытие"]
   Step15a --> Step15b["15a: Build"]
-  Step15b --> Step16["16: Code Review"]
+  Step15b --> Step16["16: Artifact Review"]
   Step16 --> Step17["17: Pre-PR"]
   Step17 --> Step18["18: Merge в base"]
   Step18 --> Step185["18.5: Feedback report (по feedback_report)"]
@@ -182,7 +182,7 @@ flowchart TB
 
 - **Spec Review (шаг 9):** до кодирования, оценивает архитектуру и риски spec.
 - **Task review (шаг 13):** per-task код-гейт во время реализации, узкий scope.
-- **Code Review (шаг 16):** финальный ревью всей ветки по типу артефакта
+- **Artifact Review (шаг 16):** финальный ревью всей ветки по типу артефакта
   (`code`/`docs`/`config`/`sql`, 4.16.0), ловит cross-task проблемы. Первое
   ревью — параллель (`reviewer` + `sonnet`, правило активации + guard «одна
   модель») — только для типа `code`; при расхождении вердиктов — арбитраж
