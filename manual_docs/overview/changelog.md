@@ -11,6 +11,17 @@
 
 > **Версия 5.0.0** — Major: чистка + стабилизация (back-compat cleanup, install fixes, terminology, sanitizer knobs).
 
+## [2026-10-04]
+
+> **Версия 5.1.0** — Minor: компенсаторный релиз P1.4–P1.8 (U1 archive+superseded, U9 model normalization, U5 audit heartbeat, U4 feedback info-line).
+
+### Добавлено
+
+- **P1.5 U1:** Feedback report — archive/superseded для прошлых отчётов, сохранение user feedback, сквозная нумерация слайсов.
+- **P1.6 U9:** `timeline.mjs` normalize `info.model` → `models[]` per agent, SKILL.md «Модель» columns + предупреждения, JSONL extensions (agent/model per event).
+- **P1.7 U5:** Audit-log heartbeat existence/emptiness check (не падать при пустом логе).
+- **P1.8 U4:** Non-blocking feedback info-line в auto-режиме (без остановки пайплайна).
+
 ### Изменено (BREAKING)
 
 - **#117:** `sanitizer_whitelist` — удаление no-op rule `ledger_entry` и переименование `patterns` → `allow_values`. Старый ключ `patterns` → warn при init, секция с `patterns` игнорируется (fail-loud, без авто-миграции). Требуется обновление `maestro.json`.
