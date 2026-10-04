@@ -167,18 +167,19 @@ const messages = Array.isArray(exportData.messages) && exportData.messages.every
 
 const sessionModel = typeof info.model === "string"
   ? info.model
-  : (typeof info.model === "object" && info.model && info.model.providerID && info.model.modelID
-    ? `${info.model.providerID}/${info.model.modelID}`
+  : (typeof info.model === "object" && info.model && info.model.providerID && (info.model.modelID || info.model.id)
+    ? `${info.model.providerID}/${info.model.modelID || info.model.id}`
     : null);
 
 function normalizeModel(infoModel) {
-  if (!infoModel) return null;
-  if (typeof infoModel === "string") return infoModel;
-  if (typeof infoModel === "object" && infoModel && infoModel.providerID && infoModel.modelID) {
-    return `${infoModel.providerID}/${infoModel.modelID}`;
+    if (!infoModel) return null;
+    if (typeof infoModel === "string") return infoModel;
+    if (typeof infoModel === "object" && infoModel && infoModel.providerID && (infoModel.modelID || infoModel.id)) {
+      return `${infoModel.providerID}/${infoModel.modelID || infoModel.id}`;
+    }
+    return null;
   }
-  return null;
-}
+
 
 const allTs = messages.map(m => m.info && m.info.time && m.info.time.created).filter(t => typeof t === "number");
 const sessionStart = allTs.length ? Math.min(...allTs) : null;
@@ -385,7 +386,7 @@ if (!noChildren) {
       const sid = st.metadata && st.metadata.sessionId;
       if (!sid || typeof sid !== "string") continue;
       const agent = (st.input && st.input.subagent_type) || "unknown";
-      if (!agentBuckets[agent]) agentBuckets[agent] = { count: 0, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 0, failed: 0, models: [] };
+      if (!agentBuckets[agent]) agentBuckets[agent] = { count: 0, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 0, failed: 0 };
       agentBuckets[agent].count++;
       if (!uniqueChildren.has(sid)) uniqueChildren.set(sid, agent);
     }
@@ -414,8 +415,11 @@ if (!noChildren) {
           }
           // Extract and normalize child session model
           const childModel = normalizeModel(data && data.info && data.info.model);
-          if (childModel && !b.models.includes(childModel)) {
-            b.models.push(childModel);
+          if (childModel) {
+            if (!b.models) b.models = [];
+            if (!b.models.includes(childModel)) {
+              b.models.push(childModel);
+            }
           }
         } catch (e) {
           if (e && e.message === "child_export_timeout") b.skipped++;
