@@ -1275,8 +1275,6 @@ export const MaestroBootstrapPlugin = async ({ directory, client, sanitizeImpl =
   }
   const confidential = loadConfidentialConfig(config);
   const trustedAgents = loadTrustConfig(config);
-  // D1 (5.1, L21): trusted_paths config.
-  const trustedPaths = loadTrustedPathsConfig(config);
   // SEC-6: если whitelist-`patterns` содержит значения, которые сами матчатся
   // safety-правилами (оператор занёс реальный секрет) — предупредить.
   const unsafePatterns = detectUnsafePatterns(whitelist);
@@ -1393,43 +1391,6 @@ export const MaestroBootstrapPlugin = async ({ directory, client, sanitizeImpl =
           }
         }
 
-        // Trusted path guard (5.1, L21): deny non-custodian access to personal/system paths.
-        const TP_TOOLS = new Set(["read", "write", "edit"]);
-        if (TP_TOOLS.has(input.tool) && trustedPaths.enabled) {
-          const tpTarget = filePathOf(input.tool, output?.args);
-          if (tpTarget && !isPluginMetaFile(root, tpTarget)) {
-            const tpResult = isTrustedPathTarget(tpTarget, trustedPaths.custom);
-            if (tpResult.isTrusted) {
-              let trustInfo = sessionTrustCache.get(input.sessionID);
-              if (trustInfo === undefined) {
-                trustInfo = await resolveIsTrustedSubagent(client, trustedAgents, input.sessionID);
-                sessionTrustCache.set(input.sessionID, trustInfo);
-              }
-              const base = {
-                sessionID: input.sessionID,
-                callID: input.callID,
-                tool: input.tool,
-                action: trustInfo.trusted ? "allow" : "deny",
-                agent: trustInfo.agent,
-                target: path.basename(tpTarget),
-                classes: tpResult.classes,
-                reason: tpResult.reason,
-              };
-              if (trustInfo.trusted) {
-                auditLog.info("trusted_path.access", base);
-              } else {
-                auditLog.warn("trusted_path.deny", base);
-                const err = new Error(
-                  `[trusted-path:deny] Доступ к "${tpTarget}" запрещён. ` +
-                    `Доступ к персональным/системным путям разрешён только trusted-субагентам.`,
-                );
-                err.trustedPath = true;
-                throw err;
-              }
-            }
-          }
-        }
-
         // Санитайзинг промпта task (Уровень 1 Security Review): маскируем
         // чувствительные данные ДО того, как промпт уйдёт в сабагента.
         // Авто, без HITL. Trusted сабагенты (maestro.json → trust) — skip
@@ -1495,7 +1456,7 @@ export const MaestroBootstrapPlugin = async ({ directory, client, sanitizeImpl =
           });
         }
       } catch (err) {
-        if (err?.confidential || err?.sanitizerFailed || err?.trustedPath) {
+        if (err?.confidential || err?.sanitizerFailed) {
           // Confidential-нарушение / сбой маскирования (D2) — обязаны
           // дойти до OpenCode (реальный блок), не замалчиваться логгером
           // (иначе fail-open сохранялся).
