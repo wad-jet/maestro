@@ -13,6 +13,14 @@
 
 ## [2026-10-04]
 
+> **Версия 5.2.0** — Minor: pipeline compliance — gate 17 HITL enforcement, version bump condition, auto-ai merge/push hard-rule, test-guard.
+
+### Добавлено
+
+- **P0.16:** SKILL.md: явные шаги 14–18.5 для всех категорий в таблице Feature Classification; Anti-patterns +2 строки (merge/push без ветки+гейта 17 = ⚑1; завершение до шага 18.5 запрещено); шаг 18 условие «Версионирование: да»; auto-ai-decision-prompt.md hard-rule ⚑1 merge/push; test-guard checkD5() в docs-drift.test.mjs (4 маркера: gate 17 HITL, step 18 bump condition, simple-feature 14-18.5, auto-ai merge/push).
+
+## [2026-10-04]
+
 > **Версия 5.1.0** — Minor: компенсаторный релиз P1.4–P1.8 (U1 archive+superseded, U9 model normalization, U5 audit heartbeat, U4 feedback info-line).
 
 ### Добавлено
