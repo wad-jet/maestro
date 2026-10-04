@@ -157,6 +157,7 @@
   удаление `resolveIsTrustedSubagent`, `confGlobMatch` из enforcement;
   retiring `access_policy`) — отдельная фича, зависит от Eтапа A реализации.
 - **#87** — только если решение окажется breaking.
+- ~~**#106 (5.1): trusted_paths (custodian-only для ~/ и /etc)** — **отменено (2026-10-03):** не обосновано, value 0/10. Удалён без обратной совместимости (6 коммитов, revert). Нативные permissions opencode уже защищают файловую систему; trusted_paths добавлял false sense of security. Проблемы: (1) атака через trusted_paths нереалистична (bash-blocked нативно); (2) custodian-only бессмысленен (другие trusted тоже могут нуждаться в ~/); (3) ~/ блокирует легитимный доступ (caches, configs, temp); (4) custodian не даёт достаточно контекста для debug. Детали: TODO.md line 21.
 
 > Закрыт (C2): #93 «разбор access_policy» уже реализован (2026-09-16,
 > `docs/superpowers/specs/2026-09-16-remove-access-policy-design.md` + regression
