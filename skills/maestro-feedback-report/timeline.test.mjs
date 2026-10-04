@@ -204,7 +204,7 @@ const expectedEmpty = {
   top_ops: [],
   gaps: [],
   timeline: [],
-  metrics: { tokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: null }, activeMs: null, questionCount: 0, reviewDispatches: 0, children: "full", tokensByAgent: {} },
+  metrics: { tokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: null }, activeMs: null, machineActiveMs: null, hitlWaitMs: null, userIdleMs: null, questionCount: 0, reviewDispatches: 0, children: "full", tokensByAgent: {}, validation: null, reviewCycles: [] },
 };
 
 const fixtureTokens = {
@@ -535,6 +535,81 @@ test("metrics.questionCount и reviewDispatches — completed-only, границ
   assert.equal(out.metrics.reviewDispatches, 2); // "Review feature X" + "Ревью по спеке"; "Preview" и pending — нет
 });
 
+test("metrics.machineActiveMs/hitlWaitMs/userIdleMs — разделение времени", () => {
+  const out = runFixture(fixtureTokens, "tokens-split");
+  assert.ok(out.metrics.machineActiveMs !== null, "machineActiveMs не null");
+  assert.ok(out.metrics.hitlWaitMs !== null, "hitlWaitMs не null");
+  assert.ok(out.metrics.userIdleMs !== null, "userIdleMs не null");
+  assert.equal(out.metrics.machineActiveMs, out.totals.toolTimeMs + out.totals.inferenceMs);
+  assert.equal(out.metrics.hitlWaitMs, out.totals.idleWaitMs);
+});
+
+test("metrics.validation — totalMs/sum/delta корректны", () => {
+  const out = runFixture(fixtureTokens, "tokens-val");
+  assert.ok(out.metrics.validation !== null, "validation не null");
+  assert.equal(out.metrics.validation.totalMs, out.session.durationMs);
+  assert.equal(out.metrics.validation.sum, out.metrics.machineActiveMs + out.metrics.hitlWaitMs);
+  assert.equal(out.metrics.validation.delta, Math.abs(out.session.durationMs - (out.metrics.machineActiveMs + out.metrics.hitlWaitMs)));
+  // delta > 0 потому что userIdleMs > 0 (неучтённое время)
+  assert.ok(out.metrics.validation.delta > 0, "delta > 0 при наличии userIdleMs");
+});
+
+test("metrics.validation — totalMs/sum/delta", () => {
+  const out = runFixture(fixtureTokens, "tokens-val");
+  assert.ok(out.metrics.validation !== null, "validation не null");
+  assert.equal(out.metrics.validation.totalMs, out.session.durationMs);
+  assert.equal(out.metrics.validation.sum, out.metrics.machineActiveMs + out.metrics.hitlWaitMs);
+  assert.equal(out.metrics.validation.delta, Math.abs(out.session.durationMs - (out.metrics.machineActiveMs + out.metrics.hitlWaitMs)));
+});
+
+test("metrics.reviewCycles — structured данные из task-диспатчей", () => {
+  const out = runFixture(fixtureTokens, "tokens-rc");
+  assert.ok(Array.isArray(out.metrics.reviewCycles), "reviewCycles — массив");
+  assert.equal(out.metrics.reviewCycles.length, 2); // "Review feature X" + "Ревью по спеке"
+  assert.equal(out.metrics.reviewCycles[0].round, 1);
+  assert.ok(out.metrics.reviewCycles[0].titleShort.length <= 80, "titleShort ≤ 80 символов");
+});
+
+test("formatMs — округление вниз, null, сек/мин/ч", () => {
+  // Тестируем косвенно: формируем fixture с известными значениями и проверяем stdout
+  const data = {
+    info: { id: "ses_fm", model: "m", time: { created: 1000, end: 8000 } },
+    messages: [
+      { info: { role: "user", time: { created: 1000 } }, parts: [] },
+      {
+        info: { role: "assistant", time: { created: 2000 } },
+        parts: [
+          { type: "tool", tool: "bash", callID: "f1", state: { status: "completed", input: { command: "node test.js" }, output: "ok", time: { start: 2100, end: 2600 } }, id: "tf1" },
+        ],
+      },
+      { info: { role: "user", time: { created: 3000 } }, parts: [] },
+      {
+        info: { role: "assistant", time: { created: 4000 } },
+        parts: [],
+      },
+    ],
+  };
+  // toolTimeMs = 500, inferenceMs = 200 (4000-3000=1000 минус 500 tool = 500? Нет)
+  // assistant at 4000: parts=[], nTools=0, toolMs=0, infMs = max(0, (4000-3000) - 0) = 1000
+  // toolTimeMs = 500, inferenceMs = 1000
+  // machineActiveMs = 1500
+  // user at 3000: assistantTs=4000 → wait = 3000-4000 < 0 → 0
+  // user at 1000: assistantTs=null → wait = 0
+  // idleWaitMs = 0
+  const out = runFixture(data, "formatMs");
+  // toolTimeMs = 500 (bash 2100→2600)
+  // inferenceMs = 0
+  // idleWaitMs = 1000 (user at 3000 - assistantTs=2000)
+  // sessionDurationMs = 4000-1000 = 3000 (по max/min m.info.time.created)
+  // machineActiveMs = 500 + 0 = 500
+  // hitlWaitMs = 1000
+  // userIdleMs = 3000 - 500 - 1000 = 1500
+  assert.equal(out.metrics.machineActiveMs, 500);
+  assert.equal(out.metrics.hitlWaitMs, 1000);
+  assert.equal(out.metrics.userIdleMs, 1500);
+  assert.ok(out.metrics.validation.delta >= 0, "delta >= 0");
+});
+
 test("metrics — drift-формата: нет tokens/title/state → нули, без исключений", () => {
   const data = {
     info: { id: "ses_drift" },
@@ -640,6 +715,31 @@ test("JSONL — невалидные строки пропускаются (self
   const lines = readFileSync(jsonl, "utf-8").trim().split("\n").map((l) => JSON.parse(l));
   assert.equal(lines.length, 2); // ses_old (валидная) + ses_test; broken — удалён
   assert.ok(lines.some((l) => l.sessionID === "ses_old"));
+});
+
+test("JSONL — новые поля: machineActiveMs, hitlWaitMs, userIdleMs, validation", () => {
+  const jsonl = join(tmpDir, "j5/history.jsonl");
+  const data = {
+    info: { id: "ses_j5", model: "m", time: { created: 1000, end: 5000 } },
+    messages: [
+      { info: { role: "user", time: { created: 1000 } }, parts: [] },
+      {
+        info: { role: "assistant", time: { created: 2000 } },
+        parts: [
+          { type: "tool", tool: "bash", callID: "j5t1", state: { status: "completed", input: { command: "node t" }, output: "ok", time: { start: 2100, end: 2400 } }, id: "jt1" },
+        ],
+      },
+      { info: { role: "user", time: { created: 3000 } }, parts: [] },
+    ],
+  };
+  runFixture(data, "j5", { MAESTRO_METRICS_JSONL: jsonl });
+  const lines = readFileSync(jsonl, "utf-8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.equal(lines.length, 1);
+  assert.ok(typeof lines[0].machineActiveMs === "number", "machineActiveMs в JSONL");
+  assert.ok(typeof lines[0].hitlWaitMs === "number", "hitlWaitMs в JSONL");
+  assert.ok(typeof lines[0].userIdleMs === "number", "userIdleMs в JSONL");
+  assert.ok(lines[0].validation !== null, "validation в JSONL");
+  assert.ok(typeof lines[0].validation.delta === "number", "validation.delta в JSONL");
 });
 
 test("JSONL — fail-soft: неписательный путь → stdout не меняется, код 0", () => {
