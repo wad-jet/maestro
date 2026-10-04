@@ -644,8 +644,8 @@ test("tokensByAgent — атрибуция по child-экспорту (fixture-
     ],
   };
   const out = runFixture(data, "by-agent", { MAESTRO_TIMELINE_EXPORT_DIR: exportDir });
-  assert.deepEqual(out.metrics.tokensByAgent.sonnet, { count: 1, input: 100, output: 10, reasoning: 0, cacheRead: 5, cacheWrite: 0, skipped: 0, failed: 0 });
-  assert.deepEqual(out.metrics.tokensByAgent.haiku, { count: 1, input: 50, output: 5, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 0, failed: 0 });
+  assert.deepEqual(out.metrics.tokensByAgent.sonnet, { count: 1, input: 100, output: 10, reasoning: 0, cacheRead: 5, cacheWrite: 0, skipped: 0, failed: 0, models: [] });
+  assert.deepEqual(out.metrics.tokensByAgent.haiku, { count: 1, input: 50, output: 5, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 0, failed: 0, models: [] });
 });
 
 test("tokensByAgent — дубль sessionId: токены 1 раз, count = task-части; атрибуция по первому subagent_type", () => {
@@ -662,8 +662,8 @@ test("tokensByAgent — дубль sessionId: токены 1 раз, count = tas
     ],
   };
   const out = runFixture(data, "dup", { MAESTRO_TIMELINE_EXPORT_DIR: exportDir });
-  assert.deepEqual(out.metrics.tokensByAgent.sonnet, { count: 1, input: 77, output: 7, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 0, failed: 0 });
-  assert.deepEqual(out.metrics.tokensByAgent.haiku, { count: 1, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 0, failed: 0 });
+  assert.deepEqual(out.metrics.tokensByAgent.sonnet, { count: 1, input: 77, output: 7, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 0, failed: 0, models: [] });
+  assert.deepEqual(out.metrics.tokensByAgent.haiku, { count: 1, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 0, failed: 0, models: [] });
 });
 
 test("tokensByAgent — без metadata.sessionId → игнор; failed (нет fixture); over-cap → skipped", () => {
@@ -751,7 +751,7 @@ test("JSONL — новые поля: sessionModel, agentsModels", () => {
       {
         info: { role: "assistant", time: { created: 2000 } },
         parts: [
-          { type: "tool", tool: "task", callID: "c1", state: { status: "completed" }, id: "tc1" },
+          { type: "tool", tool: "task", callID: "c1", state: { status: "completed", input: { subagent_type: "haiku" }, metadata: { sessionId: "child_m1" } }, id: "tc1" },
         ],
       },
     ],
@@ -793,7 +793,7 @@ test("tokensByAgent — зависший child-экспорт (таймаут) �
     ],
   };
   const out = runFixture(data, "hang", { MAESTRO_TIMELINE_EXPORT_DIR: exportDir, MAESTRO_CHILD_EXPORT_TIMEOUT_MS: "200" });
-  assert.deepEqual(out.metrics.tokensByAgent.opus, { count: 1, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 1, failed: 0 });
+  assert.deepEqual(out.metrics.tokensByAgent.opus, { count: 1, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 1, failed: 0, models: [] });
 });
 
 test("--no-children: children=skipped, tokensByAgent пуст даже при наличии task-частей (fixture)", () => {
@@ -938,4 +938,41 @@ test("stderr: многострочный stderr CLI → diag остаётся о
   assert.equal(lines.length, 1);
   assert.match(lines[0], /\[timeline\] export failed: ses_child_bad/);
   assert.match(lines[0], /line1 line2-injected/);
+});
+
+test("session.model — объект {providerID, id} (сессионный формат экспорта)", () => {
+  const data = {
+    info: { id: "ses_idkey", model: { providerID: "akash", id: "Qwen/Qwen3.8-27B" }, time: { created: 1000, end: 1000 } },
+    messages: [{ info: { role: "user", time: { created: 1000 } }, parts: [] }],
+  };
+  const out = runFixture(data, "idkey_session");
+  assert.equal(out.session.model, "akash/Qwen/Qwen3.8-27B");
+});
+
+test("session.model — приоритет modelID над id при обоих ключах", () => {
+  const data = {
+    info: { id: "ses_both", model: { providerID: "p", modelID: "a/b", id: "c/d" }, time: { created: 1000, end: 1000 } },
+    messages: [{ info: { role: "user", time: { created: 1000 } }, parts: [] }],
+  };
+  const out = runFixture(data, "idkey_both");
+  assert.equal(out.session.model, "p/a/b");
+});
+
+test("tokensByAgent.models — child-экспорт с {providerID, id} атрибутирует модель", () => {
+  const exportDir = join(tmpDir, "child-export-idkey");
+  mkdirSync(exportDir, { recursive: true });
+  writeFileSync(join(exportDir, "child_idkey.json"), JSON.stringify({
+    info: { id: "child_idkey", model: { providerID: "akash", id: "X/Y" }, tokens: { input: 1, output: 1, reasoning: 0, cache: { read: 0, write: 0 } } },
+    messages: [],
+  }));
+  const data = {
+    info: { id: "ses_idkey_c" },
+    messages: [
+      { info: { role: "assistant", time: { created: 2000 } }, parts: [
+        { type: "tool", tool: "task", callID: "c1", state: { status: "completed", input: { subagent_type: "fable" }, output: "ok", metadata: { sessionId: "child_idkey" }, time: { start: 2100, end: 2500 } }, id: "tc1" },
+      ] },
+    ],
+  };
+  const out = runFixture(data, "idkey_child", { MAESTRO_TIMELINE_EXPORT_DIR: exportDir });
+  assert.deepEqual(out.metrics.tokensByAgent.fable.models, ["akash/X/Y"]);
 });
