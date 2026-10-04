@@ -299,6 +299,7 @@ let mInput = 0, mOutput = 0, mReasoning = 0, mCacheRead = 0, mCacheWrite = 0;
 let costSum = 0, costSeen = false;
 let questionCount = 0;
 let reviewDispatches = 0;
+const reviewCycles = [];
 const REVIEW_RE = /\breview\b|ревью/i;
 
 for (const msg of messages) {
@@ -322,6 +323,11 @@ for (const msg of messages) {
       const st = p.state;
       if (st && st.status === "completed" && typeof st.title === "string" && REVIEW_RE.test(st.title)) {
         reviewDispatches++;
+        reviewCycles.push({
+          round: reviewDispatches,
+          titleShort: st.title.slice(0, 80),
+          sessionId: st.metadata && st.metadata.sessionId,
+        });
       }
     }
   }
@@ -354,6 +360,7 @@ const metrics = {
         sum: machineActiveMs + hitlWaitMs,
         delta: Math.abs(sessionDurationMs - (machineActiveMs + hitlWaitMs)),
       },
+  reviewCycles,
 };
 
 if (!noChildren) {
