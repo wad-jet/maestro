@@ -31,12 +31,10 @@
 6. ~~**Feedback-report: U9 — модель агента в таблицах + предупреждение одинаковых моделей**~~
    - ✅ **решено (2026-10-04):** normalizeModel(), models[] per agent, history.jsonl sessionModel/agentsModels, колонки Модель, warnings (наследование, shared model, P4-gigiena)
 
-7. **Feedback-report: U5 — heartbeat аудит-лога (нет событий vs файл не создан)**
-   - Impact: HIGH | Feasibility: MEDIUM | Sec: MEDIUM
-   - Обоснование: «аудит-лог отсутствует» ≠ «чисто»; ретроспектива confidential не отличает сломано от безопасно
-   - Status: spike
+7. ~~**Feedback-report: U5 — heartbeat аудит-лога (нет событий vs файл не создан)**~~
+   - ✅ **решено (2026-10-04):** heartbeat-check existence/emptiness audit-log, status в секции "Безопасность"
 
-8. **Feedback-report: U4 — небlocking фидбек-гейт в auto-режиме**
+8. ~~**Feedback-report: U4 — небlocking фидбек-гейт в auto-режиме**~~
    - Impact: MEDIUM | Feasibility: HIGH | Sec: —
    - Обоснование: одна строка в шаге 18.5; исторически 3 фидбека трижды меняли продукт, сейчас — 0 после auto-режима
    - Status: spike
