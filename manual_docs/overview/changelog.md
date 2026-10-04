@@ -13,6 +13,14 @@
 
 ## [2026-10-05]
 
+> **Версия 5.3.1** — Patch: timeline.mjs — model extraction from `id` key (fallback for `modelID`), regression tests, repair of stale timeline test expectations/fixtures.
+
+### Исправлено
+
+- **timeline.mjs (feedback-report):** сессионный `info.model` в `opencode export` хранит модель под ключом `id`, а код читал только `modelID` → `session.model = null` и модели агентов не атрибутировались в отчётах. Fallback `modelID` → `id` (sessionModel + normalizeModel); 3 регресс-теста; починка 4 stale-тестов/фикстуры (timeline.test.mjs не входит в `npm test` — дрейф не покрывался).
+
+## [2026-10-05]
+
 > **Версия 5.3.0** — Minor: test-agents model column (verification of agent configuration), strengthening of ⚑1 — auto-merge STOP on gate 17 in all modes.
 
 ### Added
