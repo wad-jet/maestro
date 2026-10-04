@@ -25,11 +25,8 @@
 4. ~~**Spike: Уточнение `maestro-setup` scope**~~
    - ✅ **решено (2026-10-04):** SKILL.md 545→119 строк, context optional, soft warning вместо HITL, pipeline step 0 не-блокирующий
 
-5. **Feature: `maestro-feedback-report` — U1: пересоздавать отчёт по sessionID**
-   - TODO.md line 3
-   - Impact: HIGH | Feasibility: HIGH | Sec: —
-   - Задача: одна сессия = один файл `report-<sessionID>.md`, дата/номер среза внутри; прежний срез → `archive/` с пометкой superseded; устраняет 22% дублей (8/36 файлов)
-   - Status: spike
+5. ~~**Feature: `maestro-feedback-report` — U1: пересоздавать отчёт по sessionID**~~
+   - ✅ **решено (2026-10-04):** одна сессия = один файл, archive+superseded, пользовательский фидбек verbatim, slice numbering
 
 6. **Feedback-report: U9 — модель агента в таблицах + предупреждение одинаковых моделей**
    - Impact: MEDIUM | Feasibility: HIGH | Sec: MEDIUM
