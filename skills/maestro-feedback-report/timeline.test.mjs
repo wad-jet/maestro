@@ -742,6 +742,38 @@ test("JSONL — новые поля: machineActiveMs, hitlWaitMs, userIdleMs, va
   assert.ok(typeof lines[0].validation.delta === "number", "validation.delta в JSONL");
 });
 
+test("JSONL — новые поля: sessionModel, agentsModels", () => {
+  const jsonl = join(tmpDir, "j5a/history.jsonl");
+  const data = {
+    info: { id: "ses_j5a", model: "anthropic/claude-3.5-sonnet" },
+    messages: [
+      { info: { role: "user", time: { created: 1000 } }, parts: [] },
+      {
+        info: { role: "assistant", time: { created: 2000 } },
+        parts: [
+          { type: "tool", tool: "task", callID: "c1", state: { status: "completed" }, id: "tc1" },
+        ],
+      },
+    ],
+  };
+  // fixture для child: haiku с моделью в строке
+  const exportDir = join(tmpDir, "child-export-models");
+  mkdirSync(exportDir, { recursive: true });
+  writeFileSync(join(exportDir, "child_m1.json"), JSON.stringify({
+    info: { id: "child_m1", model: "haiku-3.5" },
+    messages: [{ info: { role: "user", time: { created: 1000 } }, parts: [] }],
+  }));
+  const out = runFixture(data, "child_m1", {
+    MAESTRO_METRICS_JSONL: jsonl,
+    MAESTRO_TIMELINE_EXPORT_DIR: exportDir,
+  });
+  const lines = readFileSync(jsonl, "utf-8").trim().split("\n").map((l) => JSON.parse(l));
+  assert.equal(lines.length, 1);
+  assert.equal(lines[0].sessionModel, "anthropic/claude-3.5-sonnet");
+  assert.ok(Array.isArray(lines[0].agentsModels?.haiku));
+  assert.ok(lines[0].agentsModels.haiku.includes("haiku-3.5"));
+});
+
 test("JSONL — fail-soft: неписательный путь → stdout не меняется, код 0", () => {
   const jsonl = "/proc/never-writable/history.jsonl";
   const out = runFixture({ info: { id: "ses_j4" }, messages: [] }, "j4", { MAESTRO_METRICS_JSONL: jsonl });
