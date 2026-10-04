@@ -11,6 +11,15 @@
 
 > **Версия 5.0.0** — Major: чистка + стабилизация (back-compat cleanup, install fixes, terminology, sanitizer knobs).
 
+## [2026-10-05]
+
+> **Версия 5.3.0** — Minor: test-agents model column (verification of agent configuration), strengthening of ⚑1 — auto-merge STOP on gate 17 in all modes.
+
+### Added
+
+- **test-agents:** dispatch prompt extended — the agent returns the model used; a «Модель» column added to the summary table (consistency check of agent configuration).
+- **Gate 17 / ⚑1:** STOP marker on auto-merge in auto-answer/auto-ai modes; explicit prohibition in invariants.md (⚑1).
+
 ## [2026-10-04]
 
 > **Версия 5.2.0** — Minor: pipeline compliance — gate 17 HITL enforcement, version bump condition, auto-ai merge/push hard-rule, test-guard.
