@@ -33,8 +33,10 @@
 
 1. **Предусловие `AGENTS.md`** — если файла нет, предложит выполнить встроенный
    `/init` opencode (создаёт `AGENTS.md`).
-2. **Сбор контекста** — интерактивный опрос по 14 категориям → создаёт
-   `docs/project-context.md`. Обязательные секции: 1, 2, 3, 4, 9, 14.
+2. **Сбор контекста (опционально)** — опрос по 14 категориям из `init-context.md`
+   → создаёт `docs/project-context.md`. Обязательные секции: 1, 2, 3, 4, 9, 14.
+   > `project-context.md` может быть создан позже через `/maestro-design` (шаг «Project Context»).
+   > Без context pipeline продолжает работу с контекстом из user story.
 3. **Конфигурация** — генерирует (по канону скилла `maestro-assistant`):
     - `maestro.json` — `trust` (custodian, sanitizer), `confidential`,
       `sanitizer_whitelist`;
