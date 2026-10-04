@@ -20,12 +20,10 @@
 ~~3. **Feedback-report: U6 + U8 — машиночитаемый слой + сводная таблица ревью-вердиктов**~~
    - ✅ **решено (2026-10-04):** `timeline.mjs`: `reviewCycles[]` (structured: round/titleShort/sessionId); SKILL.md: таблица ревью-вердиктов вместо нарратива, рендер из history.jsonl
 
-### Приоритет P1 (высокий)
+### Приоритет P1 (частично закрыто)
 
-4. **Spike: Уточнение `maestro-setup` scope**
-   - TODO.md line 5
-   - Impact: HIGH | Feasibility: HIGH | Sec: —
-   - Задача: переопределить scope — только permissions, maestro.json, модели. project-context.md — последний этап или перенести в maestro-design.
+4. ~~**Spike: Уточнение `maestro-setup` scope**~~
+   - ✅ **решено (2026-10-04):** SKILL.md 545→119 строк, context optional, soft warning вместо HITL, pipeline step 0 не-блокирующий
 
 5. **Feature: `maestro-feedback-report` — U1: пересоздавать отчёт по sessionID**
    - TODO.md line 3
