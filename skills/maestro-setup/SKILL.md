@@ -1,545 +1,119 @@
 ---
 name: maestro-setup
-description: Use when initializing maestro for a new or existing project — generates docs/project-context.md (14 categories), maestro config (maestro.json, .gitignore, plugin+models in .opencode/opencode.json or global), regression/ structure, and verifies prerequisites (AGENTS.md, superpowers, plugin)
+description: Initialize maestro for a new or existing project — quick setup (AGENTS check, maestro.json, permissions, models, checks); optional project-context survey
 ---
 
 # Init — Setup для нового или уже существующего проекта
 
 ## Overview
 
-Сквозная инициализация maestro для нового или уже существующего проекта. Команда
-`/maestro-setup` запускает этот скилл в любой primary-сессии. Цель — подготовить
-проект к работе pipeline maestro: есть `docs/project-context.md` (источник
-контекста шага 0), конфигурация maestro (`maestro.json` + `.gitignore` +
-плагин/модели в `.opencode/opencode.json` или глобально),
-структура `regression/` и проверенные предусловия (AGENTS.md, superpowers, плагин).
+Быстрая инициализация maestro: проверка предусловий, конфигурация (`maestro.json` + permissions + модели), структура `regression/`, проверка superpowers и плагина. Проект-контекст (`docs/project-context.md`) — опциональный финальный шаг.
 
-**ВНИМАНИЕ:** `/maestro-setup` выполняет **только setup-фазу**. Дизайн, scaffold
-и roadmap — в отдельной команде `/maestro-design` (скилл `maestro-design`). Это разделение
-разделение setup и дизайна зафиксировано в спецификации пайплайна.
-
-**Мы НЕ переопределяем встроенный `/init` opencode** (тот создаёт `AGENTS.md`).
-`/maestro-setup` — отдельная команда.
+> Дизайн/спека, scaffold, roadmap — в `/maestro-design`.
 
 **Язык:** все HITL-вопросы, варианты и сообщения пользователю — только на русском.
 
-## Артефакты, которые производит скилл
+## Артефакты
 
 | Задача | Выход |
 |---|---|
-| 1. `/init` гейт | `AGENTS.md` (проверка/создание через встроенный `/init`) |
-| 2. Контекст | `docs/project-context.md` (14 категорий, см. `init-context.md`) |
-| 3. Конфиг | `maestro.json` (trust/confidential/sanitizer_whitelist) + нативные permissions (`.opencode/opencode.json`) + плагин/модели (`.opencode/opencode.json` или global) + `.gitignore` + `regression/` |
-| 3а. Каталоги | `.maestro/`, `docs/superpowers/{specs,plans}/`, `docs/confidential/` |
-| 4. superpowers | проверка/установка (HITL) |
-| 5. плагин | проверка подключения `maestro-bootstrap` (не блокер) |
+| 1. `/init` гейт | `AGENTS.md` (проверка/создание через `/init`) |
+| 2. Контекст | `docs/project-context.md` (опционально, 14 категорий из `init-context.md`) |
+| 3. Конфиг | `maestro.json` + permissions (`agents.*.permission`) + плагин/модели + `.gitignore` + `regression/` |
+| 4. superpowers | проверка (7 REQUIRED SUB-SKILLS) |
+| 5. плагин | проверка `maestro-bootstrap` (не блокер) |
 
-> Дизайн/спека, scaffold, roadmap — НЕ здесь. Они в `/maestro-design`.
+## Предусловия
 
-## Предусловия (pre-flight)
+### 1. Проверка AGENTS.md
 
-### 1. Проверка AGENTS.md (задача 1)
+- Отсутствует → HITL: (a) выполнить `/init` — (b) пропустить — (c) отмена
 
-- Если `AGENTS.md` отсутствует → HITL:
-  (a) выполнить встроенный `/init` (системный setup), затем вернуться
-  (b) пропустить и продолжить `/maestro-setup`
-  (c) отмена
+### 2. Git-состояние
 
-### 2. Проверка docs/project-context.md (задача 2)
-
-- Файл существует → HITL:
-  (a) перечитать/восстановить контекст из него и перейти к задачам 3–5
-  (b) пересоздать/обновить с нуля (полный опрос)
-  (c) отмена
-- Файла нет → полный опрос (переход к «Задача 2. Сбор контекста»).
-
-### 3. Git-состояние (HITL перед записью файлов)
-
-Определить `git status` (clean/dirty) и текущую ветку. Запросить решение:
-
-- (a) работать в текущем дереве **без** создания ветки (автокоммитов нет)
-- (b) isolate в ветку по inline-конвенции maestro: `feature/<kebab-case>`
-  (для нового проекта, напр. `feature/project-init`), без автокоммитов
+Определить `git status` и ветку. Запросить:
+- (a) работать в текущем дереве (без ветки)
+- (b) создать ветку `feature/<kebab-case>` (напр. `feature/project-init`)
 - (c) отмена
+Автокоммитов нет.
 
-Автокоммиты НЕ создаём ни в каком варианте — коммит пользователь делает сам.
+## Задача 2. Project Context (опционально)
 
-## Задача 2. Сбор контекста по 14 категориям
+Перед завершением — проверить `docs/project-context.md`:
+- Существует → пропустить
+- Отсутствует → HITL: (a) опросить context (14 категорий из `init-context.md`) — (b) пропустить (завершить без context)
+- При (a): загрузить `init-context.md`, опросить обязательные секции (1,2,3,4,9,14), создать файл
+- При (b): записать статус `context: deferred` в `.maestro/last-run.md`
+- **ВАЖНО:** НЕ создавать placeholder-файл. Существование файла — единственный маркер готовности контекста.
 
-Оркестратор читает `init-context.md` (схему 14 категорий) и проходит категории
-поочерёдно. Для каждой категории:
-- Задаёт один-два конкретных вопроса в интерактивном режиме.
-- Модель сама определяет, предполагает ли вопрос готовые варианты ответа. Если
-  да — задаёт вопрос через вопросный инструмент (radio — одиночный выбор,
-  checkbox — множественный) с пунктом «свой вариант» (свободный ввод). Варианты,
-  перечисленные в тексте категории (напр. «Тип проекта: сервис / приложение /
-  библиотека / CLI / monorepo», «Стратегии: unit / integration / e2e»), предлагаются
-  на выбор, а не остаются только текстом вопроса. Если готовых вариантов нет —
-  открытый вопрос.
-- Фиксирует ответ в накапливаемый черновик.
-- Обязательные секции: 1, 2, 3, 4, 9, 14. Остальные — по релевантности,
-  либо помечаются `_pending_` (не блокируют).
-
-Секция `14. Commands`: после опроса применить `stack-detection.md` для
-автозаполнения команд по артефактам (если проект уже имеет манифесты), либо
-задать через вопросный инструмент — для каждой команды значение `auto` / `none` /
-явная команда (radio) + «свой вариант» (ввод команды вручную); при определении
-набора команд (какие из TEST/BUILD/E2E/LINT/… описать) — checkbox. Radio и checkbox
-не смешивать: radio — выбор значения одной команды, checkbox — выбор нескольких
-команд. Неоднозначность → HITL (см. §14 в `init-context.md`).
-
-В конце — показать пользователю готовый черновик `docs/project-context.md`.
-
-**HITL gate:** «Контекст корректен? (a) approve — (b) правки — (c) отмена».
-При (b) — внести правки и повторить gate.
-
-→ создаёт `docs/project-context.md`.
-
-> **Делегирование правил наполнения:** правила актуализации/наполнения project-context
-> (граница «схема vs наполнение», §14 Commands, обязательные секции) — в скилле
-> `maestro-assistant` (канон). Схема 14 категорий остаётся в `init-context.md`; схему
-> не менять, править только наполнение. При вопросах по наполнению/актуализации — загрузить
-> `maestro-assistant`.
-
-> **Гигиена project-context.md (правила при создании и актуализации):**
-> 1. Тест обрезки — вызовет ли удаление этой строки ошибку у модели? Если
->    нет — вырезать.
-> 2. Максимум один IMPORTANT-акцент на раздел (много акцентов = ни одного).
-> 3. Редко-нужные знания — по требованию (конкретный шаг/скилл их
->    загружает), а не постоянная загрузка.
+> Детали процедуры опроса и гигиены — в `skills/maestro-setup/init-context.md` и `maestro-assistant/SKILL.md` (§7 "Опрос project-context").
 
 ## Задача 3. Конфигурация maestro
 
-На основе контекста (§3 стек, §5 домены, §12 безопасность) сгенерировать конфиги
-идемпотентно.
+Перед генерацией — **probe скилла `maestro-assistant` (CRIT-2).** Вызвать `skill` с bogus-именем, проверить наличие.
+- **Есть** → следовать канону maestro-assistant для генерации конфигов
+- **Нет** → HITL: "необходимо установить `maestro-assistant`" → **жесткое прерывание** (не продолжать)
 
-### 3а. Подготовка каталогов
+### maestro.json (коммитится в git)
 
-> Правила структуры каталогов pipeline + `.gitignore` конкретных путей — в скилле
-> `maestro-assistant` (канон). Идемпотентно (`mkdir -p` безопасен).
-
-Перед генерацией конфигов (идемпотентно, `mkdir -p` безопасен):
-- `mkdir -p .maestro/` (для логов плагина и `last-run.md`)
-- `mkdir -p docs/superpowers/specs docs/superpowers/plans` (для `/maestro-design`)
-- `mkdir -p docs/confidential` (защищённая папка, см. `confidential` в `maestro.json`)
-
-### maestro.json (консолидированный конфиг, коммитится в git)
-
-**Перед генерацией — probe скилла `maestro-assistant` (жёсткий gate, CRIT-2).**
-Вызвать `skill` tool с bogus-именем и проверить наличие `maestro-assistant` в списке доступных.
-- **Скилл есть** → загрузить `maestro-assistant` (`skill` tool) и следовать его **канону**
-  `maestro.json` (три секции: `trust` / `confidential` / `sanitizer_whitelist`;
-  полный JSON-канон — в `skills/maestro-assistant/SKILL.md`).
-- **Скилла нет** → HITL-сообщение «необходимо установить скилл `maestro-assistant` для
-  продолжения» и **жёсткое прерывание задачи 3 и всего процесса `/maestro-setup`** (не переходить
-  к 4–5, без fallback-деградации). Идемпотентно: проверка выполняется только если задача 3
-  реально генерирует/обновляет конфиг; при пропуске задачи (конфиг уже есть) — не проверяется.
-
-- **Вопрос режима коммуникации (HITL):** «Какой режим коммуникации?
-  (a) plain — простой язык для обсуждений по умолчанию (рекомендуется) —
-  (b) professional — технический язык, без упрощения». Результат — ключ
-  `communication` (`"plain"` | `"professional"`) в `maestro.json`. При
-  обновлении существующего конфига без ключа — спросить только если
-  пользователь просил правку конфига (дефолт `plain` действует молча).
-
-Правила вывода секций (по канону assistant): `trust` — всегда `custodian: true`, `sanitizer: true`;
-`confidential.paths` дефолт `["docs/confidential/**"]`;
-`sanitizer_whitelist` из §3/§12. Идемпотентность: при существовании `maestro.json` — diff по
-секциям; merge сохраняет пользовательские правки; если файла нет — создаётся целиком.
-
-**Чтение текущего `maestro.json`** (существующий проект, diff секций) —
-**плагин-тулом `maestro_config`** (весь конфиг; native `ask`). `read`-тул —
-нативно denied, bash-чтение запрещено (см. канон нативных permissions в
-`maestro-assistant`). Тул недоступен — «перезапустите opencode / обновите плагин
-(≥ 4.9.0)», конфиг не читать.
-
-**Нативные permissions** (файл-доступ) генерируются в
-`.opencode/opencode.json` (merge-config) по канону `maestro-assistant` §«Канон нативных
-permissions OpenCode»: `read`/`glob`/`grep` deny `maestro.json`/`.maestro/**`,
-`read`-allow `.maestro/plugin-version`, `edit`-ask `maestro.json`, глобально
-`maestro_config` — `ask`, per-agent `maestro_config` — `deny` для всех
-сабагентов.
-
-### Секция `memory` (опциональный memory layer)
-
-Память — **опциональный модуль** плагина; секция `memory` в `maestro.json`
-добавляется **только** при выполнении одного из условий:
-
-1. **Маркер `enabled.flag`** — проверить наличие
-   `<data-dir>/maestro/memory/enabled.flag` (ставится опциональным шагом
-   `maestro-install.sh` «Подключить memory layer? (y/N)»). `<data-dir>`:
-   `$XDG_DATA_HOME` → macOS `~/Library/Application Support` → `~/.local/share`;
-   далее `/maestro/memory/enabled.flag`. Маркер — персистентный machine-level
-   default: каждый последующий `/maestro-setup` в любом проекте машины добавляет
-   секцию `memory`; отключается удалением файла.
-2. **Явный запрос HITL** — пользователь просит включить память.
-
-Если ни одно условие не выполнено — секцию `memory` **не добавлять** (никакого
-silent opt-in).
-
-При добавлении — HITL-опрос (по канону `maestro-assistant`, секция `memory`):
-
-- **Бэкенд:** `sqlite` (default, локальный) / `qdrant` / `pgvector`
-  (централизованные — требуют identity и env-ссылки на ключ/DSN). Решение
-  «локально vs удалённо» — только `storage.type`.
-- **Командная память:** `identity_env` (имя env-переменной) и `namespace`
-  (monorepo / связанные репозитории) — по запросу.
-
-- **Namespace (обязательно):** формат `a.b.c` (1–3 сегмента, lowercase, точка-
-  разделитель). Предложить значение из git remote: `org.<repo>` lowercase, пользователь
-  правит. Невалидный/отсутствующий → memory off (disabled_reason: `namespace_missing`).
-- **Related (опционально):** список namespace-prefix целей для кросс-доменной
-  интеграции (merged-only, предпочтение 1:1, ≤16 записей).
-- **Domain recall (опционально):** `true` по умолчанию. `false` = off-switch домен-ног.
-- **Артефакты (опционально):** `artifact_globs` — allowlist-глобы спек/планов
-  для поля `artifacts[]` записей (v5.2). Default — маэстро-набор
-  `["docs/superpowers/specs/**", "docs/superpowers/plans/**"]`; явный `[]` —
-  отключение. По умолчанию не задаётся (действует default).
-
-Минимальный канон при добавлении: `{ "enabled": true }` (остальные ключи —
-дефолты). После записи — напомнить про `npm install` в `module_dir`
-(`<data-dir>/maestro/memory/module/`) и перезапуск opencode (OP-1).
-
-При включении памяти в merge-конфиг (`.opencode/opencode.json` или global)
-добавить нативные permission для write/boundary-tools (обязательное правило,
-канон `maestro-assistant`):
-`permission: { memory_forget: "ask", memory_export: "ask", memory_import: "ask",
-memory_migrate: "ask", memory_prune: "ask", memory_reindex: "ask", memory_backup: "ask" }`
-(opencode default для новых тулов — allow, поэтому правило обязательно).
-
-Последовательность включения (канон, см. `manual_docs/how-to/enable-memory.md`):
-(1) добавить секцию `memory`, (2) рестарт opencode → self-provision `module_dir`,
-(3) `npm install` в `module_dir`, (4) рестарт №2, (5) верификация
-(probe-лог / `@maestro-memory` / блок «Контекст из памяти maestro»).
-
-### Плагин + модели агентов (без корневого `opencode.json`)
-
-Корневой `opencode.json` **не создаётся**. Плагин и модели живут в merge-конфиге
-OpenCode (`.opencode/opencode.json` или глобальный `~/.config/opencode/opencode.json`).
-
-- **Плагин** `maestro-bootstrap` — рекомендуется **глобально** в
-  `~/.config/opencode/opencode.json` (`"plugin": ["maestro-bootstrap@git+https://github.com/wad-jet/maestro.git"]`).
-  Допустим также `.opencode/opencode.json`. Если ключа `plugin` нет → добавить;
-  если есть, но spec отсутствует → дописать; если уже есть → skip.
-  **Никогда не перезаписывать существующий контент.**
-  Для локального клона репозитория допустим путь `../plugins/maestro-bootstrap/index.js`
-  (относительный путь резолвится от каталога конфига: `.opencode/` для проектного,
-  `~/.config/opencode/` для глобального; `./plugins/...` → `.opencode/plugins/...`,
-  которого нет, — плагин молча не загрузится; при сомнении — абсолютный `file:///…`).
-- **Модели агентов** — в `.opencode/opencode.json` (gitignored) или глобально,
-  по M1 (см. ниже). **Плейсхолдеры запрещены.**
-
-### Нативный permission-бастион OpenCode (R1+R4)
-
-Помимо плагина, `/maestro-setup` пишет **нативный permission-конфиг** в merge-config —
-fail-closed baseline, не зависящий от плагина. Идемпотентно: только добавлять ключи,
-**не перезаписывать существующий контент**, не дублировать уже присутствующие правила.
-
-**Placement (I4):** deny для `docs/confidential/*` — **только в project**
-`.opencode/opencode.json` (maestro-конвенциональный путь, не должен влиять на
-не-maestro проекты). В глобальный `~/.config/opencode/opencode.json` — максимум
-паритет built-in секретов (`.env`, `*.pem`, `*.key` и т.п.), не `docs/confidential/*`.
-
-**R1 — deny-baseline для confidential (read/edit).** Паритет built-in confidential
-плагина, на уровне ядра OpenCode (fail-closed даже без плагина):
-
+**Дефолты (не требуют project-context):**
 ```json
 {
-  "permission": {
-    "read": {
-      "*": "allow",
-      "docs/confidential/*": "deny",
-      "*.env": "deny",
-      "*.env.*": "deny",
-      "*.env.example": "allow",
-      "*.pem": "deny",
-      "*.key": "deny",
-      "*.crt": "deny",
-      "*.p12": "deny",
-      "*.pfx": "deny"
-    },
-    "edit": {
-      "*": "allow",
-      "docs/confidential/*": "deny",
-      "*.env": "deny",
-      "*.env.*": "deny",
-      "*.env.example": "allow",
-      "*.pem": "deny",
-      "*.key": "deny",
-      "*.crt": "deny",
-      "*.p12": "deny",
-      "*.pfx": "deny"
-    }
-  }
+  "trust": { "custodian": true, "sanitizer": true },
+  "confidential": { "paths": ["docs/confidential/**"] },
+  "sanitizer_whitelist": {},
+  "communication": "plain"
 }
 ```
 
-**Генерация из `confidential.paths`:** deny для `docs/confidential/*` в примере —
-дефолт; фактический набор deny (R1 и R4: read/edit/glob/grep) генерируется из
-`confidential.paths` в `maestro.json` (для каждого пути — deny + per-agent allow
-`custodian`/`sanitizer`). `maestro.json` — единственный ручной источник путей;
-`.opencode/opencode.json` — производный (генерируется, вручную пути не
-дублируются).
+- `sanitizer_whitelist: {}` = плагин применяет `DEFAULT_RULES` (все 7 правил маскирования ON, fail-closed по построению)
+- Существующий файл → diff-merge (сохраняет пользовательские правки)
+- Вопрос `communication`: (a) plain — (b) professional
 
-**R4 — 2-й эшелон (glob/grep) — закрывает пробел плагина.** Плагин не
-перехватывает `bash`/`glob`/`grep`; нативный слой добавляет эвристические deny по
-confidential-путям для `glob`/`grep`. **Семантика:** `glob`/`grep` — по
-**аргументу-паттерну**, а не по путям-результатам → закрывают
-только прямое указание паттерна `confidential`, широкие паттерны-обход (напр.
-`glob("docs/**/*.md")`) не блокируются. Это **best-effort слой**, не абсолютный
-барьер; основной fail-closed — `read`/`edit` (R1). Не вводим глобальный
-`"*": "ask"` для bash — он эскалировал бы каждый bash-вызов в per-call HITL
-(противоречит не-форсированию плагина); только точечные deny. **Bash-паттерны по
-слову запрещены** (напр. `*cat*confidential*`) — не защищают произвольные пути и
-блокируют служебные команды; защита bash — через `read`/`edit` deny по реальным путям:
+### Нативные permissions (`agent.<name>.permission` в `.opencode/opencode.json`)
 
-```json
-{
-  "permission": {
-    "bash": { "*": "allow" },
-    "glob": { "*": "allow", "docs/confidential/*": "deny" },
-    "grep": { "*": "allow", "docs/confidential/*": "deny" }
-  }
-}
-```
+Идемпотентно добавить deny-baseline для `docs/confidential/*` и built-in секретов (`.env`, `*.pem`, `*.key`), per-agent allow для `custodian`/`sanitizer` (чтобы trusted-агенты читали confidential поверх глобального deny).
 
-**Правила вывода:**
-- **Порядок правил (last-match-wins):** catch-all (`"*": "allow"`) —
-  **первым**, специфичные deny — **после** (иначе catch-all перекроет deny).
-- **Семантика `*`:** в opencode `*` **пересекает `/`** (в отличие от сегментной
-  `confGlobMatch` плагина). `docs/confidential/*` покрывает вложенные пути.
-- **Ограничение glob/grep:** они матчат аргумент-паттерн, не пути-результаты —
-  не считать их полной защитой от обхода через `glob`/`grep`; основной барьер —
-  `read`/`edit` (R1).
-- **HITL-гейт:** показать diff-merge перед записью; (a) approve — (b) правки — (c) отмена.
-- **OP-1:** после записи сообщить о необходимости перезапуска opencode.
-- **Не добавлять** `docs/superpowers/{specs,plans}/*` в deny — они двухролевые
-  (см. agents-and-trust.md); native-baseline касается только confidential-ДАННЫХ.
+### Плагин + модели
 
-### Per-agent trusted-исключения (конфигурационная половина R2, Этап A)
+- Плагин `maestro-bootstrap` — рекомендуется глобально в `~/.config/opencode/opencode.json`
+- **M1 — 7 HITL-вопросов по моделям** (radio): для каждого из haiku/sonnet/opus/reviewer/fable/custodian/sanitizer предложить tier-кандидата + оставить текущую/свой вариант
+- **Temperature** по дефолту: haiku 0.0, sonnet 0.1, opus 0.1, reviewer 0.2, fable 0.7, custodian 0.1, sanitizer 0.0
 
-**Обязательно** — без этого глобальный deny R1 ломает trusted-канал: `custodian`/
-`sanitizer` читают confidential через `read`/`glob`/`grep`, а нативный глобальный
-deny применяется ко всем агентам, и плагин **не может** override нативный deny.
-Per-agent `allow` (agent rules take precedence) даёт trusted-агентам доступ поверх
-глобального deny. Семантика подтверждена доками OpenCode; runtime-верификация
-(merge agent-vs-global) — V1 (см. spec, pending).
+### .gitignore
 
-Записать per-agent `read`/`glob`/`grep` allow для `custodian` и `sanitizer` в
-merge-config (`agent.<name>.permission`), идемпотентно:
+Добавить `.maestro/` и `.opencode/` (не дублировать).
 
-```json
-{
-  "agent": {
-    "custodian": {
-      "permission": {
-        "read": { "*": "allow", "docs/confidential/*": "allow" },
-        "glob": { "*": "allow", "docs/confidential/*": "allow" },
-        "grep": { "*": "allow", "docs/confidential/*": "allow" }
-      }
-    },
-    "sanitizer": {
-      "permission": {
-        "read": { "*": "allow", "docs/confidential/*": "allow" },
-        "glob": { "*": "allow", "docs/confidential/*": "allow" },
-        "grep": { "*": "allow", "docs/confidential/*": "allow" }
-      }
-    }
-  }
-}
-```
+### regression/
 
-**Ограничение:** это нативная конфигурация доступа, но **enforcement плагина
-остаётся** (defense-in-depth): `confidential.trusted[read]` и fail-closed deny
-для untrusted не удаляются. Нативное trusted-исключение — необходимый мост поверх
-нативного глобального deny; если runtime-V1 покажет, что agent allow не
-перекрывает global deny → fallback: скоупить нативный confidential-deny из Этапа A
-(оставить built-in секреты), положившись на плагин (см. spec, V1).
+Создать (идемпотентно): `regression/entries/.gitkeep`, `regression/released/.gitkeep`, `regression/cancelled-features.md`.
 
-### Policies для P4 (R5, опционально)
+## Задача 4. Проверка superpowers
 
-**Enforce P4** (trusted-агенты на изолированных моделях) через нативные policies
-OpenCode — enforced в ядре, в отличие от merge-конфига `agent.*.model` (не enforced
-в рантайме). Опциональный HITL-шаг: спросить, хочет ли пользователь ограничить
-провайдеров.
-
-Если да — записать `experimental.policies` (`provider.use`) в merge-config,
-идемпотентно, не перезаписывая существующее:
-
-```json
-{
-  "experimental": {
-    "policies": [
-      { "effect": "deny", "action": "provider.use", "resource": "*" },
-      { "effect": "allow", "action": "provider.use", "resource": "anthropic" },
-      { "effect": "allow", "action": "provider.use", "resource": "openai" }
-    ]
-  }
-}
-```
-
-**Правила:**
-- Global-конфиг приоритетнее project (репозиторий не может re-enable запрещённый
-  глобально провайдер). Запись в project разрешена только с HITL-подтверждением.
-- `resource` — ID провайдера; `*`/`?` — wildcard. Порядок: широкий deny первым,
-  специфичные allow после (last-match-wins).
-- Это **enforce-дополнение** к рекомендации локальной модели для `custodian`/
-  `sanitizer` (см. `model-selection.md` → P4); не заменяет выбор `agent.*.model`.
-- **Ограничение (I1):** policies **глобальны** (на весь инстанс), не per-agent —
-  не выражают «trusted — локальные, untrusted — внешние»; они enforce более строгую
-  **глобальную** политику (allowlist провайдеров), совместимую с P4.
-- **Кросс-проверка (I1):** before записи — allowlist провайдеров должен **⊇**
-  провайдеров всех выбранных `agent.*.model` (из M1), иначе deny ломает агента.
-  Проверить и предупредить HITL при расхождении.
-
-### M1 — выбор моделей агентов (7 отдельных HITL-вопросов)
-
-**Оси Tier и Trust ортогональны.** Trusted — атрибут безопасности, не мощность.
-
-- **Tier (мощность, Ось A):** custodian→opus, opus→opus, reviewer→opus,
-  haiku→haiku, sonnet→sonnet, fable→fable, sanitizer→своя.
-- **Trust (доверие, Ось B):** custodian ✅ + sanitizer ✅ trusted; остальные untrusted.
-
-`custodian` и `sanitizer` — **оба trusted**, но **разные агенты**. Модели могут быть
-разными, но **одна модель тоже допустима** на усмотрение пользователя (например,
-одна локальная/изолированная для обоих).
-
-Для каждого из 7 агентов:
-1. Определить tier-класс (Ось A).
-2. Сформировать предложение (приоритет): эффективное значение `agent.<name>.model`
-   (merge-представление: project → global): project `.opencode/opencode.json` (если
-   задан в проекте) → global (`~/.config/opencode/opencode.json`, наследуемая) →
-   tier-подсказка (custodian→opus-модель; sanitizer→своя/безопасная).
-3. HITL через вопросный инструмент (radio): «Модель для `<agent>`?». Варианты:
-   кандидаты моделей из D2 (`opencode models <provider>`, с fallback на
-   `provider.<name>.models`) + `auto`
-   (ключ `model` не пишется) + «оставить текущую (из проекта)»/«оставить текущую
-   (из global)» (если агент уже настроен на соответствующем уровне) +
-   «свой вариант» (ручной ввод ID модели).
-4. Записать `agent.<name>.model` только для выбранных, если значение отличается
-   от эффективного; при `auto` — **не писать**. Если выбрана «оставить текущую» —
-   не писать в project (наследование работает автоматически через merge).
-
-**Temperature задаётся дефолтом по tier** (если у агента ещё нет значения в
-merge-конфиге — `.opencode/opencode.json` или global), пользователь может поправить:
-
-| Агент | Tier | temperature (дефолт) |
-|---|---|---|
-| `haiku` | haiku | 0.0 |
-| `sonnet` | sonnet | 0.1 |
-| `opus` | opus | 0.1 |
-| `reviewer` | opus | 0.2 |
-| `fable` | fable | 0.7 |
-| `custodian` | opus | 0.1 |
-| `sanitizer` | своя | 0.0 |
-
-- Если `agent.<name>.temperature` уже задан — **не перезаписывать** (сохранить
-  пользовательское значение).
-- Записывать `agent.<name>.temperature` только вместе с `model` (не при `auto`).
-- При записи новой модели в проект: наследовать `temperature` из global (если
-  задана), иначе — дефолт по tier.
-
-> **Централизованный вариант (рекомендуется).** Настроить `agent.{custodian,haiku,
-> sonnet,opus,fable,reviewer,sanitizer}` (model + temperature) один раз в
-> global-конфиге `~/.config/opencode/opencode.json` — новые проекты наследуют
-> значения, М1 предлагает «оставить текущую (из global)» первым вариантом.
-> Подробнее: `manual_docs/tutorials/setup-project.md`.
-
-**D2 — определение доступных моделей.** Список кандидатов для tier-подсказок.
-
-1. **Основной источник — `opencode models <provider>`** (запрос к рантайму opencode,
-   не чтение глобального файла). Выполнить для **каждого провайдера**, известного
-   в эффективном merge-конфиге (`provider.*`), и объединить списки моделей.
-2. **Fallback** (если `opencode models` недоступна как команда / ошибка / пустой
-   список): взять `provider.<name>.models` из эффективного merge-конфига
-   (project → global).
-3. **Ручной ввод** — если и это не дало кандидатов (нет провайдеров/моделей),
-   HITL-ввод ID вручную + попытка `opencode models <provider>`.
-
-Устраняет обращение к глобальному файлу при настройке opencode: доступные модели
-спрашиваем у рантайма, а не «прогуливаем» конфиги вручную.
-
-### .gitignore — весь `.maestro/` и `.opencode/` (только эфемерное/доставляемое)
-
-Добавить (идемпотентно, не дублировать):
-```
-.maestro/
-.opencode/
-```
-`.maestro/` содержит только эфемерное (sdd/, last-run.md, logs/, feedback-reports/,
-plugin-version) и игнорируется целиком. `.opencode/` — доставляемая конфигурация
-средств (скиллы/агенты/команды/`opencode.json`), в git проекта не коммитится
-(доставка — вручную/agpack). Конфиг проекта — единственный файл `maestro.json` в
-корне. **Никакие конфиги не класть в `.maestro/`** — иначе они потеряются из git
-(`.maestro/` в `.gitignore`).
-
-### regression/ — структура каталогов
-
-Создать (идемпотентно):
-```
-regression/entries/.gitkeep
-regression/released/.gitkeep
-regression/cancelled-features.md   (пустой файл с заголовком)
-```
-Не входит в HITL-гейт (структурная необходимость).
-
-**HITL gate по конфигу:** «Конфигурация сформирована. (a) approve — (b) правки —
-(c) отмена». Показать diff-merge для каждого файла перед записью.
-
-## Задача 4. Проверка/установка скилов superpowers
-
-Проверить, установлены ли скилы superpowers (7 REQUIRED SUB-SKILLS maestro).
-
-**Пробник** (без загрузки содержимого скилов в контекст):
-1. Вызвать `skill` tool с **bogus-именем** (например `__maestro_probe__`).
-2. В тексте ошибки `not found` прочитать полный список доступных скилов.
-3. Проверить наличие всех 7: `writing-plans`, `subagent-driven-development`,
-   `test-driven-development`, `using-git-worktrees`, `requesting-code-review`,
-   `finishing-a-development-branch`, `systematic-debugging`.
-
-- **Все найдены** → `superpowers: ok`, к следующему шагу.
-- **Есть недостающие** → HITL:
-  (a) установить глобально (`-g`) — (b) установить в проект — (c) пропустить.
-  ```
-  opencode plugin -g superpowers@git+https://github.com/obra/superpowers.git   # (a)
-  opencode plugin superpowers@git+https://github.com/obra/superpowers.git       # (b)
-  ```
-  При (c) — пометка в `last-run.md` «superpowers НЕ установлен — SDD-шаги не
-  работать будут» (fail-open, не блокирует).
+Богус-проб `skill` → прочитать доступные скиллы. Проверить 7 REQUIRED: `writing-plans`, `subagent-driven-development`, `test-driven-development`, `using-git-worktrees`, `requesting-code-review`, `finishing-a-development-branch`, `systematic-debugging`.
+- Все → ok
+- Некоторые → HITL: (a) установить — (b) пропустить (fail-open, пометка в last-run.md)
 
 ## Задача 5. Проверка плагина `maestro-bootstrap`
 
-Проверить, что плагин `maestro-bootstrap` подключён в merge-конфиге
-(`~/.config/opencode/opencode.json` — реком., или `.opencode/opencode.json`) и
-загружается:
-- `"plugin"` содержит git-spec `maestro-bootstrap@git+https://github.com/wad-jet/maestro.git`
-  (или аналог, например локальный путь `../plugins/maestro-bootstrap/index.js` —
-  относительный путь резолвится от `.opencode/`, поэтому `./plugins/...` не работает,
-  используйте `../plugins/...` или абсолютный `file:///…`).
-- Файл плагина существует.
-- **Не блокер:** если плагин не подключён/не загружается — НЕ останавливать init.
-  Отметить в своде и `last-run.md`. Пользователь чинит после.
+Проверить `plugin` в merge-конфиге → `maestro-bootstrap@git+https://github.com/wad-jet/maestro.git`.
+- **Не блокер:** если не подключён — отметить в своде/last-run, не останавливать
 
 ## Завершение
 
-- **HITL-свод:** список созданных/изменённых файлов + git-статус (незакоммичено).
-  Напоминание: коммит выполняет пользователь.
-- Записать свод в `.maestro/last-run.md` (перезаписывается, в `.gitignore`).
-  Включить статус superpowers (`ok` / `installed (restart required)` /
-  `НЕ установлен`) и статус плагина.
-- Сообщить, что setup завершён; для дизайна/спеки/scaffold/roadmap запустить
-  `/maestro-design`.
+- HITL-свод: список файлов + git-статус
+- Записать в `.maestro/last-run.md`: статус superpowers + плагин + context (`ready` / `deferred`)
+- Напоминание: коммит — пользователь
+- Для дизайна/спеки → `/maestro-design`
 
 ## Обработка сбоев
 
 | Ситуация | Действие |
 |---|---|
-| AGENTS.md нет и пользователь выбрал (b) | Продолжить, в своде отметить отсутствие AGENTS.md |
-| project-context.md существует, выбран (a) | Пропустить «Задачу 2», перейти к задачам 3–5 |
-| Git: выбран (a) без ветки | Писать файлы в текущее дерево |
-| superpowers: формат ошибки `skill` tool изменился | Fallback: загрузить один канонический скил `test-driven-development` |
-| superpowers: команда установки упала (сеть, git) | HITL: повторить / показать команду для ручного запуска / пропустить |
-| superpowers: отказ (c) | Продолжить, пометка в last-run.md + своде |
-| stack-detection не находит команду | HITL: вручную / `none` / отмена |
-| Плагин не загружается (задача 5) | Отметить в своде/last-run, не блокировать; пользователь чинит после |
-| models нигде не заданы (D2 fallback) | HITL-ввод вручную + попытка `opencode models <provider>` |
+| AGENTS.md нет, выбрано (b) | Продолжить, в своде отметить |
+| project-context уже есть | Пропустить задачу 2 |
+| Git: без ветки | Писать файлы в текущее дерево |
+| superpowers: формат ошибки `skill` изменился | Fallback: загрузить `test-driven-development` |
+| superpowers: установка упала | HITL: повторить/показать команду/пропустить |
+| Плагин не загружается (задача 5) | Отметить в своде, не блокировать |
+| models нигде не заданы | HITL-ввод вручную |
