@@ -160,7 +160,14 @@ description: Сбор фактуры по прошлым процессам maes
 содержит блок `metrics`:
 
 - `tokens` (primary-сессия): `input/output/reasoning/cacheRead/cacheWrite`,
-  `cost` (число или `null` — провайдер без прайсинга);
+  `cost` (число или `null` — провайдер без прайсинга; источник — нативный
+  cost opencode, считается по `provider.*.models.*.cost` в конфиге opencode,
+  $/1M токенов);
+- `cost` (блок стоимости, всегда присутствует): `available` (true, если cost
+  есть у primary или хотя бы у одного агента), `primaryUsd` (cost
+  primary-сессии; `null`, если не рассчитан), `byAgent` (cost по
+  `subagent_type`; агент без cost отсутствует), `totalUsd` (primary + агенты;
+  `null`, если cost нет), `note` (описание источника);
 - `tokensByAgent` (по `subagent_type`): `count` (task-диспатчей с известной
   child-сессией; **может быть меньше** таблицы «Агенты» из 3c — туда входят
   все task-части), токены child-сессий (`input/output/reasoning/cacheRead/cacheWrite`), `skipped`/`failed`
@@ -287,20 +294,29 @@ fallback: stdout `timeline.mjs` из 3c.
 > Источник: `metrics`-блок `timeline.mjs` (0 LLM) + bootstrap-лог (retry, 3a)
 > + ход диалога (нарратив). Только агрегаты (SEC-4b).
 > Предпочтительно читать из `.maestro/metrics/history.jsonl` (upsert по sessionID).
+> cost: нативный opencode (config).
 
 ### Итоговая статистика
-- **Токены (primary):** input <N> / output <N> / reasoning <N> / cache read <N> / cache write <N>; cost: <$X | — (провайдер без прайсинга)>
+- **Токены (primary):** input <N> / output <N> / reasoning <N> / cache read <N> / cache write <N>; cost: <$X.XX | — (цены моделей не объявлены в конфиге opencode)>
 - **Токены по агентам:**
 
 Если `metrics.children: "skipped"` — вместо таблицы: «Атрибуция по агентам
 недоступна (fast mode `--no-children`)».
 
-| Агент | Модель | Диспатчей* | Input | Output | Атрибуция |
-|---|---|---|---|---|---|
-| <subagent_type> | <models[]> | <N> | <N> | <N> | <«полная» (skipped=0 и failed=0) / «неполная: skipped N / failed M»> |
+| Агент | Модель | Диспатчей* | Input | Output | Стоимость | Атрибуция |
+|---|---|---|---|---|---|---|
+| <subagent_type> | <models[]> | <N> | <N> | <N> | <$X.XXXX / «—»> | <«полная» (skipped=0 и failed=0) / «неполная: skipped N / failed M»> |
+
+- **Итого (primary + агенты): $X.XX** (metrics.cost.totalUsd)
 
 \* диспатчей с известной child-сессией; может быть меньше таблицы «Агенты» (3c).
 Атрибуция: «полная», если `skipped = 0` И `failed = 0`; иначе — «неполная: skipped N / failed M» с числами из `metrics.tokensByAgent`.
+
+> Стоимость: primary — `metrics.cost.primaryUsd` (формат `$X.XX`, 2 знака),
+> агент — `metrics.cost.byAgent[agent]` (формат `$X.XXXX`, 4 знака; агент без
+> cost → «—»), итог — `metrics.cost.totalUsd` (`null` → «—»). Источник цен —
+> `cost` в конфиге opencode (формат models.dev, $/1M токенов); модель без
+> объявленных цен → «—». Как включить — `manual_docs/how-to/enable-cost-tracking.md`.
 
 ### Активное время
 
