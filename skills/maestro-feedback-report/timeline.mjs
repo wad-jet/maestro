@@ -348,11 +348,22 @@ const userIdleMs = sessionDurationMs !== null && sessionDurationMs >= machineAct
   ? sessionDurationMs - (machineActiveMs + hitlWaitMs)
   : 0;
 
+const round6 = (x) => Math.round(x * 1e6) / 1e6;
+const COST_NOTE = "cost, рассчитанный opencode по provider.*.models.*.cost в конфиге opencode ($/1M токенов)";
+
 const metrics = {
   tokens: {
     input: mInput, output: mOutput, reasoning: mReasoning,
     cacheRead: mCacheRead, cacheWrite: mCacheWrite,
     cost: costSeen ? costSum : null,
+  },
+  // всегда присутствует; пересчитывается после child-агрегации (primary + children)
+  cost: {
+    available: false,
+    primaryUsd: costSeen ? round6(costSum) : null,
+    byAgent: {},
+    totalUsd: costSeen ? round6(costSum) : null,
+    note: COST_NOTE,
   },
   activeMs: sessionDurationMs === null ? null : Math.max(0, sessionDurationMs - idleWaitMs),
   machineActiveMs: sessionDurationMs === null ? null : machineActiveMs,
@@ -385,7 +396,7 @@ if (!noChildren) {
       const sid = st.metadata && st.metadata.sessionId;
       if (!sid || typeof sid !== "string") continue;
       const agent = (st.input && st.input.subagent_type) || "unknown";
-      if (!agentBuckets[agent]) agentBuckets[agent] = { count: 0, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 0, failed: 0, models: [] };
+      if (!agentBuckets[agent]) agentBuckets[agent] = { count: 0, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 0, failed: 0, models: [], cost: 0, costSeen: false };
       agentBuckets[agent].count++;
       if (!uniqueChildren.has(sid)) uniqueChildren.set(sid, agent);
     }
@@ -412,6 +423,8 @@ if (!noChildren) {
             b.cacheRead += (t.cache && t.cache.read) || 0;
             b.cacheWrite += (t.cache && t.cache.write) || 0;
           }
+          const cc = data && data.info && data.info.cost;
+          if (typeof cc === "number" && Number.isFinite(cc) && cc > 0) { b.cost += cc; b.costSeen = true; }
           // Extract and normalize child session model
           const childModel = normalizeModel(data && data.info && data.info.model);
           if (childModel && !b.models.includes(childModel)) {
@@ -429,6 +442,22 @@ if (!noChildren) {
   metrics.tokensByAgent = agentBuckets;
 
 }
+
+// --- metrics.cost — пересчёт после child-агрегации (выполняется всегда: --no-children → byAgent пуст, primary учитывается) ---
+const byAgentCost = {};
+let agentCostSum = 0;
+for (const [agent, b] of Object.entries(metrics.tokensByAgent || {})) {
+  if (b.costSeen) { byAgentCost[agent] = round6(b.cost); agentCostSum += b.cost; }
+}
+const primaryCost = costSeen ? costSum : null;
+const hasCost = primaryCost !== null || agentCostSum > 0;
+metrics.cost = {
+  available: hasCost,
+  primaryUsd: primaryCost === null ? null : round6(primaryCost),
+  byAgent: byAgentCost,
+  totalUsd: hasCost ? round6((primaryCost || 0) + agentCostSum) : null,
+  note: COST_NOTE,
+};
 
 const topOpsResult = topOps.sort((a, b) => b.durationMs - a.durationMs).slice(0, 10);
 const gapsResult = gaps.sort((a, b) => b.ms - a.ms).slice(0, 5);

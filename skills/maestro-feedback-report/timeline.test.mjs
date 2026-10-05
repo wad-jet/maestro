@@ -204,7 +204,7 @@ const expectedEmpty = {
   top_ops: [],
   gaps: [],
   timeline: [],
-  metrics: { tokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: null }, activeMs: null, machineActiveMs: null, hitlWaitMs: null, userIdleMs: null, questionCount: 0, reviewDispatches: 0, children: "full", tokensByAgent: {}, validation: null, reviewCycles: [] },
+  metrics: { tokens: { input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, cost: null }, cost: { available: false, primaryUsd: null, byAgent: {}, totalUsd: null, note: "cost, рассчитанный opencode по provider.*.models.*.cost в конфиге opencode ($/1M токенов)" }, activeMs: null, machineActiveMs: null, hitlWaitMs: null, userIdleMs: null, questionCount: 0, reviewDispatches: 0, children: "full", tokensByAgent: {}, validation: null, reviewCycles: [] },
 };
 
 const fixtureTokens = {
@@ -644,8 +644,8 @@ test("tokensByAgent — атрибуция по child-экспорту (fixture-
     ],
   };
   const out = runFixture(data, "by-agent", { MAESTRO_TIMELINE_EXPORT_DIR: exportDir });
-  assert.deepEqual(out.metrics.tokensByAgent.sonnet, { count: 1, input: 100, output: 10, reasoning: 0, cacheRead: 5, cacheWrite: 0, skipped: 0, failed: 0, models: [] });
-  assert.deepEqual(out.metrics.tokensByAgent.haiku, { count: 1, input: 50, output: 5, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 0, failed: 0, models: [] });
+  assert.deepEqual(out.metrics.tokensByAgent.sonnet, { count: 1, input: 100, output: 10, reasoning: 0, cacheRead: 5, cacheWrite: 0, skipped: 0, failed: 0, models: [], cost: 0, costSeen: false });
+  assert.deepEqual(out.metrics.tokensByAgent.haiku, { count: 1, input: 50, output: 5, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 0, failed: 0, models: [], cost: 0, costSeen: false });
 });
 
 test("tokensByAgent — дубль sessionId: токены 1 раз, count = task-части; атрибуция по первому subagent_type", () => {
@@ -662,8 +662,8 @@ test("tokensByAgent — дубль sessionId: токены 1 раз, count = tas
     ],
   };
   const out = runFixture(data, "dup", { MAESTRO_TIMELINE_EXPORT_DIR: exportDir });
-  assert.deepEqual(out.metrics.tokensByAgent.sonnet, { count: 1, input: 77, output: 7, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 0, failed: 0, models: [] });
-  assert.deepEqual(out.metrics.tokensByAgent.haiku, { count: 1, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 0, failed: 0, models: [] });
+  assert.deepEqual(out.metrics.tokensByAgent.sonnet, { count: 1, input: 77, output: 7, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 0, failed: 0, models: [], cost: 0, costSeen: false });
+  assert.deepEqual(out.metrics.tokensByAgent.haiku, { count: 1, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 0, failed: 0, models: [], cost: 0, costSeen: false });
 });
 
 test("tokensByAgent — без metadata.sessionId → игнор; failed (нет fixture); over-cap → skipped", () => {
@@ -793,7 +793,7 @@ test("tokensByAgent — зависший child-экспорт (таймаут) �
     ],
   };
   const out = runFixture(data, "hang", { MAESTRO_TIMELINE_EXPORT_DIR: exportDir, MAESTRO_CHILD_EXPORT_TIMEOUT_MS: "200" });
-  assert.deepEqual(out.metrics.tokensByAgent.opus, { count: 1, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 1, failed: 0, models: [] });
+  assert.deepEqual(out.metrics.tokensByAgent.opus, { count: 1, input: 0, output: 0, reasoning: 0, cacheRead: 0, cacheWrite: 0, skipped: 1, failed: 0, models: [], cost: 0, costSeen: false });
 });
 
 test("--no-children: children=skipped, tokensByAgent пуст даже при наличии task-частей (fixture)", () => {
@@ -975,4 +975,137 @@ test("tokensByAgent.models — child-экспорт с {providerID, id} атри
   };
   const out = runFixture(data, "idkey_child", { MAESTRO_TIMELINE_EXPORT_DIR: exportDir });
   assert.deepEqual(out.metrics.tokensByAgent.fable.models, ["akash/X/Y"]);
+});
+
+// --- metrics.cost (нативный cost opencode: info.cost primary + data.info.cost child-экспорта) ---
+
+const COST_NOTE = "cost, рассчитанный opencode по provider.*.models.*.cost в конфиге opencode ($/1M токенов)";
+
+function childFixtureCost(id, tokens, cost) {
+  return JSON.stringify({ info: { id, tokens, cost }, messages: [] });
+}
+
+test("metrics.cost.byAgent — child с info.cost: byAgent[agent] = cost, totalUsd = primaryUsd + agents (точные числа)", () => {
+  const exportDir = join(tmpDir, "child-cost-1");
+  mkdirSync(exportDir, { recursive: true });
+  writeFileSync(join(exportDir, "cc_a.json"), childFixtureCost("cc_a", { input: 100, output: 10, reasoning: 0, cache: { read: 5, write: 0 } }, 0.002));
+  const data = {
+    info: { id: "ses_cost1" },
+    messages: [
+      { info: { role: "user", time: { created: 1000 } }, parts: [] },
+      {
+        info: { role: "assistant", time: { created: 2000 }, tokens: { input: 100, output: 50, reasoning: 5, cache: { read: 10, write: 2 } }, cost: 0.001 },
+        parts: [
+          { type: "tool", tool: "task", callID: "c1", state: { status: "completed", input: { subagent_type: "sonnet" }, output: "ok", metadata: { sessionId: "cc_a" }, time: { start: 2100, end: 2500 } }, id: "tc1" },
+        ],
+      },
+      {
+        info: { role: "assistant", time: { created: 3000 }, tokens: { input: 30, output: 20, reasoning: 0, cache: { read: 0, write: 0 } }, cost: 0.0005 },
+        parts: [],
+      },
+    ],
+  };
+  const out = runFixture(data, "cost-byagent", { MAESTRO_TIMELINE_EXPORT_DIR: exportDir });
+  assert.equal(out.metrics.cost.available, true);
+  assert.equal(out.metrics.cost.primaryUsd, 0.0015);          // 0.001 + 0.0005
+  assert.deepEqual(out.metrics.cost.byAgent, { sonnet: 0.002 });
+  assert.equal(out.metrics.cost.totalUsd, 0.0035);             // 0.0015 + 0.002
+  assert.equal(out.metrics.cost.note, COST_NOTE);
+  // metrics.tokens.cost — не тронут (provider-совместимость, без round6)
+  assert.equal(out.metrics.tokens.cost, 0.0015);
+});
+
+test("metrics.cost — child без info.cost: byAgent пуст (agent отсутствует), остальной вывод не ломается", () => {
+  const exportDir = join(tmpDir, "child-cost-2");
+  mkdirSync(exportDir, { recursive: true });
+  writeFileSync(join(exportDir, "cc_b.json"), childFixture("cc_b", { input: 50, output: 5, reasoning: 0, cache: { read: 0, write: 0 } }));
+  const data = {
+    info: { id: "ses_cost2" },
+    messages: [
+      {
+        info: { role: "assistant", time: { created: 2000 }, tokens: { input: 10, output: 5, reasoning: 0, cache: { read: 0, write: 0 } } },
+        parts: [
+          { type: "tool", tool: "task", callID: "c1", state: { status: "completed", input: { subagent_type: "haiku" }, output: "ok", metadata: { sessionId: "cc_b" }, time: { start: 2100, end: 2500 } }, id: "tc1" },
+        ],
+      },
+    ],
+  };
+  const out = runFixture(data, "cost-child-nocost", { MAESTRO_TIMELINE_EXPORT_DIR: exportDir });
+  assert.deepEqual(out.metrics.cost.byAgent, {});
+  assert.equal(out.metrics.cost.available, false);
+  assert.equal(out.metrics.cost.primaryUsd, null);
+  assert.equal(out.metrics.cost.totalUsd, null);
+  // tokensByAgent интакт
+  assert.equal(out.metrics.tokensByAgent.haiku.input, 50);
+  assert.equal(out.metrics.tokensByAgent.haiku.output, 5);
+});
+
+test("metrics.cost — сессия без cost (ни primary, ни children): available=false, totalUsd=null, primaryUsd=null", () => {
+  const data = {
+    info: { id: "ses_cost3" },
+    messages: [
+      { info: { role: "user", time: { created: 1000 } }, parts: [] },
+      { info: { role: "assistant", time: { created: 2000 }, tokens: { input: 10, output: 5, reasoning: 0, cache: { read: 0, write: 0 } } }, parts: [] },
+    ],
+  };
+  const out = runFixture(data, "cost-none");
+  assert.deepEqual(out.metrics.cost, { available: false, primaryUsd: null, byAgent: {}, totalUsd: null, note: COST_NOTE });
+});
+
+test("metrics.cost — --no-children + cost в primary: available=true, byAgent={}, totalUsd===primaryUsd", () => {
+  const path = join(tmpDir, "cost-noc.json");
+  writeFileSync(path, JSON.stringify({
+    info: { id: "ses_cost4" },
+    messages: [
+      {
+        info: { role: "assistant", time: { created: 2000 }, tokens: { input: 10, output: 5, reasoning: 0, cache: { read: 0, write: 0 } }, cost: 0.05 },
+        parts: [
+          // task-часть с metadata.sessionId: без --no-children шёл бы child-экспорт; с флагом — skipped
+          { type: "tool", tool: "task", callID: "c1", state: { status: "completed", input: { subagent_type: "haiku" }, output: "ok", metadata: { sessionId: "cc_never" }, time: { start: 2100, end: 2500 } }, id: "tc1" },
+        ],
+      },
+    ],
+  }));
+  const out = execFileSync(process.execPath, [scriptPath, "ses_test", path, "--no-children"], {
+    encoding: "utf-8", timeout: 30000,
+    env: { ...process.env, MAESTRO_TIMELINE_EXPORT_DIR: join(tmpDir, "cost-noc-dir"), MAESTRO_METRICS_JSONL: join(tmpDir, "cost-noc.jsonl") },
+  });
+  const data = JSON.parse(out.trim());
+  assert.equal(data.metrics.children, "skipped");
+  assert.equal(data.metrics.cost.available, true);
+  assert.equal(data.metrics.cost.primaryUsd, 0.05);
+  assert.deepEqual(data.metrics.cost.byAgent, {});
+  assert.equal(data.metrics.cost.totalUsd, data.metrics.cost.primaryUsd);
+});
+
+test("metrics.cost — детерминизм: два прогона одного fixture → одинаковый JSON metrics.cost", () => {
+  const exportDir = join(tmpDir, "child-cost-det");
+  mkdirSync(exportDir, { recursive: true });
+  writeFileSync(join(exportDir, "cc_det.json"), childFixtureCost("cc_det", { input: 10, output: 2, reasoning: 0, cache: { read: 0, write: 0 } }, 0.003));
+  const data = {
+    info: { id: "ses_costdet" },
+    messages: [
+      {
+        info: { role: "assistant", time: { created: 2000 }, tokens: { input: 10, output: 5, reasoning: 0, cache: { read: 0, write: 0 } }, cost: 0.001 },
+        parts: [
+          { type: "tool", tool: "task", callID: "c1", state: { status: "completed", input: { subagent_type: "sonnet" }, output: "ok", metadata: { sessionId: "cc_det" }, time: { start: 2100, end: 2500 } }, id: "tc1" },
+        ],
+      },
+    ],
+  };
+  const a = runFixture(data, "cost-det-a", { MAESTRO_TIMELINE_EXPORT_DIR: exportDir });
+  const b = runFixture(data, "cost-det-b", { MAESTRO_TIMELINE_EXPORT_DIR: exportDir });
+  assert.equal(JSON.stringify(a.metrics.cost), JSON.stringify(b.metrics.cost));
+});
+
+test("metrics.cost — round6: граница на 6-м знаке (0.0000004999 → 0; 0.0000005001 → 0.000001)", () => {
+  // cost подставляется в info assistant-сообщения
+  const mkWithCost = (id, cost) => ({
+    info: { id },
+    messages: [{ info: { role: "assistant", time: { created: 2000 }, cost }, parts: [] }],
+  });
+  const a = runFixture(mkWithCost("ses_r6a", 0.0000004999), "cost-r6-a");
+  assert.equal(a.metrics.cost.primaryUsd, 0, "0.0000004999 * 1e6 = 0.4999 < 0.5 → 0");
+  const b = runFixture(mkWithCost("ses_r6b", 0.0000005001), "cost-r6-b");
+  assert.equal(b.metrics.cost.primaryUsd, 0.000001, "0.0000005001 * 1e6 = 0.5001 ≥ 0.5 → 1/1e6");
 });
