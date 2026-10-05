@@ -12,7 +12,7 @@
 
 | Tier | Когда использовать | OpenCode сабагент |
 |---|---|---|
-| **Haiku** (быстрая/дешёвая) | Механические task-и: 1-2 файла, полный spec, трансляция+тесты | `haiku` |
+| **Haiku** (быстрая/дешёвая) | Механические task-и: 1-2 файла, полный spec, трансляция+тесты; без structural markdown (doc-правки → sonnet) | `haiku` |
 | **Sonnet** (средняя/сбалансированная) | Интеграционные task-и: multi-file, pattern matching, debugging | `sonnet` |
 | **Opus** (наиболее мощная) | Архитектура, spec formation, design judgment, final whole-branch review | `custodian` (Q/A по confidential), `opus` (spec review), `reviewer` (code review). На Revise `opus` выдаёт правки, применяет оркестратор |
 | **Fable** (креативная) | Примеры, метафоры, аналогии, пояснения в стиле историй | `fable` |

@@ -13,6 +13,16 @@
 
 ## [2026-10-05]
 
+> **Версия 5.5.1** - Patch: надёжность отчётов implementer (self-check-контракт + scope haiku без structural markdown).
+
+### Добавлено
+
+- **Self-check-контракт implementer:** `skills/maestro/implementer-prompt.md` — обязательная самопроверка перед отчётом (DONE): фактический SHA коммита, фактический вывод тестов (запуск, а не по памяти), чистое рабочее дерево, структурная проверка внесённых изменений; любой пропущенный/неподтверждённый пункт → статус `DONE_WITH_CONCERNS`, не DONE.
+- **Scope haiku (model-selection):** без структурных markdown-правок (таблицы/списки/мульти-вставки) — doc/шаблон-правки и multi-file → sonnet (`skills/maestro/references/model-selection.md`, SKILL.md шаг 13, `manual_docs/reference/model-selection.md`).
+- **Обоснование (факт 2026-10-05):** батч 5.4.0 (haiku) — 3/3 дефектных отчёта (сфабрикованный SHA, пустой отчёт, сломанные markdown-вставки) vs батч 5.5.0 (sonnet) — 3/3 полных отчёта.
+
+## [2026-10-05]
+
 > **Версия 5.5.0** - Minor: стоимость сессии в feedback-отчёте (нативный cost opencode).
 
 ### Добавлено

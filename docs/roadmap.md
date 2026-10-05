@@ -1,6 +1,6 @@
 # Роадмап maestro-agent
 
-**Текущая версия:** `5.5.0`
+**Текущая версия:** `5.5.1`
 **Дата обновления:** 2026-10-05
 
 > Архив закрытых волн и детализированная история — в `git log` и `manual_docs/overview/changelog.md`.
@@ -91,6 +91,9 @@
 
 ~~30. **Feature: стоимость сессии в feedback-отчёте (нативный cost opencode)**~~
     - ✅ **решено (5.5.0, 2026-10-05):** `timeline.mjs` - `metrics.cost` (primary + по агентам + итог) на нативном cost opencode (config `provider.<id>.models.<name>.cost`, $/1M, формат models.dev; в репо/плагине нет сети и ключей); отчёт - колонка «Стоимость» + «Итого (primary + агенты)»; how-to `manual_docs/how-to/enable-cost-tracking.md`
+
+~~31. **Feature: надёжность отчётов implementer (self-check + scope haiku)**~~
+    - ✅ **решено (5.5.1, 2026-10-05):** `implementer-prompt.md` - self-check перед отчётом (фактический SHA, фактический вывод тестов, чистое дерево, структурная проверка; пропуск → `DONE_WITH_CONCERNS`); `references/model-selection.md` - scope haiku: без structural markdown (doc/шаблон-правки и multi-file → sonnet); обоснование - факт 2026-10-05: батч 5.4.0 (3/3 дефектных отчёта) vs батч 5.5.0 (3/3 полных)
 
 ### Приоритет P3 (отложить)
 

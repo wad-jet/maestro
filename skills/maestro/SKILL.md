@@ -748,8 +748,9 @@ init), следует его правилам, затем решает и про
             контракты) — оркестратор исправляет план **в момент выявления**, до
             перехода к следующему task. Не откладывать до pre-PR (шаг 17).
             Исправленный план — актуальный source of truth для последующих задач.
-         — Диспатч по tier (см. `references/model-selection.md`, таблица «Шаг → Tier»):
-          - OpenCode: `task` tool с `subagent_type=haiku` (механический) или
+          — Диспатч по tier (см. `references/model-selection.md`, таблица «Шаг → Tier»):
+           - выбор implementer-модели — канон `references/model-selection.md` (haiku: без structural markdown; doc-правки → sonnet)
+           - OpenCode: `task` tool с `subagent_type=haiku` (механический) или
             `subagent_type=sonnet` (интеграционный)
           - Claude Code: Agent tool с `model=haiku` или `model=sonnet`
          — Task review: `subagent_type=sonnet` (OpenCode) / `model=sonnet` (Claude Code)
