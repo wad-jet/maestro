@@ -80,7 +80,12 @@ CONTEXT_NEEDED: <if NEEDS_CONTEXT, describe; else "none">
 **Контракт отчёта (обязателен):** верни Status (DONE | DONE_WITH_CONCERNS |
 BLOCKED | NEEDS_CONTEXT) + Commits + Files changed + Test output + отчёт-файл.
 Отчёт без Status/Files/Test/Commit считается бессодержательным (нарушение
-контракта) — оркестратор не примет его как DONE.
+ контракта) — оркестратор не примет его как DONE.
+
+`DONE` валиден только с фактическим выводом **последнего** прогона тестов
+в `TEST_OUTPUT` (не «по памяти») и с реально сделанными коммитами в
+`COMMITS` (проверяется `git log`). Расхождение фактов с отчётом —
+оркестратор не принимает отчёт как DONE (evidence-based verification).
 
 ## Codebase Pattern Checklist
 

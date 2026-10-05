@@ -765,7 +765,15 @@ init), следует его правилам, затем решает и про
          — Если task зависит от другого (например, endpoint без тестов), указать:
            "Note: tests for this code may fail until Task N is completed — это ожидаемо"
          — Добавить codebase-pattern чеклист из implementer-prompt.md в контекст
-         — **Каждый task после DONE проходит task-reviewer (spec compliance + code quality).
+          — **Каждый task после DONE проходит task-reviewer (spec compliance + code quality).
+          — **Evidence-based верификация implementer:** после `DONE`,
+            **до** task review, оркестратор сверяет отчёт по фактам:
+            (1) заявленные коммиты существуют (`git log`); (2) заявленные
+            тесты реально зелёные (фактический запуск команды из отчёта);
+            (3) изменения в пределах task‑брифа (diff vs brief).
+            Расхождение → отчёт не принимается как DONE (нарушение
+            контракта отчёта) — re-dispatch/фикс; task review не раньше
+            согласования фактов.
            Пропуск task review — anti-pattern.**
       e. Progress-лог в .maestro/sdd/progress.md (через SDD Durable Progress)
       f. **Regression reconciliation (P1):** после реализации, до выхода из
@@ -1143,7 +1151,8 @@ init), следует его правилам, затем решает и про
 | **Gate: отмена (шаги 7c, 10c, 12c, 17c, D7b)** | STOP + cleanup: удалить feature-ветку (`git branch -D <branch>`) и worktree (`git worktree remove <path>`), если создан. Решение оставить в `regression/cancelled-features.md` (в git) для последующей архивации. **Regression cleanup:** если `entries/<YYYY-MM-DD-<feature>>.md` существует → `git mv entries/X.md released/X.md`, `status: cancelled`, `released: <дата>`, дописать решение в `regression/cancelled-features.md` и закоммитить оба файла (`chore(regression): <feature> cancelled`) (только после шага 12a; до 12a entry ещё не создан — no-op). |
 | **Implementer: BLOCKED** | Оркестратор: (1) дать контекст, (2) мощнее модель, (3) разбить задачу, (4) эскалация |
 | **Implementer: NEEDS_CONTEXT** | Оркестратор предоставляет недостающий контекст, re-dispatch |
-| **Implementer: DONE_WITH_CONCERNS** | Оркестратор читает concerns; если correctness/scope — адресовать до review |
+ | **Implementer: DONE_WITH_CONCERNS** | Оркестратор читает concerns; если correctness/scope — адресовать до review |
+| **Implementer: ложный DONE (факты ≠ отчёту)** | Evidence-перепроверка (git log, запуск тестов, diff vs task‑бриф); отчёт не принимается как DONE; task review не раньше расхождения |
 | **Plan quality check fail** | Исправить plan (переписать через Write), повторно проверить |
 | **Coverage-тесты fail** | Implementer фиксит -> re-run -> если 2 раза fail, эскалация к пользователю |
 | **Build check fail** | **Fix-loop (первая линия):** (1) диагностировать ошибку сборки, (2) исправить, (3) перезапустить build, (4) перейти к code review. Если fix-loop не помогает — **HITL:** (a) fix context — обновить команду сборки — (b) real fail — диагностика + fix-loop — (c) skip с подтверждением |
