@@ -1,7 +1,7 @@
 # Роадмап maestro-agent
 
-**Текущая версия:** `5.3.1`
-**Дата обновления:** 2026-10-04
+**Текущая версия:** `5.4.0`
+**Дата обновления:** 2026-10-05
 
 > Архив закрытых волн и детализированная история — в `git log` и `manual_docs/overview/changelog.md`.
 
@@ -79,6 +79,15 @@
     - Impact: MEDIUM | Feasibility: MEDIUM | Sec: —
     - Обоснование: 09-29: «question-гейтов 3; в диалоге — текстовые гейты B1–B4, гейт 10, #107 (6)» — счётчик занижает в разы
     - Status: spike
+
+~~28. **Improvements batch: тест-coverage guard + evidence-верификация implementer + P4-check**~~
+    - ✅ **решено (5.4.0, 2026-10-05):** `maestro-install/test-coverage.test.mjs` (все `*.test.*` зарегистрированы в `npm test`; забытые файлы подключены); SKILL.md шаг 13 + «Обработка сбоев» + `implementer-prompt.md` (evidence-верификация DONE по фактам до task review); maestro-setup/maestro-assistant P4-check (неблокирующее предупреждение при совпадении моделей trusted/untrusted)
+
+29. **Feature: плагин-гард на merge/push без гейта 17 (механический стоп ⚑1)**
+    - TODO.md: открытый пункт
+    - Impact: HIGH | Feasibility: MEDIUM | Sec: HIGH
+    - Обоснование: 2026-10-05 — инцидент auto-merge без гейта 17 (нарушение ⚑1) закрыт на уровне правил (5.3.0); механический гард — отдельная итерация (дизайн: always-block + override / marker-file / warn-only)
+    - Status: open
 
 ### Приоритет P3 (отложить)
 
