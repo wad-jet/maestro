@@ -89,9 +89,9 @@ CONTEXT_NEEDED: <if NEEDS_CONTEXT, describe; else "none">
 4. Структурная проверка изменённых файлов: markdown — целостность таблиц/списков
    (вставки не разрывают строки/таблицы); код — синтаксический check
    (например `node --check` для .mjs/.js).
-Любой пункт не выполнен → статус `DONE_WITH_CONCERNS` с указанием пункта.
-DONE без self-check — невалиден (evidence-based verification — проверка
-оркестратором по фактам).
+5. Любой пункт не выполнен → статус `DONE_WITH_CONCERNS` с указанием пункта.
+   DONE без self-check — невалиден (evidence-based verification — проверка
+   оркестратором по фактам).
 
 **Контракт отчёта (обязателен):** верни Status (DONE | DONE_WITH_CONCERNS |
 BLOCKED | NEEDS_CONTEXT) + Commits + Files changed + Test output + отчёт-файл.
