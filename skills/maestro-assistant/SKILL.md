@@ -413,7 +413,7 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
   (`agent.*.model`) — если `trust.custodian` и/или `trust.sanitizer` = true и
   модель trusted-агента совпадает с моделью любого untrusted-агента
   (`haiku`/`sonnet`/`opus`/`fable`/`reviewer`) → **неблокирующее
-  предупреждение** в сводке: «P4: trusted‑агент <имя> на той же модели, что
+  предупреждение** в сводке: «P4: trusted-агент <имя> на той же модели, что
   untrusted <имя(а)>; рекомендуется изолированная/локальная модель
   (SECURITY.md P4)». Предупреждение не останавливает поток.
 - **OP-1:** после правки native-permission конфига — рестарт opencode.
