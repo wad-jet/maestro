@@ -80,6 +80,11 @@ description: Initialize maestro for a new or existing project — quick setup (A
 - **M1 — 7 HITL-вопросов по моделям** (radio): для каждого из haiku/sonnet/opus/reviewer/fable/custodian/sanitizer предложить tier-кандидата + оставить текущую/свой вариант
 - **Temperature** по дефолту: haiku 0.0, sonnet 0.1, opus 0.1, reviewer 0.2, fable 0.7, custodian 0.1, sanitizer 0.0
 
+- **P4-check (гигиена моделей):** по канону maestro-assistant — если
+  `trust.custodian`/`trust.sanitizer` включены и модель trusted-агента
+  совпадает с моделью untrusted-агента → неблокирующее предупреждение в
+  сводке (SECURITY.md P4: trusted → изолированная/локальная модель)
+
 ### .gitignore
 
 Добавить `.maestro/` и `.opencode/` (не дублировать).
