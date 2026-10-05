@@ -102,9 +102,12 @@
    default 600 с; `sessionID` должен совпадать с текущей сессией).
    **Fail-closed:** нет маркера / просрочен / чужой `sessionID` / аномалия
    проверки → deny (throw блокирует bash-вызов). Carve-out (by construction):
-   человек в своём терминале не затрагивается (плагин видит только tool-вызовы
-   агентов). Opt-out — явный `merge_guard.enabled: false` в `maestro.json`
-   (warn `merge_guard.disabled` при init).
+    человек в своём терминале не затрагивается (плагин видит только tool-вызовы
+    агентов). Opt-out — явный `merge_guard.enabled: false` в `maestro.json`
+    (warn `merge_guard.disabled` при init). Documented limitation: агент с
+    write-доступом к `.maestro/gates/` может само-написать маркер (self-approve)
+    — гард защищает от дрейфа пайплайна (инцидент-класс: merge без гейта 17),
+    а не от враждебного агента (модель доверия — не adversarial-песочница).
 
 ## 4. Реализованные контрмеры
 
