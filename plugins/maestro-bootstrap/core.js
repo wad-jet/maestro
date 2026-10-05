@@ -29,6 +29,7 @@ import { tool } from "./tool-shim.js";
 import { SESSIONS as MEMORY_SERVICE_SESSIONS } from "./memory/summarize.js";
 import { registerCommunicationHooks } from "./communication.js";
 import { registerFeedbackReportHooks } from "./feedback-report.js";
+import { detectGuardCommand, checkMergeMarker, resolveMergeGuardConf } from "./merge-guard.js";
 
 const LOG_LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
 
@@ -1185,6 +1186,10 @@ export const MaestroBootstrapPlugin = async ({ directory, client, sanitizeImpl =
     });
   }
   const confidential = loadConfidentialConfig(config);
+  const mergeGuardConf = resolveMergeGuardConf(config);
+  if (!mergeGuardConf.enabled) {
+    log.warn("merge_guard.disabled", { sessionID: undefined });
+  }
   const trustedAgents = loadTrustConfig(config);
   // SEC-6: если whitelist-`patterns` содержит значения, которые сами матчатся
   // safety-правилами (оператор занёс реальный секрет) — предупредить.
@@ -1255,6 +1260,31 @@ export const MaestroBootstrapPlugin = async ({ directory, client, sanitizeImpl =
 
     "tool.execute.before": async (input, output) => {
       try {
+        // Merge guard (5.6.0, ⚑1): `git merge` и push в mainline (main/master)
+        // — только с явным HITL-аппрувом гейта 17 (маркер
+        // .maestro/gates/merge-<sessionID>.json). Fail-closed: нет маркера /
+        // аномалия → deny (throw блокирует bash-вызов, паттерн
+        // confidential-ветки: маркер на err + re-throw во внешнем catch).
+        if (input.tool === "bash" && mergeGuardConf.enabled) {
+          const kind = detectGuardCommand(typeof output?.args?.command === "string" ? output.args.command : "");
+          if (kind) {
+            const res = checkMergeMarker(root, input.sessionID, Date.now(), mergeGuardConf);
+            const base = { sessionID: input.sessionID, callID: input.callID, kind, reason: res.reason };
+            if (res.allow) {
+              log.info("merge_guard", { action: "allow", ...base });
+            } else {
+              log.warn("merge_guard", { action: "deny", ...base });
+              const err = new Error(
+                `[merge-guard:deny] git ${kind === "merge" ? "merge" : "push (mainline)"} заблокирован: ` +
+                `нет явного HITL-аппрува гейта 17 (маркер .maestro/gates/merge-<sessionID>.json; ` +
+                `reason: ${res.reason}). Обсуди с пользователем гейт 17, после явного (a) создай маркер и повтори.`
+              );
+              err.mergeGuard = true;
+              throw err;
+            }
+          }
+        }
+
         // Confidential control (Уровень 3+): жёсткий deny для не-trusted по
         // `confidential.paths`. Покрывает read/write/edit. bash/glob/grep — нативные permissions.
         const CONF_TOOLS = new Set(["read", "write", "edit"]);
@@ -1367,10 +1397,10 @@ export const MaestroBootstrapPlugin = async ({ directory, client, sanitizeImpl =
           });
         }
       } catch (err) {
-        if (err?.confidential || err?.sanitizerFailed) {
-          // Confidential-нарушение / сбой маскирования (D2) — обязаны
-          // дойти до OpenCode (реальный блок), не замалчиваться логгером
-          // (иначе fail-open сохранялся).
+        if (err?.confidential || err?.sanitizerFailed || err?.mergeGuard) {
+          // Confidential-нарушение / сбой маскирования (D2) / merge-guard
+          // deny — обязаны дойти до OpenCode (реальный блок), не
+          // замалчиваться логгером (иначе fail-open сохранялся).
           throw err;
         }
         log.error("tool.execute.before: error", {
