@@ -13,6 +13,16 @@
 
 ## [2026-10-05]
 
+> **Версия 5.4.0** — Minor: improvements batch — тест-регистрация в npm test + guard, evidence-based верификация implementer, P4-check в /maestro-setup.
+
+### Добавлено
+
+- **Тест-coverage guard:** `maestro-install/test-coverage.test.mjs` (в `npm test`) — каждый `*.test.mjs`/`*.test.js` в дереве обязан быть зарегистрирован в `scripts.test`/`scripts["test:memory"]`; забытые test-файлы подключены: `timeline.test.mjs`, `maestro-benchmark/diff.test.mjs`, `sandbox-smoke.test.mjs`.
+- **Evidence-based верификация implementer:** после `DONE`, до task review, оркестратор сверяет отчёт по фактам (коммиты — `git log`, тесты — фактический запуск, diff vs task-бриф); расхождение → отчёт не принимается как DONE (SKILL.md шаг 13 + «Обработка сбоев»; `implementer-prompt.md` — усиленный DONE-контракт).
+- **P4-check (гигиена моделей):** `/maestro-setup` (задача 3) + `maestro-assistant` (канон) — если модель trusted-агента (`custodian`/`sanitizer`) совпадает с моделью untrusted-агента → неблокирующее предупреждение в сводке (SECURITY.md P4: trusted → изолированная/локальная модель).
+
+## [2026-10-05]
+
 > **Версия 5.3.1** — Patch: timeline.mjs — model extraction from `id` key (fallback for `modelID`), regression tests, repair of stale timeline test expectations/fixtures.
 
 ### Исправлено
