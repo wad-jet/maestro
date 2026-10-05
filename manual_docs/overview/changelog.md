@@ -13,6 +13,16 @@
 
 ## [2026-10-05]
 
+> **Версия 5.5.0** - Minor: стоимость сессии в feedback-отчёте (нативный cost opencode).
+
+### Добавлено
+
+- **Стоимость сессии в feedback-отчёте:** `timeline.mjs` - блок `metrics.cost` (`available`, `primaryUsd`, `byAgent` по агентам, `totalUsd` - итог, `note`); агрегирует нативный cost opencode (цены - `provider.<id>.models.<name>.cost` в конфиге opencode, $/1M токенов, формат models.dev). В репо/плагине нет сети и ключей - cost считает сам opencode. Шаблон отчёта: колонка «Стоимость» в таблице агентов «Итоговой статистики», `cost: $X.XX` в строке primary, строка «Итого (primary + агенты)»; модель без `cost` - «дефис».
+- **How-to:** `manual_docs/how-to/enable-cost-tracking.md` - как объявить цены моделей в конфиге opencode (формат $/1M, где взять цены, перезапуск, эффект на TUI и отчёт).
+- **Тесты:** 6 новых в `timeline.test.mjs` (48 всего).
+
+## [2026-10-05]
+
 > **Версия 5.4.0** — Minor: improvements batch — тест-регистрация в npm test + guard, evidence-based верификация implementer, P4-check в /maestro-setup.
 
 ### Добавлено

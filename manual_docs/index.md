@@ -35,6 +35,7 @@ primary-сессии.
 - [Как включить память maestro](how-to/enable-memory.md) — опциональный memory layer (sqlite/qdrant/pgvector)
 - [Бэкап и восстановление памяти maestro](how-to/memory-backup-restore.md) — бэкап/restore memory layer (команда, аварийный CLI, приватные репо)
 - [Выбор и замена модели эмбеддингов](how-to/choose-embedding-model.md) — критерии, рекомендуемые модели, настройка, переиндексация (пошагово), командный сценарий, чек-лист ошибок, проверка
+- [Учёт стоимости сессий (cost tracking)](how-to/enable-cost-tracking.md) — цены моделей в конфиге opencode, «Стоимость» в TUI и feedback-отчёте
 
 ## Reference (справочник)
 

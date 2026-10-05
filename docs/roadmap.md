@@ -1,6 +1,6 @@
 # Роадмап maestro-agent
 
-**Текущая версия:** `5.4.0`
+**Текущая версия:** `5.5.0`
 **Дата обновления:** 2026-10-05
 
 > Архив закрытых волн и детализированная история — в `git log` и `manual_docs/overview/changelog.md`.
@@ -88,6 +88,9 @@
     - Impact: HIGH | Feasibility: MEDIUM | Sec: HIGH
     - Обоснование: 2026-10-05 — инцидент auto-merge без гейта 17 (нарушение ⚑1) закрыт на уровне правил (5.3.0); механический гард — отдельная итерация (дизайн: always-block + override / marker-file / warn-only)
     - Status: open
+
+~~30. **Feature: стоимость сессии в feedback-отчёте (нативный cost opencode)**~~
+    - ✅ **решено (5.5.0, 2026-10-05):** `timeline.mjs` - `metrics.cost` (primary + по агентам + итог) на нативном cost opencode (config `provider.<id>.models.<name>.cost`, $/1M, формат models.dev; в репо/плагине нет сети и ключей); отчёт - колонка «Стоимость» + «Итого (primary + агенты)»; how-to `manual_docs/how-to/enable-cost-tracking.md`
 
 ### Приоритет P3 (отложить)
 
