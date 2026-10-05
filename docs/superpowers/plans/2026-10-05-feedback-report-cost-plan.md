@@ -1,121 +1,119 @@
 ---
-title: Implementation plan — feedback-report cost (5.5.0)
+title: Implementation plan — feedback-report cost (5.5.0, v3)
 date: 2026-10-05
 author: maestro-auto
+status: approved
 ---
 
-# Implementation Plan: feedback-report cost
+# Implementation Plan: feedback-report cost (v3 — нативный cost opencode)
+
+## Суть
+
+Cost считает **opencode нативно** (config `provider.*.models.*.cost`, $/1M).
+В репо — только агрегация (`timeline.mjs`) и шаблон отчёта. Нет сети, ключей,
+pricing.json, скриптов обновления. Конфиг-акция (cost-блоки в
+`~/.config/opencode/opencode.json`) выполнена до старта (v3, approved).
+
+## Формат данных (подтверждён)
+
+- Экспорт сессии (`opencode export <id>`): top-level `info.cost` (число, USD)
+  + `messages[].info.cost`. Primary-код уже суммирует per-message (L325).
+- Child-экспорт той же формы → `data.info.cost` (агрегат) — fixture L211 теста.
 
 ## Файлы
 
-- `skills/maestro-feedback-report/update-pricing.mjs` — **новый** (refresh pricing.json)
-- `skills/maestro-feedback-report/pricing.json` — **новый** (коммитится; первичный снапшот из живого API)
-- `skills/maestro-feedback-report/timeline.mjs` — блок `metrics.cost`
+- `skills/maestro-feedback-report/timeline.mjs` — `metrics.cost`
 - `skills/maestro-feedback-report/timeline.test.mjs` — cost-тесты
-- `skills/maestro-feedback-report/SKILL.md` — шаблон (колонка Стоимость, итог, шаг refresh, примечание)
+- `skills/maestro-feedback-report/SKILL.md` — шаблон (колонка Стоимость, итог)
 - `manual_docs/overview/changelog.md` — секция 5.5.0
-- версия 5.4.0 → 5.5.0: `package.json`, `package-lock.json`, `docs/project-context.md`,
-  `AGENTS.md`, `docs/roadmap.md`, `TODO.md`
-- `regression/entries/2026-10-05-feedback-report-cost.md` — **новый** entry
-- spec/plan (этот файл) — не меняются после утверждения
+- `manual_docs/how-to/enable-cost-tracking.md` — **новый**
+- версия 5.4.0 → 5.5.0: `package.json`, `package-lock.json`,
+  `docs/project-context.md`, `AGENTS.md`, `docs/roadmap.md`, `TODO.md`
+- `regression/entries/2026-10-05-feedback-report-cost.md` — **новый**
 
 ## Задачи
 
-### T1: update-pricing.mjs + pricing.json (первичный снапшот)
+### T1: timeline.mjs — metrics.cost + тесты
 
-**Файлы:** `skills/maestro-feedback-report/update-pricing.mjs`, `skills/maestro-feedback-report/pricing.json`
+**Файлы:** `timeline.mjs`, `timeline.test.mjs`
 
-1. Скрипт (ESM, без зависимостей):
-   - ключ: `~/.local/share/opencode/auth.json` → запись `akash` (или `akash-ml`),
-     поле `apiKey`; лог — только маска `aksh…(len=37)`
-   - `GET https://api.akashml.com/v1/models` (Bearer), таймаут 30 c
-   - чистая экспортная функция `parseModelsApi(responseJson)` →
-     `{ "<id>": { input, output, input_cache_read?, request } }`:
-     только модели с `pricing` и `Number(pricing.input) > 0 ||
-     Number(pricing.output) > 0`; числа из строк; `input_cache_read` — только
-     если поле present; `request` — Number (default 0)
-   - запись: `{ source, fetchedAt: new Date().toISOString(), models }`,
-     `--out <path>` (default: рядом со скриптом)
-   - **fail-soft:** нет auth-файла/ключа, сетевая ошибка, HTTP ≠ 200, JSON-сбой →
-     warn + exit 0, существующий pricing.json не трогаем
-   - `--check`: показать source/fetchedAt/число моделей + «stale» если > 30 дней
-2. Запустить скрипт → первичный `pricing.json` (живой API).
-3. Тесты парсинга — в timeline.test.mjs (синтетика): отбор моделей, числа из
-   строк, absence input_cache_read, request default.
+1. Agent-buckets (L388): добавить `cost: 0, costSeen: false`.
+2. Child-обработка (L407-414):
+   `const cc = data && data.info && data.info.cost;
+    if (typeof cc === "number" && isFinite(cc) && cc > 0) { b.cost += cc; b.costSeen = true; }`
+3. После L429 (`metrics.tokensByAgent = agentBuckets`):
+   ```js
+   const byAgentCost = {};
+   let agentCostSum = 0;
+   for (const [agent, b] of Object.entries(agentBuckets)) {
+     if (b.costSeen) { byAgentCost[agent] = round6(b.cost); agentCostSum += b.cost; }
+   }
+   const primaryCost = costSeen ? costSum : null;
+   metrics.cost = {
+     available: primaryCost !== null || agentCostSum > 0,
+     primaryUsd: primaryCost === null ? null : round6(primaryCost),
+     byAgent: byAgentCost,
+     totalUsd: (primaryCost === null && agentCostSum === 0) ? null
+       : round6((primaryCost || 0) + agentCostSum),
+     note: "cost, рассчитанный opencode по provider.*.models.*.cost в конфиге opencode ($/1M токенов)",
+   };
+   ```
+   (`round6 = (x) => Math.round(x * 1e6) / 1e6` — helper рядом с metrics.)
+4. `metrics.tokens.cost` (L355) не трогать (provider-совместимость).
+5. Тесты (fixture-режим, как существующие):
+   - child с `info.cost` → bucket `costSeen`, `metrics.cost.byAgent` populated,
+     `totalUsd = primary + agents`
+   - child без `info.cost` → bucket cost 0/not seen, не ломает
+   - сессия без cost везде → `available: false`, `totalUsd: null`
+   - детерминизм: два прогона fixture — равные JSON
+   - round6: 0.0000004999 → 0.0000005
 
-**Коммит:** `feat(feedback-report): update-pricing.mjs + pricing.json snapshot`
+**Коммит:** `feat(feedback-report): metrics.cost — агрегация нативного cost opencode`
 
-### T2: timeline.mjs — metrics.cost
-
-**Файл:** `skills/maestro-feedback-report/timeline.mjs`
-
-1. Чтение `pricing.json` (relative к скрипту; `existsSync` → нет =
-   `available: false`).
-2. Экспортная чистая функция `computeCost({ primary, agents, pricing })` →
-   `{ available, totalUsd, primaryUsd, byAgent, note }`:
-   - формула: `in×input + cache×(input_cache_read ?? input) + (out+reasoning)×output + request`
-     (request — 0 для всех текущих моделей, но формула учитывает)
-   - primary: модель = `sessionModel` (из `normalizeModel(info.model)`);
-     токены = mInput/mCacheRead/mOutput+mReasoning
-   - агенты: по `metrics.tokensByAgent` (buckets уже имеют input/output/reasoning/
-     cacheRead/models); модель — первая из `models[]` (несколько моделей в
-     child → средняя цена некорректна: считать по первой, в note — пометка)
-   - модель не найдена в pricing → `available: false` + note «модель X не в
-     pricing.json» (или partial: посчитать найденные, total = null + note)
-   - round: 6 знаков (USD); детерминизм — без Date/random
-3. `metrics.cost = computeCost(...)` (provider-`cost` в `metrics.tokens.cost`
-   не трогать).
-4. Тесты: cache-rate vs no-cache-rate, reasoning→output, total = primary +
-   agents, модель не найдена, pricing.json отсутствует, детерминизм.
-
-**Коммит:** `feat(feedback-report): metrics.cost — расчёт стоимости по pricing.json`
-
-### T3: Шаблон отчёта (SKILL.md)
+### T2: Шаблон отчёта (SKILL.md)
 
 **Файл:** `skills/maestro-feedback-report/SKILL.md`
 
-1. L292 (строка primary): `cost: <$X | —>` → добавить
-   `· стоимость: $X.XX (pricing.json, <fetchedAt>)` / `· стоимость: — (нет pricing.json)`.
-2. L293+ (таблица «Токены по агентам»): колонка **Стоимость** + строка
-   **Итого (primary + агенты): $X.XX**.
-3. Примечание под таблицей: формула + допущения (reasoning по output-ставке;
-   API — list-цены, промо-скидки доков не учитываются; cache без ставки =
-   полный input-rate).
-4. Генерация: новый шаг — «если `pricing.json` отсутствует или `fetchedAt`
-   старше 30 дней → `node update-pricing.mjs` (fail-soft, отчёт не
-   блокируется); после — перезапустить timeline.mjs».
-5. Строка источника метрик — добавить `pricing: <source> (fetchedAt)`.
+1. L163 (описание поля `cost`) — уточнить: источник — нативный cost opencode.
+2. L292 (строка primary): `cost: <$X | — (цены моделей не объявлены в конфиге opencode)>`,
+   формат `$X.XX` (2 знака), данные — `metrics.cost`.
+3. L293+ (таблица «Токены по агентам»): колонка **Стоимость** (`$X.XXXX`) +
+   строка **Итого (primary + агенты): $X.XX** (`metrics.cost.totalUsd`).
+4. Примечание под таблицей: источник цен — `provider.<id>.models.<name>.cost`
+   в конфиге opencode (формат models.dev, $/1M); без объявления → «—»;
+   см. how-to `enable-cost-tracking`.
+5. Строка источника метрик: «cost: нативный opencode (config)».
 
-**Коммит:** `docs(feedback-report): cost column in report template + pricing refresh step`
+**Коммит:** `docs(feedback-report): cost column in report template`
 
-### T4: docs sync + bump + regression
+### T3: docs sync + bump 5.5.0 + regression
 
-**Файлы:** changelog, версия, roadmap, TODO.md, regression entry
+**Файлы:** changelog, how-to, версия, roadmap, TODO.md, regression entry
 
-1. `changelog.md` — секция 5.5.0.
-2. Bump 5.4.0 → 5.5.0 (package.json, package-lock.json, project-context,
-   AGENTS.md, roadmap «Текущая версия», новый закрытый пункт + открытый? нет —
-   фича закрыта в этом релизе).
-3. `regression/entries/2026-10-05-feedback-report-cost.md`: сценарии —
-   `node --test timeline.test.mjs` зелёный; `node update-pricing.mjs --check`
-   работает; прогон по сессии → `metrics.cost.available: true`;
-   `grep -c "Стоимость" skills/maestro-feedback-report/SKILL.md` ≥ 2.
+1. `manual_docs/how-to/enable-cost-tracking.md` (новый): как объявить `cost`
+   (формат, $/1M, пример для openai-совместимого провайдера, перезапуск
+   opencode, где взять цены, эффект на TUI и отчёт maestro).
+2. `changelog.md` — секция 5.5.0 (feat + how-to).
+3. Bump 5.4.0 → 5.5.0 (package.json, package-lock.json, project-context,
+   AGENTS.md, roadmap «Текущая версия» + закрытый пункт).
+4. `regression/entries/2026-10-05-feedback-report-cost.md`: сценарии —
+   `node --test timeline.test.mjs` зелёный; `npm test` (docs-drift 0);
+   `grep -c "Стоимость" skills/maestro-feedback-report/SKILL.md` ≥ 2;
+   ручной чек на новом сеансе (после перезапуска) — `metrics.cost.available: true`.
 
-**Коммит:** `chore: bump 5.5.0 + regression entry (feedback-report cost)`
+**Коммит:** `chore: bump 5.5.0 + regression entry + how-to enable-cost-tracking`
 
-## Порядок выполнения
+## Порядок
 
-1. T1 → task review (sonnet) + evidence-проверка
+1. T1 → task review (sonnet) + evidence-проверка оркестратором
 2. T2 → task review + evidence-проверка
-3. T3 → task review + evidence-проверка
-4. T4 → evidence-проверка (docs)
-5. Final review (reviewer) по дифу ветки
-6. Гейт 17 (HITL STOP) → merge ff → ветка удаляется
-7. Регенерация отчёта (срез #5) со стоимостью
+3. T3 → evidence-проверка (docs)
+4. Final review (reviewer) по дифу ветки
+5. Гейт 17 (HITL STOP) → merge ff → ветка удаляется
 
-## Валидация
+## Валидация (конец)
 
-- `npm test` (включая docs-drift) — 0 fail
+- `npm test` — 0 fail (включая docs-drift)
 - `node --test skills/maestro-feedback-report/timeline.test.mjs` — 0 fail
-- `node update-pricing.mjs --check` — свежий снапшот
-- Прогон timeline.mjs по текущей сессии: `metrics.cost` populated, total ≈ $2.78 (list-цены)
+- Регенерация отчёта (срез #5) — в новом сеансе (после перезапуска opencode):
+  `metrics.cost.available: true`, колонка Стоимость заполнена
