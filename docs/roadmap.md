@@ -1,6 +1,6 @@
 # Роадмап maestro-agent
 
-**Текущая версия:** `5.5.1`
+**Текущая версия:** `5.6.0`
 **Дата обновления:** 2026-10-05
 
 > Архив закрытых волн и детализированная история — в `git log` и `manual_docs/overview/changelog.md`.
@@ -83,11 +83,8 @@
 ~~28. **Improvements batch: тест-coverage guard + evidence-верификация implementer + P4-check**~~
     - ✅ **решено (5.4.0, 2026-10-05):** `maestro-install/test-coverage.test.mjs` (все `*.test.*` зарегистрированы в `npm test`; забытые файлы подключены); SKILL.md шаг 13 + «Обработка сбоев» + `implementer-prompt.md` (evidence-верификация DONE по фактам до task review); maestro-setup/maestro-assistant P4-check (неблокирующее предупреждение при совпадении моделей trusted/untrusted)
 
-29. **Feature: плагин-гард на merge/push без гейта 17 (механический стоп ⚑1)**
-    - TODO.md: открытый пункт
-    - Impact: HIGH | Feasibility: MEDIUM | Sec: HIGH
-    - Обоснование: 2026-10-05 — инцидент auto-merge без гейта 17 (нарушение ⚑1) закрыт на уровне правил (5.3.0); механический гард — отдельная итерация (дизайн: always-block + override / marker-file / warn-only)
-    - Status: open
+~~29. **Feature: плагин-гард на merge/push без гейта 17 (механический стоп ⚑1)**~~
+    - ✅ **решено (5.6.0, 2026-10-05):** плагин `maestro-bootstrap` — bash-гард: агентские `git merge` (любая) и `git push` в mainline (`main`/`master`) блокируются без маркера явного HITL-аппрува гейта 17 (`.maestro/gates/merge-<sessionID>.json`, TTL 600 с, `merge_guard.ttlSec`); fail-closed (нет маркера / просрочен / чужой sessionID / аномалия → deny); конфиг `merge_guard: {enabled, ttlSec}` (defaults true/600, opt-out — explicit); carve-out: человек в терминале не затрагивается
 
 ~~30. **Feature: стоимость сессии в feedback-отчёте (нативный cost opencode)**~~
     - ✅ **решено (5.5.0, 2026-10-05):** `timeline.mjs` - `metrics.cost` (primary + по агентам + итог) на нативном cost opencode (config `provider.<id>.models.<name>.cost`, $/1M, формат models.dev; в репо/плагине нет сети и ключей); отчёт - колонка «Стоимость» + «Итого (primary + агенты)»; how-to `manual_docs/how-to/enable-cost-tracking.md`

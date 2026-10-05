@@ -1027,6 +1027,11 @@ init), следует его правилам, затем решает и про
             issues нет — вариант помечается: «(b) Fix — нет открытых
             замечаний (только follow-up, не блокирует)».
         (c) Отмена
+       **Маркер аппрува (5.6.0, обязательный):** после явного (a) пользователя,
+       **до выполнения merge**, создай `.maestro/gates/merge-<sessionID>.json` с
+       `{"sessionID": "<id>", "ts": <Date.now()>, "gate": 17, "decision": "a"}`.
+       Без маркера merge-guard плагина (5.6.0) заблокирует `git merge`/`git push`
+       в mainline (fail-closed, TTL 600 с).
 🟢 18. [agent] finishing-a-development-branch
       — При fast-forward merge: `$TEST_COMMAND` на merged результате
         не выполняется. Fast-forward = HEAD feature-ветки становится

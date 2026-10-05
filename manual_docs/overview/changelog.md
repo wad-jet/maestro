@@ -13,6 +13,16 @@
 
 ## [2026-10-05]
 
+> **Версия 5.6.0** — Minor: merge-guard (R3, roadmap #29) — механический гард ⚑1: `git merge`/`git push` в mainline без маркера гейта 17 блокируются (fail-closed).
+
+### Добавлено
+
+- **Merge-guard (5.6.0, R3):** плагин `maestro-bootstrap` — bash-гард: агентские `git merge` (любая) и `git push` в mainline (`main`/`master`) блокируются без маркера явного HITL-аппрува гейта 17: `.maestro/gates/merge-<sessionID>.json` (`{"sessionID", "ts", "gate": 17, "decision": "a"}`, TTL 600 с, `merge_guard.ttlSec`); **fail-closed** (нет маркера / просрочен / чужой sessionID / аномалия проверки → deny, `[merge-guard:deny]`); конфиг `merge_guard: {enabled, ttlSec}` (defaults true/600, opt-out — explicit, warn `merge_guard.disabled` при init); логи `merge_guard` (allow/deny, без текста команд — SEC-4b); carve-out: человек в своём терминале не затрагивается (плагин видит только tool-вызовы агентов). SKILL.md гейт 17 — обязательный шаг: после явного (a) создать маркер до выполнения merge.
+- **Доки:** `SECURITY.md` (P9 — механический enforce ⚑1), `manual_docs/reference/config.md` (секция `merge_guard`), `manual_docs/explanation/agents-and-trust.md` (merge-guard как enforcement ⚑1).
+- **Тесты:** 29 unit-тестов (`plugins/maestro-bootstrap/merge-guard.test.js`, зарегистрирован в `npm test`).
+
+## [2026-10-05]
+
 > **Версия 5.5.1** - Patch: надёжность отчётов implementer (self-check-контракт + scope haiku без structural markdown).
 
 ### Добавлено

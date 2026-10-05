@@ -129,6 +129,33 @@
 - Область: только пайплайн (шаг 16; шаги 9/13 не затрагиваются).
 - Чтец — оркестратор (шаг 0, `maestro_config`); плагин не меняется.
 
+### Секция `merge_guard` (merge-guard, 5.6.0)
+
+Механический enforce инварианта ⚑1: плагин `maestro-bootstrap` блокирует
+bash-команды агента `git merge` (любую) и `git push` в mainline
+(`main`/`master`) до маркера явного HITL-аппрува гейта 17
+(`.maestro/gates/merge-<sessionID>.json`, создаётся оркестратором на гейте 17
+после явного (a) — SKILL.md, гейт 17).
+
+| Ключ | Тип | Default | Описание |
+|---|---|---|---|
+| `enabled` | boolean | `true` | гард вкл/выкл; `false` — explicit opt-out (гард выключен; warn `merge_guard.disabled` при init) |
+| `ttlSec` | number > 0 | `600` | TTL (секунды) маркера аппрува: после явного (a) на гейте 17 маркер действителен `ttlSec` секунд |
+
+- Поведение: нет маркера / просрочен / чужой `sessionID` / аномалия проверки →
+  **deny (fail-closed)**: bash-вызов блокируется ошибкой
+  `[merge-guard:deny] ...` (reason: `no_marker` / `marker_expired` /
+  `marker_session_mismatch` / `marker_bad_json` / `guard_error`). Свежий маркер
+  текущей сессии → allow (маркер не удаляется — retry merge в пределах TTL
+  допустим).
+- Невалидные значения → default + soft fallback (паттерн плагина).
+- Логи (bootstrap-лог): `merge_guard` — `{ action: "allow"|"deny",
+  kind: "merge"|"push-mainline", reason, sessionID }`; текст команд в лог не
+  попадает (SEC-4b).
+- Carve-out: человек в своём терминале не затрагивается (плагин видит только
+  tool-вызовы агентов).
+- Чтец — плагин (при init); маркер создаёт оркестратор (гейт 17, вариант (a)).
+
 ### Секция `confidential`
 
 Защита конфиденциальных путей: жёсткий deny чтения и записи для всех, кроме

@@ -93,6 +93,18 @@
   в любом режиме. Инварианты ⚑1–4 действуют во всех режимах
   (manual / auto-answer / auto-ai) — канон: `skills/maestro/invariants.md`. Статус: инструкция
   SKILL (не enforcement).
+ - **P9. Механический enforce ⚑1 (merge-guard, 5.6.0).** Плагин
+   `maestro-bootstrap` блокирует bash-команды агента `git merge` (любую) и
+   `git push` в mainline (`main`/`master`) — scope: bash-тул агента; прочие
+   git-команды и push feature-веток не затрагиваются. Разблокировка — маркер
+   явного HITL-аппрува гейта 17: `.maestro/gates/merge-<sessionID>.json`
+   (`{ sessionID, ts, gate: 17, decision: "a" }`; TTL — `merge_guard.ttlSec`,
+   default 600 с; `sessionID` должен совпадать с текущей сессией).
+   **Fail-closed:** нет маркера / просрочен / чужой `sessionID` / аномалия
+   проверки → deny (throw блокирует bash-вызов). Carve-out (by construction):
+   человек в своём терминале не затрагивается (плагин видит только tool-вызовы
+   агентов). Opt-out — явный `merge_guard.enabled: false` в `maestro.json`
+   (warn `merge_guard.disabled` при init).
 
 ## 4. Реализованные контрмеры
 
