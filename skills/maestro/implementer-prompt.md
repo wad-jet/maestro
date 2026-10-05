@@ -77,6 +77,22 @@ BLOCKER: <if BLOCKED, describe; else "none">
 CONTEXT_NEEDED: <if NEEDS_CONTEXT, describe; else "none">
 ```
 
+**Self-check перед отчётом (обязателен):** перед формированием отчёта выполни
+и зафиксируй фактические результаты:
+1. `git log --oneline -3` + `git show --stat <SHA>` — фактический SHA из лога в
+   поле `COMMITS` (не «по памяти»; сфабрикованный/несуществующий SHA — отчёт
+   не принимается).
+2. Последний полный прогон тестов — фактический вывод (числа pass/fail) в
+   `TEST_OUTPUT` (не пересказ).
+3. `git status --short` — working tree чистый после коммита (нет незакоммиченных
+   артефактов задачи).
+4. Структурная проверка изменённых файлов: markdown — целостность таблиц/списков
+   (вставки не разрывают строки/таблицы); код — синтаксический check
+   (например `node --check` для .mjs/.js).
+Любой пункт не выполнен → статус `DONE_WITH_CONCERNS` с указанием пункта.
+DONE без self-check — невалиден (evidence-based verification — проверка
+оркестратором по фактам).
+
 **Контракт отчёта (обязателен):** верни Status (DONE | DONE_WITH_CONCERNS |
 BLOCKED | NEEDS_CONTEXT) + Commits + Files changed + Test output + отчёт-файл.
 Отчёт без Status/Files/Test/Commit считается бессодержательным (нарушение

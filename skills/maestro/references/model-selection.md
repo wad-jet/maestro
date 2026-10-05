@@ -21,7 +21,7 @@
 
 | Tier | Когда использовать | OpenCode сабагент |
 |---|---|---|
-| **Haiku** (Быстрая/дешёвая) | Механические task-и: 1-2 файла, полный spec, трансляция+тесты | `haiku` |
+| **Haiku** (Быстрая/дешёвая) | Механические task-и: 1-2 файла, полный spec, трансляция+тесты; **без структурных markdown-правок** (таблицы/списки/мульти-вставки) — doc/шаблон-правки и multi-file → sonnet | `haiku` |
 | **Sonnet** (средняя/сбалансированная) | Интеграционные task-и: multi-file, pattern matching, debugging | `sonnet` |
 | **Opus** (наиболее мощная) | Архитектура, spec formation, design judgment, final whole-branch review | `custodian` (Q/A по confidential), `opus` (spec review), `reviewer` (code review). На Revise (шаг 10b) `opus` **выдаёт структурированные правки**, а не пишет в файл (`edit: deny` сохраняется) |
 | **Fable** (креативная) | Примеры, метафоры, аналогии, пояснения в стиле историй | `fable` |
@@ -35,11 +35,13 @@
 | `security_review` (шаг 8.6) | sanitizer | `sanitizer` (trusted) |
 | `task_reviewer` (шаг 13, per-task) | sonnet | `sonnet` |
 | `code_review` (шаг 16) | opus | `reviewer` |
-| `implementer_mechanical` (шаг 13, 1-2 файла) | haiku | `haiku` |
+| `implementer_mechanical` (шаг 13, 1-2 файла, без structural markdown) | haiku | `haiku` |
 | `implementer_integration` (шаг 13, multi-file) | sonnet | `sonnet` |
 | `explain` (по запросу, примеры/метафоры) | fable | `fable` |
 | `decision_medium` (auto-ai, средние решения) | sonnet | `sonnet` (батч вопросов, промпт `auto-ai-decision-prompt.md`) |
 | `decision_complex` (auto-ai, сложные решения) | opus | `opus` (батч вопросов, промпт `auto-ai-decision-prompt.md`) |
+
+Ограничение scope haiku — по факту 2026-10-05: батч 5.4.0 (haiku) — 3/3 дефектных отчёта (сфабрикованный SHA, пустой отчёт, сломанные markdown-вставки); батч 5.5.0 (sonnet) — 3/3 полных отчёта. Evidence-верификация оркестратора ловит дефекты после, scope-правило — до диспатча.
 
 **Decision → Tier (auto-ai, п. 3в):** механические авто-принятия (набор auto-answer:
 источник-условие P1.3/matrix/guard) и security-дефолты (risk-reducing) применяет
