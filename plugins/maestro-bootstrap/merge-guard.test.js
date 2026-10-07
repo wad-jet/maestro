@@ -235,4 +235,17 @@ describe("merge-guard hook integration (tool.execute.before)", () => {
       fs.rmSync(offDir, { recursive: true, force: true });
     }
   });
+
+  it("denies git merge without marker, shows git merge text", async () => {
+    await assert.rejects(
+      async () => {
+        await hooks["tool.execute.before"](
+          { tool: "bash", sessionID: "ses_m", callID: "c6" },
+          { args: { command: "git merge --ff-only f" } },
+        );
+      },
+      /merge-guard:deny.*git merge/,
+    );
+  });
+
 });
