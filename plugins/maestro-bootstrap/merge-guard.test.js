@@ -182,7 +182,7 @@ describe("merge-guard hook integration (tool.execute.before)", () => {
         { tool: "bash", sessionID: "ses_x", callID: "c1" },
         { args: { command: "git merge --ff-only f" } },
       ),
-      /merge-guard:deny.*git push \(mainline\)/,
+      /merge-guard:deny.*git merge/,
     );
     const gates = path.join(dir, ".maestro", "gates");
     fs.mkdirSync(gates, { recursive: true });
