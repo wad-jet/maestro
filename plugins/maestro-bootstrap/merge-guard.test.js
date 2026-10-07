@@ -247,5 +247,4 @@ describe("merge-guard hook integration (tool.execute.before)", () => {
       /merge-guard:deny.*git merge/,
     );
   });
-
 });
