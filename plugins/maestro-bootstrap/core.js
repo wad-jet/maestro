@@ -1265,13 +1265,12 @@ export const MaestroBootstrapPlugin = async ({ directory, client, sanitizeImpl =
         // .maestro/gates/merge-<sessionID>.json). Fail-closed: нет маркера /
         // аномалия → deny (throw блокирует bash-вызов, паттерн
         // confidential-ветки: маркер на err + re-throw во внешнем catch).
-if (input.tool === "bash" && mergeGuardConf.enabled) {
-        const detected = detectGuardCommand(typeof output?.args?.command === "string" ? output.args.command : "");
-        if (detected) {
-          const kind = detected.kind;
-          const res = checkMergeMarker(root, input.sessionID, Date.now(), mergeGuardConf);
-          const base = { sessionID: input.sessionID, callID: input.callID, kind, reason: res.reason };
-
+        if (input.tool === "bash" && mergeGuardConf.enabled) {
+          const detected = detectGuardCommand(typeof output?.args?.command === "string" ? output.args.command : "");
+          if (detected) {
+            const kind = detected.kind;
+            const res = checkMergeMarker(root, input.sessionID, Date.now(), mergeGuardConf);
+            const base = { sessionID: input.sessionID, callID: input.callID, kind, reason: res.reason };
             if (res.allow) {
               log.info("merge_guard", { action: "allow", ...base });
             } else {

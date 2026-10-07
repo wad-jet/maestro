@@ -182,7 +182,7 @@ describe("merge-guard hook integration (tool.execute.before)", () => {
         { tool: "bash", sessionID: "ses_x", callID: "c1" },
         { args: { command: "git merge --ff-only f" } },
       ),
-      /merge-guard:deny/,
+      /merge-guard:deny.*git push \(mainline\)/,
     );
     const gates = path.join(dir, ".maestro", "gates");
     fs.mkdirSync(gates, { recursive: true });
@@ -204,7 +204,7 @@ describe("merge-guard hook integration (tool.execute.before)", () => {
         { tool: "bash", sessionID: "ses_y", callID: "c3" },
         { args: { command: "git push origin main" } },
       ),
-      /merge-guard:deny/,
+      /merge-guard:deny.*git push \(mainline\)/,
     );
   });
 
