@@ -11,6 +11,14 @@
 
 > **Версия 5.0.0** — Major: чистка + стабилизация (back-compat cleanup, install fixes, terminology, sanitizer knobs).
 
+## [2026-10-07]
+
+> **Версия 5.6.1** - Patch: merge-guard - deny-сообщение для `git merge` команд и `kind` в логах: строка, не объект.
+
+### Исправлено
+
+- **merge-guard (5.6.1):** deny-сообщение для `git merge` команд корректно показывает «git merge заблокирован» (ранее всегда «git push (mainline)» - объект vs строка в ternary); `kind` в логах `merge_guard` - строка (`"merge"`/`"push-mainline"`), не объект; +тесты (текстовые ассерты обеих веток сообщения), индентация. 383/383.
+
 ## [2026-10-05]
 
 > **Версия 5.6.0** — Minor: merge-guard (R3, roadmap #29) — механический гард ⚑1: `git merge`/`git push` в mainline без маркера гейта 17 блокируются (fail-closed).
