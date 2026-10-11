@@ -576,11 +576,15 @@ test("indexer timeout bounds hanging summarize (I1)", async () => {
   };
   let failCalled = false;
   let failSessionId = null;
+  let statusReturned = null;
   const idx = new Indexer({
     client, config: mkConfig({ summarize_timeout_ms: 50 }),
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage,
-    state: { ...mkState(), recordFail: async (sid) => { failCalled = true; failSessionId = sid; } },
+    state: {
+      ...mkState(),
+      recordFail: async (sid) => { failCalled = true; failSessionId = sid; },
+    },
     summarize,
     projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
     git: mkGit(),
@@ -593,8 +597,68 @@ test("indexer timeout bounds hanging summarize (I1)", async () => {
   // Should complete within timeout + small buffer (50ms + 100ms buffer)
   assert.ok(elapsed >= 40, `timed out fast (expected ~50ms, got ${elapsed}ms)`);
   assert.ok(elapsed < 300, `completed too slowly (expected <300ms, got ${elapsed}ms)`);
-  assert.ok(failCalled, "recordFail called after timeout");
-  assert.equal(failSessionId, "s1");
+  // Timeout errors are retryable (F-1 fix) — recordFail NOT called, skip counter not incremented.
+  assert.ok(!failCalled, "recordFail NOT called for retryable timeout");
+  idx.dispose();
+});
+
+// ── F-1 — summarize_transcript_max_chars (bounded input) ─────────────
+
+test("F-1 transcript capped to summarize_transcript_max_chars", async () => {
+  const largeText = "x".repeat(500000); // 500K chars — well over 200K default
+  const client = mkClient();
+  client.session.messages = async () => [{
+    role: "user",
+    parts: [{ type: "text", text: largeText }],
+    info: { role: "user" },
+  }];
+  let capturedTranscript = "";
+  const summarize = async ({ transcript }) => {
+    capturedTranscript = transcript;
+    return { title: "t", summary: "s", decisions: [] };
+  };
+  const idx = new Indexer({
+    client, config: mkConfig({ summarize_transcript_max_chars: 200000 }),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client),
+    state: mkState(),
+    summarize,
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+  });
+
+  await idx._run("s1");
+  // Transcript should be capped (head ~100K + truncation marker + tail ~100K)
+  assert.ok(capturedTranscript.length <= 200100,
+    `transcript should be capped (got ${capturedTranscript.length}, max 200100)`);
+  assert.ok(capturedTranscript.includes("[transcript truncated — "), "truncation marker present");
+  idx.dispose();
+});
+
+test("F-1 short transcript passes through unchanged", async () => {
+  const client = mkClient();
+  client.session.messages = async () => [{
+    role: "user",
+    parts: [{ type: "text", text: "hello" }],
+    info: { role: "user" },
+  }];
+  let capturedTranscript = "";
+  const summarize = async ({ transcript }) => {
+    capturedTranscript = transcript;
+    return { title: "t", summary: "s", decisions: [] };
+  };
+  const idx = new Indexer({
+    client, config: mkConfig({ summarize_transcript_max_chars: 200000 }),
+    embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
+    storage: mkStorage(client),
+    state: mkState(),
+    summarize,
+    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    git: mkGit(),
+  });
+
+  await idx._run("s1");
+  assert.equal(capturedTranscript, "hello", "short transcript passes through unchanged");
   idx.dispose();
 });
 

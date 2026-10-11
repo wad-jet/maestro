@@ -10,9 +10,30 @@ function withTimeout(p, ms) {
   return Promise.race([
     p,
     new Promise((_, rej) =>
-      setTimeout(() => rej(new Error("memory: summarize timeout")), ms).unref?.()
+      setTimeout(() => {
+        const e = new Error("memory: summarize timeout");
+        e.retryable = true;
+        e.errorClass = "summarize_timeout";
+        rej(e);
+      }, ms).unref?.()
     ),
   ]);
+}
+
+/**
+ * Обрезаем транскрипт: сохраняем начало и конец до заданного лимита.
+ * split-порог — последовательные пустые строки (разделители сообщений).
+ * Это предотвращает OOM/таймаут на длинных сессиях (F-1).
+ */
+function _capTranscript(text, maxChars) {
+  if (text.length <= maxChars) return text;
+  const half = Math.floor(maxChars / 2);
+  const head = text.slice(0, half);
+  const tail = text.slice(-half);
+  // Split by consecutive blank lines (message separator).
+  const idx = tail.indexOf("\n\n");
+  const trimmed = idx >= 0 ? tail.slice(idx) : tail;
+  return head + "\n\n[transcript truncated — " + (text.length - maxChars) + " chars removed]\n\n" + trimmed;
 }
 
 export class Indexer {
@@ -214,7 +235,13 @@ export class Indexer {
         return;
       }
       const rawClass = err?.errorClass;
-      const errorClass = (rawClass === "storage_error" || rawClass === "embedder_error" || rawClass === "index_error") ? rawClass : "index_error";
+      // F4: enum-only (SEC-4b); fallback — index_error.
+      // retryable уже отфильтрован выше (I3: skip не засчитывается).
+      const errorClass = (rawClass === "storage_error" || rawClass === "embedder_error" ||
+        rawClass === "index_error" || rawClass === "summarize_timeout" ||
+        rawClass === "summarize_invalid" || rawClass === "summarizer_no_text" ||
+        rawClass === "model_unresolved" || rawClass === "session_read_failed")
+        ? rawClass : "index_error";
       this.logError?.("memory:index_error", { sessionID, error_class: errorClass });
       try { await this.state.recordFail(sessionID, errorClass); } catch {}
       const fails = (this._fails.get(sessionID) ?? 0) + 1;
@@ -278,9 +305,15 @@ export class Indexer {
         if (newCount < minNew) return { status: "no_new_messages" };
       }
 
-      const transcript = messages
+      let transcript = messages
         .map((m) => (m.parts ?? []).map((p) => p.type === "text" ? p.text : "").join("\n"))
         .join("\n");
+
+      // F-1 cap: bounded input for long sessions (spec §4.2.4).
+      const MAX_CHARS = this.config.summarize_transcript_max_chars ?? 200000;
+      if (transcript.length > MAX_CHARS) {
+        transcript = _capTranscript(transcript, MAX_CHARS);
+      }
 
       if (!transcript.trim()) return { status: "no_new_messages" };
 
@@ -461,7 +494,13 @@ export class Indexer {
         return { status: "failed:retryable" };
       }
       const rawClass = err?.errorClass;
-      const errorClass = (rawClass === "storage_error" || rawClass === "embedder_error" || rawClass === "index_error") ? rawClass : "index_error";
+      // F4: enum-only (SEC-4b); fallback — index_error.
+      // retryable уже отфильтрован выше (I3: skip не засчитывается).
+      const errorClass = (rawClass === "storage_error" || rawClass === "embedder_error" ||
+        rawClass === "index_error" || rawClass === "summarize_timeout" ||
+        rawClass === "summarize_invalid" || rawClass === "summarizer_no_text" ||
+        rawClass === "model_unresolved" || rawClass === "session_read_failed")
+        ? rawClass : "index_error";
       this.logError?.("memory:index_error", { sessionID, error_class: errorClass });
       try { await this.state.recordFail(sessionID, errorClass); } catch {}
       // локальный счётчик fails — memory:index_skipped при переходе в skip

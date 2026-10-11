@@ -40,6 +40,7 @@ export const DEFAULTS = {
   retention_days: null,
   delete_on_session_delete: false,
   summarize_timeout_ms: 120000,
+  summarize_transcript_max_chars: 200000,
   branch_context: true,
   mainline: null,
   related: null,

@@ -20,13 +20,21 @@ export function parseSummary(raw) {
   // M1: strip markdown fences
   inner = inner.replace(/^```(?:\w*)\s*/i, "").replace(/```\s*$/i, "").trim();
   let obj;
-  try { obj = JSON.parse(inner); } catch { throw new Error("invalid summary JSON"); }
+  try { obj = JSON.parse(inner); } catch {
+    const e = new Error("invalid summary JSON");
+    e.errorClass = "summarize_invalid";
+    throw e;
+  }
   if (!obj || typeof obj.title !== "string" || typeof obj.summary !== "string" || !Array.isArray(obj.decisions)) {
-    throw new Error("invalid summary shape");
+    const e = new Error("invalid summary shape");
+    e.errorClass = "summarize_invalid";
+    throw e;
   }
   // M1: validate decisions elements are strings
   if (!obj.decisions.every((d) => typeof d === "string")) {
-    throw new Error("invalid summary shape");
+    const e = new Error("invalid summary shape");
+    e.errorClass = "summarize_invalid";
+    throw e;
   }
   return { title: obj.title, summary: obj.summary, decisions: obj.decisions };
 }
@@ -59,7 +67,9 @@ export async function summarizeSession({ client, sessionID, transcript, model, s
     const modelRef = splitModel(summarizerModel) ?? splitModel(model);
     // M3: throw if neither model resolves
     if (!modelRef) {
-      throw new Error("memory: cannot resolve summarizer model (provider/model)");
+      const e = new Error("memory: cannot resolve summarizer model (provider/model)");
+      e.errorClass = "model_unresolved";
+      throw e;
     }
     const promptRes = await client.session.prompt({
       path: { id: sm.id },
@@ -68,7 +78,9 @@ export async function summarizeSession({ client, sessionID, transcript, model, s
     const resp = promptRes?.data ?? promptRes;
     const text = (resp?.parts ?? []).filter((p) => p.type === "text").map((p) => p.text).join("\n");
     if (!text) {
-      throw new Error("memory: summarizer returned no text");
+      const e = new Error("memory: summarizer returned no text");
+      e.errorClass = "summarizer_no_text";
+      throw e;
     }
     return parseSummary(text);
   } finally {
