@@ -134,10 +134,17 @@ export function createState(path, { log } = {}) {
  * @param {object} data
  */
 function persistAtomic(path, data) {
-  mkdirSync(dirname(path), { recursive: true });
+  const dir = dirname(path);
+  mkdirSync(dir, { recursive: true });
   const tmp = `${path}.tmp`;
-  writeFileSync(tmp, JSON.stringify(data), "utf8");
-  renameSync(tmp, path);
+  try {
+    writeFileSync(tmp, JSON.stringify(data), "utf8");
+    renameSync(tmp, path);
+  } catch (err) {
+    // Fallback: если rename падает (permissions / macOS quirks), пишем напрямую
+    try { writeFileSync(path, JSON.stringify(data), "utf8"); }
+    catch { /* fail-soft: state persist не блокирует память */ }
+  }
 }
 
 /**

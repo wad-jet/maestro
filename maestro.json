@@ -20,14 +20,13 @@
       "data_field": true,
       "env_file": true,
       "db_credential": true,
-      "ledger_entry": true,
       "private_key": true,
       "auth_header": true
     },
     "by_agent": {
       "reviewer": []
     },
-    "patterns": [],
+    "allow_values": [],
     "extra_fields": [],
     "extra_uri_schemes": []
   },

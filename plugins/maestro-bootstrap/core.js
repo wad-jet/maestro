@@ -1,23 +1,18 @@
 /**
- * Maestro Bootstrap Plugin for OpenCode.ai
+ * Maestro Bootstrap Plugin for OpenCode.ai — V2 port.
  *
- * Rôle (после ухода от агента `maestro`, 2026-08-18): глобальный, не привязан
- * к агенту. Скилл `maestro` вызывается через команду `@maestro-init` в любой
- * primary-сессии; инжекция директивы в сессии агента удалена.
+ * Rôle: глобальный, не привязан к агенту. Скилл `maestro` вызывается через
+ * команду `@maestro-init` в любой primary-сессии.
  *
  * Функции:
  *  - Логирование ключевых событий: ошибки/повторы сессий, пустой результат
  *    субагента, вызовы `task` (диспатч субагентов) — для observability.
  *  - Санитайзинг промптов `task` (Уровень 1 Security Review, Этап 2):
  *    маскирование чувствительных данных по правилам Context Sanitizer.
+ *  - Merge guard: блокировка git merge/push в mainline без HITL-аппрува.
+ *  - Confidential control: доступ к docs/confidential/** только trusted-сабагентам.
  *
  * Логирование: JSONL to `<project>/.maestro/logs/maestro-bootstrap-<date>.log`
- * (gitignored), one file per day. Levels: debug / info / warn / error.
- * Config via env:
- *   MAESTRO_BOOTSTRAP_LOG_LEVEL  (default: info)
- *   MAESTRO_BOOTSTRAP_LOG_MASK   (default: derived from LOG_LEVEL)
- *   MAESTRO_BOOTSTRAP_LOG_DIR    (default: <directory>/.maestro)
- *   MAESTRO_CONFIG               (path to maestro.json — consolidated config)
  */
 
 import fs from "node:fs";
@@ -25,31 +20,16 @@ import path from "node:path";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { classifyMemoryConfig } from "./memory/config.js";
-import { tool } from "./tool-shim.js";
-import { SESSIONS as MEMORY_SERVICE_SESSIONS } from "./memory/summarize.js";
 import { registerCommunicationHooks } from "./communication.js";
 import { registerFeedbackReportHooks } from "./feedback-report.js";
 import { detectGuardCommand, checkMergeMarker, resolveMergeGuardConf } from "./merge-guard.js";
 
 const LOG_LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
 
-// Git config lookup (fail-soft). Используется для identity-фоллбека
-// централизованного memory gate (git user.name) и проектного ключа
-// (remote.origin.url). C5 (dedup): ОДИН `git config --list` на корень,
-// результат парсится и кэшируется в module-level Map — core gate и memory
-// переиспользуют его, не запуская повторные subprocess-вызовы.
+// --- Git config (cached) ----------------------------------------------------
+
 const gitConfigCache = new Map();
 
-/**
- * Read git identity + remote in a single subprocess call, cached per root.
- * C5: dedup — один `execSync("git config --list")` на корень; результат
- * кэшируется в module-level Map (переживает несколько init в процессе).
- * Fail-soft: git отсутствует / ключи не заданы → null (не бросаем).
- * @param {string} root  Project directory (cwd for git).
- * @param {(cmd: string, opts: object) => string} [exec]  Injectable execSync
- *   (тесты). По умолчанию — node:child_process.execSync.
- * @returns {{ name: string|null, remote: string|null }}
- */
 export function getGitConfig(root, exec = execSync) {
   const cached = gitConfigCache.get(root);
   if (cached !== undefined) return cached;
@@ -61,10 +41,6 @@ export function getGitConfig(root, exec = execSync) {
       stdio: ["ignore", "pipe", "ignore"],
     });
     const lines = String(out ?? "").split("\n");
-    // I-3: `git config --list` prints in increasing precedence (system → global
-    // → local), so the LAST occurrence of a key is the highest-precedence value
-    // (what `git config --get` would return). Last-match-wins: overwrite on each
-    // match instead of keeping the first (lowest-precedence) line.
     for (const line of lines) {
       const eq = line.indexOf("=");
       if (eq === -1) continue;
@@ -74,66 +50,32 @@ export function getGitConfig(root, exec = execSync) {
       else if (key === "remote.origin.url") result.remote = value || null;
     }
   } catch {
-    /* fail-soft: git отсутствует → null */
+    /* fail-soft */
   }
   gitConfigCache.set(root, result);
   return result;
 }
 
-// --- Context Sanitizer (Уровень 1) -----------------------------------------
+// --- Context Sanitizer ------------------------------------------------------
 
-// Категории правил детекта чувствительных данных.
-const RULE_NAMES = [
-  "env_secret", "data_field", "env_file", "db_credential",
-  "private_key", "auth_header",
-];
+const RULE_NAMES = ["env_secret", "data_field", "env_file", "db_credential", "private_key", "auth_header"];
 
-const DEFAULT_RULES = {
-  env_secret: true,
-  data_field: true,
-  env_file: true,
-  db_credential: true,
-  private_key: true,
-  auth_header: true,
-};
+const DEFAULT_RULES = { env_secret: true, data_field: true, env_file: true, db_credential: true, private_key: true, auth_header: true };
 
-// --- Поля данных (для rule `data_field`) -----------------------------------
-
-// Чувствительные поля данных по умолчанию (base-формы). Из них строится
-// динамический regex (см. buildDataFieldsRegex). Проект может дополнить через
-// `extra_fields` в sanitizer-whitelist.json.
 const DEFAULT_SENSITIVE_FIELDS = [
-  // Финансовые
-  "amount", "currency", "salary", "price", "cost", "balance",
-  "vat", "tax_amount", "iban", "bic", "account_number",
-  "bank_account", "card_number", "cvv", "pan",
-  "contract_id", "invoice_id", "payment_id",
-  // Распространённые префиксы сумм (totalAmount/netAmount ловит Ур.2-LLM)
+  "amount", "currency", "salary", "price", "cost", "balance", "vat", "tax_amount", "iban", "bic",
+  "account_number", "bank_account", "card_number", "cvv", "pan", "contract_id", "invoice_id", "payment_id",
   "total_amount", "net_amount", "gross_amount", "discount_amount",
-  // PII (перс./налоговые)
-  "phone", "email", "address", "first_name", "last_name",
-  "full_name", "birth_date", "passport", "passport_number",
-  "inn", "kpp", "ogrn", "snils", "ssn", "tax_id",
-  // Секреты / credentials (для `"key": value` / `key: value` — SEC-1b)
+  "phone", "email", "address", "first_name", "last_name", "full_name", "birth_date",
+  "passport", "passport_number", "inn", "kpp", "ogrn", "snils", "ssn", "tax_id",
   "client_secret", "api_key", "secret_key", "auth_token", "access_key",
   "refresh_token", "id_token", "password", "secret",
-  // Бизнес-поля (существующие)
   "article_code", "counterparty_id",
 ];
 
 const escapeRegex = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-
-// camelCase-вариант snake_case поля: `card_number` → `cardNumber`,
-// `counterparty_id` → `counterpartyId`. Ловит `CardNumber` и т.п.
 const toCamel = (s) => s.replace(/_([a-z])/g, (_, c) => c.toUpperCase());
 
-/**
- * Build the `data_field` regex from a list of field names.
- * Для каждого имени добавляется camelCase-вариант (`card_number` → `cardNumber`)
- * и `\w*`-суффикс для `amountValue`/`amount_value`. `i`-флаг — регистронезависимо.
- * @param {string[]} fields  Field names.
- * @returns {RegExp}
- */
 function buildDataFieldsRegex(fields) {
   const alts = [];
   for (const f of fields) {
@@ -141,127 +83,30 @@ function buildDataFieldsRegex(fields) {
     if (f.includes("_")) alts.push(toCamel(f));
   }
   const alt = alts.map(escapeRegex).join("|");
-  // \b перед именем (start/после "_"/кавычки/non-word), `\w*` после — суффиксы.
-  // H-1 (4.21.0): value-альтернация + unquoted-токен `[^\s"'<>|,;]+` — маскирует
-  // значение до пробела/кавычки/разделителя у кураторских полей
-  // (`email: john@doe.com`, `phone: +7-900-…`, `iban: DE89…` — до D3 не ловились).
-  // FP-обоснование: имена из DEFAULT_SENSITIVE_FIELDS чувствительны по
-  // определению — согласуется с SECRET_COLON (для keyword-имён уже [^\s,;]+).
-  // Побочно закрывается `amount: -100` (H-10-фрагмент).
-  return new RegExp(
-    `\\b["']?(?:${alt})\\w*["']?\\s*:\\s*("[^"]*"|'[^']*'|\\d[\\d.,]*|[^\\s"'<>|,;]+)`,
-    "gi",
-  );
+  return new RegExp(`\\b["']?(?:${alt})\\w*["']?\\s*:\\s*("[^"]*"|'[^']*'|\\d[\\d.,]*|[^\\s"'<>|,;]+)`, "gi");
 }
 
-// --- Secrets из окружения (rule `env_secret`) ------------------------------
-
-// Строки вида NAME=value для секретных переменных окружения. `i`-флаг ловит
-// lowercase/camelCase: `apiKey=`, `api_key=`, `dbPassword=`. Keywords —
-// как UPPER, так и любой регистр. False positives возможны (substring `key`
-// в `keyword`), но для security-инструмента безопаснее лишний раз замаскировать.
-const ENV_KEYWORDS =
-  "SECRET|KEY|TOKEN|PASSWORD|CREDENTIAL|PASS|AUTH|DSN|CERT|SALT|SIGNATURE|NONCE";
-// Префикс должен быть optional/backtrackable (может быть пустым), иначе keyword
-// в начале имени (`TOKEN=`, `KEY=`, `SECRET=` и т.п.) не маскируется — жадный
-// `[A-Z]` съедал его начало (SEC-1). `[A-Za-z0-9_]*` ловит и camelCase
-// (`apiKey=`, `dbPassword=`) и snake_case (`API_KEY=`, `POSTGRES_PASSWORD=`).
-const ENV_ASSIGN = new RegExp(
-  `\\b[A-Za-z0-9_]*(?:${ENV_KEYWORDS})[A-Z0-9_]*\\s*=\\s*("[^"]*"|'[^']*'|[^\\s;]+)`,
-  "gi",
-);
-
-// .env файлы (без \b перед точкой — '.' не word-символ).
+const ENV_KEYWORDS = "SECRET|KEY|TOKEN|PASSWORD|CREDENTIAL|PASS|AUTH|DSN|CERT|SALT|SIGNATURE|NONCE";
+const ENV_ASSIGN = new RegExp(`\\b[A-Za-z0-9_]*(?:${ENV_KEYWORDS})[A-Z0-9_]*\\s*=\\s*("[^"]*"|'[^']*'|[^\\s;]+)`, "gi");
 const ENV_FILE = /(\.env(?:\.\w+)?)\b/g;
 
-// --- DB/SFTP credentials (rule `db_credential`) ----------------------------
-
-// Схемы URI с встроенными credentials: scheme://user:pass@host.
-const DEFAULT_URI_SCHEMES = [
-  "sftp", "postgres", "postgresql", "mysql", "mongodb", "redis", "amqp",
-  "http", "https", "ssh", "ftp", "ftps", "ldap", "ldaps", "grpc",
-  "clickhouse", "mssql", "cassandra",
-];
-
-// Connection string (key=value) с паролем: host=db password=secret.
+const DEFAULT_URI_SCHEMES = ["sftp", "postgres", "postgresql", "mysql", "mongodb", "redis", "amqp", "http", "https", "ssh", "ftp", "ftps", "ldap", "ldaps", "grpc", "clickhouse", "mssql", "cassandra"];
 const CONN_PASSWORD = /\b(?:password|passwd|pwd)\s*=\s*("[^"]*"|'[^']*'|[^\s;]+)/gi;
-
-// D3(s) (4.21.0): полный escape через escapeRegex — раньше экранировался
-// только `?`, а, например, `extra_uri_schemes: ["bad("]` строил невалидный
-// regex (SyntaxError при `new RegExp` → сбой sanitize на каждом диспатче).
-// Любой строковый элемент теперь строит валидный regex-литерал (просто не
-// матчит ничего) — последний SyntaxError-триггер H-4 закрыт.
 const escapeScheme = (s) => escapeRegex(s);
 
-/**
- * Build the `db_credential` URI regex from a list of schemes.
- * @param {string[]} schemes  URI schemes.
- * @returns {RegExp}
- */
 function buildDbUriRegex(schemes) {
   const alt = schemes.map(escapeScheme).join("|");
-  // `i`-флаг — схемы регистронезависимо: `POSTGRES://`, `Postgres://`, `sftp://`.
-  // Username опционален: ловит и `user:pass@`, и анонимный `:pass@` (SEC-1b).
-  return new RegExp(
-    `\\b(?:${alt}):\\/\\/(?:[^\\s/@:]+:)?[^\\s/@]+@[^\\s]+`,
-    "gi",
-  );
+  return new RegExp(`\\b(?:${alt}):\\/\\/(?:[^\\s/@:]+:)?[^\\s/@]+@[^\\s]+`, "gi");
 }
 
-// --- Private keys (rule `private_key`) -------------------------------------
-
-// PEM-блоки: -----BEGIN <type> PRIVATE KEY----- ... -----END ...-----.
-// `i`-флаг — регистронезависимо (BEGIN/PRIVATE KEY в любом регистре).
-// H-3 (4.21.0): `ENCRYPTED ` в альтернации типов В ОБЕИХ половинах (BEGIN и
-// END) — до D3 блок `ENCRYPTED PRIVATE KEY` не маскировался.
-const PRIVATE_KEY =
-  /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY-----/gi;
-
-// --- Auth headers (rule `auth_header`) -------------------------------------
-
-// Authorization / X-API-Key и т.п.: Bearer/Basic токены.
-// H-2 (4.21.0): `["']?` после имени и перед значением — JSON-обёртка
-// (`"Authorization": "Bearer …"`) до D3 не маскировалась (кавычка ломала
-// `\s*:\s*`). Семантика redact() НЕ меняется: весь матч → <redacted>, имя
-// заголовка не сохраняется; `,`-разделители не растут over-mask.
-const AUTH_HEADER =
-  /\b(?:Authorization|X-API-Key|Proxy-Authorization|X-Auth-Token)["']?\s*:\s*["']?(?:Bearer\s+|Basic\s+|Token\s+)?[^\s,;]+/gi;
-
-// --- Colon-separated secrets (SEC-1b) --------------------------------------
-
-// `password: value`, `token: x`, `API_KEY: value`, `client_secret: value` —
-// config-стиль (двоеточие, не `=`). Префикс опционален (`[A-Za-z0-9_]*`), чтобы
-// ловить `API_KEY:` и т.п.
-const SECRET_COLON = new RegExp(
-  `\\b[A-Za-z0-9_]*(?:${ENV_KEYWORDS})\\s*:\\s*("[^"]*"|'[^']*'|[^\\s,;]+)`,
-  "gi",
-);
-
-// --- JWT (SEC-1b) ----------------------------------------------------------
-
-// Одиночный JWT вне Authorization-заголовка: header.payload.signature (base64url).
-const JWT_TOKEN =
-  /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g;
-
-// --- URI с паролем без user (SEC-1b, redis://:pass@host) ------------------
-
-// `scheme://:password@host` — анонимный user. Ловится buildDbUriRegex (user опционален).
-
-// Ledger-проводки покрываются rule `data_field` (те же поля) — отдельная
-// обработка не нужна; `ledger_entry` оставлен как маркер (no-op).
+const PRIVATE_KEY = /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY-----[\s\S]*?-----END (?:RSA |EC |DSA |OPENSSH |PGP |ENCRYPTED )?PRIVATE KEY-----/gi;
+const AUTH_HEADER = /\b(?:Authorization|X-API-Key|Proxy-Authorization|X-Auth-Token)["']?\s*:\s*["']?(?:Bearer\s+|Basic\s+|Token\s+)?[^\s,;]+/gi;
+const SECRET_COLON = new RegExp(`\\b[A-Za-z0-9_]*(?:${ENV_KEYWORDS})\\s*:\\s*("[^"]*"|'[^']*'|[^\\s,;]+)`, "gi");
+const JWT_TOKEN = /\beyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\b/g;
 
 /**
- * Sanitize a prompt string by masking sensitive data (Context Sanitizer rules).
- *
- * @param {string} prompt  Text to sanitize.
- * @param {object} [opts]
- * @param {object} [opts.rules]  Enable/disable rule categories (bool per name).
- * @param {string[]} [opts.disabledRules]  Rule names to disable (convenience).
- * @param {string[]} [opts.patterns]  Specific literal values to never treat as
- *   sensitive (whitelist patterns). Substrings matched literally are kept intact.
- * @param {string[]} [opts.extraFields]  Extra sensitive field names (data_field).
- * @param {string[]} [opts.extraUriSchemes]  Extra URI schemes (db_credential).
- * @returns {{ text: string, count: number }}  Sanitized text + number of redactions.
+ * Sanitize a prompt string by masking sensitive data.
+ * V2: pure function, no side effects.
  */
 export function sanitize(prompt, opts = {}) {
   if (typeof prompt !== "string" || prompt.length === 0) {
@@ -277,8 +122,6 @@ export function sanitize(prompt, opts = {}) {
   const DATA_FIELDS = buildDataFieldsRegex(fields);
   const DB_URI = buildDbUriRegex(schemes);
 
-  // Функция «замаскировать» с защитой whitelist-паттернов: если найденный
-  // фрагмент содержит whitelist-паттерн целиком, не трогаем.
   const isProtected = (fragment) => {
     for (const p of protect) {
       if (p && fragment.includes(p)) return true;
@@ -299,7 +142,6 @@ export function sanitize(prompt, opts = {}) {
   };
 
   if (rules.env_secret) {
-    // Маскируем значения в присваиваниях, сохраняя имя переменной.
     text = text.replace(ENV_ASSIGN, (match) => {
       if (isProtected(match)) return match;
       const eq = match.indexOf("=");
@@ -319,26 +161,11 @@ export function sanitize(prompt, opts = {}) {
     });
   }
 
-  if (rules.env_file) {
-    redact(ENV_FILE);
-  }
+  if (rules.env_file) redact(ENV_FILE);
+  if (rules.db_credential) { redact(DB_URI); redact(CONN_PASSWORD); }
+  if (rules.private_key) redact(PRIVATE_KEY);
+  if (rules.auth_header) { redact(AUTH_HEADER); redact(JWT_TOKEN); }
 
-  if (rules.db_credential) {
-    redact(DB_URI);
-    redact(CONN_PASSWORD);
-  }
-
-  if (rules.private_key) {
-    redact(PRIVATE_KEY);
-  }
-
-  if (rules.auth_header) {
-    redact(AUTH_HEADER);
-    redact(JWT_TOKEN); // standalone JWT вне заголовка (SEC-1b)
-  }
-
-  // Colon-стиль `key: value` — ПОСЛЕ структурных правил (private_key, auth_header,
-  // db_credential), чтобы SECRET_COLON не съедал `-----BEGIN`, `Bearer` и т.п.
   if (rules.env_secret) {
     text = text.replace(SECRET_COLON, (match) => {
       if (isProtected(match)) return match;
@@ -349,26 +176,13 @@ export function sanitize(prompt, opts = {}) {
     });
   }
 
-  // `ledger_entry` — маркер: проводки покрываются rule `data_field` (те же
-  // поля). Если data_field выключен — отдельно не маскируем (no-op).
-
   return { text, count };
 }
 
-// --- Consolidated config (maestro.json) ------------------------------------
+// --- Config -----------------------------------------------------------------
 
-/**
- * Load the maestro config from `maestro.json` (корень проекта) — единственный
- * источник конфигурации. Sections: `trust`, `sanitizer_whitelist`, `confidential`.
- * @param {string} [file]  Explicit path. Defaults to MAESTRO_CONFIG env
- *   or `<dir>/maestro.json`.
- * @param {string} [dir]   Project directory.
- * @returns {object}  Parsed config (empty object if file missing/unreadable).
- */
 export function loadMaestroConfig(file, dir) {
-  const resolved =
-    file || process.env.MAESTRO_CONFIG ||
-    path.join(dir || process.cwd(), "maestro.json");
+  const resolved = file || process.env.MAESTRO_CONFIG || path.join(dir || process.cwd(), "maestro.json");
   try {
     return JSON.parse(fs.readFileSync(resolved, "utf8"));
   } catch {
@@ -376,193 +190,15 @@ export function loadMaestroConfig(file, dir) {
   }
 }
 
-/**
- * Пути к конфигу для тула `maestro_config`: env `MAESTRO_CONFIG` или
- * `<root>/maestro.json` (parity с loadMaestroConfig).
- * @param {string} root  Корень проекта.
- * @returns {string}
- */
 export function resolveConfigFile(root) {
   return process.env.MAESTRO_CONFIG || path.join(root, "maestro.json");
 }
 
-/**
- * Read-only тул `maestro_config` — санкционированный канал чтения
- * параметров `maestro.json` в сессии (spec 2026-09-24, §3.1).
- * Fail-closed guard: только top-level primary-сессии — deny: task-сессия
- * (parentID), service-сессия (title `[maestro-memory]` / MEMORY_SERVICE_SESSIONS),
- * session.get-ошибка или отсутствие sessionID (паттерн communication.js).
- * Ответ — JSON-string, без redact (diff-merge требует правки значений
- * пользователем, см. spec §3.1/§3.4). Аудит: `maestro_config:read` (result
- * ok/file_missing/parse_error/section_missing), `maestro_config:access_denied`
- * (reason task_session/service_session/session_unavailable).
- * @param {{ client: object, root: string, log: object }} p
- * @returns {object} tool-деф (description/args/execute)
- */
-export function makeMaestroConfigTool({ client, root, log }) {
-  const guardCache = makeBoundedMap(1024); // sessionID → null (ok) | reason
-  const guard = async (sessionID) => {
-    if (!sessionID) return "session_unavailable";
-    if (MEMORY_SERVICE_SESSIONS.has(sessionID)) return "service_session";
-    // makeBoundedMap: API get/set/delete/size/clear (без has) — absent = undefined.
-    const cached = guardCache.get(sessionID);
-    if (cached !== undefined) return cached;
-    let reason;
-    try {
-      const resp = await client?.session?.get({ path: { id: sessionID } });
-      const data = resp?.data ?? resp;
-      if (!data) reason = "session_unavailable";
-      else if (data.parentID) reason = "task_session";
-      else if (
-        typeof data.title === "string" &&
-        data.title.startsWith("[maestro-memory]")
-      )
-        reason = "service_session";
-      else reason = null;
-    } catch {
-      reason = "session_unavailable"; // консервативно: ошибка → deny
-    }
-    guardCache.set(sessionID, reason);
-    return reason;
-  };
-  const deny = (sessionID, reason) => {
-    log?.info?.("maestro_config:access_denied", { sessionID, reason });
-    return "maestro_config: the tool is only available in top-level primary sessions";
-  };
-
-  return tool({
-    description:
-      "Read-only access to the maestro config file (maestro.json) — the sanctioned " +
-      "channel for reading maestro config parameters within a session. Argument " +
-      "section — dot-path to a section (e.g. memory, communication, " +
-      "sanitizer_whitelist); no argument — the whole config.",
-    args: {
-      section: tool.schema
-        .string()
-        .optional()
-        .describe(
-          "Dot-path to a section (memory, memory.embedding.model, …); no argument — the whole config",
-        ),
-    },
-    execute: async (args, ctx) => {
-      const sessionID = ctx?.sessionID;
-      const reason = await guard(sessionID);
-      if (reason) return deny(sessionID, reason);
-      const section = args?.section;
-      const file = resolveConfigFile(root);
-      if (!fs.existsSync(file)) {
-        log?.info?.("maestro_config:read", {
-          sessionID,
-          section: section ?? null,
-          result: "file_missing",
-        });
-        return JSON.stringify({ exists: false, config: {}, path: file });
-      }
-      let config;
-      try {
-        config = JSON.parse(fs.readFileSync(file, "utf8"));
-      } catch {
-        log?.info?.("maestro_config:read", {
-          sessionID,
-          section: section ?? null,
-          result: "parse_error",
-        });
-        return JSON.stringify({
-          exists: true,
-          config: {},
-          parse_error: true,
-          path: file,
-        });
-      }
-      if (section === undefined || section === null) {
-        log?.info?.("maestro_config:read", {
-          sessionID,
-          section: null,
-          result: "ok",
-        });
-        return JSON.stringify({ exists: true, config, path: file });
-      }
-      if (
-        typeof section !== "string" ||
-        section.startsWith(".") ||
-        section.endsWith(".") ||
-        section.split(".").some((seg) => seg.length === 0)
-      ) {
-        return `maestro_config: invalid section "${String(
-          section,
-        )}" (dot-path, non-empty segments, no leading/trailing dots)`;
-      }
-      let value = config;
-      for (const seg of section.split(".")) {
-        if (value !== null && typeof value === "object" &&
-            Object.hasOwn(value, seg)) {
-          value = value[seg];
-        } else {
-          log?.info?.("maestro_config:read", {
-            sessionID,
-            section,
-            result: "section_missing",
-          });
-          return JSON.stringify({
-            exists: true,
-            config: null,
-            section_found: false,
-            path: file,
-          });
-        }
-      }
-      log?.info?.("maestro_config:read", {
-        sessionID,
-        section,
-        result: "ok",
-      });
-      return JSON.stringify({
-        exists: true,
-        config: value,
-        section_found: true,
-        path: file,
-      });
-    },
-  });
-}
-
-/**
- * Extract the sanitizer whitelist from a parsed maestro config.
- * @param {object} config  Parsed `maestro.json` (from loadMaestroConfig).
- * @returns {{ rules?: object, by_agent?: object, allow_values?: string[],
- *   extra_fields?: string[], extra_uri_schemes?: string[] }}
- */
 export function loadWhitelist(config) {
   const section = config?.sanitizer_whitelist;
   return section && typeof section === "object" ? section : {};
 }
 
-/**
- * D1 (4.21.0, H-4/H-5/H-7): строгая валидация секции `sanitizer_whitelist`.
- * Вызывается ОДИН раз при init (после loadWhitelist): невалидные элементы
- * отбрасываются, валидные — сохраняются. Валидированный объект уходит в
- * замыкание хуков; `resolveSanitizeOptions` остаётся чистым резолвером по
- * провалидированным данным (не дублирует валидацию).
- *
- * Правила (soft-fallback-паттерн memory:config_fallback, но для security-
- * механизма warn обязан быть явным — см. init):
- *  - `rules` — только объект; ключи только из RULE_NAMES; значения только
- *    boolean. Не-объект → секция игнорируется (дефолты ON) + warn;
- *    неизвестный ключ / не-boolean → элемент игнорируется (дефолт ON) + warn.
- *  - `by_agent` — только объект; value каждого агента — только массив строк
- *    из известных имён правил. Не-объект / не-массив value / не-строка /
- *    неизвестное имя → элемент(ы) игнорируются + warn.
- *  - `allow_values` / `extra_fields` / `extra_uri_schemes` — только массивы
- *    строк. Не-массив → поле игнорируется + warn; не-строки и пустые строки
- *    → элемент отбрасывается + warn (footgun: пустая альтернатива в regex =
- *    mass-over-mask; H-5).
- *
- * @param {object} [section]  Секция из loadWhitelist.
- * @returns {{ section: object, warnings: {field: string, type: string}[] }}
- *   Провалидированная секция + предупреждения {field, type} — только имена
- *   полей и тип проблемы, БЕЗ значений элементов (SEC-4b: элементы могут
- *   быть чувствительными).
- */
 export function validateWhitelist(section) {
   const warnings = [];
   const warn = (field, type) => warnings.push({ field, type });
@@ -572,7 +208,6 @@ export function validateWhitelist(section) {
   }
   const out = {};
 
-  // rules: объект / известные имена / boolean.
   if (section.rules !== undefined) {
     if (section.rules !== null && typeof section.rules === "object" && !Array.isArray(section.rules)) {
       const rules = {};
@@ -583,19 +218,15 @@ export function validateWhitelist(section) {
       }
       out.rules = rules;
     } else {
-      warn("rules", "not_object"); // секция игнорируется — дефолты ON
+      warn("rules", "not_object");
     }
   }
 
-  // by_agent: объект / массивы строк-известных имён правил.
   if (section.by_agent !== undefined) {
     if (section.by_agent !== null && typeof section.by_agent === "object" && !Array.isArray(section.by_agent)) {
       const byAgent = {};
       for (const [agent, names] of Object.entries(section.by_agent)) {
-        if (!Array.isArray(names)) {
-          warn("by_agent", "not_array"); // агент игнорируется
-          continue;
-        }
+        if (!Array.isArray(names)) { warn("by_agent", "not_array"); continue; }
         const valid = [];
         for (const n of names) {
           if (typeof n === "string" && RULE_NAMES.includes(n)) valid.push(n);
@@ -609,136 +240,54 @@ export function validateWhitelist(section) {
     }
   }
 
-  // Строковые массивы: allow_values / extra_fields / extra_uri_schemes.
-   // 5.0 BREAKING: `patterns` → `allow_values`. Старый ключ — warn + игнор.
-   if (Object.hasOwn(section, "patterns")) {
-     warn("patterns", "deprecated_rename"); // удалён в 5.0, использовать `allow_values`
-   }
-   for (const field of ["allow_values", "extra_fields", "extra_uri_schemes"]) {
+  for (const field of ["allow_values", "extra_fields", "extra_uri_schemes"]) {
     const value = section[field];
     if (value === undefined) continue;
-    if (!Array.isArray(value)) {
-      warn(field, "not_array"); // поле игнорируется
-      continue;
-    }
+    if (!Array.isArray(value)) { warn(field, "not_array"); continue; }
     const valid = [];
     for (const item of value) {
-      if (typeof item !== "string") {
-        warn(field, "non_string");
-      } else if (item === "") {
-        warn(field, "empty_string");
-      } else {
-        valid.push(item);
-      }
+      if (typeof item !== "string") { warn(field, "non_string"); }
+      else if (item === "") { warn(field, "empty_string"); }
+      else { valid.push(item); }
     }
     out[field] = valid;
   }
 
+  if (Object.hasOwn(section, "patterns")) { warn("patterns", "deprecated_rename"); }
+
   return { section: out, warnings };
 }
 
-const COMMUNICATION_MODES = new Set(["plain", "professional"]);
-
-/**
- * Разбор `communication` из maestro.json — режим «простой язык» для HITL-диалога.
- * Ключ отсутствует → "plain" (дефолт). Невалидное значение → soft fallback в
- * дефолт + invalid: true (философия memory:config_fallback: warn, без значения).
- * @param {object} [config]  Parsed `maestro.json` (from loadMaestroConfig).
- * @returns {{ mode: "plain"|"professional", explicit: boolean, invalid: boolean }}
- */
-export function loadCommunicationConfig(config) {
-  const value =
-    config && typeof config === "object" ? config.communication : undefined;
-  if (value === undefined) return { mode: "plain", explicit: false, invalid: false };
-  if (typeof value === "string" && COMMUNICATION_MODES.has(value)) {
-    return { mode: value, explicit: true, invalid: false };
-  }
-  return { mode: "plain", explicit: false, invalid: true };
-}
-
-const FEEDBACK_REPORT_MODES = new Set(["auto", "manual", "disable"]);
-
-/**
- * Разбор `feedback_report` из maestro.json — режим отчёта ретроспективы
- * (шаг 18.5 pipeline). Ключ отсутствует → "manual" (дефолт). Невалидное
- * значение → soft fallback в дефолт + invalid: true (философия
- * communication:config_fallback).
- * @param {object} [config]  Parsed `maestro.json` (from loadMaestroConfig).
- * @returns {{ mode: "auto"|"manual"|"disable", explicit: boolean, invalid: boolean }}
- */
-export function loadFeedbackReportConfig(config) {
-  const value =
-    config && typeof config === "object" ? config.feedback_report : undefined;
-  if (value === undefined) return { mode: "manual", explicit: false, invalid: false };
-  if (typeof value === "string" && FEEDBACK_REPORT_MODES.has(value)) {
-    return { mode: value, explicit: true, invalid: false };
-  }
-  return { mode: "manual", explicit: false, invalid: true };
-}
-
-/**
- * Resolve effective options for a subagent: rules (respect by_agent) + patterns.
- * @param {object} whitelist  Parsed whitelist.
- * @param {string} agent      Subagent name (from task args).
- * @returns {{ rules: object, disabledRules: string[], patterns: string[],
- *   extraFields: string[], extraUriSchemes: string[] }}
- */
 export function resolveSanitizeOptions(whitelist, agent) {
   const rules = { ...DEFAULT_RULES, ...(whitelist.rules ?? {}) };
   const disabledRules = [];
   const byAgent = whitelist.by_agent?.[agent];
   if (Array.isArray(byAgent)) {
     for (const name of byAgent) {
-      if (name in rules) {
-        rules[name] = false;
-        disabledRules.push(name);
-      }
+      if (name in rules) { rules[name] = false; disabledRules.push(name); }
     }
   }
-  const patterns = Array.isArray(whitelist.patterns) ? whitelist.patterns : [];
+  const patterns = Array.isArray(whitelist.allow_values) ? whitelist.allow_values : (Array.isArray(whitelist.patterns) ? whitelist.patterns : []);
   const extraFields = Array.isArray(whitelist.extra_fields) ? whitelist.extra_fields : [];
   const extraUriSchemes = Array.isArray(whitelist.extra_uri_schemes) ? whitelist.extra_uri_schemes : [];
   return { rules, disabledRules, patterns, extraFields, extraUriSchemes };
 }
 
-/**
- * SEC-6: выявить whitelist-`patterns`, которые сами матчатся safety-правилами.
- * Оператор мог случайно занести реальный секрет в `patterns` — тогда он будет
- * исключён из ВСЕХ правил (footgun).
- * @param {object} whitelist  Parsed whitelist.
- * @returns {string[]}  Опасные значения (сами НЕ логируются — могут быть секретами).
- */
-
-// Значения, которые выглядят как реальные секреты (вне контекста key=value).
-// Используется для SEC-6-детекта footgun-паттернов в whitelist-`patterns`.
-const SECRET_VALUE =
-  /\b(?:sk(?:_live|_test)?_[A-Za-z0-9]+|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+|xox[baprs]-[A-Za-z0-9-]+)\b|-----BEGIN[^-]*PRIVATE KEY-----|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/;
+const SECRET_VALUE = /\b(?:sk(?:_live|_test)?_[A-Za-z0-9]+|AKIA[0-9A-Z]{16}|ghp_[A-Za-z0-9]+|github_pat_[A-Za-z0-9_]+|xox[baprs]-[A-Za-z0-9-]+)\b|-----BEGIN[^-]*PRIVATE KEY-----|eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/;
 
 export function detectUnsafePatterns(whitelist) {
-  const patterns = Array.isArray(whitelist?.patterns) ? whitelist.patterns : [];
+  const patterns = Array.isArray(whitelist?.allow_values) ? whitelist.allow_values : (Array.isArray(whitelist?.patterns) ? whitelist.patterns : []);
   return patterns.filter((p) => SECRET_VALUE.test(String(p)));
 }
 
-/**
- * SEC-7: выключены ли для агента ВСЕ правила Level-1 (rules + by_agent).
- * При `hybrid`-mode Level-2 запускается только если Level-1 что-то нашёл,
- * поэтому полный off создаёт дыру (untrusted проходит без Level-1 и Level-2).
- * @param {object} opts  Результат resolveSanitizeOptions.
- * @returns {boolean}
- */
 export function allRulesDisabled(opts) {
   if (!opts?.rules) return false;
   const defined = Object.values(opts.rules);
   return defined.length > 0 && defined.every((v) => v === false);
 }
 
-// --- Trust model -----------------------------------------------------------
+// --- Trust & Confidential ---------------------------------------------------
 
-/**
- * Extract trusted subagents from a parsed maestro config.
- * @param {object} config  Parsed `maestro.json` (from loadMaestroConfig).
- * @returns {Set<string>}  Set of trusted subagent names.
- */
 export function loadTrustConfig(config) {
   const trusted = new Set();
   for (const [name, value] of Object.entries(config?.trust ?? {})) {
@@ -747,81 +296,30 @@ export function loadTrustConfig(config) {
   return trusted;
 }
 
-// --- Confidential access control ------------------------------------------
-
-// Допустимые значения политики trusted для инструмента.
 const CONF_TRUSTED_ACTIONS = new Set(["allow", "deny"]);
+const BUILTIN_CONFIDENTIAL_PATTERNS = [".env", ".env.*", "*.pem", "*.key", "*.crt", "*.p12", "*.pfx"];
 
-// Built-in confidential-набор (OQ-3, решение B): применяется по умолчанию,
-// независимо от `confidential.paths`. Охватывает служебные файлы секретов
-// (`.env`, `.env.*`) и приватные ключи (`*.pem`, `*.key`, `*.crt`, `*.p12`,
-// `*.pfx`) — deny для primary и non-trusted. `confidential.paths` РАСШИРЯЕТ,
-// а не заменяет этот набор. Маски без `/` матчат только корневые файлы
-// (см. `confGlobMatch`).
-const BUILTIN_CONFIDENTIAL_PATTERNS = [
-  ".env",
-  ".env.*",
-  "*.pem",
-  "*.key",
-  "*.crt",
-  "*.p12",
-  "*.pfx",
-];
-
-/**
- * Extract the confidential access policy from a parsed maestro config.
- * Секция `confidential` применяется к read/write/edit по путям из `paths`. Для untrusted/primary — всегда deny (инвариант, не
- * конфигурируется). Для trusted-субагентов действие задаётся мапой `trusted`.
- * @param {object} config  Parsed `maestro.json`.
- * @returns {{ exists: boolean, paths: string[], builtin: string[], trusted: {read:string, write:string, edit:string} }}
- */
 export function loadConfidentialConfig(config) {
   const section = config?.confidential;
-  const defaults = {
-    paths: ["docs/confidential/**"],
-    trusted: { read: "allow", write: "deny", edit: "deny" },
-  };
-  // Built-in набор присутствует ВСЕГДА (OQ-3): не зависит от секции `confidential`.
+  const defaults = { paths: ["docs/confidential/**"], trusted: { read: "allow", write: "deny", edit: "deny" } };
   const builtin = [...BUILTIN_CONFIDENTIAL_PATTERNS];
   if (!section || typeof section !== "object") {
     return { exists: false, paths: defaults.paths, builtin, trusted: { ...defaults.trusted } };
   }
-  const paths = Array.isArray(section.paths) && section.paths.length > 0
-    ? section.paths
-    : defaults.paths;
+  const paths = Array.isArray(section.paths) && section.paths.length > 0 ? section.paths : defaults.paths;
   const trusted = {};
   const provided = section.trusted && typeof section.trusted === "object" ? section.trusted : {};
   for (const tool of ["read", "write", "edit"]) {
-    if (!(tool in provided)) {
-      trusted[tool] = defaults.trusted[tool];
-    } else {
-      // Явно заданное значение: допустимо только allow|deny, иначе — deny.
-      trusted[tool] = CONF_TRUSTED_ACTIONS.has(provided[tool]) ? provided[tool] : "deny";
-    }
+    trusted[tool] = !(tool in provided) ? defaults.trusted[tool] : (CONF_TRUSTED_ACTIONS.has(provided[tool]) ? provided[tool] : "deny");
   }
   return { exists: true, paths, builtin, trusted };
 }
 
-/**
- * Resolve the confidential action for a tool call.
- * Инвариант: не trusted-субагент → всегда deny. Trusted → по `conf.trusted[tool]`.
- * @param {{ trusted: {read:string,write:string,edit:string} }} conf  Loaded confidential config.
- * @param {string} tool  Tool name (read|write|edit).
- * @param {boolean} isTrustedSubagent  Whether the call originates from a trusted subagent.
- * @returns {"allow"|"deny"}
- */
 export function resolveConfidentialAction(conf, tool, isTrustedSubagent) {
   if (!isTrustedSubagent) return "deny";
   return conf?.trusted?.[tool] === "allow" ? "allow" : "deny";
 }
 
-/**
- * Extract the agent name from a session's messages (defensive).
- * Возвращает первое найденное имя: AssistantMessage.mode / UserMessage.agent /
- * AgentPart.name / SubtaskPart.agent.
- * @param {Array} messages  Response from client.session.messages (array of {info, parts}).
- * @returns {string|undefined}
- */
 function agentNameFromMessages(messages) {
   for (const m of messages ?? []) {
     const info = m?.info ?? {};
@@ -835,15 +333,6 @@ function agentNameFromMessages(messages) {
   return undefined;
 }
 
-/**
- * Determine whether a tool call originates from a trusted subagent.
- * Fail-closed: без client, без parentID (primary), не резолвится агент, ошибка
- * lookup — всё трактуется как untrusted → deny.
- * @param {object|undefined} client  OpenCode SDK client (from plugin closure).
- * @param {Set<string>} trustedAgents  Trusted subagent names.
- * @param {string} sessionID  Session that made the tool call.
- * @returns {Promise<boolean>}
- */
 export async function resolveIsTrustedSubagent(client, trustedAgents, sessionID) {
   if (!client?.session?.get) return { trusted: false, agent: undefined };
   let session;
@@ -853,7 +342,7 @@ export async function resolveIsTrustedSubagent(client, trustedAgents, sessionID)
   } catch {
     return { trusted: false, agent: undefined };
   }
-  if (!session?.parentID) return { trusted: false, agent: undefined }; // root/primary
+  if (!session?.parentID) return { trusted: false, agent: undefined };
   try {
     const mresp = await client.session.messages({ path: { id: sessionID } });
     const messages = mresp?.data ?? mresp;
@@ -864,28 +353,12 @@ export async function resolveIsTrustedSubagent(client, trustedAgents, sessionID)
   }
 }
 
-/**
- * Segment-aware glob matcher for confidential paths ONLY.
- * Confidential-граница использует более строгую семантику, чем общий
- * glob-матчинг — там `*` пересекает `/` (в отличие от confidential):
- *  - `**`  — 0+ сегментов (0 включительно ⇒ покрывает корень);
- *  - `*`   — любые символы в пределах ОДНОГО сегмента (не пересекает `/`);
- *  - `?`   — один символ в пределах одного сегмента;
- *  - `{a,b}` — чередование внутри сегмента.
- * Паттерн без `/` и без `**` (напр. `*.env`) матчит только корневые файлы.
- * Оба аргумента ожидаются в нижнем регистре (case-insensitive граница).
- * Пустой pattern/value → `false` (защитный guard от `("**","")` / `("*","")`).
- * @param {string} pattern  Glob pattern (lowercased).
- * @param {string} value    Project-relative path (lowercased).
- * @returns {boolean}
- */
 export function confGlobMatch(pattern, value) {
   if (typeof pattern !== "string" || !pattern) return false;
   if (typeof value !== "string" || !value) return false;
   const patSegs = pattern.split("/");
   const valSegs = value.split("/");
 
-  // regex для отдельного сегмента паттерна (без `**`).
   const segRe = (seg) => {
     let out = "";
     let i = 0;
@@ -894,33 +367,21 @@ export function confGlobMatch(pattern, value) {
       if (ch === "{") {
         const end = seg.indexOf("}", i);
         if (end !== -1) {
-          const alts = seg
-            .slice(i + 1, end)
-            .split(",")
-            .map((a) => a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
+          const alts = seg.slice(i + 1, end).split(",").map((a) => a.replace(/[.*+?^${}()|[\]\\]/g, "\\$&"));
           out += `(?:${alts.join("|")})`;
-          i = end + 1;
-          continue;
+          i = end + 1; continue;
         }
       }
-      if (ch === "*") {
-        out += "[^/]*";
-      } else if (ch === "?") {
-        out += "[^/]";
-      } else {
-        out += ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      }
+      if (ch === "*") out += "[^/]*";
+      else if (ch === "?") out += "[^/]";
+      else out += ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
       i += 1;
     }
     return new RegExp(`^${out}$`);
   };
 
   const re = patSegs.map((s) => (s === "**" ? null : segRe(s)));
-
-  // DP: dp[i][j] = можно ли сопоставить паттерн[0..i) со значением[0..j).
-  const dp = Array.from({ length: patSegs.length + 1 }, () =>
-    Array(valSegs.length + 1).fill(false),
-  );
+  const dp = Array.from({ length: patSegs.length + 1 }, () => Array(valSegs.length + 1).fill(false));
   dp[0][0] = true;
   for (let i = 1; i <= patSegs.length; i++) {
     if (patSegs[i - 1] === "**") dp[i][0] = dp[i - 1][0];
@@ -928,7 +389,6 @@ export function confGlobMatch(pattern, value) {
   for (let i = 1; i <= patSegs.length; i++) {
     for (let j = 1; j <= valSegs.length; j++) {
       if (patSegs[i - 1] === "**") {
-        // `**` матчит 0+ сегментов.
         dp[i][j] = dp[i - 1][j] || dp[i][j - 1];
       } else if (re[i - 1].test(valSegs[j - 1])) {
         dp[i][j] = dp[i - 1][j - 1];
@@ -938,13 +398,6 @@ export function confGlobMatch(pattern, value) {
   return dp[patSegs.length][valSegs.length];
 }
 
-/**
- * Normalize a target path to a canonical project-relative form (posix separators).
- * Сводит absolute / relative / `./` / `..` к единому виду для glob-матчинга.
- * @param {string} root    Project root (absolute).
- * @param {string} target  Raw path from tool args.
- * @returns {string}  Project-relative path with `/` separators ("" if invalid).
- */
 export function normalizeTarget(root, target) {
   if (typeof target !== "string" || !target) return "";
   const abs = path.isAbsolute(target) ? target : path.resolve(root, target);
@@ -952,57 +405,22 @@ export function normalizeTarget(root, target) {
   return rel.split(path.sep).join("/");
 }
 
-/**
- * Whether a target path is one of the plugin's own version metadata files.
- * `.maestro/plugin-version` — внутренний diagnostic-файл плагина; не подпадает
- * под confidential (должен быть всегда читаем для /maestro-version).
- * Содержимое — только semver (не чувствительно). Сопоставление
- * case-sensitive: плагин пишет каноническое имя; несовпадение = fail-closed
- * (файл блокируется).
- * @param {string} root    Project root (absolute).
- * @param {string} target  Raw path from tool args.
- * @returns {boolean}
- */
 export function isPluginMetaFile(root, target) {
   const t = normalizeTarget(root, target);
   return t === ".maestro/plugin-version";
 }
 
-/**
- * Check whether a target path falls within any confidential pattern.
- * Confidential — security-граница: матчинг case-insensitive (APFS/NTFS могут
- * резолвить case-варианты в тот же файл) и блокирует как файлы под паттерном,
- * так и саму директорию/поддиректории (листинг — C2).
- * Сегментная семантика `confGlobMatch`: `**` покрывает корень и вложенные,
- * `*`/`?` — в пределах одного сегмента; маска без `/` — только корневые файлы.
- * @param {string} root      Project root (absolute).
- * @param {string[]} patterns  Confidential path globs (e.g. `docs/confidential/**`).
- * @param {string} target    Raw path from tool args.
- * @returns {boolean}
- */
 export function isConfidentialTarget(root, patterns, target) {
   const rel = normalizeTarget(root, target);
   if (!rel) return false;
   const lower = rel.toLowerCase();
   for (const p of patterns ?? []) {
     if (typeof p !== "string" || !p) continue;
-    const pat = p.toLowerCase();
-    // Confidential-граница: сегментный матчинг (confGlobMatch). Директория,
-    // поддиректории и файлы под `dir/**` покрываются самим матчером
-    // (`**` матчит 0+ сегментов), поэтому отдельный префикс не нужен.
-    if (confGlobMatch(pat, lower)) return true;
+    if (confGlobMatch(p.toLowerCase(), lower)) return true;
   }
   return false;
 }
 
-/**
- * Extract a target file path from a file tool's args.
- * Confidential-контроль применяет проверку к read/write/edit
- * (у всех трёх тулов аргумент `filePath`).
- * @param {string} tool  Tool name (read|write|edit).
- * @param {object} args  Tool args.
- * @returns {string|undefined}  Path to match, if any.
- */
 export function filePathOf(tool, args) {
   if (!args) return undefined;
   if ((tool === "read" || tool === "write" || tool === "edit") && typeof args.filePath === "string") {
@@ -1011,28 +429,38 @@ export function filePathOf(tool, args) {
   return undefined;
 }
 
-export function makeLogger(directory, {
-  filePrefix = "maestro-bootstrap",
-  logDirEnv = "MAESTRO_BOOTSTRAP_LOG_DIR",
-  filterEnv = "MAESTRO_BOOTSTRAP",
-  logDir = null, // новая опция: явный каталог, приоритет над logDirEnv/directory
-} = {}) {
-  const dir =
-    logDir ||
-    process.env[logDirEnv] ||
-    path.join(directory, ".maestro/logs");
+export function loadCommunicationConfig(config) {
+  const value = config && typeof config === "object" ? config.communication : undefined;
+  const COMMUNICATION_MODES = new Set(["plain", "professional"]);
+  if (value === undefined) return { mode: "plain", explicit: false, invalid: false };
+  if (typeof value === "string" && COMMUNICATION_MODES.has(value)) {
+    return { mode: value, explicit: true, invalid: false };
+  }
+  return { mode: "plain", explicit: false, invalid: true };
+}
 
-  // Маска/порог. Для аудит-лога (filterEnv === null) фильтрация отключена —
-  // пишется всё (security-фактура не должна зависеть от bootstrap-маски).
-  // Для bootstrap-лога читаются MAESTRO_BOOTSTRAP_LOG_LEVEL / _LOG_MASK.
+export function loadFeedbackReportConfig(config) {
+  const value = config && typeof config === "object" ? config.feedback_report : undefined;
+  const FEEDBACK_REPORT_MODES = new Set(["auto", "manual", "disable"]);
+  if (value === undefined) return { mode: "manual", explicit: false, invalid: false };
+  if (typeof value === "string" && FEEDBACK_REPORT_MODES.has(value)) {
+    return { mode: value, explicit: true, invalid: false };
+  }
+  return { mode: "manual", explicit: false, invalid: true };
+}
+
+// --- Logger -----------------------------------------------------------------
+
+export function makeLogger(directory, { filePrefix = "maestro-bootstrap", logDirEnv = "MAESTRO_BOOTSTRAP_LOG_DIR", filterEnv = "MAESTRO_BOOTSTRAP", logDir = null } = {}) {
+  const dir = logDir || process.env[logDirEnv] || path.join(directory, ".maestro/logs");
   let enabled;
   let threshold = 10;
   let levelEnv = "debug";
   if (filterEnv !== null) {
     const levelKey = `${filterEnv}_LOG_LEVEL`;
-    const maskKey = `${filterEnv}_LOG_MASK`;
     levelEnv = process.env[levelKey] || "info";
     threshold = LOG_LEVELS[levelEnv] ?? 10;
+    const maskKey = `${filterEnv}_LOG_MASK`;
     const maskEnv = process.env[maskKey];
     enabled = new Set(
       maskEnv
@@ -1043,31 +471,18 @@ export function makeLogger(directory, {
     enabled = new Set(Object.keys(LOG_LEVELS));
   }
 
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-  } catch {
-    /* logging must never break the session */
-  }
+  try { fs.mkdirSync(dir, { recursive: true }); } catch { /* logging must never break the session */ }
 
-  const logFileFor = (date) =>
-    path.join(dir, `${filePrefix}-${date}.log`);
+  const logFileFor = (date) => path.join(dir, `${filePrefix}-${date}.log`);
 
   const write = (level, msg, extra) => {
     if (!enabled.has(level)) return;
     if (filterEnv !== null && LOG_LEVELS[level] < threshold) return;
     const now = new Date();
     const date = now.toISOString().slice(0, 10);
-    const entry = JSON.stringify({
-      ts: now.toISOString(),
-      level,
-      msg,
-      ...extra,
-    });
-    try {
-      fs.appendFileSync(logFileFor(date), entry + "\n");
-    } catch (err) {
-      // Аудит-запись не должна теряться молча: сбой пишем в console.error
-      // (не ломая сессию), чтобы не было тихого пропуска security-фактуры.
+    const entry = JSON.stringify({ ts: now.toISOString(), level, msg, ...extra });
+    try { fs.appendFileSync(logFileFor(date), entry + "\n"); }
+    catch (err) {
       if (filePrefix === "maestro-audit") {
         console.error("[maestro-bootstrap] audit write failed:", err instanceof Error ? err.message : err);
       }
@@ -1075,9 +490,7 @@ export function makeLogger(directory, {
   };
 
   return {
-    logDir: dir,
-    filePrefix,
-    level: levelEnv,
+    logDir: dir, filePrefix, level: levelEnv,
     mask: filterEnv === null ? "all" : [...enabled].join(","),
     debug: (msg, extra) => write("debug", msg, extra),
     info: (msg, extra) => write("info", msg, extra),
@@ -1086,43 +499,6 @@ export function makeLogger(directory, {
   };
 }
 
-/**
- * Read the plugin version from the repo root package.json.
- * Плагин живёт в `plugins/maestro-bootstrap/` внутри репозитория `wad-jet/maestro`;
- * единственный источник версии — корневой `package.json` (git-установка читает его
- * через `main` → `plugins/maestro-bootstrap/index.js`). Путь резолвится относительно
- * `core.js`: `../../package.json` (фиксированная глубина макета репо).
- * @returns {string|undefined}  Version string, or undefined on any error (fail-soft).
- */
-export function readPluginVersion() {
-  try {
-    const pkgPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../package.json");
-    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
-    return typeof pkg.version === "string" && pkg.version ? pkg.version : undefined;
-  } catch {
-    return undefined;
-  }
-}
-
-/**
- * Write the plugin version to `<dir>/.maestro/plugin-version`.
- * Перезаписывается при каждом init → отражает загруженную версию.
- * Провал записи молча игнорируется (fail-soft) — версия не критична.
- * @param {string} dir      Project directory.
- * @param {string|undefined} version  Version to write (skips if undefined).
- */
-export function writePluginVersionFile(dir, version) {
-  if (typeof version !== "string" || !version) return;
-  try {
-    fs.mkdirSync(path.join(dir, ".maestro"), { recursive: true });
-    fs.writeFileSync(path.join(dir, ".maestro/plugin-version"), version + "\n", "utf8");
-  } catch {
-    /* version file is best-effort; never break the session */
-  }
-}
-
-// Ограниченная карта: при переполнении вытесняет самую старую запись по
-// порядку вставки — защита от неограниченного роста в долгоживущем процессе.
 export function makeBoundedMap(max = 1024) {
   const m = new Map();
   return {
@@ -1140,50 +516,127 @@ export function makeBoundedMap(max = 1024) {
   };
 }
 
+// --- Version ----------------------------------------------------------------
+
+export function readPluginVersion() {
+  try {
+    const pkgPath = path.join(path.dirname(fileURLToPath(import.meta.url)), "../../package.json");
+    const pkg = JSON.parse(fs.readFileSync(pkgPath, "utf8"));
+    return typeof pkg.version === "string" && pkg.version ? pkg.version : undefined;
+  } catch { return undefined; }
+}
+
+export function writePluginVersionFile(dir, version) {
+  if (typeof version !== "string" || !version) return;
+  try {
+    fs.mkdirSync(path.join(dir, ".maestro"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".maestro/plugin-version"), version + "\n", "utf8");
+  } catch { /* best-effort */ }
+}
+
+// --- Maestro config tool ----------------------------------------------------
+
+export function makeMaestroConfigTool({ client, root, log }) {
+  const guardCache = makeBoundedMap(1024);
+  const SESSIONS = new Set(["maestro-memory-summarizer", "maestro-memory-backfill"]);
+
+  const guard = async (sessionID) => {
+    if (!sessionID) return "session_unavailable";
+    if (SESSIONS.has(sessionID)) return "service_session";
+    const cached = guardCache.get(sessionID);
+    if (cached !== undefined) return cached;
+    let reason;
+    try {
+      const resp = await client?.session?.get?.({ path: { id: sessionID } });
+      const data = resp?.data ?? resp;
+      if (!data) reason = "session_unavailable";
+      else if (data.parentID) reason = "task_session";
+      else if (typeof data.title === "string" && data.title.startsWith("[maestro-memory]")) reason = "service_session";
+      else reason = null;
+    } catch { reason = "session_unavailable"; }
+    guardCache.set(sessionID, reason);
+    return reason;
+  };
+
+  const deny = (sessionID, reason) => {
+    log?.info?.("maestro_config:access_denied", { sessionID, reason });
+    return "maestro_config: the tool is only available in top-level primary sessions";
+  };
+
+  return {
+    name: "maestro_config",
+    description: "Read-only access to the maestro config file (maestro.json) — the sanctioned channel for reading maestro config parameters within a session. Argument section — dot-path to a section (e.g. memory, communication, sanitizer_whitelist); no argument — the whole config.",
+    input: {
+      type: "object",
+      properties: {
+        section: { type: "string", description: "Dot-path to a section (memory, memory.embedding.model, …); no argument — the whole config" },
+      },
+      additionalProperties: false,
+    },
+    execute: async (args, ctx) => {
+      const sessionID = ctx?.sessionID;
+      const reason = await guard(sessionID);
+      if (reason) return { content: [{ type: "text", text: deny(sessionID, reason) }] };
+      const section = args?.section;
+      const file = resolveConfigFile(root);
+      if (!fs.existsSync(file)) {
+        log?.info?.("maestro_config:read", { sessionID, section: section ?? null, result: "file_missing" });
+        return { content: [{ type: "text", text: JSON.stringify({ exists: false, config: {}, path: file }) }] };
+      }
+      let config;
+      try { config = JSON.parse(fs.readFileSync(file, "utf8")); }
+      catch {
+        log?.info?.("maestro_config:read", { sessionID, section: section ?? null, result: "parse_error" });
+        return { content: [{ type: "text", text: JSON.stringify({ exists: true, config: {}, parse_error: true, path: file }) }] };
+      }
+      if (section === undefined || section === null) {
+        log?.info?.("maestro_config:read", { sessionID, section: null, result: "ok" });
+        return { content: [{ type: "text", text: JSON.stringify({ exists: true, config, path: file }) }] };
+      }
+      if (typeof section !== "string" || section.startsWith(".") || section.endsWith(".") || section.split(".").some((seg) => seg.length === 0)) {
+        return { content: [{ type: "text", text: `maestro_config: invalid section "${String(section)}" (dot-path, non-empty segments, no leading/trailing dots)` }] };
+      }
+      let value = config;
+      for (const seg of section.split(".")) {
+        if (value !== null && typeof value === "object" && Object.hasOwn(value, seg)) {
+          value = value[seg];
+        } else {
+          log?.info?.("maestro_config:read", { sessionID, section, result: "section_missing" });
+          return { content: [{ type: "text", text: JSON.stringify({ exists: true, config: null, section_found: false, path: file }) }] };
+        }
+      }
+      log?.info?.("maestro_config:read", { sessionID, section, result: "ok" });
+      return { content: [{ type: "text", text: JSON.stringify({ exists: true, config: value, section_found: true, path: file }) }] };
+    },
+  };
+}
+
+// --- V2 Plugin Factory ------------------------------------------------------
+
 /**
- * Фабрика плагина.
- * @param {string} [directory]  Корень проекта.
- * @param {object} [client]  OpenCode SDK client.
- * @param {(prompt: string, opts: object) => {text: string, count: number}}
- *   [sanitizeImpl]  Test-seam: инъектируемая реализация маскирования
- *   (precedent injectable-швов: getGitConfig(root, exec)). По умолчанию —
- *   реальный `sanitize`; используется в tool.execute.before (task-ветка) и
- *   tool.execute.after (title-ветка).
+ * V2 plugin factory. Called once from setup(ctx).
+ * Returns a cleanup function.
  */
-export const MaestroBootstrapPlugin = async ({ directory, client, sanitizeImpl = sanitize }) => {
-  const root = directory || process.cwd();
+export async function createBootstrapPlugin(ctx) {
+  const root = ctx.location.directory || process.cwd();
   const version = readPluginVersion();
   const log = makeLogger(root);
-  // Аудит-лог — отдельный файл `maestro-audit-<date>.log`, security-фактура.
-  // filterEnv: null → НЕ зависит от MAESTRO_BOOTSTRAP_LOG_MASK/LOG_LEVEL
-  // (аудит пишется всегда). Каталог — MAESTRO_AUDIT_LOG_DIR.
   const auditLog = makeLogger(root, {
     filePrefix: "maestro-audit",
     logDirEnv: "MAESTRO_AUDIT_LOG_DIR",
     filterEnv: null,
   });
-  // Memory-лог — отдельный файл `maestro-memory-<date>.log` (аудит-фактура
-  // операций memory-модуля: recall/promote/forget и т.п.). Каталог:
-  // MAESTRO_MEMORY_LOG_DIR или каталог bootstrap-лога; фильтр —
-  // MAESTRO_MEMORY_LOG_LEVEL/_LOG_MASK (по умолчанию info).
   const memoryLog = makeLogger(root, {
     logDir: process.env.MAESTRO_MEMORY_LOG_DIR || log.logDir,
     filePrefix: "maestro-memory",
     filterEnv: "MAESTRO_MEMORY",
   });
+
   const config = loadMaestroConfig(undefined, root);
-  // D1 (4.21.0, H-4/H-5/H-7): валидация whitelist — ОДИН раз при init
-  // (soft-fallback, как memory:config_fallback): невалидные элементы
-  // отбрасываются с ЯВНЫМ warn (security-механизм не молчит). В warn только
-  // имена полей и типы проблем, без значений (SEC-4b). Валидированный объект
-  // уходит в замыкание хуков — диспатчи работают по чистым данным.
   const validatedWhitelist = validateWhitelist(loadWhitelist(config));
   const whitelist = validatedWhitelist.section;
   if (validatedWhitelist.warnings.length > 0) {
-    log.warn("sanitizer.invalid_config", {
-      fields: validatedWhitelist.warnings.map((w) => w.field),
-      count: validatedWhitelist.warnings.length,
-    });
+    log.warn("sanitizer.invalid_config", { fields: validatedWhitelist.warnings.map((w) => w.field), count: validatedWhitelist.warnings.length });
   }
   const confidential = loadConfidentialConfig(config);
   const mergeGuardConf = resolveMergeGuardConf(config);
@@ -1191,386 +644,223 @@ export const MaestroBootstrapPlugin = async ({ directory, client, sanitizeImpl =
     log.warn("merge_guard.disabled", { sessionID: undefined });
   }
   const trustedAgents = loadTrustConfig(config);
-  // SEC-6: если whitelist-`patterns` содержит значения, которые сами матчатся
-  // safety-правилами (оператор занёс реальный секрет) — предупредить.
   const unsafePatterns = detectUnsafePatterns(whitelist);
   if (unsafePatterns.length > 0) {
-    log.warn("sanitizer.unsafe_patterns", {
-      // значения НЕ логируем — это могут быть реальные секреты
-      count: unsafePatterns.length,
-    });
+    log.warn("sanitizer.unsafe_patterns", { count: unsafePatterns.length });
   }
   writePluginVersionFile(root, version);
 
-  log.info("plugin initialized", {
-    version,
-    logDir: log.logDir,
-    level: log.level,
-    mask: log.mask,
-  });
+  log.info("plugin initialized", { version, logDir: log.logDir, level: log.level, mask: log.mask });
 
-  // callID -> timestamp (для подсчёта длительности тула)
   const toolCalls = makeBoundedMap(2048);
-
-  // sessionID -> trusted-статус субагента (кэш для confidential-контроля)
   const sessionTrustCache = makeBoundedMap(2048);
 
-  const plugin = {
-    config: undefined,
-
-    event: async ({ event }) => {
-      try {
-        const { type, properties } = event ?? {};
-        const sessionID = properties?.sessionID;
-        if (type === "session.error") {
-          const err = properties?.error;
-          let errorType = null;
-          let errorMessage = null;
-          let aborted = false;
-          if (err && typeof err === "object") {
-            // New format: Error object { name, data: { message } }
-            // Legacy fallback: { type, message }.
-            errorType = err.name ?? err.type ?? null;
-            errorMessage = err.data?.message ?? err.message ?? null;
-            aborted = err.name === "MessageAbortedError" || err.type === "message_aborted";
-          } else if (typeof err === "string") {
-            // Raw string error — no name, not aborted.
-            errorType = "Error";
-            errorMessage = err;
-          }
-          log.warn("session.error", {
-            sessionID,
-            errorType,
-            errorMessage,
-            aborted,
-          });
-        } else if (type === "session.status" && properties?.status?.type === "retry") {
-          log.warn("session.status.retry", {
-            sessionID,
-            attempt: properties.status.attempt,
-            message: properties.status.message,
-          });
-        }
-      } catch (err) {
-        log.error("event: error", {
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    },
-
-    "tool.execute.before": async (input, output) => {
-      try {
-        // Merge guard (5.6.0, ⚑1): `git merge` и push в mainline (main/master)
-        // — только с явным HITL-аппрувом гейта 17 (маркер
-        // .maestro/gates/merge-<sessionID>.json). Fail-closed: нет маркера /
-        // аномалия → deny (throw блокирует bash-вызов, паттерн
-        // confidential-ветки: маркер на err + re-throw во внешнем catch).
-        if (input.tool === "bash" && mergeGuardConf.enabled) {
-          const detected = detectGuardCommand(typeof output?.args?.command === "string" ? output.args.command : "");
-          if (detected) {
-            const kind = detected.kind;
-            const res = checkMergeMarker(root, input.sessionID, Date.now(), mergeGuardConf);
-            const base = { sessionID: input.sessionID, callID: input.callID, kind, reason: res.reason };
-            if (res.allow) {
-              log.info("merge_guard", { action: "allow", ...base });
-            } else {
-              log.warn("merge_guard", { action: "deny", ...base });
-              const err = new Error(
-                `[merge-guard:deny] git ${kind === "merge" ? "merge" : "push (mainline)"} заблокирован: ` +
-                `нет явного HITL-аппрува гейта 17 (маркер .maestro/gates/merge-<sessionID>.json; ` +
-                `reason: ${res.reason}). Обсуди с пользователем гейт 17, после явного (a) создай маркер и повтори.`
-              );
-              err.mergeGuard = true;
-              throw err;
-            }
-          }
-        }
-
-        // Confidential control (Уровень 3+): жёсткий deny для не-trusted по
-        // `confidential.paths`. Покрывает read/write/edit. bash/glob/grep — нативные permissions.
-        const CONF_TOOLS = new Set(["read", "write", "edit"]);
-        let wasConfidential = false;
-        // `.maestro/plugin-version` (isPluginMetaFile) исключён из confidential
-        // и для write/edit тоже — намеренно: файл нечувствителен (semver),
-        // перезаписывается плагином при каждом init. Не «закрывать» read обратно.
-        // Built-in набор (OQ-3) применяется даже при отсутствии секции `confidential`
-        // в maestro.json: `confidential.builtin` непуст всегда. Если целевой путь
-        // попадает под конфигурируемые `confidential.paths` ИЛИ под built-in —
-        // это confidential-граница.
-        if (CONF_TOOLS.has(input.tool)) {
-          const target = filePathOf(input.tool, output?.args);
-          const isConfTarget = target && !isPluginMetaFile(root, target) &&
-            ((confidential.exists && isConfidentialTarget(root, confidential.paths, target)) ||
-             isConfidentialTarget(root, confidential.builtin, target));
-          if (isConfTarget) {
-            wasConfidential = true;
-            let trustInfo = sessionTrustCache.get(input.sessionID);
-            if (trustInfo === undefined) {
-              trustInfo = await resolveIsTrustedSubagent(client, trustedAgents, input.sessionID);
-              sessionTrustCache.set(input.sessionID, trustInfo);
-            }
-            const action = resolveConfidentialAction(confidential, input.tool, trustInfo.trusted);
-            const base = {
-              sessionID: input.sessionID,
-              callID: input.callID,
-              tool: input.tool,
-              action,
-              agent: trustInfo.agent,        // имя trusted-агента (undefined для root/unresolved)
-              target: path.basename(target), // SEC-5: только basename, без содержимого
-            };
-            // Security-события — ТОЛЬКО в audit-лог (без дублей в bootstrap).
-            if (action === "allow") {
-              auditLog.info("confidential.access", base);
-            } else {
-              auditLog.warn("confidential.access", base);
-              const err = new Error(
-                `[confidential:deny] Доступ к "${target}" запрещён. ` +
-                  `Доступ к confidential-путям разрешён только trusted-субагентам.`,
-              );
-              err.confidential = true;
-              throw err;
-            }
-          }
-        }
-
-        // Санитайзинг промпта task (Уровень 1 Security Review): маскируем
-        // чувствительные данные ДО того, как промпт уйдёт в сабагента.
-        // Авто, без HITL. Trusted сабагенты (maestro.json → trust) — skip
-        // (доверенный сабагент получает промпт как есть).
-        if (input.tool === "task" && output?.args?.prompt) {
-          const agent = output.args.subagent_type || output.args.model || "unknown";
-          if (!trustedAgents.has(agent)) {
-            const opts = resolveSanitizeOptions(whitelist, agent);
-            // SEC-7: для untrusted выключены ВСЕ правила Level-1 (rules+by_agent) —
-            // при hybrid-mode Level-2 тоже не запустится. Предупредить.
-            if (allRulesDisabled(opts)) {
-              log.warn("sanitizer.all_rules_disabled", {
-                sessionID: input.sessionID,
-                callID: input.callID,
-                tool: input.tool,
-                agent,
-              });
-            }
-            // D2 (4.21.0, H-4): fail-closed — сбой маскирования БЛОКИРУЕТ
-            // диспатч (до фикса ошибка проглатывалась внешним catch, и промпт
-            // уходил в сабагента несанитизированным).
-            let res;
-            try {
-              res = sanitizeImpl(output.args.prompt, opts);
-            } catch (cause) {
-              // Security-событие — ТОЛЬКО в audit-лог (без дублей в
-              // bootstrap, конвенция выше); видимый сигнал даёт сам throw.
-              auditLog.warn("sanitizer.failed", {
-                sessionID: input.sessionID,
-                callID: input.callID,
-                tool: input.tool,
-                agent,
-              });
-              const err = new Error(
-                `[sanitizer:failed] Маскирование не выполнено — диспатч в ${agent} заблокирован. ` +
-                  `Проверьте sanitizer_whitelist в maestro.json`,
-              );
-              err.sanitizerFailed = true;
-              err.cause = cause;
-              throw err;
-            }
-            if (res.count > 0) {
-              output.args.prompt = res.text;
-              log.warn("sanitizer.redacted", {
-                sessionID: input.sessionID,
-                callID: input.callID,
-                tool: input.tool,
-                agent,
-                redacted: res.count,
-              });
-            }
-          }
-        }
-
-        // Логируем только диспатч субагентов (task) — это ядро observability
-        // после сокращения. Прочие тулы (bash/skill/read) не логируем детально.
-        if (input.tool === "task") {
-          toolCalls.set(input.callID, Date.now());
-          log.info("tool.execute.before", {
-            sessionID: input.sessionID,
-            callID: input.callID,
-            tool: input.tool,
-          });
-        }
-      } catch (err) {
-        if (err?.confidential || err?.sanitizerFailed || err?.mergeGuard) {
-          // Confidential-нарушение / сбой маскирования (D2) / merge-guard
-          // deny — обязаны дойти до OpenCode (реальный блок), не
-          // замалчиваться логгером (иначе fail-open сохранялся).
-          throw err;
-        }
-        log.error("tool.execute.before: error", {
-          sessionID: input?.sessionID,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    },
-
-    "tool.execute.after": async (input, output) => {
-      try {
-        const startedAt = input.tool === "task" ? toolCalls.get(input.callID) : undefined;
-        if (startedAt !== undefined) toolCalls.delete(input.callID);
-        const extra = {
-          sessionID: input.sessionID,
-          callID: input.callID,
-          tool: input.tool,
-        };
-        if (startedAt !== undefined) extra.durationMs = Date.now() - startedAt;
-        // SEC-4: `title` субагента — untrusted (может содержать секреты в отчёте).
-        // Санитизируем перед записью в лог. Используем те же правила, что и для
-        // промпта (resolveSanitizeOptions), чтобы учесть org-конфигурацию
-        // sanitizer (extra_fields/extra_uri_schemes/patterns/per-agent rules).
-        if (output?.title) {
-          const agent = input.args?.subagent_type || input.args?.model || "unknown";
-          const opts = resolveSanitizeOptions(whitelist, agent);
-          let title;
-          try {
-            title = sanitizeImpl(String(output.title), opts).text;
-          } catch {
-            // D2: title-ветка — не диспатч, сбой маскирования не ломает
-            // сессию (fail-soft): title просто не логируется.
-            title = "<unavailable>";
-          }
-          extra.title = title;
-        }
-        const isEmptySubagentResult =
-          input.tool === "task" &&
-          (!output?.title || !output?.output) &&
-          (!output?.metadata || Object.keys(output.metadata).length === 0);
-        if (isEmptySubagentResult) {
-          log.warn("tool.execute.after.empty_result", {
-            sessionID: input.sessionID,
-            callID: input.callID,
-            tool: input.tool,
-          });
-        }
-        if (startedAt !== undefined) {
-          log.info("tool.execute.after", extra);
-        }
-      } catch (err) {
-        log.error("tool.execute.after: error", {
-          sessionID: input?.sessionID,
-          error: err instanceof Error ? err.message : String(err),
-        });
-      }
-    },
-
-    dispose: async () => {
-      log.info("plugin disposing", {});
-    },
-  };
-
-  // Memory module (опционально): tool `memory_search`, chat.message,
-  // experimental.chat.system.transform, event-дополнения (session.idle /
-  // session.deleted). Fail-soft: любая ошибка инициализации → лог + {}.
-  // Инвариант: `experimental.chat.messages.transform` НЕ присваивается.
-  // C1 (zero-dep): импорт memory/index.js (тянет better-sqlite3 через
-  // storage/sqlite.js) происходит ТОЛЬКО при memory.enabled === true.
-  // Классификация — лёгкий classifyMemoryConfig (без storage-импортов).
+  // --- Memory module (optional) ---
   const memClass = classifyMemoryConfig(config, { gitName: getGitConfig(root).name });
-  let memoryHooks = {};
+  let memoryDispose = () => {};
   if (memClass.enabled) {
     try {
       const { registerMemoryHooks } = await import("./memory/index.js");
-      memoryHooks = await registerMemoryHooks({ client, config, log, memoryLog, root });
+      const memResult = await registerMemoryHooks({
+        client: ctx,  // V2: ctx IS the client
+        config, log, memoryLog, root,
+      });
+      memoryDispose = memResult.dispose || (() => {});
     } catch (err) {
       log.error("memory: init failed", { error: err instanceof Error ? err.message : String(err) });
     }
   } else if (config?.memory && memClass.disabled_reason) {
     log.info("memory: disabled", { reason: memClass.disabled_reason });
   }
-  // Communication (plain language): активен всегда (standalone-ключ enabled
-  // нет; дефолт communication — "plain"). Fail-soft, как memory.
-  let commHooks = {};
+
+  // --- Communication hooks ---
+  let commDispose = () => {};
   try {
-    commHooks = await registerCommunicationHooks({ client, config, log });
+    const commResult = await registerCommunicationHooks({ client: ctx, config, log });
+    commDispose = commResult.dispose || (() => {});
   } catch (err) {
     log.error("communication: init failed", { error: err instanceof Error ? err.message : String(err) });
   }
-  // Feedback report mode (auto/manual/disable): активен всегда (standalone-
-  // ключ enabled нет; дефолт — manual, директива не инжектится). Fail-soft,
-  // как communication.
-  let fbHooks = {};
+
+  // --- Feedback report hooks ---
+  let fbDispose = () => {};
   try {
-    fbHooks = await registerFeedbackReportHooks({ client, config, log });
+    const fbResult = await registerFeedbackReportHooks({ client: ctx, config, log });
+    fbDispose = fbResult.dispose || (() => {});
   } catch (err) {
     log.error("feedback_report: init failed", { error: err instanceof Error ? err.message : String(err) });
   }
-  plugin.tool = {
-    ...(memoryHooks.tool ?? {}),
-    maestro_config: makeMaestroConfigTool({ client, root, log }),
-  };
-  const chainHooks = (name) => {
-    const a = commHooks[name];
-    const b = memoryHooks[name];
-    const c = fbHooks[name];
-    if (!a && !b && !c) return;
-    plugin[name] = async (input, out) => {
-      if (a) { try { await a(input, out); } catch {} }
-      if (b) { try { await b(input, out); } catch {} }
-      if (c) { try { await c(input, out); } catch {} }
-    };
-  };
-  chainHooks("chat.message");
-  chainHooks("experimental.chat.system.transform");
-  // Расширяем event: сначала существующая логика (session.error/retry), затем memory.
-  const baseEvent = plugin.event;
-  plugin.event = async (input) => {
-    try { await baseEvent(input); } catch {}
-    try { await memoryHooks.event?.(input); } catch {}
-  };
-  // Расширяем dispose: сначала существующая логика, затем memory.
-  const baseDispose = plugin.dispose;
-  plugin.dispose = async () => {
-    try { await baseDispose(); } catch {}
-    try { await memoryHooks.dispose?.(); } catch {}
-  };
 
-  return plugin;
-};
-
-/**
- * Адаптер opencode-плагина: оборачивает фабрику плагина в форвардинг всех хуков.
- * Мемо успешного init + retry после сбоя (каркас НЕ кэшируется — следующая
- * инвокация повторяет init). Логирование сбоя init — I2-guard против тихого
- * fail-open. config/startup — условный override: config всегда функция (opencode
- * вызывает hook.config?.(cfg), M12: НЕ форсируем file_access); startup — только
- * если core его не дал (hooks.startup ?? noop), чтобы не глушить будущий core-хук.
- * @param {(input: object) => Promise<object>} factory  Асинхронная фабрика плагина.
- * @returns {(input: object) => Promise<object>}  Функция opencode-plugin.
- */
-export function createBootstrapAdapter(factory) {
-  let hooks = null;
-  return async function adapter(input) {
-    if (!hooks) {
-      try {
-        hooks = await factory(input);
-      } catch (err) {
-        // I2: проглоченный сбой init тихо отключает ВСЕ хуки (confidential,
-        // sanitizer) → fail-open. Логируем, чтобы не было тихого отключения
-        // защиты. Плагин не кэшируется — следующая инвокация повторит.
-        console.error("[maestro-bootstrap] init failed:", err instanceof Error ? err.message : err);
-        hooks = null;
+  // --- Event subscription ---
+  const eventController = new AbortController();
+  void (async () => {
+    try {
+      for await (const event of ctx.event.subscribe({ signal: eventController.signal })) {
+        try {
+          const { type, properties } = event?.data ?? event ?? {};
+          const sessionID = properties?.sessionID;
+          if (type === "session.error") {
+            const err = properties?.error;
+            let errorType = null, errorMessage = null, aborted = false;
+            if (err && typeof err === "object") {
+              errorType = err.name ?? err.type ?? null;
+              errorMessage = err.data?.message ?? err.message ?? null;
+              aborted = err.name === "MessageAbortedError" || err.type === "message_aborted";
+            } else if (typeof err === "string") {
+              errorType = "Error";
+              errorMessage = err;
+            }
+            log.warn("session.error", { sessionID, errorType, errorMessage, aborted });
+          } else if (type === "session.status" && properties?.status?.type === "retry") {
+            log.warn("session.status.retry", { sessionID, attempt: properties.status.attempt, message: properties.status.message });
+          }
+        } catch {
+          log.error("event: error", { error: "failed to process event" });
+        }
       }
+    } catch { /* subscribe ends when signal is aborted */ }
+  })();
+
+  // --- Tool hook: execute.before ---
+  const beforeRegistration = await ctx.tool.hook("execute.before", async (event) => {
+    try {
+      const input = event;
+      if (!input || typeof input !== "object") return;
+
+      // Merge guard
+      if (input.tool === "bash" && mergeGuardConf.enabled) {
+        const output = event?.output;
+        const detected = detectGuardCommand(typeof output?.args?.command === "string" ? output.args.command : "");
+        if (detected) {
+          const kind = detected.kind;
+          const res = checkMergeMarker(root, input.sessionID, Date.now(), mergeGuardConf);
+          const base = { sessionID: input.sessionID, callID: input.callID, kind, reason: res.reason };
+          if (res.allow) {
+            log.info("merge_guard", { action: "allow", ...base });
+          } else {
+            log.warn("merge_guard", { action: "deny", ...base });
+            const err = new Error(
+              `[merge-guard:deny] git ${kind === "merge" ? "merge" : "push (mainline)"} заблокирован: ` +
+              `нет явного HITL-аппрува гейта 17. Обсуди с пользователем гейт 17, после явного (a) создай маркер и повтори.`
+            );
+            err.mergeGuard = true;
+            throw err;
+          }
+        }
+      }
+
+      // Confidential control
+      const CONF_TOOLS = new Set(["read", "write", "edit"]);
+      if (CONF_TOOLS.has(input.tool)) {
+        const output = event?.output;
+        const target = filePathOf(input.tool, output?.args);
+        const isConfTarget = target && !isPluginMetaFile(root, target) &&
+          ((confidential.exists && isConfidentialTarget(root, confidential.paths, target)) ||
+           isConfidentialTarget(root, confidential.builtin, target));
+        if (isConfTarget) {
+          let trustInfo = sessionTrustCache.get(input.sessionID);
+          if (trustInfo === undefined) {
+            trustInfo = await resolveIsTrustedSubagent(ctx, trustedAgents, input.sessionID);
+            sessionTrustCache.set(input.sessionID, trustInfo);
+          }
+          const action = resolveConfidentialAction(confidential, input.tool, trustInfo.trusted);
+          const base = { sessionID: input.sessionID, callID: input.callID, tool: input.tool, action, agent: trustInfo.agent, target: path.basename(target) };
+          if (action === "allow") {
+            auditLog.info("confidential.access", base);
+          } else {
+            auditLog.warn("confidential.access", base);
+            const err = new Error(`[confidential:deny] Доступ к "${target}" запрещён. Доступ к confidential-путям разрешён только trusted-субагентам.`);
+            err.confidential = true;
+            throw err;
+          }
+        }
+      }
+
+      // Sanitize task prompt
+      if (input.tool === "task" && event?.output?.args?.prompt) {
+        const agent = event.output.args.subagent_type || event.output.args.model || "unknown";
+        if (!trustedAgents.has(agent)) {
+          const opts = resolveSanitizeOptions(whitelist, agent);
+          if (allRulesDisabled(opts)) {
+            log.warn("sanitizer.all_rules_disabled", { sessionID: input.sessionID, callID: input.callID, tool: input.tool, agent });
+          }
+          try {
+            const res = sanitize(event.output.args.prompt, opts);
+            if (res.count > 0) {
+              event.output.args.prompt = res.text;
+              log.warn("sanitizer.redacted", { sessionID: input.sessionID, callID: input.callID, tool: input.tool, agent, redacted: res.count });
+            }
+          } catch (cause) {
+            auditLog.warn("sanitizer.failed", { sessionID: input.sessionID, callID: input.callID, tool: input.tool, agent });
+            const err = new Error("[sanitizer:failed] Маскирование не выполнено — диспатч в " + agent + " заблокирован.");
+            err.sanitizerFailed = true;
+            err.cause = cause;
+            throw err;
+          }
+        }
+      }
+
+      // Log task dispatch
+      if (input.tool === "task") {
+        toolCalls.set(input.callID, Date.now());
+        log.info("tool.execute.before", { sessionID: input.sessionID, callID: input.callID, tool: input.tool });
+      }
+    } catch (err) {
+      if (err?.confidential || err?.sanitizerFailed || err?.mergeGuard) throw err;
+      log.error("tool.execute.before: error", { sessionID: input?.sessionID, error: err instanceof Error ? err.message : String(err) });
     }
-    // Fail-soft: init упал → минимальный каркас (без защиты).
-    if (!hooks) {
-      return {
-        config: async () => ({}),
-        event: async () => {},
-        startup: async () => {},
-        dispose: async () => {},
-      };
+  });
+
+  // --- Tool hook: execute.after ---
+  const afterRegistration = await ctx.tool.hook("execute.after", async (event) => {
+    try {
+      const input = event;
+      if (!input || typeof input !== "object") return;
+
+      const startedAt = input.tool === "task" ? toolCalls.get(input.callID) : undefined;
+      if (startedAt !== undefined) toolCalls.delete(input.callID);
+
+      const extra = { sessionID: input.sessionID, callID: input.callID, tool: input.tool };
+      if (startedAt !== undefined) extra.durationMs = Date.now() - startedAt;
+
+      if (event?.output?.title) {
+        const agent = input.args?.subagent_type || input.args?.model || "unknown";
+        const opts = resolveSanitizeOptions(whitelist, agent);
+        try {
+          extra.title = sanitize(String(event.output.title), opts).text;
+        } catch {
+          extra.title = "<unavailable>";
+        }
+      }
+
+      const isEmptySubagentResult = input.tool === "task" && (!event?.output?.title || !event?.output?.output) &&
+        (!event?.output?.metadata || Object.keys(event.output.metadata).length === 0);
+      if (isEmptySubagentResult) {
+        log.warn("tool.execute.after.empty_result", { sessionID: input.sessionID, callID: input.callID, tool: input.tool });
+      }
+      if (startedAt !== undefined) {
+        log.info("tool.execute.after", extra);
+      }
+    } catch (err) {
+      log.error("tool.execute.after: error", { sessionID: input?.sessionID, error: err instanceof Error ? err.message : String(err) });
     }
-    return {
-      ...hooks,
-      config: async () => ({}),
-      startup: hooks.startup ?? (async () => {}),
-    };
+  });
+
+  // --- Tool transform: custom tools ---
+  const toolTransformRegistration = await ctx.tool.transform((editor) => {
+    // Register memory tools (delegated to memory module, but register maestro_config here)
+    editor.add(makeMaestroConfigTool({ client: ctx, root, log }));
+  });
+
+  // --- Cleanup ---
+  return () => {
+    eventController.abort();
+    beforeRegistration?.dispose?.();
+    afterRegistration?.dispose?.();
+    toolTransformRegistration?.dispose?.();
+    memoryDispose();
+    commDispose();
+    fbDispose();
+    log.info("plugin disposing", {});
   };
 }
