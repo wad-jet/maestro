@@ -1413,12 +1413,12 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
 
     // --- System transform (unsaved notice) ---
     let systemTransformRegistration = null;
-    if (memClass.disabled_reason) {
+    if (config.disabled_reason) {
       systemTransformRegistration = await client.session.hook("context", async (event) => {
         try {
           const sessionID = event?.sessionID;
           if (!sessionID || !(await isNoticeEligible(sessionID))) return;
-          if (event?.system) event.system.push(noticeSessionText(memClass.disabled_reason));
+          if (event?.system) event.system.push(noticeSessionText(config.disabled_reason));
         } catch { /* fail-soft */ }
       });
     }
