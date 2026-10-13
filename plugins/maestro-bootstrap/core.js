@@ -20,6 +20,7 @@ import path from "node:path";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
 import { classifyMemoryConfig } from "./memory/config.js";
+import { SESSIONS as MEMORY_SERVICE_SESSIONS } from "./memory/summarize.js";
 import { registerCommunicationHooks } from "./communication.js";
 import { registerFeedbackReportHooks } from "./feedback-report.js";
 import { detectGuardCommand, checkMergeMarker, resolveMergeGuardConf } from "./merge-guard.js";
@@ -538,7 +539,7 @@ export function writePluginVersionFile(dir, version) {
 
 export function makeMaestroConfigTool({ client, root, log }) {
   const guardCache = makeBoundedMap(1024);
-  const SESSIONS = new Set(["maestro-memory-summarizer", "maestro-memory-backfill"]);
+  const SESSIONS = MEMORY_SERVICE_SESSIONS;
 
   const guard = async (sessionID) => {
     if (!sessionID) return "session_unavailable";
@@ -576,25 +577,25 @@ export function makeMaestroConfigTool({ client, root, log }) {
     execute: async (args, ctx) => {
       const sessionID = ctx?.sessionID;
       const reason = await guard(sessionID);
-      if (reason) return { content: [{ type: "text", text: deny(sessionID, reason) }] };
+      if (reason) return deny(sessionID, reason);
       const section = args?.section;
       const file = resolveConfigFile(root);
       if (!fs.existsSync(file)) {
         log?.info?.("maestro_config:read", { sessionID, section: section ?? null, result: "file_missing" });
-        return { content: [{ type: "text", text: JSON.stringify({ exists: false, config: {}, path: file }) }] };
+        return JSON.stringify({ exists: false, config: {}, path: file });
       }
       let config;
       try { config = JSON.parse(fs.readFileSync(file, "utf8")); }
       catch {
         log?.info?.("maestro_config:read", { sessionID, section: section ?? null, result: "parse_error" });
-        return { content: [{ type: "text", text: JSON.stringify({ exists: true, config: {}, parse_error: true, path: file }) }] };
+        return JSON.stringify({ exists: true, config: {}, parse_error: true, path: file });
       }
       if (section === undefined || section === null) {
         log?.info?.("maestro_config:read", { sessionID, section: null, result: "ok" });
-        return { content: [{ type: "text", text: JSON.stringify({ exists: true, config, path: file }) }] };
+        return JSON.stringify({ exists: true, config, path: file });
       }
       if (typeof section !== "string" || section.startsWith(".") || section.endsWith(".") || section.split(".").some((seg) => seg.length === 0)) {
-        return { content: [{ type: "text", text: `maestro_config: invalid section "${String(section)}" (dot-path, non-empty segments, no leading/trailing dots)` }] };
+        return `maestro_config: invalid section "${String(section)}" (dot-path, non-empty segments, no leading/trailing dots)`;
       }
       let value = config;
       for (const seg of section.split(".")) {
@@ -602,11 +603,11 @@ export function makeMaestroConfigTool({ client, root, log }) {
           value = value[seg];
         } else {
           log?.info?.("maestro_config:read", { sessionID, section, result: "section_missing" });
-          return { content: [{ type: "text", text: JSON.stringify({ exists: true, config: null, section_found: false, path: file }) }] };
+          return JSON.stringify({ exists: true, config: null, section_found: false, path: file });
         }
       }
       log?.info?.("maestro_config:read", { sessionID, section, result: "ok" });
-      return { content: [{ type: "text", text: JSON.stringify({ exists: true, config: value, section_found: true, path: file }) }] };
+      return JSON.stringify({ exists: true, config: value, section_found: true, path: file });
     },
   };
 }
@@ -619,6 +620,8 @@ export function makeMaestroConfigTool({ client, root, log }) {
  */
 export async function createBootstrapPlugin(ctx) {
   const root = ctx.location.directory || process.cwd();
+  // Test-seam: инъектируемая реализация маскирования (тесты fail-closed D2).
+  const sanitizeFn = typeof ctx?.sanitizeImpl === "function" ? ctx.sanitizeImpl : sanitize;
   const version = readPluginVersion();
   const log = makeLogger(root);
   const auditLog = makeLogger(root, {
@@ -785,14 +788,17 @@ export async function createBootstrapPlugin(ctx) {
             log.warn("sanitizer.all_rules_disabled", { sessionID: input.sessionID, callID: input.callID, tool: input.tool, agent });
           }
           try {
-            const res = sanitize(event.output.args.prompt, opts);
+            const res = sanitizeFn(event.output.args.prompt, opts);
             if (res.count > 0) {
               event.output.args.prompt = res.text;
               log.warn("sanitizer.redacted", { sessionID: input.sessionID, callID: input.callID, tool: input.tool, agent, redacted: res.count });
             }
           } catch (cause) {
             auditLog.warn("sanitizer.failed", { sessionID: input.sessionID, callID: input.callID, tool: input.tool, agent });
-            const err = new Error("[sanitizer:failed] Маскирование не выполнено — диспатч в " + agent + " заблокирован.");
+            const err = new Error(
+              `[sanitizer:failed] Маскирование не выполнено — диспатч в ${agent} заблокирован. ` +
+                `Проверьте sanitizer_whitelist в maestro.json`,
+            );
             err.sanitizerFailed = true;
             err.cause = cause;
             throw err;
@@ -827,7 +833,7 @@ export async function createBootstrapPlugin(ctx) {
         const agent = input.args?.subagent_type || input.args?.model || "unknown";
         const opts = resolveSanitizeOptions(whitelist, agent);
         try {
-          extra.title = sanitize(String(event.output.title), opts).text;
+          extra.title = sanitizeFn(String(event.output.title), opts).text;
         } catch {
           extra.title = "<unavailable>";
         }

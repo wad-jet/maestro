@@ -46,12 +46,26 @@ export async function registerFeedbackReportHooks({ client, config, log }) {
     return ok;
   };
 
+  // V1: system.transform — eligibility-guard + инжект директивы (без дедупа)
+  const onSystemTransform = async ({ sessionID }, out) => {
+    try {
+      if (!fr.explicit || fr.mode === "manual") return;
+      if (!sessionID || !(await isEligible(sessionID))) return;
+      if (out?.system) out.system.push(directiveText(fr.mode));
+      log?.debug?.("feedback_report:directive_injected", { sessionID, mode: fr.mode });
+    } catch {
+      /* fail-soft */
+    }
+  };
+
+  // V2: context hook — та же логика + дедупликация (хук может сработать
+  // повторно на request)
   const registration = await client?.session?.hook?.("context", async (event) => {
     try {
       if (!fr.explicit || fr.mode === "manual") return;
       const sessionID = event?.sessionID;
       if (!sessionID || !(await isEligible(sessionID))) return;
-      
+
       const directive = directiveText(fr.mode);
       if (!event.system) event.system = [];
       if (!event.system.some(s => typeof s === "string" && s.includes("feedback_report"))) {
@@ -64,6 +78,7 @@ export async function registerFeedbackReportHooks({ client, config, log }) {
   });
 
   return {
+    "experimental.chat.system.transform": onSystemTransform,
     dispose: () => {
       try { registration?.dispose?.(); } catch {}
     },

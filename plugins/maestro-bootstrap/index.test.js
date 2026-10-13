@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { MaestroBootstrapPlugin, createBootstrapAdapter, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, validateWhitelist, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile, loadCommunicationConfig, loadFeedbackReportConfig, makeMaestroConfigTool, resolveConfigFile } from "./core.js";
+import { createBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, validateWhitelist, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile, loadCommunicationConfig, loadFeedbackReportConfig, makeMaestroConfigTool, resolveConfigFile } from "./core.js";
 import {
   detectPlainFlag,
   SOURCE_LABELS,
@@ -29,6 +29,132 @@ function readLogs(dir, filePrefix = "maestro-bootstrap") {
     }
   }
   return out;
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// V1→V2 compat: тесты написаны под V1-интерфейс (фабрика возвращает hooks-объект
+// с event / tool.execute.before / tool.execute.after / dispose / tool). В V2
+// плагин создаётся createBootstrapPlugin(ctx) через контекст. Ниже — mock ctx,
+// который перехватывает зарегистрированные хуки и предоставляет управляемый
+// event-поток; возвращаемый V1-стиль hooks вызывает те же V2-обработчики.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// Event-шина: core.js вызывает ctx.event.subscribe({signal}) → async generator.
+// push(event) детерминированно дожидается, пока обработчик core не обработает
+// событие (ack после yield, т.е. после тела for-await).
+function makeEventBus() {
+  const subs = new Set();
+  return {
+    subscribe({ signal } = {}) {
+      const sub = { queue: [], waiter: null };
+      subs.add(sub);
+      return (async function* () {
+        try {
+          while (!signal?.aborted) {
+            if (!sub.queue.length) {
+              await new Promise((r) => { sub.waiter = r; });
+              if (signal?.aborted) return;
+            }
+            const holder = sub.queue.shift();
+            yield holder.event;
+            // Генератор возобновляется, только когда цикл core обработал event.
+            holder.acks += 1;
+            if (holder.acks >= subs.size) holder.resolve();
+          }
+        } finally {
+          subs.delete(sub);
+        }
+      })();
+    },
+    push(event) {
+      const holders = [...subs];
+      if (holders.length === 0) return Promise.resolve();
+      const holder = { event, acks: 0, resolve: () => {} };
+      const p = new Promise((r) => { holder.resolve = r; });
+      for (const sub of holders) {
+        sub.queue.push(holder);
+        const w = sub.waiter;
+        sub.waiter = null;
+        if (w) w();
+      }
+      return p;
+    },
+  };
+}
+
+async function MaestroBootstrapPlugin({ directory, client, sanitizeImpl } = {}) {
+  const dir = directory ?? process.cwd();
+  const disposers = [];
+  const toolHooks = {};
+  const transformedTools = {};
+  const contextHandlers = [];
+  const bus = makeEventBus();
+  const ctx = {
+    location: { directory: dir },
+    sanitizeImpl, // test-seam: fail-closed D2 (core.js)
+    session: {
+      // Без client — fail-soft (V1-семантика): session.get бросает →
+      // isEligible → false → без инъекций/маркировок.
+      get: async ({ path }) => {
+        if (client?.session?.get) return client.session.get({ path });
+        throw new Error("no client (test)");
+      },
+      messages: async ({ path }) => (client?.session?.messages ? client.session.messages({ path }) : { data: [] }),
+      list: async () => (client?.session?.list ? client.session.list({}) : { data: [] }),
+      hook: async (name, fn) => {
+        if (name === "context") contextHandlers.push(fn);
+        const d = () => {};
+        disposers.push(d);
+        return { dispose: d };
+      },
+    },
+    event: { subscribe: (opts) => bus.subscribe(opts) },
+    tool: {
+      // V1-обёртка: (input, output) → V2 event { ...input, output }.
+      hook: async (name, fn) => {
+        toolHooks[`tool.${name}`] = (input, output) =>
+          output === undefined ? fn(input) : fn({ ...input, output });
+        const d = () => {};
+        disposers.push(d);
+        return { dispose: d };
+      },
+      transform: async (fn) => {
+        fn({ add: (t) => { transformedTools[t.name] = t; } });
+        const d = () => {};
+        disposers.push(d);
+        return { dispose: d };
+      },
+    },
+  };
+  const cleanup = await createBootstrapPlugin(ctx);
+  // V1-обёртки над V2 context-хендлерами (communication + feedback-report):
+  // chat.message — flag-детект; system.transform — инжект-цепочка (все хендлеры,
+  // out.system — по ссылке, как в V1 chainHooks).
+  const v1Hooks = {};
+  if (contextHandlers.length > 0) {
+    v1Hooks["chat.message"] = async (input, output) => {
+      const text = (output?.message?.parts ?? [])
+        .filter((p) => p.type === "text")
+        .map((p) => p.text ?? "")
+        .join(" ");
+      const e = { sessionID: input?.sessionID, messages: text ? [{ role: "user", content: text }] : [], system: [] };
+      for (const h of contextHandlers) await h(e);
+    };
+    v1Hooks["experimental.chat.system.transform"] = async ({ sessionID }, out) => {
+      const e = { sessionID, messages: [], system: out?.system };
+      for (const h of contextHandlers) await h(e);
+    };
+  }
+  return {
+    ...toolHooks,
+    ...v1Hooks,
+    event: async ({ event }) => { await bus.push(event); },
+    dispose: () => {
+      for (const d of disposers) { try { d(); } catch { /* fail-soft */ } }
+      try { cleanup?.(); } catch { /* fail-soft */ }
+    },
+    tool: transformedTools,
+  };
 }
 
 describe("maestro-bootstrap global logging", () => {
@@ -2179,14 +2305,14 @@ describe("maestro-bootstrap confidential enforcement by mask/filename", () => {
   });
 });
 
-describe("maestro-bootstrap adapter forwarding core hooks", () => {
+describe("maestro-bootstrap V2 entry (Plugin.define)", () => {
   const savedCwd = process.cwd();
   let dir;
 
   before(async () => {
     // Пустой temp-dir без maestro.json → memory off → детерминированно,
     // без тяжёлых импортов memory-модуля.
-    dir = fs.mkdtempSync(path.join(os.tmpdir(), "maestro-adapter-"));
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "maestro-v2-"));
     process.chdir(dir);
   });
 
@@ -2195,61 +2321,41 @@ describe("maestro-bootstrap adapter forwarding core hooks", () => {
     try { fs.rmSync(dir, { recursive: true, force: true }); } catch {}
   });
 
-  it("forwards tool.execute hooks, event, dispose, config, startup and tool key", async () => {
-    const hooks = await opencodePlugin({});
+  it("default export is a V2 definition: id + setup (no V1 config/startup)", () => {
+    assert.equal(opencodePlugin.id, "maestro-bootstrap");
+    assert.equal(typeof opencodePlugin.setup, "function");
+    // M12 (V2): V1-хуки config/startup отсутствуют — плагин не форсирует
+    // config (file_access и др.), инъекция — только через ctx.
+    assert.equal(opencodePlugin.config, undefined);
+    assert.equal(opencodePlugin.startup, undefined);
+  });
+
+  it("setup registers tool hooks, event, dispose and tools via ctx", async () => {
+    const hooks = await MaestroBootstrapPlugin({ directory: dir });
     assert.equal(typeof hooks["tool.execute.before"], "function");
     assert.equal(typeof hooks["tool.execute.after"], "function");
     assert.equal(typeof hooks.event, "function");
     assert.equal(typeof hooks.dispose, "function");
-    assert.equal(typeof hooks.startup, "function");
-    assert.equal(typeof hooks.config, "function");
-    // M12: config НЕ форсирует file_access.
-    assert.equal((await hooks.config({})).file_access, undefined);
-    // memory-инструменты регистрируются в ключе `tool` (пусто при memory off).
+    // maestro_config регистрируется через ctx.tool.transform; memory-тулы —
+    // в том же ключе (пусто при memory off).
+    assert.equal(Object.hasOwn(hooks.tool, "maestro_config"), true);
     assert.equal(Object.hasOwn(hooks, "tool"), true);
   });
 
-  it("fail-soft: throwing factory returns minimal skeleton, retries init on next call", async () => {
-    let calls = 0;
-    const realHooks = { event: async () => {}, dispose: async () => {}, marker: "real" };
-    const adapter = createBootstrapAdapter(async () => {
-      calls += 1;
-      if (calls === 1) throw new Error("boom");
-      return realHooks;
-    });
-    const hooks1 = await adapter({});
-    assert.equal(typeof hooks1.config, "function");
-    assert.equal(typeof hooks1.event, "function");
-    assert.equal(typeof hooks1.startup, "function");
-    assert.equal(typeof hooks1.dispose, "function");
-    assert.notEqual(hooks1.marker, "real", "first call is the fail-soft skeleton");
-    const hooks2 = await adapter({});
-    assert.equal(hooks2.marker, "real", "second call retried init and got real hooks");
-  });
-
-  it("forwards ALL core hook keys (superset, incl chat/experimental)", async () => {
-    const coreHooks = await MaestroBootstrapPlugin({ directory: dir });
-    const adapter = createBootstrapAdapter(async () => coreHooks);
-    const out = await adapter({});
-    const coreKeys = Object.keys(coreHooks);
-    const override = new Set(["config", "startup"]);
-    for (const k of coreKeys) {
-      if (override.has(k)) continue;
-      assert.ok(Object.hasOwn(out, k), `core hook ${k} must be forwarded`);
-    }
-    // chat/experimental присутствуют (даже если undefined при memory off)
-    assert.equal(Object.hasOwn(out, "chat.message"), true);
-    assert.equal(Object.hasOwn(out, "experimental.chat.system.transform"), true);
-  });
-
-  it("spread mechanism: stub core hooks all forwarded", async () => {
-    const stub = { event: async () => {}, tool: {}, "chat.message": undefined, "experimental.chat.system.transform": undefined, dispose: async () => {} };
-    const out = await createBootstrapAdapter(async () => stub)({});
-    assert.equal(typeof out.event, "function");
-    assert.equal(typeof out.dispose, "function");
-    assert.equal(Object.hasOwn(out, "tool"), true);
-    assert.equal(Object.hasOwn(out, "chat.message"), true);
-    assert.equal(Object.hasOwn(out, "experimental.chat.system.transform"), true);
+  it("fail-soft: setup with failing ctx → no reject (session не ломается)", async () => {
+    const badCtx = {
+      location: { directory: dir },
+      session: {
+        get: async () => ({ data: { id: "s", parentID: null } }),
+        hook: async () => ({ dispose: () => {} }),
+      },
+      event: { subscribe: async function* () {} },
+      tool: {
+        hook: async () => { throw new Error("boom"); },
+        transform: async () => { throw new Error("boom"); },
+      },
+    };
+    await assert.doesNotReject(() => opencodePlugin.setup(badCtx));
   });
 });
 

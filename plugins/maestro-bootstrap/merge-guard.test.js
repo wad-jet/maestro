@@ -4,7 +4,26 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { detectGuardCommand, checkMergeMarker, resolveMergeGuardConf } from "./merge-guard.js";
-import { MaestroBootstrapPlugin } from "./core.js";
+import { createBootstrapPlugin } from "./core.js";
+
+// V2 mock-контекст: перехватывает зарегистрированные tool-хуки под V1-именами
+// (tool.execute.before/after), чтобы интеграционные тесты оставались читаемыми.
+function makeV2Ctx(directory) {
+  const hooks = {};
+  return {
+    location: { directory },
+    session: {
+      get: async () => ({ data: { id: "s", parentID: null } }),
+      hook: async () => ({ dispose() {} }),
+    },
+    event: { subscribe: async function* () {} },
+    tool: {
+      hook: async (name, fn) => { hooks[`tool.${name}`] = fn; return { dispose() {} }; },
+      transform: async (fn) => { fn({ add() {} }); return { dispose() {} }; },
+    },
+    _hooks: hooks,
+  };
+}
 
 describe("merge-guard detectGuardCommand", () => {
   it("git merge → merge", () => {
@@ -165,7 +184,9 @@ describe("merge-guard hook integration (tool.execute.before)", () => {
       path.join(dir, "maestro.json"),
       JSON.stringify({ merge_guard: { enabled: true, ttlSec: 600 } }),
     );
-    hooks = await MaestroBootstrapPlugin({ directory: dir });
+    const ctx = makeV2Ctx(dir);
+    await createBootstrapPlugin(ctx);
+    hooks = ctx._hooks;
   });
 
   after(() => {
@@ -179,8 +200,7 @@ describe("merge-guard hook integration (tool.execute.before)", () => {
   it("denies git merge without marker, allows after marker created", async () => {
     await assert.rejects(
       hooks["tool.execute.before"](
-        { tool: "bash", sessionID: "ses_x", callID: "c1" },
-        { args: { command: "git merge --ff-only f" } },
+        { tool: "bash", sessionID: "ses_x", callID: "c1", output: { args: { command: "git merge --ff-only f" } } },
       ),
       /merge-guard:deny.*git merge/,
     );
@@ -192,8 +212,7 @@ describe("merge-guard hook integration (tool.execute.before)", () => {
     );
     await assert.doesNotReject(
       hooks["tool.execute.before"](
-        { tool: "bash", sessionID: "ses_x", callID: "c2" },
-        { args: { command: "git merge --ff-only f" } },
+        { tool: "bash", sessionID: "ses_x", callID: "c2", output: { args: { command: "git merge --ff-only f" } } },
       ),
     );
   });
@@ -201,8 +220,7 @@ describe("merge-guard hook integration (tool.execute.before)", () => {
   it("denies push to mainline without marker", async () => {
     await assert.rejects(
       hooks["tool.execute.before"](
-        { tool: "bash", sessionID: "ses_y", callID: "c3" },
-        { args: { command: "git push origin main" } },
+        { tool: "bash", sessionID: "ses_y", callID: "c3", output: { args: { command: "git push origin main" } } },
       ),
       /merge-guard:deny.*git push \(mainline\)/,
     );
@@ -211,8 +229,7 @@ describe("merge-guard hook integration (tool.execute.before)", () => {
   it("allows non-guard bash commands", async () => {
     await assert.doesNotReject(
       hooks["tool.execute.before"](
-        { tool: "bash", sessionID: "ses_z", callID: "c4" },
-        { args: { command: 'git commit -m "x"' } },
+        { tool: "bash", sessionID: "ses_z", callID: "c4", output: { args: { command: 'git commit -m "x"' } } },
       ),
     );
   });
@@ -224,11 +241,12 @@ describe("merge-guard hook integration (tool.execute.before)", () => {
         path.join(offDir, "maestro.json"),
         JSON.stringify({ merge_guard: { enabled: false } }),
       );
-      const offHooks = await MaestroBootstrapPlugin({ directory: offDir });
+      const offCtx = makeV2Ctx(offDir);
+      await createBootstrapPlugin(offCtx);
+      const offHooks = offCtx._hooks;
       await assert.doesNotReject(
         offHooks["tool.execute.before"](
-          { tool: "bash", sessionID: "ses_q", callID: "c5" },
-          { args: { command: "git merge --ff-only f" } },
+          { tool: "bash", sessionID: "ses_q", callID: "c5", output: { args: { command: "git merge --ff-only f" } } },
         ),
       );
     } finally {
@@ -240,8 +258,7 @@ describe("merge-guard hook integration (tool.execute.before)", () => {
     await assert.rejects(
       async () => {
         await hooks["tool.execute.before"](
-          { tool: "bash", sessionID: "ses_m", callID: "c6" },
-          { args: { command: "git merge --ff-only f" } },
+          { tool: "bash", sessionID: "ses_m", callID: "c6", output: { args: { command: "git merge --ff-only f" } } },
         );
       },
       /merge-guard:deny.*git merge/,

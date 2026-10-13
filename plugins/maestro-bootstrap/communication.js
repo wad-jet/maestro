@@ -49,8 +49,9 @@ function parseCommunication(config) {
 export const SERVICE_TITLE_PREFIX = "[maestro-memory]";
 
 /**
- * V2: registers communication hooks via ctx.session.hook("context", ...).
- * Returns a cleanup function (for ctx.tool.hook / session.hook disposal).
+ * V2: регистрирует communication-хуки через ctx.session.hook("context", ...).
+ * Возвращает V2 dispose + V1-совместимые хуки (chat.message / system.transform)
+ * — те же обработчики, что используются в context hook (тестовая совместимость).
  */
 export async function registerCommunicationHooks({ client, config, log }) {
   const comm = parseCommunication(config);
@@ -77,12 +78,50 @@ export async function registerCommunicationHooks({ client, config, log }) {
     return ok;
   };
 
+  // Инжект директивы (общий для V1 transform и V2 context hook)
+  const injectDirective = async (sessionID, system) => {
+    const flagMarked = flagSessions.has(sessionID);
+    if (comm.mode !== "plain" && !flagMarked) return;
+    const label = resolveDirectiveLabel({ flagMarked, communication: comm });
+    if (system) system.push(directiveText(label));
+    log?.debug?.("communication:directive_injected", { sessionID, source: label });
+  };
+
+  // V1: chat.message — eligibility-guard + идемпотентная маркировка флага
+  const onChatMessage = async (input, output) => {
+    try {
+      const sessionID = input?.sessionID;
+      if (!sessionID || !(await isEligible(sessionID))) return;
+      const text = (output?.message?.parts ?? [])
+        .filter((p) => p.type === "text")
+        .map((p) => p.text ?? "")
+        .join(" ");
+      if (detectPlainFlag(text) && !flagSessions.has(sessionID)) {
+        flagSessions.add(sessionID);
+        log?.info?.("communication:flag_plain", { sessionID });
+      }
+    } catch {
+      /* fail-soft */
+    }
+  };
+
+  // V1: system.transform — eligibility-guard + инжект директивы
+  const onSystemTransform = async ({ sessionID }, out) => {
+    try {
+      if (!sessionID || !(await isEligible(sessionID))) return;
+      await injectDirective(sessionID, out?.system);
+    } catch {
+      /* fail-soft */
+    }
+  };
+
+  // V2: context hook — флаг из последнего user-сообщения + инжект (с дедупом:
+  // хук может сработать повторно на request)
   const registration = await client?.session?.hook?.("context", async (event) => {
     try {
       const sessionID = event?.sessionID;
       if (!sessionID || !(await isEligible(sessionID))) return;
 
-      // Detect --plain flag in last user message
       if (event?.messages) {
         const lastUserMsg = [...event.messages].reverse().find(m => m?.role === "user");
         const text = lastUserMsg?.content ?? "";
@@ -92,13 +131,11 @@ export async function registerCommunicationHooks({ client, config, log }) {
         }
       }
 
-      // Inject plain language directive
       const flagMarked = flagSessions.has(sessionID);
       if (comm.mode === "plain" || flagMarked) {
         const label = resolveDirectiveLabel({ flagMarked, communication: comm });
         const directive = directiveText(label);
         if (!event.system) event.system = [];
-        // Avoid duplicates
         if (!event.system.some(s => typeof s === "string" && s.includes("Общайся с пользователем простым")) &&
             !event.system.some(s => typeof s === "object" && s.text?.includes("Общайся с пользователем простым"))) {
           event.system.push(directive);
@@ -111,6 +148,8 @@ export async function registerCommunicationHooks({ client, config, log }) {
   });
 
   return {
+    "chat.message": onChatMessage,
+    "experimental.chat.system.transform": onSystemTransform,
     dispose: () => {
       try { registration?.dispose?.(); } catch {}
     },
