@@ -124,3 +124,80 @@ describe("registerPipelineStatusHooks", () => {
     assert.ok(capturedSystem.some(s => s.text?.includes("step 3/18")));
   });
 });
+
+// ---------------------------------------------------------------------------
+// makePipelineStatusTool — tool registration
+// ---------------------------------------------------------------------------
+
+describe("makePipelineStatusTool", () => {
+  beforeEach(() => ps.clearPipelineStatus());
+
+  it("get returns current state", async () => {
+    ps.setPipelineStatus({ step: 5, totalSteps: 10, description: "Test" });
+    const tool = ps.makePipelineStatusTool({ client: {}, log: {} });
+    const result = await tool.execute({ action: "get" }, { sessionID: "test-session" });
+    const content = result.content[0].text;
+    assert.ok(content.includes('"active":true'));
+    assert.ok(content.includes('"step":5'));
+  });
+
+  it("set returns ok true", async () => {
+    const tool = ps.makePipelineStatusTool({ client: {}, log: {} });
+    const result = await tool.execute({ action: "set", step: 3, totalSteps: 15, description: "Greeting" }, { sessionID: "test-session" });
+    const content = result.content[0].text;
+    assert.ok(content.includes('"ok":true'));
+    // Verify state was actually set
+    const s = ps.getPipelineStatus();
+    assert.equal(s.step, 3);
+  });
+
+  it("clear returns ok true", async () => {
+    ps.setPipelineStatus({ step: 1, totalSteps: 5, description: "Before" });
+    const tool = ps.makePipelineStatusTool({ client: {}, log: {} });
+    const result = await tool.execute({ action: "clear" }, { sessionID: "test-session" });
+    const content = result.content[0].text;
+    assert.ok(content.includes('"ok":true'));
+    assert.equal(ps.getPipelineStatus().active, false);
+  });
+
+  it("deny: non-primary session (has parentID) cannot set/clear", async () => {
+    const mockClient = {
+      session: {
+        get: async ({ sessionID }) => ({ data: { id: sessionID, parentID: "parent-123" } })
+      }
+    };
+    const tool = ps.makePipelineStatusTool({ client: mockClient, log: {} });
+    const result = await tool.execute({ action: "set", step: 1, totalSteps: 5, description: "X" }, { sessionID: "task-session" });
+    assert.ok(result.content[0].text.includes("denied"));
+  });
+
+  it("allow: primary session (no parentID) can set/clear", async () => {
+    const mockClient = {
+      session: {
+        get: async ({ sessionID }) => ({ data: { id: sessionID } }) // no parentID
+      }
+    };
+    const tool = ps.makePipelineStatusTool({ client: mockClient, log: {} });
+    const result = await tool.execute({ action: "set", step: 1, totalSteps: 5, description: "X" }, { sessionID: "primary-session" });
+    const content = result.content[0].text;
+    assert.ok(content.includes('"ok":true'));
+  });
+
+  it("error on invalid action", async () => {
+    const tool = ps.makePipelineStatusTool({ client: {}, log: {} });
+    const result = await tool.execute({ action: "invalid" }, { sessionID: "test-session" });
+    assert.ok(result.content[0].text.toLowerCase().includes("invalid"));
+  });
+
+  it("error on set without required params", async () => {
+    // Use a client that allows primary sessions so guard passes and we reach param check
+    const mockClient = {
+      session: {
+        get: async ({ sessionID }) => ({ data: { id: sessionID } })
+      }
+    };
+    const tool = ps.makePipelineStatusTool({ client: mockClient, log: {} });
+    const result = await tool.execute({ action: "set" }, { sessionID: "test-session" });
+    assert.ok(result.content[0].text.toLowerCase().includes("required"));
+  });
+});
