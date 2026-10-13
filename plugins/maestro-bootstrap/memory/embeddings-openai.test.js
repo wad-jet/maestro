@@ -12,14 +12,14 @@ const okRes = () => ({ ok: true, status: 200, statusText: "OK", json: async () =
 
 test("embed posts /embeddings with auth, returns Float32Array", async () => {
   const fetchImpl = fakeFetch(async () => okRes());
-  const e = new OpenAiEmbedder({ model: "m", baseUrl: "https://api.openai.com/v1", apiKey: "sk-xyz", dim: 3, fetchImpl });
+  const e = new OpenAiEmbedder({ model: "m", baseUrl: "https://api.openai.com/v1", apiKey: "fake-test-key-000", dim: 3, fetchImpl });
   const v = await e.embed("hello");
   assert.ok(v instanceof Float32Array);
   assert.equal(v.length, 3);
   assert.equal(e.modelId, "openai:m@https://api.openai.com/v1");
   const c = fetchImpl.calls[0];
   assert.equal(c.url, "https://api.openai.com/v1/embeddings");
-  assert.equal(c.opts.headers.Authorization, "Bearer sk-xyz");
+  assert.equal(c.opts.headers.Authorization, "Bearer fake-test-key-000");
   assert.deepEqual(JSON.parse(c.opts.body), { model: "m", input: "hello" });
 });
 
