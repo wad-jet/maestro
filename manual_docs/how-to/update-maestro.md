@@ -98,7 +98,8 @@ agpack sync        # разворачивает актуальные skills/comm
 
 Плагин ставится из git-репозитория
 `maestro-bootstrap@git+https://github.com/wad-jet/maestro.git` и **кэшируется** в
-`~/.cache/opencode/packages/` при установке. **Кэш не обновляется при перезапуске
+`~/.cache/opencode/npm/git-maestro-*/` (V2-layout; ранее —
+`~/.cache/opencode/packages/`) при установке. **Кэш не обновляется при перезапуске
 OpenCode** — перезапуск сам по себе НЕ подтягивает новую версию из ветки
 репозитория. Чтобы обновить плагин, нужно очистить кэш.
 
@@ -108,7 +109,7 @@ OpenCode** — перезапуск сам по себе НЕ подтягива
 **Ручной способ:** очистите кэш плагина вручную и перезапустите OpenCode:
 
 ```bash
-rm -rf ~/.cache/opencode/packages/maestro-bootstrap@git+https:...
+rm -rf ~/.cache/opencode/npm/git-maestro-*
 ```
 
 Затем перезапустите OpenCode — плагин переустановится из git заново.
@@ -119,11 +120,15 @@ rm -rf ~/.cache/opencode/packages/maestro-bootstrap@git+https:...
 ```jsonc
 // .opencode/opencode.json или opencode.json
 {
-  "plugin": [
+  "plugins": [
     "maestro-bootstrap@git+https://github.com/wad-jet/maestro.git#<commit-sha>"
   ]
 }
 ```
+
+> **Не смешивайте ключи `plugin` (V1) и `plugins` (V2)** — двойная регистрация
+> даёт «Duplicate plugin ID» и toast при старте. `maestro-update.sh` /
+> `maestro-install.sh` мигрируют legacy-ключ автоматически.
 
 > **Не копируйте папку плагина отдельно от репозитория** — версия не определится
 > (`/maestro-version` сообщит «не инициализирован»).
@@ -181,8 +186,9 @@ rm -rf ~/.cache/opencode/packages/maestro-bootstrap@git+https:...
 
 ## ⚠️ Известные ограничения
 
-- Плагин кэшируется в `~/.cache/opencode/packages/` и НЕ обновляется при
-  перезапуске OpenCode — кэш нужно очищать (`maestro-update.sh` делает это сам).
+- Плагин кэшируется в `~/.cache/opencode/npm/git-maestro-*` (V2-layout) и НЕ
+  обновляется при перезапуске OpenCode — кэш нужно очищать
+  (`maestro-update.sh` делает это сам).
 - У скилов нет отдельной версии — их версия = версия дистрибутива из `package.json`.
 - `agpack` не пинит скилы по версии (только ветка). Гарантия версии сборки — пинить
   плагин на тот же коммит `#<commit-sha>`, что и источник скилов.

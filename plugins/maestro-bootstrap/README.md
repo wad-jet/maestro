@@ -478,11 +478,16 @@ npm test
 
 ```json
 {
-  "plugin": [
+  "plugins": [
     "maestro-bootstrap@git+https://github.com/wad-jet/maestro.git"
   ]
 }
 ```
+
+> **Не смешивайте ключи `plugin` (V1) и `plugins` (V2).** Оба ключа работают по
+> отдельности, но вместе дают двойную регистрацию — «Duplicate plugin ID» и
+> toast «Plugin failed» при старте. `maestro-install.sh` / `maestro-update.sh`
+> мигрируют legacy-ключ автоматически (перенос выживших записей в `plugins`).
 
 OpenCode установит плагин автоматически (Bun) при старте, клонируя репозиторий и
 загружая entry из корневого `package.json` (`main` → `plugins/maestro-bootstrap/index.js`).
@@ -491,7 +496,7 @@ OpenCode установит плагин автоматически (Bun) при
 
 ```json
 {
-  "plugin": [
+  "plugins": [
     "maestro-bootstrap@git+https://github.com/wad-jet/maestro.git#<commit-sha>"
   ]
 }
@@ -503,7 +508,7 @@ OpenCode установит плагин автоматически (Bun) при
 
 ```json
 {
-  "plugin": [
+  "plugins": [
     "../plugins/maestro-bootstrap/index.js"
   ]
 }

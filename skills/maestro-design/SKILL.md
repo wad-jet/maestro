@@ -30,8 +30,8 @@ description: Use to produce design, spec, scaffold and roadmap for a project aft
    > Продолжение работы запрещено. Единственный способ продолжить — подключить
    > плагин и перезапустить opencode:
    > ```
-   > opencode plugin "maestro-bootstrap@git+https://github.com/wad-jet/maestro.git"
-   > # spec добавить в global ~/.config/opencode/opencode.json (реком.) или .opencode/opencode.json
+   > # добавить в global ~/.config/opencode/opencode.json (реком.) или .opencode/opencode.json:
+   > "plugins": ["maestro-bootstrap@git+https://github.com/wad-jet/maestro.git"]
    > ```
    >
    > (a) Подключить плагин и перезапустить opencode — затем повторить команду

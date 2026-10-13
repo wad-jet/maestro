@@ -446,7 +446,7 @@ EOF
 # Доставка maestro (локальная версия) в .sandbox/.opencode/.
 # permission-baseline — канон «Глобальные deny (R1+R4)» (maestro-assistant);
 # agent-секция — из authoring .opencode/opencode.json (если есть);
-# plugin — ../../plugins/maestro-bootstrap/index.js (резолв от .sandbox/.opencode/).
+# plugins — ../../plugins/maestro-bootstrap/index.js (резолв от .sandbox/.opencode/, V2-ключ).
 deliver_bench_opencode() {
   local dest="$SANDBOX/.opencode"
   local plugin_target="$REPO_ROOT/plugins/maestro-bootstrap/index.js"
@@ -516,7 +516,7 @@ const cfg = {
     },
     maestro_config: "ask"
   },
-  plugin: ["../../plugins/maestro-bootstrap/index.js"]
+  plugins: ["../../plugins/maestro-bootstrap/index.js"]
 };
 if (agent && typeof agent === "object" && !Array.isArray(agent)) cfg.agent = agent;
 writeFileSync(outPath, JSON.stringify(cfg, null, 2) + "\n");

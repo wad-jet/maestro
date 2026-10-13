@@ -9,6 +9,15 @@
 
 ## [Unreleased]
 
+> **Версия 5.6.5** — Patch: регистрация плагина переведена на V2-канон `plugins` (скрипты + доки + скиллы), миграция legacy-ключа `plugin`, кэш-очистка V2-layout.
+
+### Исправлено
+
+- **Двойная регистрация плагина — V2-канон `plugins` (5.6.5):** `maestro-install.sh` / `maestro-update.sh` писали legacy-ключ `plugin` (V1) — вместе с V2-ключом `plugins` это двойная регистрация одного плагина («Duplicate plugin ID» → toast «Plugin failed» при старте). Скрипты пишут `plugins` (V2-канон, string-alias-spec) и **автоматически мигрируют** legacy-ключ: чужие записи переносятся, ключ удаляется; наша регистрация нормализуется в единственный alias-spec независимо от прежней формы (alias/plain/object, с pin или без — 21 проверка миграции на 9 сценариях, включая идемпотентность и мусорные значения). Детектор глобального конфига — по подстроке репо-URL (`wad-jet/maestro.git`), ловит все формы записи.
+- **Кэш-очистка V2-layout (5.6.5):** `maestro-update.sh` чистил только `~/.cache/opencode/packages/<spec>/` (V1-layout), а V2-runtime ставит git-плагины в `~/.cache/opencode/npm/git-maestro-<hash>/<timestamp>/` — очистка промахивалась и плагин мог остаться на старой версии. Теперь чистятся оба layout'а (V2 + legacy).
+- **Доки и скиллы — единый V2-канон (5.6.5):** сниппеты регистрации `plugin` → `plugins` в `manual_docs/how-to/install-maestro.md`, `update-maestro.md`, `reference/config.md`, README плагина и корневом README; предупреждение «не смешивать `plugin` (V1) и `plugins` (V2)»; кэш-пути в доках — V2-layout (`npm/git-maestro-*`); стоп-сообщения скиллов (maestro, maestro-benchmark, maestro-design, maestro-feedback-report) — JSON-сниппет `plugins` вместо несуществующей CLI-команды `opencode plugin`; maestro-setup проверяет оба ключа; версия-глоб SKILL.md — по V2-layout кэша; sandbox-конфиг (`maestro-sandbox.sh` + smoke-тест) — ключ `plugins`.
+- **docs-drift:** маркеры версий AGENTS.md и `docs/project-context.md` (5.6.4 → 5.6.5).
+
 > **Версия 5.6.4** — Patch: runtime-фиксы V2 — `maestro_config` снова доступен на V2 (fallback `session.get` → `session.context`), V2-детекция — warn вместо throw.
 
 ### Исправлено

@@ -101,7 +101,7 @@ description: Initialize maestro for a new or existing project — quick setup (A
 
 ## Задача 5. Проверка плагина `maestro-bootstrap`
 
-Проверить `plugin` в merge-конфиге → `maestro-bootstrap@git+https://github.com/wad-jet/maestro.git`.
+Проверить регистрацию в merge-конфиге — ключ `plugins` (V2-канон) или legacy `plugin` (V1) → `maestro-bootstrap@git+https://github.com/wad-jet/maestro.git`. Оба ключа одновременно — ошибка (двойная регистрация, «Duplicate plugin ID»).
 - **Не блокер:** если не подключён — отметить в своде/last-run, не останавливать
 
 ## Завершение

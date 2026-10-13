@@ -129,7 +129,7 @@ commands/*.md             →  .opencode/commands/*.md
 
 ```json
 {
-  "plugin": [
+  "plugins": [
     "maestro-bootstrap@git+https://github.com/wad-jet/maestro.git"
   ]
 }
@@ -139,7 +139,7 @@ commands/*.md             →  .opencode/commands/*.md
 
 ```json
 {
-  "plugin": [
+  "plugins": [
     "../plugins/maestro-bootstrap/index.js"
   ]
 }

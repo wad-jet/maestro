@@ -196,22 +196,53 @@ if os.path.exists(config_path):
         sys.stderr.write("maestro-install: не могу прочитать %s: %s\n" % (config_path, e))
         sys.exit(1)
 
-plugins = data.get("plugin")
+plugins = data.get("plugins")
 if plugins is None:
     plugins = []
 if not isinstance(plugins, list):
-    sys.stderr.write("maestro-install: ключ 'plugin' в %s — не массив; не трогаю.\n" % config_path)
+    sys.stderr.write("maestro-install: ключ 'plugins' в %s — не массив; не трогаю.\n" % config_path)
     sys.exit(1)
 
-if plugin_spec in plugins:
-    print("maestro-install: плагин уже подключён (%s)" % plugin_spec)
-else:
-    plugins.append(plugin_spec)
-    data["plugin"] = plugins
-    with open(config_path, "w", encoding="utf-8") as f:
-        json.dump(data, f, ensure_ascii=False, indent=2)
-        f.write("\n")
-    print("maestro-install: плагин добавлен в конфиг opencode")
+# Спец-строка плагина из entry: string | dict{"package"} | V1-tuple [spec, opts]
+def entry_spec(e):
+    if isinstance(e, str):
+        return e
+    if isinstance(e, dict):
+        p = e.get("package")
+        return p if isinstance(p, str) else ""
+    if isinstance(e, list) and e and isinstance(e[0], str):
+        return e[0]
+    return ""
+
+# Наша регистрация в любой форме (alias/plain, с pin или без)
+def is_ours(e):
+    s = entry_spec(e)
+    return (s.startswith(plugin_spec) or
+            s.startswith("git+https://github.com/wad-jet/maestro.git"))
+
+# Миграция V1→V2: legacy-ключ 'plugin' (singular) вместе с 'plugins' даёт
+# двойную регистрацию ("Duplicate plugin ID" в OpenCode V2, toast при старте).
+# Выжившие чужие записи переносим в 'plugins', ключ удаляем.
+legacy = data.get("plugin")
+if isinstance(legacy, str):
+    legacy = [legacy]
+if isinstance(legacy, list):
+    for e in legacy:
+        if not is_ours(e) and e not in plugins:
+            plugins.append(e)
+    del data["plugin"]
+    print("maestro-install: V1→V2 миграция: ключ 'plugin' перенесён в 'plugins'")
+elif legacy is not None:
+    sys.stderr.write("maestro-install: ключ 'plugin' в %s — не массив/строка; миграция пропущена.\n" % config_path)
+
+# Наша регистрация — ровно одна, в канонической форме (V2-ключ 'plugins')
+plugins = [e for e in plugins if not is_ours(e)]
+plugins.append(plugin_spec)
+data["plugins"] = plugins
+with open(config_path, "w", encoding="utf-8") as f:
+    json.dump(data, f, ensure_ascii=False, indent=2)
+    f.write("\n")
+print("maestro-install: плагин зарегистрирован в %s (ключ 'plugins', V2)" % config_path)
 PY
 
 # --- 5a. Memory layer (опционально) ------------------------------------------

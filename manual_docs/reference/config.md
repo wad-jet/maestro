@@ -233,7 +233,7 @@ deny. Trust не наследуется вложенными субагента�
 > `confidential` реализована **внутри плагина `maestro-bootstrap`** (перехват
 > `tool.execute.before`) и **не является файловой защитой на уровне ОС**
 > (не chmod/ACL, не шифрование). Это полноценный **fail-open**: если плагин не
-> подключён в конфиге (`.opencode/opencode.json`/global, `plugin` без
+> подключён в конфиге (`.opencode/opencode.json`/global, `plugins` без
 > `maestro-bootstrap`), не загрузился,
 > деактивирован или opencode запущен без него — `read`/`write`/`edit` в
 > `docs/confidential/**` выполняются **как обычные** (без каких-либо ограничений).
@@ -626,7 +626,7 @@ merge-config (`.opencode/opencode.json`
 
 ```json
 {
-  "plugin": [
+  "plugins": [
     "maestro-bootstrap@git+https://github.com/wad-jet/maestro.git"
   ]
 }
@@ -635,11 +635,17 @@ merge-config (`.opencode/opencode.json`
 При необходимости зафиксировать конкретный коммит — через fragment `#<commit-sha>`
 в конце spec.
 
+> **Не смешивайте ключи `plugin` (V1) и `plugins` (V2).** Оба ключа работают по
+> отдельности (V1-совместимость), но вместе дают двойную регистрацию одного
+> плагина — «Duplicate plugin ID» и toast «Plugin failed» при старте.
+> Канон — единственный ключ `plugins`; скрипты
+> `maestro-install.sh` / `maestro-update.sh` мигрируют legacy-ключ автоматически.
+
 **Локально (из исходников):**
 
 ```json
 {
-  "plugin": [
+  "plugins": [
     "../plugins/maestro-bootstrap/index.js"
   ]
 }
@@ -657,7 +663,7 @@ merge-config (`.opencode/opencode.json`
 > загружен — в `.maestro/logs/` отсутствует свежий `maestro-bootstrap-<дата>.log`
 > с записью `plugin initialized` (это признак незагруженного плагина, а не «нет логов»).
 
-Если ключа `plugin` нет — добавить; если есть массив, но пути нет —
+Если ключа `plugins` нет — добавить; если есть массив, но пути нет —
 дописать. Если путь уже есть — пропустить. **Никогда не перезаписывать**
 существующее содержимое конфига.
 

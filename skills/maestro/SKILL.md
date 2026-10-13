@@ -18,9 +18,9 @@ description: Use when implementing a feature end-to-end — orchestrates brainst
 
    После подтверждения свежести — проверь рассинхрон версий (warn, НЕ stop):
    init-строка содержит `"version":"X.Y.Z"` — сравни с версией из кэша плагина:
-   `~/.cache/opencode/packages/maestro-bootstrap@git+*/github.com/wad-jet/maestro.git/
-   node_modules/maestro-bootstrap/package.json` (glob; тот же файл читает
-   `readPluginVersion()`). Сравнение semver-осознанное; файл не найден / `#sha`-pin /
+   `~/.cache/opencode/npm/git-maestro-*/[0-9]*/node_modules/maestro-bootstrap/package.json`
+   (glob по V2-layout кэша; тот же файл читает `readPluginVersion()`). Сравнение
+   semver-осознанное; файл не найден / `#sha`-pin /
    runtime новее кэша → молча пропустить. При отставании runtime от кэша — показать:
    «Версия плагина (A) отстаёт от кэша (B) — runtime-правки не активны до перезапуска
    opencode» и продолжить (не блокировать).
@@ -35,9 +35,11 @@ description: Use when implementing a feature end-to-end — orchestrates brainst
    > Продолжение работы запрещено. Единственный способ продолжить — подключить
    > плагин и перезапустить opencode:
    > ```
-   > opencode plugin "maestro-bootstrap@git+https://github.com/wad-jet/maestro.git"
-   > # spec добавить в global ~/.config/opencode/opencode.json (реком.) или .opencode/opencode.json
+   > # добавить в global ~/.config/opencode/opencode.json (реком.) или .opencode/opencode.json:
+   > "plugins": ["maestro-bootstrap@git+https://github.com/wad-jet/maestro.git"]
    > ```
+   > Не смешивать с legacy-ключом `plugin` (V1): двойная регистрация даёт
+   > «Duplicate plugin ID» и toast при старте.
    >
    > (a) Подключить плагин и перезапустить opencode — затем повторить команду
    > (c) Отмена / стоп

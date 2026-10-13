@@ -264,19 +264,25 @@ info "запускаю 'agpack sync'..."
 
 # --- 4. Очистка кэша плагина OpenCode ---------------------------------------
 
-CACHE_BASE="${XDG_CACHE_HOME:-$HOME/.cache}/opencode/packages"
-CACHE_PREFIX="maestro-bootstrap@git+https://github.com/wad-jet/maestro"
-info "очищаю кэш плагина OpenCode: $CACHE_BASE/${CACHE_PREFIX}*"
+CACHE_ROOT="${XDG_CACHE_HOME:-$HOME/.cache}/opencode"
+info "очищаю кэш плагина OpenCode (V2: npm/git-maestro-*; legacy: packages/)..."
 MATCHED=0
-if [[ -d "$CACHE_BASE" ]]; then
-  for d in "$CACHE_BASE"/"$CACHE_PREFIX"*; do
+if [[ -d "$CACHE_ROOT" ]]; then
+  # V2-layout: npm/git-<repo>-<hash>/<timestamp>/
+  for d in "$CACHE_ROOT"/npm/git-maestro-*; do
+    [[ -e "$d" ]] || continue
+    rm -rf "$d"
+    MATCHED=$((MATCHED+1))
+  done
+  # legacy V1-layout: packages/<spec>/
+  for d in "$CACHE_ROOT"/packages/maestro-bootstrap@git+https://github.com/wad-jet/maestro*; do
     [[ -e "$d" ]] || continue
     rm -rf "$d"
     MATCHED=$((MATCHED+1))
   done
 fi
 if [[ "$MATCHED" -eq 0 ]]; then
-  warn "кэш плагина не найден по префиксу (возможно, layout изменился) — перезапустите opencode вручную после обновления скилов"
+  warn "кэш плагина не найден (возможно, чистая установка) — перезапустите opencode вручную после обновления скилов"
 else
   info "удалено записей кэша: $MATCHED"
 fi
@@ -286,7 +292,8 @@ fi
 GLOBAL_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/opencode.json"
 if [[ "$GLOBAL_MODE" -eq 1 ]]; then
   CONFIG_FILE="$GLOBAL_CONFIG"
-elif [[ -f "$GLOBAL_CONFIG" ]] && grep -qF "$PLUGIN_SPEC" "$GLOBAL_CONFIG"; then
+elif [[ -f "$GLOBAL_CONFIG" ]] && grep -q "wad-jet/maestro\.git" "$GLOBAL_CONFIG"; then
+  # любой spec-вариант (alias/plain/object) — обновляем там, где уже зарегистрирован
   CONFIG_FILE="$GLOBAL_CONFIG"
   info "плагин найден в глобальном конфиге: $CONFIG_FILE"
 else
@@ -306,22 +313,60 @@ if os.path.exists(config_path):
     except (json.JSONDecodeError, OSError) as e:
         sys.stderr.write("maestro-update: не могу прочитать %s: %s\n" % (config_path, e))
         sys.exit(1)
-plugins = data.get("plugin") or []
+
+plugins = data.get("plugins") or []
+if not isinstance(plugins, list):
+    sys.stderr.write("maestro-update: ключ 'plugins' в %s — не массив; не трогаю.\n" % config_path)
+    sys.exit(1)
+
+# Спец-строка плагина из entry: string | dict{"package"} | V1-tuple [spec, opts]
+def entry_spec(e):
+    if isinstance(e, str):
+        return e
+    if isinstance(e, dict):
+        p = e.get("package")
+        return p if isinstance(p, str) else ""
+    if isinstance(e, list) and e and isinstance(e[0], str):
+        return e[0]
+    return ""
+
+# Наша регистрация в любой форме (alias/plain, с pin или без)
+def is_ours(e):
+    s = entry_spec(e)
+    return (s.startswith(plugin_spec) or
+            s.startswith("git+https://github.com/wad-jet/maestro.git"))
+
 new_plugins = []
 for p in plugins:
-    if p == plugin_spec or p.startswith(plugin_spec + "#"):
+    if is_ours(p):
         continue
     new_plugins.append(p)
+
+# Миграция V1→V2: legacy-ключ 'plugin' (singular) вместе с 'plugins' даёт
+# двойную регистрацию ("Duplicate plugin ID" в OpenCode V2, toast при старте).
+# Выжившие чужие записи переносим в 'plugins', ключ удаляем.
+legacy = data.get("plugin")
+if isinstance(legacy, str):
+    legacy = [legacy]
+if isinstance(legacy, list):
+    for e in legacy:
+        if not is_ours(e) and e not in new_plugins:
+            new_plugins.append(e)
+    del data["plugin"]
+    print("maestro-update: V1→V2 миграция: ключ 'plugin' перенесён в 'plugins'")
+elif legacy is not None:
+    sys.stderr.write("maestro-update: ключ 'plugin' в %s — не массив/строка; миграция пропущена.\n" % config_path)
+
 if pin:
     new_plugins.append(plugin_spec + "#" + pin)
 else:
     new_plugins.append(plugin_spec)
-data["plugin"] = new_plugins
+data["plugins"] = new_plugins
 os.makedirs(os.path.dirname(config_path), exist_ok=True)
 with open(config_path, "w", encoding="utf-8") as f:
     json.dump(data, f, ensure_ascii=False, indent=2)
     f.write("\n")
-print("maestro-update: плагин %s%s зарегистрирован в %s" % (plugin_spec, "#"+pin if pin else "", config_path))
+print("maestro-update: плагин %s%s зарегистрирован в %s (ключ 'plugins', V2)" % (plugin_spec, "#"+pin if pin else "", config_path))
 PY
 
 # --- 6. Инструкция -----------------------------------------------------------
