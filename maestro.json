@@ -35,8 +35,5 @@
     "namespace": "ai.opencode.maestro"
   },
   "communication": "professional",
-  "feedback_report": "auto",
-  "merge_guard": {
-    "enabled": false
-  }
+  "feedback_report": "auto"
 }
