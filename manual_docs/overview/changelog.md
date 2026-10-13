@@ -9,6 +9,14 @@
 
 ## [Unreleased]
 
+> **Версия 5.6.7** — Minor: pipeline status indication
+
+- Инструмент `maestro_pipeline_status` для индикации текущего шага пайплайна.
+- Статус-блок в system prompt: `maestro pipeline: active (step X/Y, Description)`.
+- Документация: `manual_docs/reference/pipeline-status.md`.
+
+## [2026-10-13]
+
 > **Версия 5.6.6** — Patch: feedback-report — V2-совместимость timeline.mjs (команда `opencode session export` с legacy-fallback, нормализация V1/V2, тайминги ran→completed), fail-loud guard format_unrecognized, обязательная верификация записи отчёта в каноне скилла.
 
 ### Исправлено
