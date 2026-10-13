@@ -1,6 +1,6 @@
 #!/usr/bin/env node
-import { readFileSync, writeFileSync, unlinkSync, openSync, closeSync, mkdirSync, rmSync, existsSync, renameSync } from "node:fs";
-import { join, sep, dirname } from "node:path";
+import { readFileSync, writeFileSync, unlinkSync, openSync, closeSync, mkdirSync, existsSync, renameSync } from "node:fs";
+import { join, dirname } from "node:path";
 import { tmpdir } from "node:os";
 import { spawn } from "node:child_process";
 
@@ -38,6 +38,82 @@ function formatMs(ms) {
   return mins > 0 ? `${hours} ч ${mins} мин` : `${hours} ч`;
 }
 
+// --- экспорт сессии через opencode CLI (общий для primary и child путей) ---
+// Актуальный V2 CLI: `opencode session export <id>`; старый V1 знал только `opencode export <id>`
+// (в V2 эта форма падает «Unexpected positional argument»). Режим определяется первым
+// успешным вызовом и кэшируется на модуль: сбой конкретной сессии НЕ переоткрывает выбор
+// команды — иначе сбойный child «лечился» бы fallback'ом (двойной spawn и лишний diag-шум).
+let cliMode = null; // null | "v2" | "legacy"
+const CLI_PREFIX = {
+  v2: ["session", "export"],
+  legacy: ["export"],
+};
+
+// Одна попытка экспорта: stdout → временный файл, stderr — в память (хвост для diag).
+// resolve — распарсенный export JSON; reject — Error с полем tail (хвост stderr этой попытки).
+function runOnce(mode, sessionID, timeoutMs) {
+  return new Promise((resolve, reject) => {
+    const fail = (e, tail) => { e.tail = tail || ""; reject(e); };
+    const tmpFile = join(tmpdir(), `maestro-export-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
+    let fd;
+    try {
+      fd = openSync(tmpFile, "w", 0o600);
+    } catch (e) {
+      fail(e, "");
+      return;
+    }
+    const child = spawn("opencode", [...CLI_PREFIX[mode], sessionID], { stdio: ["ignore", fd, "pipe"] });
+    let errTail = "";
+    child.stderr.on("data", (d) => { errTail = (errTail + d).slice(-500); });
+    const cleanup = () => { try { closeSync(fd); } catch {} try { unlinkSync(tmpFile); } catch {} };
+    let done = false;
+    const timer = timeoutMs > 0 ? setTimeout(() => {
+      if (done) return;
+      done = true;
+      try { child.kill("SIGKILL"); } catch {}
+      cleanup();
+      fail(new Error("child_export_timeout"), errTail);
+    }, timeoutMs) : null;
+    child.on("error", (e) => {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      cleanup();
+      fail(e, errTail);
+    });
+    child.on("exit", (code) => {
+      if (done) return;
+      done = true;
+      if (timer) clearTimeout(timer);
+      try { closeSync(fd); } catch {}
+      let raw = null;
+      try { raw = readFileSync(tmpFile, "utf-8"); } catch {}
+      try { unlinkSync(tmpFile); } catch {}
+      if (code !== 0 || !raw || !raw.trim()) { fail(new Error("export_failed"), errTail); return; }
+      try { resolve(JSON.parse(raw)); } catch { fail(new Error("invalid_export"), errTail); }
+    });
+  });
+}
+
+// Экспорт сессии с V2-first и legacy-fallback: первый вызов пробует `session export`,
+// при сбое — `export`; успех фиксирует режим. Промежуточный сбой полностью молчит,
+// итоговый сбой всех попыток — ровно одна diag-строка с хвостом ПОСЛЕДНЕЙ попытки.
+async function runExport(sessionID, timeoutMs) {
+  const attempts = cliMode ? [cliMode] : ["v2", "legacy"];
+  let lastErr;
+  for (const mode of attempts) {
+    try {
+      const data = await runOnce(mode, sessionID, timeoutMs);
+      cliMode = mode; // успех фиксирует режим для всех последующих вызовов
+      return data;
+    } catch (e) {
+      lastErr = e;
+    }
+  }
+  try { process.stderr.write(`[timeline] export failed: ${sessionID} — ${errTailOneLine(lastErr.tail)}\n`); } catch {}
+  throw lastErr;
+}
+
 async function exportSession(sessionID, timeoutMs) {
   if (EXPORT_DIR) {
     // fixture-mode: <dir>/<id>.json — данные; <dir>/<id>.hang — сон max(timeoutMs*5, 2000) мс (эмуляция зависания)
@@ -63,103 +139,33 @@ async function exportSession(sessionID, timeoutMs) {
       clearTimeout(timer);
     }
   }
-  return await new Promise((resolve, reject) => {
-    const tmpFile = join(tmpdir(), `maestro-child-${Date.now()}-${Math.random().toString(36).slice(2)}.json`);
-    const fd = openSync(tmpFile, "w", 0o600);
-    const child = spawn("opencode", ["export", sessionID], { stdio: ["ignore", fd, "pipe"] });
-    let errTail = "";
-    child.stderr.on("data", (d) => { errTail = (errTail + d).slice(-500); });
-    const fail = (e) => {
-      try { process.stderr.write(`[timeline] export failed: ${sessionID} — ${errTailOneLine(errTail)}\n`); } catch {}
-      reject(e);
-    };
-    let done = false;
-    const timer = setTimeout(() => {
-      if (done) return;
-      done = true;
-      try { child.kill("SIGKILL"); } catch {}
-      try { closeSync(fd); } catch {}
-      try { unlinkSync(tmpFile); } catch {}
-      fail(new Error("child_export_timeout"));
-    }, timeoutMs);
-    child.on("error", (e) => { if (done) return; done = true; clearTimeout(timer); try { closeSync(fd); } catch {}; try { unlinkSync(tmpFile); } catch {}; fail(e); });
-    child.on("exit", (code) => {
-      if (done) return;
-      done = true;
-      clearTimeout(timer);
-      try { closeSync(fd); } catch {}
-      if (code !== 0) { try { unlinkSync(tmpFile); } catch {}; fail(new Error("export_failed")); return; }
-      let raw;
-      try { raw = readFileSync(tmpFile, "utf-8"); } catch (e) { try { unlinkSync(tmpFile); } catch {}; fail(e); return; }
-      try { unlinkSync(tmpFile); } catch {}
-      if (!raw || !raw.trim()) { fail(new Error("export_failed")); return; }
-      try { resolve(JSON.parse(raw)); } catch { fail(new Error("invalid_export")); }
-    });
-  });
-}
-
-let raw;
-
-try {
-  if (exportPath) {
-    raw = readFileSync(exportPath, "utf-8");
-    if (!raw || !raw.trim()) {
-      process.stdout.write(JSON.stringify({ error: "export_failed" }) + "\n");
-      process.exit(1);
-    }
-  } else {
-    const shimDir = join(tmpdir(), `maestro-feedback-${Date.now()}`);
-    mkdirSync(shimDir);
-    const shimPath = join(shimDir, "opencode" + (sep === "\\" ? ".cmd" : ""));
-    const tmpFile = join(tmpdir(), `opencode-export-${Date.now()}.json`);
-    const shimScript = [
-      '#!/bin/sh',
-      'exec opencode export "$@" ' + sep + tmpFile.replace(/ /g, '\\ '),
-    ].join("\n");
-    writeFileSync(shimPath, shimScript, { mode: 0o755 });
-    try {
-      await new Promise((resolve, reject) => {
-        const fd = openSync(tmpFile, "w", 0o600);
-        const child = spawn("opencode", ["export", sessionID], {
-          stdio: ["ignore", fd, "pipe"],
-        });
-        let errTail = "";
-        child.stderr.on("data", (d) => { errTail = (errTail + d).slice(-500); });
-        child.on("exit", (code) => {
-          closeSync(fd);
-          if (code !== 0) {
-            process.stderr.write(`[timeline] export failed: ${sessionID} — ${errTailOneLine(errTail)}\n`);
-            reject(new Error("export failed"));
-          } else {
-            resolve();
-          }
-        });
-        child.on("error", (e) => {
-          process.stderr.write(`[timeline] export failed: ${sessionID} — ${errTailOneLine(errTail)}\n`);
-          reject(e);
-        });
-      });
-      raw = readFileSync(tmpFile, "utf-8");
-      if (!raw || !raw.trim()) {
-        process.stdout.write(JSON.stringify({ error: "export_failed" }) + "\n");
-        process.exit(1);
-      }
-    } finally {
-      try { unlinkSync(tmpFile); } catch { }
-      try { rmSync(shimDir, { recursive: true, force: true }); } catch { }
-    }
-  }
-} catch {
-  process.stdout.write(JSON.stringify({ error: "export_failed" }) + "\n");
-  process.exit(1);
+  return await runExport(sessionID, timeoutMs);
 }
 
 let exportData;
-try {
-  exportData = JSON.parse(raw);
-} catch {
-  process.stdout.write(JSON.stringify({ error: "invalid_export" }) + "\n");
-  process.exit(1);
+
+if (exportPath) {
+  // 2-й аргумент — готовый export JSON: CLI вообще не трогаем
+  let raw = null;
+  try { raw = readFileSync(exportPath, "utf-8"); } catch { }
+  if (!raw || !raw.trim()) {
+    process.stdout.write(JSON.stringify({ error: "export_failed" }) + "\n");
+    process.exit(1);
+  }
+  try {
+    exportData = JSON.parse(raw);
+  } catch {
+    process.stdout.write(JSON.stringify({ error: "invalid_export" }) + "\n");
+    process.exit(1);
+  }
+} else {
+  // primary-экспорт через CLI (V2-first; режим кэшируется и переиспользуется child-вызовами)
+  try {
+    exportData = await runExport(sessionID, null);
+  } catch (e) {
+    process.stdout.write(JSON.stringify({ error: e && e.message === "invalid_export" ? "invalid_export" : "export_failed" }) + "\n");
+    process.exit(1);
+  }
 }
 
 const info = exportData.info || {};

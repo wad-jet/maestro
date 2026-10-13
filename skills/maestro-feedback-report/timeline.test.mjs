@@ -905,7 +905,7 @@ function makeFakeOpencode(dirName, { failChild = false, failAll = false, noise =
   if (failAll) {
     lines.push("echo 'boom-detail' >&2; exit 1");
   } else {
-    if (failChild) lines.push('if [ "$2" = "ses_child_bad" ]; then echo "boom-detail" >&2; exit 1; fi');
+    if (failChild) lines.push('if [ "$3" = "ses_child_bad" ]; then echo "boom-detail" >&2; exit 1; fi');
     for (let i = 0; i < noise; i++) lines.push("echo 'progress-noise-" + i + "' >&2");
     lines.push('cat "' + fixturePath + '"');
   }
@@ -958,7 +958,7 @@ test("stderr: многострочный stderr CLI → diag остаётся о
   const dir = makeFakeOpencode("stderr_multiline", { failChild: true, noise: 0 });
   // многострочный stderr для child-sid; cat — абсолютным путём (CWD репо, а не dir)
   const sh = join(dir, "opencode");
-  writeFileSync(sh, "#!/bin/sh\nif [ \"$2\" = \"ses_child_bad\" ]; then printf 'line1\\nline2-injected\\n' >&2; exit 1; fi\ncat \"" + join(dir, "fixture.json") + "\"\n");
+  writeFileSync(sh, "#!/bin/sh\nif [ \"$3\" = \"ses_child_bad\" ]; then printf 'line1\\nline2-injected\\n' >&2; exit 1; fi\ncat \"" + join(dir, "fixture.json") + "\"\n");
   chmodSync(sh, "755");
   const r = runReal(dir, "ses_stderr_ml");
   assert.equal(r.status, 0);
@@ -966,6 +966,30 @@ test("stderr: многострочный stderr CLI → diag остаётся о
   assert.equal(lines.length, 1);
   assert.match(lines[0], /\[timeline\] export failed: ses_child_bad/);
   assert.match(lines[0], /line1 line2-injected/);
+});
+
+test("V2-first: session export — успешен, fallback не вызывается", () => {
+  const dir = makeFakeOpencode("v2first_ok", { noise: 0 });
+  // шим отвечает только на V2-форму (`session export <id>`); любая другая команда — ошибка
+  const sh = join(dir, "opencode");
+  writeFileSync(sh, "#!/bin/sh\nif [ \"$1\" = \"session\" ] && [ \"$2\" = \"export\" ]; then cat \"" + join(dir, "fixture.json") + "\"; else echo \"unknown-command\" >&2; exit 1; fi\n");
+  chmodSync(sh, "755");
+  const r = runReal(dir, "ses_v2first");
+  assert.equal(r.status, 0);
+  assert.equal(r.stderr, "");
+  const data = JSON.parse(r.stdout.trim());
+  assert.ok(data.metrics.tokensByAgent.haiku, "child-пул должен был отработать в V2-режиме");
+});
+
+test("legacy-fallback: session export падает → export ок; промежуточный сбой молчит", () => {
+  const dir = makeFakeOpencode("legacy_ok", { noise: 0 });
+  // шим валит любой `session …` (V2-форма), отвечает только на legacy `export <id>`
+  const sh = join(dir, "opencode");
+  writeFileSync(sh, "#!/bin/sh\nif [ \"$1\" = \"session\" ]; then echo \"boom-intermediate\" >&2; exit 1; fi\ncat \"" + join(dir, "fixture.json") + "\"\n");
+  chmodSync(sh, "755");
+  const r = runReal(dir, "ses_legacy");
+  assert.equal(r.status, 0);
+  assert.equal(r.stderr, "");
 });
 
 test("session.model — объект {providerID, id} (сессионный формат экспорта)", () => {
