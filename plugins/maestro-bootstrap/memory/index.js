@@ -1348,8 +1348,8 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       },
     });
 
-    // --- Register tools via V2 ctx.tool.transform ---
-    const toolRegistration = await ctx.tool.transform((editor) => {
+    // --- Register tools via V2 client.tool.transform ---
+    const toolRegistration = await client.tool.transform((editor) => {
       editor.add(memoryProbeTool);
       editor.add(memorySearchTool);
       editor.add(memoryForgetTool);
@@ -1368,7 +1368,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     const eventController = new AbortController();
     void (async () => {
       try {
-        for await (const event of ctx.event.subscribe({ signal: eventController.signal })) {
+        for await (const event of client.event.subscribe({ signal: eventController.signal })) {
           try {
             const { type, properties } = event?.data ?? event ?? {};
             const sessionID = properties?.sessionID;
@@ -1396,7 +1396,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     })();
 
     // --- Chat message hook (userMessageCounts) ---
-    const msgCountRegistration = await ctx.session.hook("context", async (event) => {
+    const msgCountRegistration = await client.session.hook("context", async (event) => {
       try {
         const sessionID = event?.sessionID;
         if (!sessionID || !config.enabled) return;
@@ -1414,7 +1414,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     // --- System transform (unsaved notice) ---
     let systemTransformRegistration = null;
     if (memClass.disabled_reason) {
-      systemTransformRegistration = await ctx.session.hook("context", async (event) => {
+      systemTransformRegistration = await client.session.hook("context", async (event) => {
         try {
           const sessionID = event?.sessionID;
           if (!sessionID || !(await isNoticeEligible(sessionID))) return;
