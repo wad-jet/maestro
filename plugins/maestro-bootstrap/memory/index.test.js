@@ -42,7 +42,20 @@ function mkClient(overrides = {}) {
       get: async () => ({ data: { id: "s", parentID: null } }),
       messages: async () => ({ data: [] }),
       list: async () => ({ data: [] }),
+      hook: async () => ({ dispose: () => {} }),
       ...sessionOverrides,
+    },
+    event: {
+      subscribe: async function* () {
+        // Пустой поток событий — тесты не зависят от реальных событий
+      },
+    },
+    tool: {
+      transform: async (fn) => {
+        const added = [];
+        fn({ add: (t) => added.push(t) });
+        return { dispose: () => {} };
+      },
     },
     ...rest,
   };
@@ -2099,10 +2112,11 @@ test("memory_stats_detail fail-soft: revList null → только merged-счё
 });
 
 test("@maestro-memory duplicates diagnostics: disabled_reason / mainline_unresolved / unmasked_branch_metadata", async () => {
-  // (a) память off → шаблон команды инструктирует выводить disabled_reason.
-  const cmdPath = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "commands", "maestro-memory.md");
-  const cmd = readFileSync(cmdPath, "utf8");
-  assert.match(cmd, /disabled_reason/, "command template must surface disabled_reason when memory is off");
+  // (a) память off → ядро скилла инструктирует выводить disabled_reason
+  // (32b9b95: команды slim — контент в skills/maestro-memory/).
+  const skillPath = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "skills", "maestro-memory", "SKILL.md");
+  const cmd = readFileSync(skillPath, "utf8");
+  assert.match(cmd, /disabled_reason/, "skill core must surface disabled_reason when memory is off");
 
   const dir = mkdtempSync(join(tmpdir(), "mem-diag-"));
   const saved = process.env.XDG_DATA_HOME;
@@ -3037,7 +3051,10 @@ test("M1: project scope does NOT call candidates (no wasted query, no throw risk
       root: dir,
       deps: { storage, embeddings: mkMockEmbeddings(), git: mkScopeGit() },
     });
-    // init-промоция (Task 5) тоже вызывает candidates — сбрасываем счётчик.
+    // init-промоция (Task 5) и цепочка onStartup→emitStorageStats
+    // (fire-and-forget) тоже вызывают candidates — даём цепочке завершиться
+    // и сбрасываем счётчик (иначе вызов попадает в окно замера — race).
+    await sleep(300);
     candidatesCalls = 0;
     const res = await hooks.tool.memory_search.execute({ query: "x", scope: "project" }, { sessionID: "s1" });
     assert.equal(candidatesCalls, 0, "project scope must NOT call candidates");
