@@ -200,7 +200,7 @@ describe("merge-guard hook integration (tool.execute.before)", () => {
   it("denies git merge without marker, allows after marker created", async () => {
     await assert.rejects(
       hooks["tool.execute.before"](
-        { tool: "bash", sessionID: "ses_x", callID: "c1", output: { args: { command: "git merge --ff-only f" } } },
+        { tool: "shell", sessionID: "ses_x", callID: "c1", input: { command: "git merge --ff-only f" } },
       ),
       /merge-guard:deny.*git merge/,
     );
@@ -212,7 +212,7 @@ describe("merge-guard hook integration (tool.execute.before)", () => {
     );
     await assert.doesNotReject(
       hooks["tool.execute.before"](
-        { tool: "bash", sessionID: "ses_x", callID: "c2", output: { args: { command: "git merge --ff-only f" } } },
+        { tool: "shell", sessionID: "ses_x", callID: "c2", input: { command: "git merge --ff-only f" } },
       ),
     );
   });
@@ -220,7 +220,7 @@ describe("merge-guard hook integration (tool.execute.before)", () => {
   it("denies push to mainline without marker", async () => {
     await assert.rejects(
       hooks["tool.execute.before"](
-        { tool: "bash", sessionID: "ses_y", callID: "c3", output: { args: { command: "git push origin main" } } },
+        { tool: "shell", sessionID: "ses_y", callID: "c3", input: { command: "git push origin main" } },
       ),
       /merge-guard:deny.*git push \(mainline\)/,
     );
@@ -229,7 +229,7 @@ describe("merge-guard hook integration (tool.execute.before)", () => {
   it("allows non-guard bash commands", async () => {
     await assert.doesNotReject(
       hooks["tool.execute.before"](
-        { tool: "bash", sessionID: "ses_z", callID: "c4", output: { args: { command: 'git commit -m "x"' } } },
+        { tool: "shell", sessionID: "ses_z", callID: "c4", input: { command: 'git commit -m "x"' } },
       ),
     );
   });
@@ -246,7 +246,7 @@ describe("merge-guard hook integration (tool.execute.before)", () => {
       const offHooks = offCtx._hooks;
       await assert.doesNotReject(
         offHooks["tool.execute.before"](
-          { tool: "bash", sessionID: "ses_q", callID: "c5", output: { args: { command: "git merge --ff-only f" } } },
+          { tool: "shell", sessionID: "ses_q", callID: "c5", input: { command: "git merge --ff-only f" } },
         ),
       );
     } finally {
@@ -258,7 +258,7 @@ describe("merge-guard hook integration (tool.execute.before)", () => {
     await assert.rejects(
       async () => {
         await hooks["tool.execute.before"](
-          { tool: "bash", sessionID: "ses_m", callID: "c6", output: { args: { command: "git merge --ff-only f" } } },
+          { tool: "shell", sessionID: "ses_m", callID: "c6", input: { command: "git merge --ff-only f" } },
         );
       },
       /merge-guard:deny.*git merge/,

@@ -9,6 +9,14 @@
 
 ## [Unreleased]
 
+> **Версия 5.6.4** — Patch: runtime-фиксы V2 — `maestro_config` снова доступен на V2 (fallback `session.get` → `session.context`), V2-детекция — warn вместо throw.
+
+### Исправлено
+
+- **maestro_config guard (5.6.4):** guard в `makeMaestroConfigTool` (`core.js`) вызывал `session.get({ sessionID })` — на V2 runtime метод недоступен/возвращает undefined → вечный deny `session_unavailable`, инструмент был недоступен. Разделение типов ошибок: `TypeError` (метод отсутствует) / falsy-ответ → fallback на `session.context({ sessionID })` (контекст отвечает = сессия существует → allow, service-сессии фильтруются по SESSIONS-set и раньше); прочие ошибки `session.get` → deny (fail-closed, прежнее поведение). +4 теста V2 fallback (272/272).
+- **V2-детекция — warn вместо throw (5.6.4):** V2-only check в `createBootstrapPlugin` бросал `Error` при отсутствии `session.context` → плагин падал целиком на runtime без V2 plugin API (popup «maestro-bootstrap failed»). Теперь — `log.warn("v2_runtime_not_available")`, плагин продолжает работу; V2-фичи деградируют точечно.
+- **docs-drift:** маркеры версий AGENTS.md и `docs/project-context.md` (5.6.3 → 5.6.4).
+
 > **Версия 5.6.3** — Patch: завершение V2-миграции: восстановление утраченной memory-layer функциональности (индексация, auto-recall, полные реализации тулов), V1-совместимая hook-поверхность, тестовый суит V2.
 
 ### Исправлено
