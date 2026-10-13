@@ -243,10 +243,11 @@ const fixtureFast = {
   ],
 };
 
-// --- V2-экспорт (новый формат opencode): плоская структура (type/time/content на самом сообщении) ---
+// --- V2-экспорт (новый формат opencode): плоская структура (type/time/content на самом сообщении);
+// пер-тул тайминги — на самом content-item (time: created/ran/completed), не в state ---
 const fixtureV2 = {
   info: { id: "ses_v2", model: { providerID: "akash", id: "X/Y" },
-          time: { created: 1000, updated: 9000 } },
+          time: { created: 500, updated: 9000 } },
   messages: [
     { id: "m1", time: { created: 1000 }, type: "user", text: "go", files: [], agents: [] },
     { id: "m2", time: { created: 2000, streamed: 2001, completed: 6000 }, type: "assistant",
@@ -254,11 +255,14 @@ const fixtureV2 = {
       content: [
         { type: "text", text: "ok" },
         { type: "tool", id: "t1", name: "shell", executed: true,
+          time: { created: 2100, ran: 2200, completed: 3200 },
           state: { status: "completed", input: { command: "node test.js" } } },
         { type: "tool", id: "t2", name: "subagent", executed: true,
+          time: { created: 3300, ran: 3400, completed: 5400 },
           state: { status: "completed", input: { agent: "sonnet", description: "Review feature X", prompt: "p" },
                    metadata: { sessionID: "child_v2a", status: "completed", truncated: false } } },
         { type: "tool", id: "t3", name: "question", executed: true,
+          time: { created: 5500, ran: 5500, completed: 5600 },
           state: { status: "completed", input: { questions: [] } } },
       ],
       tokens: { input: 100, output: 50, reasoning: 5, cache: { read: 10, write: 2 } },
@@ -1157,4 +1161,64 @@ test("V2-экспорт: структура (roles/tools/agents/bash/metrics)", 
   // child-атрибуция (fixture-mode): metadata.sessionID → sessionId, input.agent → subagent_type
   assert.equal(out.metrics.tokensByAgent.sonnet.count, 1);
   assert.equal(out.metrics.tokensByAgent.sonnet.input, 70);
+});
+
+test("V2-тайминги: ran→completed, top_ops, инференс, границы", () => {
+  const exportDir = join(tmpDir, "child-export-v2-timings");
+  mkdirSync(exportDir, { recursive: true });
+  writeFileSync(join(exportDir, "child_v2a.json"), JSON.stringify({
+    info: { id: "child_v2a", tokens: { input: 70, output: 7, reasoning: 0, cache: { read: 0, write: 0 } } },
+    messages: [],
+  }));
+  const out = runFixture(fixtureV2, "v2_timings", { MAESTRO_TIMELINE_EXPORT_DIR: exportDir });
+  assert.equal(out.totals.toolTimeMs, 3100);            // 1000 + 2000 + 100
+  assert.equal(out.top_ops[0].tool, "subagent");
+  assert.equal(out.top_ops[0].durationMs, 2000);
+  assert.equal(out.totals.inferenceMs, 400);            // span(blockStart 2100 → completed 5600) = 3500 − 3100
+  assert.equal(out.session.start, 500);                 // info.time.created (min с метками сообщений)
+  assert.equal(out.session.end, 9000);                  // info.time.updated (max с метками сообщений)
+  // NB: в брифе/плане указано 8000 — устаревшая арифметика черновика (info.created было 1000);
+  // при start=500/end=9000 семантика end−start даёт 8500.
+  assert.equal(out.session.durationMs, 8500);
+  assert.equal(out.metrics.machineActiveMs, 3500);      // toolTimeMs + inferenceMs
+});
+
+test("V2 tool без ran: спан created→completed", () => {
+  const data = {
+    info: { id: "ses_v2_noran", model: "m", time: { created: 100, updated: 400 } },
+    messages: [
+      { id: "m1", time: { created: 100 }, type: "user", text: "go" },
+      { id: "m2", time: { created: 150 }, type: "assistant", agent: "haiku",
+        content: [
+          { type: "tool", id: "t1", name: "shell", executed: true,
+            time: { created: 100, completed: 300 }, // ran нет → весь спан операции
+            state: { status: "completed", input: { command: "node t.js" } } },
+        ] },
+    ],
+  };
+  const out = runFixture(data, "v2_noran");
+  assert.equal(out.top_ops.length, 1);
+  assert.equal(out.top_ops[0].tool, "shell");
+  assert.equal(out.top_ops[0].durationMs, 200);
+});
+
+test("V2 idle-сообщения расширяют границы сессии", () => {
+  const exportDir = join(tmpDir, "child-export-v2-idle");
+  mkdirSync(exportDir, { recursive: true });
+  writeFileSync(join(exportDir, "child_v2a.json"), JSON.stringify({
+    info: { id: "child_v2a", tokens: { input: 70, output: 7, reasoning: 0, cache: { read: 0, write: 0 } } },
+    messages: [],
+  }));
+  // вариант fixtureV2: idle m3 позже info.time.updated — raw-метка расширяет конец сессии
+  const data = {
+    ...fixtureV2,
+    messages: [
+      fixtureV2.messages[0],
+      fixtureV2.messages[1],
+      { id: "m3", time: { created: 9500 }, type: "idle" },
+    ],
+  };
+  const out = runFixture(data, "v2_idle_bounds", { MAESTRO_TIMELINE_EXPORT_DIR: exportDir });
+  assert.equal(out.session.end, 9500);  // метка idle-сообщения шире info.time.updated (9000)
+  assert.equal(out.session.start, 500); // info.time.created остаётся стартом (min)
 });

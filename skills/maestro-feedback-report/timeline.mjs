@@ -190,6 +190,9 @@ const isBashTool = (name) => name === "bash" || name === "shell";
 // V1 (старый CLI): { info: { role, time: { created }, tokens, cost }, parts: [...] } — чтение как раньше.
 // V2 (новый CLI):  { type, time: { created }, content: [...], tokens, cost } — плоская структура.
 // Неролевые/служебные сообщения (V1 без role; V2 idle/synthetic/system/compaction/…) → null (пропуск).
+// Tool-часть в обеих ветках несёт единое поле time: V1-канон { start, end } (из state.time),
+// V2 добавляет blockStart (dispatch-задержка created→ran уходит в инференс-остаток блока).
+let v2Detected = false; // хотя бы одно V2-сообщение распознано → слияние info.time в границы сессии
 function normalizeMessage(m) {
   if (!m || typeof m !== "object") return null;
   // --- V1 ---
@@ -197,7 +200,13 @@ function normalizeMessage(m) {
     const role = m.info.role;
     if (role !== "user" && role !== "assistant") return null;
     const ts = m.info.time && typeof m.info.time.created === "number" ? m.info.time.created : null;
-    return { role, ts, parts: Array.isArray(m.parts) ? m.parts : [], tokens: m.info.tokens, cost: m.info.cost };
+    const parts = (Array.isArray(m.parts) ? m.parts : []).map(p => {
+      if (!p || typeof p !== "object" || p.type !== "tool") return p;
+      // Тайминги V1 лежат в state.time — переносим в единое поле time (blockStart нет: span от start)
+      const t = p.state && typeof p.state === "object" && p.state.time && typeof p.state.time === "object" ? p.state.time : {};
+      return { ...p, time: { start: t.start, end: t.end } };
+    });
+    return { role, ts, parts, tokens: m.info.tokens, cost: m.info.cost };
   }
   // --- V2 ---
   if (m.type === "user" || m.type === "assistant") {
@@ -213,20 +222,36 @@ function normalizeMessage(m) {
         if (st.metadata && typeof st.metadata === "object") st.metadata.sessionId ??= st.metadata.sessionID;
         if (isTaskTool(c.name) && st.input && typeof st.input === "object") st.title ??= st.input.description;
       }
-      parts.push({ type: "tool", tool: c.name, state: st });
+      // Тайминги V2 — на самом content-item (c.time), не в state:
+      // start = ran (исполнение; без ran — весь спан от created), end = completed, blockStart = created.
+      const ct = c.time && typeof c.time === "object" ? c.time : {};
+      parts.push({ type: "tool", tool: c.name, state: st, time: { start: ct.ran ?? ct.created, end: ct.completed, blockStart: ct.created } });
     }
+    v2Detected = true;
     return { role: m.type, ts, parts, tokens: m.tokens, cost: m.cost };
   }
   return null;
 }
 
-const allTs = messages.map(m => m.info && m.info.time && m.info.time.created).filter(t => typeof t === "number");
-const sessionStart = allTs.length ? Math.min(...allTs) : null;
-const sessionEnd = allTs.length ? Math.max(...allTs) : null;
-const sessionDurationMs = sessionStart !== null && sessionEnd !== null ? sessionEnd - sessionStart : null;
-
 // Нормализованные сообщения (V1/V2 → единая форма); три прохода агрегации ниже читают только их.
 const norm = messages.map(normalizeMessage);
+
+// Границы сессии: raw-метки всех сообщений (V1 — m.info.time.created, V2 — m.time.created;
+// неречевые V2 idle/… в тоталы не попадают, но границы расширяют). Для V2-детектированного
+// экспорта — слияние с info.time: created → старт (min), updated → конец (max).
+const allTs = messages.map(m => {
+  if (!m || typeof m !== "object") return undefined;
+  if (m.info && typeof m.info === "object") return m.info.time && m.info.time.created;
+  return m.time && m.time.created;
+}).filter(t => typeof t === "number");
+const sessionMarks = [...allTs];
+if (v2Detected && info.time && typeof info.time === "object") {
+  if (typeof info.time.created === "number") sessionMarks.push(info.time.created);
+  if (typeof info.time.updated === "number") sessionMarks.push(info.time.updated);
+}
+const sessionStart = sessionMarks.length ? Math.min(...sessionMarks) : null;
+const sessionEnd = sessionMarks.length ? Math.max(...sessionMarks) : null;
+const sessionDurationMs = sessionStart !== null && sessionEnd !== null ? sessionEnd - sessionStart : null;
 
 let toolOpsCount = 0;
 let toolTimeMs = 0;
@@ -249,7 +274,6 @@ for (const n of norm) {
 
   const parts = n.parts;
   const toolParts = parts.filter(p => typeof p === "object" && p.type === "tool");
-  const toolStates = toolParts.map(p => p.state).filter(s => typeof s === "object" && s);
 
   if (role === "assistant") assistantTs = ts;
 
@@ -273,8 +297,7 @@ for (const n of norm) {
     nTools++;
     toolOpsCount++;
 
-    const st = tp.state || {};
-    const t = st.time || {};
+    const t = tp.time || {};
     const dur = (typeof t.start === "number" && typeof t.end === "number")
       ? (t.end - t.start) : null;
 
@@ -322,21 +345,21 @@ for (const n of norm) {
     }
   }
 
-  if (toolStates.length) {
-    const complete = toolStates.filter(s => typeof s.time?.start === "number" && typeof s.time?.end === "number");
-    if (complete.length) {
-      const earliestStart = Math.min(...complete.map(s => s.time.start));
-      const latestEnd = Math.max(...complete.map(s => s.time.end));
-      const span = latestEnd - earliestStart;
-      infMs = Math.max(0, span - toolMs);
-      inferenceMs += infMs;
-      for (let i = 1; i < complete.length; i++) {
-        const prevEnd = complete[i - 1].time.end;
-        const currStart = complete[i].time.start;
-        const gap = currStart - prevEnd;
-        if (gap > 5000) {
-          gaps.push({ type: "inference", ms: gap, afterTs: prevEnd, beforeTs: currStart });
-        }
+  const complete = toolParts.filter(p => typeof p.time?.start === "number" && typeof p.time?.end === "number");
+  if (complete.length) {
+    // blockStart (V2: created) захватывает dispatch-задержку (created→ran) в инференс-остаток блока;
+    // V1 blockStart нет → span от start (эквивалент старому чтению state.time).
+    const earliestStart = Math.min(...complete.map(p => p.time.blockStart ?? p.time.start));
+    const latestEnd = Math.max(...complete.map(p => p.time.end));
+    const span = latestEnd - earliestStart;
+    infMs = Math.max(0, span - toolMs);
+    inferenceMs += infMs;
+    for (let i = 1; i < complete.length; i++) {
+      const prevEnd = complete[i - 1].time.end;
+      const currStart = complete[i].time.start;
+      const gap = currStart - prevEnd;
+      if (gap > 5000) {
+        gaps.push({ type: "inference", ms: gap, afterTs: prevEnd, beforeTs: currStart });
       }
     }
   }
