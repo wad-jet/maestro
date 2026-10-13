@@ -33,3 +33,25 @@ describe("pipeline-status state", () => {
     assert.equal(s2.active, false); // internal not affected
   });
 });
+
+describe("status block generation", () => {
+  it("idle generates idle block", () => {
+    ps.clearPipelineStatus();
+    const block = ps.formatStatusBlock();
+    assert.ok(block.includes("maestro pipeline: idle"));
+  });
+
+  it("active generates active block with step info", () => {
+    ps.setPipelineStatus({ step: 7, totalSteps: 18, description: "Feature Classification" });
+    const block = ps.formatStatusBlock();
+    assert.ok(block.includes("maestro pipeline: active"));
+    assert.ok(block.includes("step 7/18"));
+    assert.ok(block.includes("Feature Classification"));
+  });
+
+  it("format uses totalSteps as-is (supports floats like '18.5')", () => {
+    ps.setPipelineStatus({ step: 18, totalSteps: "18.5", description: "Feedback Report" });
+    const block = ps.formatStatusBlock();
+    assert.ok(block.includes("step 18/18.5"));
+  });
+});

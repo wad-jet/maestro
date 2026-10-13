@@ -14,3 +14,11 @@ export function setPipelineStatus({ step, totalSteps, description }) {
 export function clearPipelineStatus() {
   state = { active: false, step: null, totalSteps: null, description: '' };
 }
+
+export function formatStatusBlock() {
+  if (!state.active) {
+    return "## maestro pipeline: idle";
+  }
+  const total = state.totalSteps ?? '?';
+  return `## maestro pipeline: active (step ${state.step}/${total}, ${state.description})`;
+}
