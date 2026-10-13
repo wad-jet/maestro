@@ -1,8 +1,10 @@
-import { describe, it } from "node:test";
+import { describe, it, beforeEach } from "node:test";
 import { strict as assert } from "node:assert";
 import * as ps from "./pipeline-status.js";
 
 describe("pipeline-status state", () => {
+  beforeEach(() => ps.clearPipelineStatus());
+
   it("initial state is idle", () => {
     const s = ps.getPipelineStatus();
     assert.equal(s.active, false);
@@ -35,8 +37,9 @@ describe("pipeline-status state", () => {
 });
 
 describe("status block generation", () => {
+  beforeEach(() => ps.clearPipelineStatus());
+
   it("idle generates idle block", () => {
-    ps.clearPipelineStatus();
     const block = ps.formatStatusBlock();
     assert.ok(block.includes("maestro pipeline: idle"));
   });
