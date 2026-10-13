@@ -2,6 +2,10 @@ import { describe, it, beforeEach } from "node:test";
 import { strict as assert } from "node:assert";
 import * as ps from "./pipeline-status.js";
 
+// ---------------------------------------------------------------------------
+// pipeline-status state
+// ---------------------------------------------------------------------------
+
 describe("pipeline-status state", () => {
   beforeEach(() => ps.clearPipelineStatus());
 
@@ -56,5 +60,67 @@ describe("status block generation", () => {
     ps.setPipelineStatus({ step: 18, totalSteps: "18.5", description: "Feedback Report" });
     const block = ps.formatStatusBlock();
     assert.ok(block.includes("step 18/18.5"));
+  });
+});
+
+// ---------------------------------------------------------------------------
+// registerPipelineStatusHooks — context hook registration
+// ---------------------------------------------------------------------------
+
+describe("registerPipelineStatusHooks", () => {
+  it("registers a context hook and returns dispose", async () => {
+    let disposed = false;
+    const mockClient = {
+      session: {
+        hook: async (name, fn) => {
+          assert.equal(name, "context");
+          // Simulate: call the hook with a mock event
+          const event = { system: [] };
+          await fn(event);
+          // Check that system block was injected
+          assert.ok(event.system.some(s => typeof s === "object" && s.text?.includes("maestro pipeline")));
+          return { dispose: () => { disposed = true; } };
+        }
+      }
+    };
+    const result = await ps.registerPipelineStatusHooks({ client: mockClient, config: {}, log: {} });
+    assert.ok(result.dispose);
+    result.dispose();
+    assert.equal(disposed, true);
+  });
+
+  it("injects idle block when pipeline not active", async () => {
+    ps.clearPipelineStatus();
+    let capturedSystem = null;
+    const mockClient = {
+      session: {
+        hook: async (name, fn) => {
+          const event = { system: [] };
+          await fn(event);
+          capturedSystem = event.system;
+          return { dispose: () => {} };
+        }
+      }
+    };
+    await ps.registerPipelineStatusHooks({ client: mockClient, config: {}, log: {} });
+    assert.ok(capturedSystem.some(s => s.text?.includes("idle")));
+  });
+
+  it("injects active block when pipeline is active", async () => {
+    ps.setPipelineStatus({ step: 3, totalSteps: 18, description: "Pre-flight" });
+    let capturedSystem = null;
+    const mockClient = {
+      session: {
+        hook: async (name, fn) => {
+          const event = { system: [] };
+          await fn(event);
+          capturedSystem = event.system;
+          return { dispose: () => {} };
+        }
+      }
+    };
+    await ps.registerPipelineStatusHooks({ client: mockClient, config: {}, log: {} });
+    assert.ok(capturedSystem.some(s => s.text?.includes("active")));
+    assert.ok(capturedSystem.some(s => s.text?.includes("step 3/18")));
   });
 });
