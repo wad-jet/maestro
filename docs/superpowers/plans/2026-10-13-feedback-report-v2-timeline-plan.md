@@ -135,7 +135,7 @@ assert.equal(out.top_ops[0].durationMs, 2000);
 assert.equal(out.totals.inferenceMs, 400);            // span(blockStart 2100 → completed 5600) = 3500 − 3100
 assert.equal(out.session.start, 500);               // info.time.created (min с метками сообщений)
 assert.equal(out.session.end, 9000);                // info.time.updated (max с метками сообщений)
-assert.equal(out.session.durationMs, 8000);
+assert.equal(out.session.durationMs, 8500);
 assert.equal(out.metrics.machineActiveMs, 3500);      // toolTimeMs + inferenceMs
 ```
 
