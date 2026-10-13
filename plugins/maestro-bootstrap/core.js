@@ -338,16 +338,18 @@ export async function resolveIsTrustedSubagent(client, trustedAgents, sessionID)
   if (!client?.session?.get) return { trusted: false, agent: undefined };
   let session;
   try {
-    const resp = await client.session.get({ path: { id: sessionID } });
+    // V2: { sessionID } + session.context() (не messages)
+    const resp = await client.session.get({ sessionID });
     session = resp?.data ?? resp;
   } catch {
     return { trusted: false, agent: undefined };
   }
   if (!session?.parentID) return { trusted: false, agent: undefined };
   try {
-    const mresp = await client.session.messages({ path: { id: sessionID } });
-    const messages = mresp?.data ?? mresp;
-    const agent = agentNameFromMessages(Array.isArray(messages) ? messages : []);
+    // V2: session.context({ sessionID }) → readonly SessionMessageInfo[]
+    const mresp = await client.session.context({ sessionID });
+    const messages = Array.isArray(mresp) ? mresp : (mresp?.data ?? []);
+    const agent = agentNameFromMessages(messages);
     return { trusted: Boolean(agent && trustedAgents.has(agent)), agent };
   } catch {
     return { trusted: false, agent: undefined };
@@ -424,8 +426,9 @@ export function isConfidentialTarget(root, patterns, target) {
 
 export function filePathOf(tool, args) {
   if (!args) return undefined;
-  if ((tool === "read" || tool === "write" || tool === "edit") && typeof args.filePath === "string") {
-    return args.filePath;
+  // V2: read/edit/write принимают path, не filePath
+  if ((tool === "read" || tool === "write" || tool === "edit") && typeof args.path === "string") {
+    return args.path;
   }
   return undefined;
 }
@@ -548,7 +551,8 @@ export function makeMaestroConfigTool({ client, root, log }) {
     if (cached !== undefined) return cached;
     let reason;
     try {
-      const resp = await client?.session?.get?.({ path: { id: sessionID } });
+      // V2: { sessionID } format
+      const resp = await client?.session?.get?.({ sessionID });
       const data = resp?.data ?? resp;
       if (!data) reason = "session_unavailable";
       else if (data.parentID) reason = "task_session";
@@ -561,7 +565,7 @@ export function makeMaestroConfigTool({ client, root, log }) {
 
   const deny = (sessionID, reason) => {
     log?.info?.("maestro_config:access_denied", { sessionID, reason });
-    return "maestro_config: the tool is only available in top-level primary sessions";
+    return { content: [{ type: "text", text: "maestro_config: the tool is only available in top-level primary sessions" }] };
   };
 
   return {
@@ -582,20 +586,20 @@ export function makeMaestroConfigTool({ client, root, log }) {
       const file = resolveConfigFile(root);
       if (!fs.existsSync(file)) {
         log?.info?.("maestro_config:read", { sessionID, section: section ?? null, result: "file_missing" });
-        return JSON.stringify({ exists: false, config: {}, path: file });
+        return { content: [{ type: "text", text: JSON.stringify({ exists: false, config: {}, path: file }) }] };
       }
       let config;
       try { config = JSON.parse(fs.readFileSync(file, "utf8")); }
       catch {
         log?.info?.("maestro_config:read", { sessionID, section: section ?? null, result: "parse_error" });
-        return JSON.stringify({ exists: true, config: {}, parse_error: true, path: file });
+        return { content: [{ type: "text", text: JSON.stringify({ exists: true, config: {}, parse_error: true, path: file }) }] };
       }
       if (section === undefined || section === null) {
         log?.info?.("maestro_config:read", { sessionID, section: null, result: "ok" });
-        return JSON.stringify({ exists: true, config, path: file });
+        return { content: [{ type: "text", text: JSON.stringify({ exists: true, config, path: file }) }] };
       }
       if (typeof section !== "string" || section.startsWith(".") || section.endsWith(".") || section.split(".").some((seg) => seg.length === 0)) {
-        return `maestro_config: invalid section "${String(section)}" (dot-path, non-empty segments, no leading/trailing dots)`;
+        return { content: [{ type: "text", text: `maestro_config: invalid section "${String(section)}" (dot-path, non-empty segments, no leading/trailing dots)` }] };
       }
       let value = config;
       for (const seg of section.split(".")) {
@@ -603,11 +607,11 @@ export function makeMaestroConfigTool({ client, root, log }) {
           value = value[seg];
         } else {
           log?.info?.("maestro_config:read", { sessionID, section, result: "section_missing" });
-          return JSON.stringify({ exists: true, config: null, section_found: false, path: file });
+          return { content: [{ type: "text", text: JSON.stringify({ exists: true, config: null, section_found: false, path: file }) }] };
         }
       }
       log?.info?.("maestro_config:read", { sessionID, section, result: "ok" });
-      return JSON.stringify({ exists: true, config: value, section_found: true, path: file });
+      return { content: [{ type: "text", text: JSON.stringify({ exists: true, config: value, section_found: true, path: file }) }] };
     },
   };
 }
@@ -634,6 +638,15 @@ export async function createBootstrapPlugin(ctx) {
     filePrefix: "maestro-memory",
     filterEnv: "MAESTRO_MEMORY",
   });
+
+  // V2-only: fail-loud если контекст не V2 (session.context — маркер V2)
+  const isV2 = typeof ctx?.session?.context === "function";
+  if (!isV2) {
+    const msg = "[maestro-bootstrap] Требуется OpenCode V2 runtime (session.context). " +
+      "Обновите opencode до версии с V2 plugin API.";
+    log.error("v2_runtime_required", { error: msg });
+    throw new Error(msg);
+  }
 
   const config = loadMaestroConfig(undefined, root);
   const validatedWhitelist = validateWhitelist(loadWhitelist(config));
@@ -725,15 +738,16 @@ export async function createBootstrapPlugin(ctx) {
   })();
 
   // --- Tool hook: execute.before ---
+  // V2: event.input (не output), tool names: shell/subagent (не bash/task)
   const beforeRegistration = await ctx.tool.hook("execute.before", async (event) => {
     try {
       const input = event;
       if (!input || typeof input !== "object") return;
 
       // Merge guard
-      if (input.tool === "bash" && mergeGuardConf.enabled) {
-        const output = event?.output;
-        const detected = detectGuardCommand(typeof output?.args?.command === "string" ? output.args.command : "");
+      // V2: tool = "shell" (не "bash"), аргументы в event.input (не output)
+      if (input.tool === "shell" && mergeGuardConf.enabled) {
+        const detected = detectGuardCommand(typeof event.input?.command === "string" ? event.input.command : "");
         if (detected) {
           const kind = detected.kind;
           const res = checkMergeMarker(root, input.sessionID, Date.now(), mergeGuardConf);
@@ -755,8 +769,8 @@ export async function createBootstrapPlugin(ctx) {
       // Confidential control
       const CONF_TOOLS = new Set(["read", "write", "edit"]);
       if (CONF_TOOLS.has(input.tool)) {
-        const output = event?.output;
-        const target = filePathOf(input.tool, output?.args);
+        // V2: аргументы тула в event.input, path (не filePath)
+        const target = filePathOf(input.tool, event.input);
         const isConfTarget = target && !isPluginMetaFile(root, target) &&
           ((confidential.exists && isConfidentialTarget(root, confidential.paths, target)) ||
            isConfidentialTarget(root, confidential.builtin, target));
@@ -779,18 +793,19 @@ export async function createBootstrapPlugin(ctx) {
         }
       }
 
-      // Sanitize task prompt
-      if (input.tool === "task" && event?.output?.args?.prompt) {
-        const agent = event.output.args.subagent_type || event.output.args.model || "unknown";
+      // Sanitize subagent prompt
+      // V2: tool = "subagent" (не "task"), промпт в event.input.prompt
+      if (input.tool === "subagent" && event.input?.prompt) {
+        const agent = event.input.subagent_type || event.input.model || "unknown";
         if (!trustedAgents.has(agent)) {
           const opts = resolveSanitizeOptions(whitelist, agent);
           if (allRulesDisabled(opts)) {
             log.warn("sanitizer.all_rules_disabled", { sessionID: input.sessionID, callID: input.callID, tool: input.tool, agent });
           }
           try {
-            const res = sanitizeFn(event.output.args.prompt, opts);
+            const res = sanitizeFn(event.input.prompt, opts);
             if (res.count > 0) {
-              event.output.args.prompt = res.text;
+              event.input.prompt = res.text;
               log.warn("sanitizer.redacted", { sessionID: input.sessionID, callID: input.callID, tool: input.tool, agent, redacted: res.count });
             }
           } catch (cause) {
@@ -806,8 +821,8 @@ export async function createBootstrapPlugin(ctx) {
         }
       }
 
-      // Log task dispatch
-      if (input.tool === "task") {
+      // Log subagent dispatch
+      if (input.tool === "subagent") {
         toolCalls.set(input.callID, Date.now());
         log.info("tool.execute.before", { sessionID: input.sessionID, callID: input.callID, tool: input.tool });
       }
@@ -818,29 +833,34 @@ export async function createBootstrapPlugin(ctx) {
   });
 
   // --- Tool hook: execute.after ---
+  // V2: event.status/result/error (не output), tool = shell/subagent
   const afterRegistration = await ctx.tool.hook("execute.after", async (event) => {
     try {
       const input = event;
       if (!input || typeof input !== "object") return;
 
-      const startedAt = input.tool === "task" ? toolCalls.get(input.callID) : undefined;
+      const startedAt = input.tool === "subagent" ? toolCalls.get(input.callID) : undefined;
       if (startedAt !== undefined) toolCalls.delete(input.callID);
 
       const extra = { sessionID: input.sessionID, callID: input.callID, tool: input.tool };
       if (startedAt !== undefined) extra.durationMs = Date.now() - startedAt;
 
-      if (event?.output?.title) {
-        const agent = input.args?.subagent_type || input.args?.model || "unknown";
+      // V2: result может содержать title; fallback на input
+      const outputTitle = event.result?.title ?? event.output?.title;
+      if (outputTitle) {
+        const agent = input.args?.subagent_type ?? input.args?.model ?? "unknown";
         const opts = resolveSanitizeOptions(whitelist, agent);
         try {
-          extra.title = sanitizeFn(String(event.output.title), opts).text;
+          extra.title = sanitizeFn(String(outputTitle), opts).text;
         } catch {
           extra.title = "<unavailable>";
         }
       }
 
-      const isEmptySubagentResult = input.tool === "task" && (!event?.output?.title || !event?.output?.output) &&
-        (!event?.output?.metadata || Object.keys(event.output.metadata).length === 0);
+      // V2: проверяем пустой результат через event.status или event.result
+      const isEmptySubagentResult = input.tool === "subagent" &&
+        (!event?.result?.title && !event?.result?.output) &&
+        (!event?.result?.metadata || Object.keys(event.result.metadata).length === 0);
       if (isEmptySubagentResult) {
         log.warn("tool.execute.after.empty_result", { sessionID: input.sessionID, callID: input.callID, tool: input.tool });
       }
