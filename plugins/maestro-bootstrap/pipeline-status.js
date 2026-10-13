@@ -28,7 +28,7 @@ export function formatStatusBlock() {
 // ---------------------------------------------------------------------------
 
 export async function registerPipelineStatusHooks({ client, config, log }) {
-  const registration = await client.session.hook("context", async (event) => {
+  const registration = await client?.session?.hook?.("context", async (event) => {
     try {
       const block = formatStatusBlock();
       if (!event.system) event.system = [];

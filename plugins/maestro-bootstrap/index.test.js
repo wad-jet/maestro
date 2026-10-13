@@ -16,6 +16,7 @@ import {
   directiveText as frDirectiveText,
   registerFeedbackReportHooks,
 } from "./feedback-report.js";
+import { clearPipelineStatus } from "./pipeline-status.js";
 import opencodePlugin from "./index.js";
 
 function readLogs(dir, filePrefix = "maestro-bootstrap") {
@@ -3095,6 +3096,7 @@ describe("pipeline-status integration", () => {
   });
 
   it("pipeline-status tool returns idle status when not set", async () => {
+    clearPipelineStatus();
     const p = await MaestroBootstrapPlugin({ directory: dir });
     const tool = p.tool.maestro_pipeline_status;
     const result = await tool.execute({ action: "get" }, { sessionID: "s1" });
