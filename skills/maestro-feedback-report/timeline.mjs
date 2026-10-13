@@ -242,6 +242,16 @@ function normalizeMessage(m) {
 // Нормализованные сообщения (V1/V2 → единая форма); три прохода агрегации ниже читают только их.
 const norm = messages.map(normalizeMessage);
 
+// Fail-loud guard (инцидент 2026-10-13): сообщения есть, но ни одно не распознано как ролевое
+// (user/assistant) — это неизвестный формат экспорта. Раньше скрипт молча выходил с пустыми
+// агрегатами (toolOps: 0, start: null) и записывал мусорную строку в history.jsonl; теперь —
+// явная ошибка ДО метрик, child-fanout и записи jsonl. Пустая сессия (messages: []) — не ошибка;
+// ролевое сообщение без ts тоже (normalizeMessage вернёт объект с ts: null, не null).
+if (messages.length > 0 && !norm.some(n => n !== null)) {
+  process.stdout.write(JSON.stringify({ error: "format_unrecognized" }) + "\n");
+  process.exit(1);
+}
+
 // Границы сессии: raw-метки всех сообщений (V1 — m.info.time.created, V2 — m.time.created;
 // неречевые V2 idle/… в тоталы не попадают, но границы расширяют). Для V2-детектированного
 // экспорта — слияние с info.time: created → старт (min), updated → конец (max).

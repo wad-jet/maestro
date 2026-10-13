@@ -420,6 +420,30 @@ test("empty file yields export_failed", () => {
   }
 });
 
+test("format_unrecognized: нераспознанные сообщения → exit 1, history.jsonl не тронут", () => {
+  const path = join(tmpDir, "unrecognized.json");
+  writeFileSync(path, JSON.stringify({ info: { id: "ses_x" }, messages: [{ foo: 1 }, { bar: { baz: 2 } }] }));
+  const dir = join(tmpDir, "j-unrecognized");
+  mkdirSync(dir, { recursive: true });
+  const jsonl = join(dir, "history.jsonl");
+  writeFileSync(jsonl, '{"sessionID":"ses_old"}\n');
+  try {
+    execFileSync(process.execPath, [scriptPath, "ses_x", path], {
+      encoding: "utf-8",
+      timeout: 30000,
+      env: { ...process.env, MAESTRO_METRICS_JSONL: jsonl },
+    });
+    assert.fail("should have thrown");
+  } catch (e) {
+    assert.equal(e.status, 1);
+    assert.deepEqual(JSON.parse(e.stdout.trim()), { error: "format_unrecognized" });
+    // jsonl: единственная строка ses_old сохранилась, новой записи нет
+    const lines = readFileSync(jsonl, "utf-8").trim().split("\n");
+    assert.equal(lines.length, 1);
+    assert.equal(JSON.parse(lines[0]).sessionID, "ses_old");
+  }
+});
+
 test("path-less export path (shim opencode)", () => {
   const fixtureData = {
     info: {
