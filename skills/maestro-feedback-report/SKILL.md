@@ -247,7 +247,7 @@ fallback: stdout `timeline.mjs` из 3c.
 <chronology: шаги, гейты, решения>
 
 ## Таймлайн и длительности операций
-> Источник: данные opencode-сессии (`opencode export` → `timeline.mjs`).
+> Источник: данные opencode-сессии (`opencode session export` → `timeline.mjs`).
 > Только агрегаты и обезличенные метки (SEC-4b): без путей файлов, без
 > текста команд (только первое слово), без title/описаний task, без текста
 > диалога.
