@@ -9,6 +9,15 @@
 
 ## [Unreleased]
 
+> **Версия 5.6.3** — Patch: завершение V2-миграции: восстановление утраченной memory-layer функциональности (индексация, auto-recall, полные реализации тулов), V1-совместимая hook-поверхность, тестовый суит V2.
+
+### Исправлено
+
+- **memory layer (5.6.3):** восстановлена в `memory/index.js` функциональность, утраченная при V2-миграции: индексация по `session.idle` (`indexer.onSessionIdle`), cleanup по `session.deleted` (`indexer.onSessionDeleted`, включая `delete_on_session_delete` + tombstone race-guard), auto-recall (`recall.onChatMessage` с дедупликацией user-сообщений + инжект `recall.systemBlock` через `ctx.session.hook("context")`), `indexer.onStartup()` backfill + `emitStorageStats`, retention-prune на старте, корректный `dispose` (indexer/recall/storage). V2-регистрация (tool.transform / event.subscribe / session.hook) — параллельно с V1-хуками (тестовая совместимость); конвертер V1 `args` → V2 JSON Schema `input` (optional/describe через shim-схему).
+- **Завершение V2-миграции (5.6.3):** `index.js` — fault-tolerant импорт `@opencode/plugin` (fallback identity — default export `{id, setup}`, валидная V2-форма); `communication.js` / `feedback-report.js` — V1-совместимые хуки (`chat.message`, `experimental.chat.system.transform`) рядом с V2 context-хуком (те же обработчики); `core.js` — test-seam `sanitizeImpl` (fail-closed D2), `SESSIONS` из `memory/summarize.js` (fast-check maestro_config), `maestro_config` — строковый результат (V2-совместимый, как memory-тулы), V1-сообщение `[sanitizer:failed]` (подсказка `sanitizer_whitelist`).
+- **Тесты:** `index.test.js` — V2 (mock ctx + управляемый event-поток + V1-компати-фабрика), `merge-guard.test.js` — мигрирован на V2 (`createBootstrapPlugin` + mock ctx), фикс race в M1 (onStartup→emitStorageStats) и stale-теста diagnostics (slim-команды 32b9b95). 382/382 (`npm test`) + 813/813 (`test:memory`).
+- **docs-drift:** маркеры версий AGENTS.md и `docs/project-context.md` (5.6.1 → 5.6.3).
+
 > **Версия 5.0.0** — Major: чистка + стабилизация (back-compat cleanup, install fixes, terminology, sanitizer knobs).
 
 ## [2026-10-07]
