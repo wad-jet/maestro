@@ -432,7 +432,8 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
   const isNoticeEligible = async (sessionID) => {
     if (!sessionID) return false;
     try {
-      const resp = await client?.session?.get?.({ path: { id: sessionID } });
+      // V2: { sessionID } format
+      const resp = await client?.session?.get?.({ sessionID });
       const data = resp?.data ?? resp;
       return Boolean(data) && !data.parentID && !SESSIONS.has(sessionID) &&
         !(typeof data.title === "string" && data.title.startsWith("[maestro-memory]"));
@@ -1199,7 +1200,8 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
                 let preview = [];
                 let messages;
                 try {
-                  const resp = await client.session.messages({ path: { id: c.session_id } });
+                  // V2: session.context({ sessionID }) вместо session.messages
+                  const resp = await client.session.context({ sessionID: c.session_id });
                   messages = (resp?.data ?? resp) ?? [];
                 } catch {
                   messages = null;
@@ -1330,7 +1332,8 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
                     // (0 LLM, без побочных эффектов reindexSession).
                     let sess = null;
                     try {
-                      const resp = await client.session.get({ path: { id: sid } });
+                      // V2: { sessionID } format
+                      const resp = await client.session.get({ sessionID: sid });
                       sess = resp?.data ?? resp;
                     } catch { /* sess = null → not_found */ }
                     if (!sess || typeof sess !== "object") {
@@ -1942,7 +1945,8 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
           if (!sessionID) return;
           // I2: только top-level primary сессии; субагентские task-сессии
           // исключаются (шум/токен-расход), как и сессии саммаризатора.
-          const sessResp = await client.session.get({ path: { id: sessionID } });
+          // V2: { sessionID } format
+          const sessResp = await client.session.get({ sessionID });
           const sess = sessResp?.data ?? sessResp;
           if (sess?.parentID) return;
           if (SESSIONS.has(sessionID)) return;

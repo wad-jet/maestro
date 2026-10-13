@@ -34,7 +34,8 @@ export async function registerFeedbackReportHooks({ client, config, log }) {
     if (eligibleCache.has(sessionID)) return eligibleCache.get(sessionID);
     let ok = false;
     try {
-      const resp = await client?.session?.get?.({ path: { id: sessionID } });
+      // V2: { sessionID } format
+      const resp = await client?.session?.get?.({ sessionID });
       const data = resp?.data ?? resp;
       ok = Boolean(data) && !data.parentID &&
         !(typeof data.title === "string" && data.title.startsWith(SERVICE_TITLE_PREFIX));
@@ -68,8 +69,9 @@ export async function registerFeedbackReportHooks({ client, config, log }) {
 
       const directive = directiveText(fr.mode);
       if (!event.system) event.system = [];
-      if (!event.system.some(s => typeof s === "string" && s.includes("feedback_report"))) {
-        event.system.push(directive);
+      if (!event.system.some(s => typeof s === "string" && s.includes("feedback_report")) &&
+          !event.system.some(s => typeof s === "object" && s.text?.includes("feedback_report"))) {
+        event.system.push({ type: "text", text: directive });
       }
       log?.debug?.("feedback_report:directive_injected", { sessionID, mode: fr.mode });
     } catch {

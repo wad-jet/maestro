@@ -41,17 +41,15 @@ export function parseSummary(raw) {
 
 export async function summarizeSession({ client, sessionID, transcript, model, summarizerModel, instructions }) {
   // C2: unwrap SDK response wrapper — real client returns { data, request, response }
-  const createRes = await client.session.create({ body: { title: `[maestro-memory] ${sessionID}` } });
+  // V2: session.create({ title }) вместо session.create({ body: { title } })
+  const createRes = await client.session.create({ title: `[maestro-memory] ${sessionID}` });
   const sm = createRes?.data ?? createRes;
   if (!sm?.id) {
     throw new Error("memory: session create returned no id");
   }
   SESSIONS.add(sm.id);
   try {
-    // Task 4: опциональный `instructions` — дописывается в промпт ДО строки
-    // «Ответь строго JSON» (git-путь: «текст — спецификация фичи, а не
-    // транскрипт сессии»). Без параметра промпт побайтово неизменён
-    // (backward-compat, regression-тест).
+    // Task 4: опциональный `instructions` — дописывается в промпт
     const prompt = [
       "Ты — саммаризатор сессий opencode. Из транскрипта (уже замаскированного) извлеки:",
       "- title: короткое имя сессии (тема)",
@@ -71,10 +69,10 @@ export async function summarizeSession({ client, sessionID, transcript, model, s
       e.errorClass = "model_unresolved";
       throw e;
     }
-    const promptRes = await client.session.prompt({
-      path: { id: sm.id },
-      body: { parts: [{ type: "text", text: prompt }], model: modelRef },
-    });
+    // V2: switchModel({ model }) + prompt({ sessionID, text })
+    // вместо prompt({ path, body: { parts, model } })
+    await client.session.switchModel({ sessionID: sm.id, model: modelRef });
+    const promptRes = await client.session.prompt({ sessionID: sm.id, text: prompt });
     const resp = promptRes?.data ?? promptRes;
     const text = (resp?.parts ?? []).filter((p) => p.type === "text").map((p) => p.text).join("\n");
     if (!text) {
@@ -84,7 +82,8 @@ export async function summarizeSession({ client, sessionID, transcript, model, s
     }
     return parseSummary(text);
   } finally {
-    try { await client.session.delete({ path: { id: sm.id } }); } catch {}
+    // V2: session.remove (не delete)
+    try { await client.session.remove({ sessionID: sm.id }); } catch {}
     // I1: remove from SESSIONS after best-effort delete
     SESSIONS.delete(sm.id);
   }

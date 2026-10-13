@@ -78,8 +78,9 @@ export async function reindexSessionArtifacts(deps, sessionID) {
   // 5. Сообщения сессии — ошибка/пусто → недоступны.
   let messages;
   try {
-    const resp = await client.session.messages({ path: { id: sessionID } });
-    messages = (resp?.data ?? resp) ?? [];
+    // V2: session.context({ sessionID }) вместо session.messages
+    const resp = await client.session.context({ sessionID });
+    messages = Array.isArray(resp) ? resp : ((resp?.data ?? resp) ?? []);
   } catch {
     return { status: "skip_messages_unavailable", artifacts: existing.artifacts ?? [] };
   }

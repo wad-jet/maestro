@@ -66,7 +66,8 @@ export async function registerCommunicationHooks({ client, config, log }) {
     if (eligibleCache.has(sessionID)) return eligibleCache.get(sessionID);
     let ok = false;
     try {
-      const resp = await client?.session?.get?.({ path: { id: sessionID } });
+      // V2: { sessionID } format
+      const resp = await client?.session?.get?.({ sessionID });
       const data = resp?.data ?? resp;
       ok = Boolean(data) && !data.parentID &&
         !(typeof data.title === "string" && data.title.startsWith(SERVICE_TITLE_PREFIX));
@@ -123,8 +124,8 @@ export async function registerCommunicationHooks({ client, config, log }) {
       if (!sessionID || !(await isEligible(sessionID))) return;
 
       if (event?.messages) {
-        const lastUserMsg = [...event.messages].reverse().find(m => m?.role === "user");
-        const text = lastUserMsg?.content ?? "";
+        const lastUserMsg = [...event.messages].reverse().find(m => m?.info?.role === "user");
+        const text = lastUserMsg?.content ?? lastUserMsg?.parts?.reduce((acc, p) => acc + (p.type === "text" ? (p.text ?? "") : ""), "") ?? "";
         if (detectPlainFlag(text) && !flagSessions.has(sessionID)) {
           flagSessions.add(sessionID);
           log?.info?.("communication:flag_plain", { sessionID });
@@ -138,7 +139,7 @@ export async function registerCommunicationHooks({ client, config, log }) {
         if (!event.system) event.system = [];
         if (!event.system.some(s => typeof s === "string" && s.includes("Общайся с пользователем простым")) &&
             !event.system.some(s => typeof s === "object" && s.text?.includes("Общайся с пользователем простым"))) {
-          event.system.push(directive);
+          event.system.push({ type: "text", text: directive });
         }
         log?.debug?.("communication:directive_injected", { sessionID, source: label });
       }

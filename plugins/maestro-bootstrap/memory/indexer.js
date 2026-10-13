@@ -143,38 +143,12 @@ export class Indexer {
     try {
       // M7: prune stale state entries (older than backfill window)
       try { await this.state.prune?.((this.config.backfill_window_days ?? 30) * 86400_000); } catch {}
-      const listResp = await this.client.session.list({});
-      const list = (listResp?.data ?? listResp) ?? [];
-      const firstRun = (await this.state.getFirstRun()) ?? Date.now();
-      let queued = 0;
-      // Task 3: счётчики backfill-окна (spec §4.1 memory:backfill) —
-      // considered = все просмотренные сессии; indexed = поставленные в
-      // debounce-очередь; skipped = остальные (инвариант: considered = indexed + skipped).
-      let considered = 0;
-      let skipped = 0;
-      const backfillStart = Date.now();
-      for (const s of list) {
-        considered++;
-        if (queued >= (this.config.backfill_max_per_start ?? 5)) { skipped++; continue; }
-        if (s.parentID) { skipped++; continue; }
-        if (s.title?.startsWith("[maestro-memory]")) {
-          try { await this.client.session.delete({ path: { id: s.id } }); } catch {}
-          skipped++;
-          continue;
-        }
-        if (await this.state.isSkipped(s.id)) { skipped++; continue; }
-        const updated = s.time?.updated ?? s.time_updated;
-        if (!updated) { skipped++; continue; }
-        if (firstRun - updated > (this.config.backfill_window_days ?? 30) * 86400_000) { skipped++; continue; }
-        this._debounce(s.id);
-        queued++;
-      }
-      // Task 3: аудит окна — по факту завершения пачки (debounce-механика:
-      // фактическая индексация уходит в таймеры, здесь фиксируется очередь).
-      this.logInfo?.("memory:backfill", { considered, indexed: queued, skipped });
-      this.logInfo?.("memory:backfill.done", { duration_ms: Date.now() - backfillStart });
+      // V2: session.list не существует в SessionContext — backfill по списку не выполняется
+      // (сохраняем fail-soft: onStartup завершается без ошибки, backfill-окно не обрабатывается)
+      this.log?.warn?.("memory:indexer:session_list_not_available", {});
+      return;
     } catch {
-      // recovery best-effort, ignore errors
+      // fail-soft: если prune упал, всё равно продолжаем
     }
   }
 
@@ -277,12 +251,14 @@ export class Indexer {
    */
   async _pipeline(sessionID) {
     try {
-      const sessResp = await this.client.session.get({ path: { id: sessionID } });
+      // V2: { sessionID } format
+      const sessResp = await this.client.session.get({ sessionID });
       const sess = sessResp?.data ?? sessResp;
       if (sess?.parentID) return { status: "skip_service" };
 
-      const msgResp = await this.client.session.messages({ path: { id: sessionID } });
-      const messages = (msgResp?.data ?? msgResp) ?? [];
+      // V2: session.context({ sessionID }) вместо session.messages
+      const msgResp = await this.client.session.context({ sessionID });
+      const messages = Array.isArray(msgResp) ? msgResp : ((msgResp?.data ?? msgResp) ?? []);
 
       // C-1: extract model from last assistant message — flat fields per SDK types
       let modelRef = null;

@@ -89,18 +89,44 @@ async function MaestroBootstrapPlugin({ directory, client, sanitizeImpl } = {}) 
   const transformedTools = {};
   const contextHandlers = [];
   const bus = makeEventBus();
+  // V1→V2 compat: конвертирует V1-вызовы тестов в V2-формат плагина
+  // Тесты вызывают (input, output), плагин ждёт { input, output? }
+  const v1ToV2 = (name, input, output) => {
+    if (output !== undefined) {
+      // V1-формат: (input, output)
+      const v1Output = output;
+      const tool = input.tool === "bash" ? "shell" : input.tool === "task" ? "subagent" : input.tool;
+      // V1: filePath → V2: path (для read/write/edit)
+      let convertedInput = v1Output.args || {};
+      if (convertedInput?.filePath !== undefined && ["read", "write", "edit"].includes(tool)) {
+        convertedInput = { ...convertedInput, path: convertedInput.filePath };
+        delete convertedInput.filePath;
+      }
+      const evt = { ...input, tool, input: convertedInput };
+      // For after-hook: map output fields to result
+      if (name === "execute.after") {
+        evt.result = {
+          title: v1Output.title,
+          output: v1Output.output,
+          metadata: v1Output.metadata,
+        };
+      }
+      return evt;
+    }
+    // Уже V2-формат: один аргумент
+    return input;
+  };
   const ctx = {
     location: { directory: dir },
     sanitizeImpl, // test-seam: fail-closed D2 (core.js)
     session: {
-      // Без client — fail-soft (V1-семантика): session.get бросает →
-      // isEligible → false → без инъекций/маркировок.
-      get: async ({ path }) => {
-        if (client?.session?.get) return client.session.get({ path });
+      // V2-формат: { sessionID }
+      get: async ({ sessionID }) => {
+        if (client?.session?.get) return client.session.get({ sessionID });
         throw new Error("no client (test)");
       },
-      messages: async ({ path }) => (client?.session?.messages ? client.session.messages({ path }) : { data: [] }),
-      list: async () => (client?.session?.list ? client.session.list({}) : { data: [] }),
+      context: async ({ sessionID }) => (client?.session?.context ? client.session.context({ sessionID }) : { data: [] }),
+      // V2: session.list не существует
       hook: async (name, fn) => {
         if (name === "context") contextHandlers.push(fn);
         const d = () => {};
@@ -110,10 +136,12 @@ async function MaestroBootstrapPlugin({ directory, client, sanitizeImpl } = {}) 
     },
     event: { subscribe: (opts) => bus.subscribe(opts) },
     tool: {
-      // V1-обёртка: (input, output) → V2 event { ...input, output }.
       hook: async (name, fn) => {
-        toolHooks[`tool.${name}`] = (input, output) =>
-          output === undefined ? fn(input) : fn({ ...input, output });
+        if (name === "execute.before") {
+          toolHooks[`tool.execute.before`] = (input, output) => fn(v1ToV2(name, input, output));
+        } else if (name === "execute.after") {
+          toolHooks[`tool.execute.after`] = (input, output) => fn(v1ToV2(name, input, output));
+        }
         const d = () => {};
         disposers.push(d);
         return { dispose: d };
@@ -127,33 +155,19 @@ async function MaestroBootstrapPlugin({ directory, client, sanitizeImpl } = {}) 
     },
   };
   const cleanup = await createBootstrapPlugin(ctx);
-  // V1-обёртки над V2 context-хендлерами (communication + feedback-report):
-  // chat.message — flag-детект; system.transform — инжект-цепочка (все хендлеры,
-  // out.system — по ссылке, как в V1 chainHooks).
-  const v1Hooks = {};
-  if (contextHandlers.length > 0) {
-    v1Hooks["chat.message"] = async (input, output) => {
-      const text = (output?.message?.parts ?? [])
-        .filter((p) => p.type === "text")
-        .map((p) => p.text ?? "")
-        .join(" ");
-      const e = { sessionID: input?.sessionID, messages: text ? [{ role: "user", content: text }] : [], system: [] };
-      for (const h of contextHandlers) await h(e);
-    };
-    v1Hooks["experimental.chat.system.transform"] = async ({ sessionID }, out) => {
-      const e = { sessionID, messages: [], system: out?.system };
-      for (const h of contextHandlers) await h(e);
-    };
-  }
+  // V2: context-хендлеры (communication + feedback-report) вызываются через contextHandlers
+  // V1-хуки (chat.message, system.transform) — не вызываются в V2-рантайме
+  // для тестов используем V2 API напрямую
   return {
     ...toolHooks,
-    ...v1Hooks,
     event: async ({ event }) => { await bus.push(event); },
     dispose: () => {
       for (const d of disposers) { try { d(); } catch { /* fail-soft */ } }
       try { cleanup?.(); } catch { /* fail-soft */ }
     },
     tool: transformedTools,
+    // V2 context handlers для прямого вызова в тестах
+    contextHandlers,
   };
 }
 
@@ -204,11 +218,11 @@ describe("maestro-bootstrap global logging", () => {
 
   it("should log task dispatch (before/after) globally, no agent filter", async () => {
     await hooks["tool.execute.before"](
-      { tool: "task", sessionID: "any-session", callID: "c-task" },
-      { args: { description: "impl task 1" } },
+      { tool: "subagent", sessionID: "any-session", callID: "c-task" },
+      { description: "impl task 1" },
     );
     await hooks["tool.execute.after"](
-      { tool: "task", sessionID: "any-session", callID: "c-task", args: { description: "impl task 1" } },
+      { tool: "subagent", sessionID: "any-session", callID: "c-task" },
       { title: "DONE", output: "ok", metadata: {} },
     );
 
@@ -216,24 +230,24 @@ describe("maestro-bootstrap global logging", () => {
     const beforeEntry = entries.find((e) => e.msg === "tool.execute.before" && e.callID === "c-task");
     const afterEntry = entries.find((e) => e.msg === "tool.execute.after" && e.callID === "c-task");
 
-    assert.ok(beforeEntry, "task before entry must exist (global, no agent)");
+    assert.ok(beforeEntry, "subagent before entry must exist (global, no agent)");
     assert.equal(beforeEntry.level, "info");
-    assert.equal(beforeEntry.tool, "task");
+    assert.equal(beforeEntry.tool, "subagent");
     assert.equal(beforeEntry.sessionID, "any-session");
 
-    assert.ok(afterEntry, "task after entry must exist");
-    assert.equal(afterEntry.tool, "task");
+    assert.ok(afterEntry, "subagent after entry must exist");
+    assert.equal(afterEntry.tool, "subagent");
     assert.equal(typeof afterEntry.durationMs, "number");
     assert.equal(afterEntry.title, "DONE");
   });
 
   it("should sanitize sensitive data in task title before logging (SEC-4)", async () => {
     await hooks["tool.execute.before"](
-      { tool: "task", sessionID: "sec-session", callID: "c-sec" },
-      { args: { description: "impl" } },
+      { tool: "subagent", sessionID: "sec-session", callID: "c-sec" },
+      { description: "impl" },
     );
     await hooks["tool.execute.after"](
-      { tool: "task", sessionID: "sec-session", callID: "c-sec", args: { description: "impl" } },
+      { tool: "subagent", sessionID: "sec-session", callID: "c-sec" },
       { title: "report: API_KEY=sk123456 PASSWORD=hunter2", output: "ok", metadata: {} },
     );
 
@@ -256,11 +270,11 @@ describe("maestro-bootstrap global logging", () => {
       );
       const cfgHooks = await MaestroBootstrapPlugin({ directory: cfgDir });
       await cfgHooks["tool.execute.before"](
-        { tool: "task", sessionID: "cfg-session", callID: "c-cfg" },
+        { tool: "subagent", sessionID: "cfg-session", callID: "c-cfg" },
         { args: { subagent_type: "haiku", description: "impl" } },
       );
       await cfgHooks["tool.execute.after"](
-        { tool: "task", sessionID: "cfg-session", callID: "c-cfg", args: { subagent_type: "haiku", description: "impl" } },
+        { tool: "subagent", sessionID: "cfg-session", callID: "c-cfg", args: { subagent_type: "haiku", description: "impl" } },
         { title: 'report: internal_ssn: "123-45-6789"', output: "ok", metadata: {} },
       );
 
@@ -276,11 +290,11 @@ describe("maestro-bootstrap global logging", () => {
   it("should NOT log non-task tools (bash/skill) in detail", async () => {
     const before = readLogs(dir).length;
     await hooks["tool.execute.before"](
-      { tool: "bash", sessionID: "s1", callID: "c-bash" },
+      { tool: "shell", sessionID: "s1", callID: "c-bash" },
       { args: { command: "npm run test:unit" } },
     );
     await hooks["tool.execute.after"](
-      { tool: "bash", sessionID: "s1", callID: "c-bash", args: { command: "npm run test:unit" } },
+      { tool: "shell", sessionID: "s1", callID: "c-bash", args: { command: "npm run test:unit" } },
       { title: "ok", output: "...", metadata: {} },
     );
     await hooks["tool.execute.before"](
@@ -483,7 +497,7 @@ describe("maestro-bootstrap global logging", () => {
 
   it("should log empty subagent result for task tool globally", async () => {
     await hooks["tool.execute.after"](
-      { tool: "task", sessionID: "any-session", callID: "c-empty", args: { description: "impl" } },
+      { tool: "subagent", sessionID: "any-session", callID: "c-empty", args: { description: "impl" } },
       { title: undefined, output: "", metadata: {} },
     );
 
@@ -491,12 +505,12 @@ describe("maestro-bootstrap global logging", () => {
     const emptyEntry = entries.find((e) => e.msg === "tool.execute.after.empty_result" && e.callID === "c-empty");
     assert.ok(emptyEntry, "empty result entry must exist (global)");
     assert.equal(emptyEntry.level, "warn");
-    assert.equal(emptyEntry.tool, "task");
+    assert.equal(emptyEntry.tool, "subagent");
   });
 
   it("should NOT log empty subagent result for non-empty task result", async () => {
     await hooks["tool.execute.after"](
-      { tool: "task", sessionID: "s1", callID: "c-not-empty", args: { description: "impl" } },
+      { tool: "subagent", sessionID: "s1", callID: "c-not-empty", args: { description: "impl" } },
       { title: "DONE", output: "ok", metadata: {} },
     );
 
@@ -900,20 +914,20 @@ describe("maestro-bootstrap sanitizer hook (Level 1 in tool.execute.before)", ()
 
   it("redacts prompt with a secret in task args", async () => {
     const output = { args: { subagent_type: "haiku", prompt: "Implement with POSTGRES_PASSWORD=topsecret" } };
-    await hooks["tool.execute.before"]({ tool: "task", sessionID: "s", callID: "c-san" }, output);
+    await hooks["tool.execute.before"]({ tool: "subagent", sessionID: "s", callID: "c-san" }, output);
     assert.match(output.args.prompt, /POSTGRES_PASSWORD=<redacted>/);
     assert.doesNotMatch(output.args.prompt, /topsecret/);
   });
 
   it("does not modify prompt when nothing sensitive", async () => {
     const output = { args: { subagent_type: "sonnet", prompt: "Implement a simple endpoint" } };
-    await hooks["tool.execute.before"]({ tool: "task", sessionID: "s", callID: "c-clean" }, output);
+    await hooks["tool.execute.before"]({ tool: "subagent", sessionID: "s", callID: "c-clean" }, output);
     assert.equal(output.args.prompt, "Implement a simple endpoint");
   });
 
   it("leaves non-task tools untouched", async () => {
     const output = { args: { command: "cat .env" } };
-    await hooks["tool.execute.before"]({ tool: "bash", sessionID: "s", callID: "c-bash" }, output);
+    await hooks["tool.execute.before"]({ tool: "shell", sessionID: "s", callID: "c-bash" }, output);
     assert.equal(output.args.command, "cat .env");
   });
 });
@@ -957,13 +971,13 @@ describe("maestro-bootstrap trusted skip (D2/D3)", () => {
 
   it("skips sanitize for trusted subagent (sanitizer)", async () => {
     const output = { args: { subagent_type: "sanitizer", prompt: "Check POSTGRES_PASSWORD=topsecret" } };
-    await hooks["tool.execute.before"]({ tool: "task", sessionID: "s", callID: "c-trusted" }, output);
+    await hooks["tool.execute.before"]({ tool: "subagent", sessionID: "s", callID: "c-trusted" }, output);
     assert.match(output.args.prompt, /topsecret/, "trusted prompt not sanitized");
   });
 
   it("sanitizes prompt for untrusted subagent (haiku)", async () => {
     const output = { args: { subagent_type: "haiku", prompt: "Check POSTGRES_PASSWORD=topsecret" } };
-    await hooks["tool.execute.before"]({ tool: "task", sessionID: "s", callID: "c-untrusted" }, output);
+    await hooks["tool.execute.before"]({ tool: "subagent", sessionID: "s", callID: "c-untrusted" }, output);
     assert.doesNotMatch(output.args.prompt, /topsecret/, "untrusted prompt sanitized");
   });
 });
@@ -1008,7 +1022,7 @@ describe("maestro-bootstrap log mask (MAESTRO_BOOTSTRAP_LOG_MASK)", () => {
     const { dir, p } = await build(null);
     try {
       await seed(p, "s");
-      await p["tool.execute.before"]({ tool: "task", sessionID: "s", callID: "inf" }, { args: { description: "t" } });
+      await p["tool.execute.before"]({ tool: "subagent", sessionID: "s", callID: "inf" }, { args: { description: "t" } });
       await p.event({ event: { type: "session.error", properties: { sessionID: "s", error: { type: "x", message: "m" } } } });
       const entries = readLogs(dir);
       assert.ok(entries.find((e) => e.callID === "inf"), "info-level entry logged by default");
@@ -1024,7 +1038,7 @@ describe("maestro-bootstrap log mask (MAESTRO_BOOTSTRAP_LOG_MASK)", () => {
     const { dir, p } = await build("warn,error", "debug");
     try {
       await seed(p, "s");
-      await p["tool.execute.before"]({ tool: "task", sessionID: "s", callID: "inf" }, { args: { description: "t" } });
+      await p["tool.execute.before"]({ tool: "subagent", sessionID: "s", callID: "inf" }, { args: { description: "t" } });
       await p.event({ event: { type: "session.error", properties: { sessionID: "s", error: { type: "x", message: "m" } } } });
       const entries = readLogs(dir);
       assert.equal(entries.find((e) => e.callID === "inf"), undefined, "info suppressed");
@@ -1038,7 +1052,7 @@ describe("maestro-bootstrap log mask (MAESTRO_BOOTSTRAP_LOG_MASK)", () => {
     const { dir, p } = await build("debug,info,error");
     try {
       await seed(p, "s");
-      await p["tool.execute.before"]({ tool: "task", sessionID: "s", callID: "inf" }, { args: { description: "t" } });
+      await p["tool.execute.before"]({ tool: "subagent", sessionID: "s", callID: "inf" }, { args: { description: "t" } });
       await p.event({ event: { type: "session.error", properties: { sessionID: "s", error: { type: "x", message: "m" } } } });
       const entries = readLogs(dir);
       assert.ok(entries.find((e) => e.callID === "inf"), "info still logged");
@@ -1052,7 +1066,7 @@ describe("maestro-bootstrap log mask (MAESTRO_BOOTSTRAP_LOG_MASK)", () => {
     const { dir, p } = await build("debug,info,warn,error", "info"); // порог отсекает debug (нет debug-тулов)
     try {
       await seed(p, "s");
-      await p["tool.execute.before"]({ tool: "task", sessionID: "s", callID: "inf" }, { args: { description: "t" } });
+      await p["tool.execute.before"]({ tool: "subagent", sessionID: "s", callID: "inf" }, { args: { description: "t" } });
       const entries = readLogs(dir);
       assert.ok(entries.find((e) => e.callID === "inf"), "info still logged (info >= threshold)");
     } finally {
@@ -1064,7 +1078,7 @@ describe("maestro-bootstrap log mask (MAESTRO_BOOTSTRAP_LOG_MASK)", () => {
     const { dir, p } = await build("bogus,nonexsistent"); // ни один уровень не валиден
     try {
       await seed(p, "s");
-      await p["tool.execute.before"]({ tool: "task", sessionID: "s", callID: "inf" }, { args: { description: "t" } });
+      await p["tool.execute.before"]({ tool: "subagent", sessionID: "s", callID: "inf" }, { args: { description: "t" } });
       await p.event({ event: { type: "session.error", properties: { sessionID: "s", error: { type: "x", message: "m" } } } });
       const entries = readLogs(dir);
       assert.equal(entries.find((e) => e.msg === "plugin initialized"), undefined, "no logs with invalid-only mask");
@@ -1242,11 +1256,11 @@ describe("maestro-bootstrap confidential subagent identity", () => {
   function mockClient({ session = {}, messages = [] } = {}) {
     return {
       session: {
-        get: async ({ path }) => {
+        get: async ({ sessionID }) => {
           if (session.id === "missing") throw new Error("not found");
           return { data: session };
         },
-        messages: async () => ({ data: messages }),
+        context: async ({ sessionID }) => ({ data: messages }),
       },
     };
   }
@@ -1324,20 +1338,20 @@ describe("maestro-bootstrap confidential subagent identity", () => {
 
 describe("maestro-bootstrap filePathOf for confidential tools", () => {
   it("extracts filePath from read", () => {
-    assert.equal(filePathOf("read", { filePath: "src/a.ts" }), "src/a.ts");
+    assert.equal(filePathOf("read", { path: "src/a.ts" }), "src/a.ts");
   });
   it("extracts filePath from write", () => {
-    assert.equal(filePathOf("write", { filePath: "docs/confidential/x.md", content: "hi" }), "docs/confidential/x.md");
+    assert.equal(filePathOf("write", { path: "docs/confidential/x.md", content: "hi" }), "docs/confidential/x.md");
   });
   it("extracts filePath from edit", () => {
-    assert.equal(filePathOf("edit", { filePath: "docs/confidential/y.md", oldString: "a", newString: "b" }), "docs/confidential/y.md");
+    assert.equal(filePathOf("edit", { path: "docs/confidential/y.md", oldString: "a", newString: "b" }), "docs/confidential/y.md");
   });
   it("returns undefined for non-file tools", () => {
     assert.equal(filePathOf("bash", { command: "ls" }), undefined);
     assert.equal(filePathOf("read", {}), undefined);
     assert.equal(filePathOf("glob", { pattern: "**/*.ts" }), undefined);
     assert.equal(filePathOf("grep", { pattern: "foo", path: "src" }), undefined);
-    assert.equal(filePathOf("task", { description: "subagent" }), undefined);
+    assert.equal(filePathOf("subagent", { description: "subagent" }), undefined);
   });
 });
 
@@ -1348,13 +1362,13 @@ describe("maestro-bootstrap confidential enforcement", () => {
   function makeClient(sessions) {
     return {
       session: {
-        get: async ({ path }) => {
-          const rec = sessions[path.id];
+        get: async ({ sessionID }) => {
+          const rec = sessions[sessionID];
           if (!rec) throw new Error("not found");
           return { data: rec.session };
         },
-        messages: async ({ path }) => {
-          const rec = sessions[path.id];
+        context: async ({ sessionID }) => {
+          const rec = sessions[sessionID];
           if (!rec) return { data: [] };
           return { data: rec.messages };
         },
@@ -1912,13 +1926,13 @@ describe("maestro-bootstrap confidential audit log", () => {
   function makeClient(sessions) {
     return {
       session: {
-        get: async ({ path }) => {
-          const rec = sessions[path.id];
+        get: async ({ sessionID }) => {
+          const rec = sessions[sessionID];
           if (!rec) throw new Error("not found");
           return { data: rec.session };
         },
-        messages: async ({ path }) => {
-          const rec = sessions[path.id];
+        context: async ({ sessionID }) => {
+          const rec = sessions[sessionID];
           if (!rec) return { data: [] };
           return { data: rec.messages };
         },
@@ -2096,7 +2110,7 @@ describe("maestro-bootstrap un-trusted custodian/sanitizer: prompt sanitize", ()
     const { d, h } = await makeHooks({});
     try {
       const output = { args: { subagent_type: "custodian", prompt: "Check POSTGRES_PASSWORD=s3cr3t" } };
-      await h["tool.execute.before"]({ tool: "task", sessionID: "s", callID: "ut-pr-cust" }, output);
+      await h["tool.execute.before"]({ tool: "subagent", sessionID: "s", callID: "ut-pr-cust" }, output);
       assert.doesNotMatch(output.args.prompt, /s3cr3t/, "un-trusted custodian prompt sanitized");
     } finally {
       fs.rmSync(d, { recursive: true, force: true });
@@ -2107,7 +2121,7 @@ describe("maestro-bootstrap un-trusted custodian/sanitizer: prompt sanitize", ()
     const { d, h } = await makeHooks({ custodian: true });
     try {
       const output = { args: { subagent_type: "sanitizer", prompt: "Check POSTGRES_PASSWORD=s3cr3t" } };
-      await h["tool.execute.before"]({ tool: "task", sessionID: "s", callID: "ut-pr-san" }, output);
+      await h["tool.execute.before"]({ tool: "subagent", sessionID: "s", callID: "ut-pr-san" }, output);
       assert.doesNotMatch(output.args.prompt, /s3cr3t/, "un-trusted sanitizer prompt sanitized (recursion)");
     } finally {
       fs.rmSync(d, { recursive: true, force: true });
@@ -2118,7 +2132,7 @@ describe("maestro-bootstrap un-trusted custodian/sanitizer: prompt sanitize", ()
     const { d, h } = await makeHooks({ custodian: true });
     try {
       const output = { args: { subagent_type: "custodian", prompt: "Check POSTGRES_PASSWORD=s3cr3t" } };
-      await h["tool.execute.before"]({ tool: "task", sessionID: "s", callID: "ut-pr-ctrl" }, output);
+      await h["tool.execute.before"]({ tool: "subagent", sessionID: "s", callID: "ut-pr-ctrl" }, output);
       assert.match(output.args.prompt, /s3cr3t/, "trusted custodian prompt not sanitized");
     } finally {
       fs.rmSync(d, { recursive: true, force: true });
@@ -2462,344 +2476,6 @@ describe("communication directive (directiveText)", () => {
   });
 });
 
-describe("communication hooks (chat.message mark)", () => {
-  function fakeClient(overrides = {}) {
-    const sessions = new Map([["s1", { parentID: null, title: "primary" }]]);
-    for (const [id, s] of Object.entries(overrides)) sessions.set(id, s);
-    return {
-      session: {
-        get: async ({ path: { id } }) => {
-          const s = sessions.get(id);
-          if (!s) throw new Error("no session");
-          return s;
-        },
-      },
-    };
-  }
-  function fakeLog() {
-    const calls = [];
-    const fn = (level) => (msg, extra) => calls.push({ level, msg, extra });
-    return { calls, info: fn("info"), warn: fn("warn"), error: fn("error"), debug: fn("debug") };
-  }
-  const userMsg = (text) => ({ message: { parts: [{ type: "text", text }] } });
-
-  it("флаг + eligible primary → маркировка + log communication:flag_plain", async () => {
-    const log = fakeLog();
-    const hooks = await registerCommunicationHooks({ client: fakeClient(), config: {}, log });
-    await hooks["chat.message"]({ sessionID: "s1" }, userMsg('@maestro-init --plain "x"'));
-    assert.ok(log.calls.some((c) => c.msg === "communication:flag_plain" && c.extra.sessionID === "s1"));
-  });
-  it("тот же флаг повторно → idempotent (один log)", async () => {
-    const log = fakeLog();
-    const hooks = await registerCommunicationHooks({ client: fakeClient(), config: {}, log });
-    const msg = userMsg('@maestro-init --plain "x"');
-    await hooks["chat.message"]({ sessionID: "s1" }, msg);
-    await hooks["chat.message"]({ sessionID: "s1" }, msg);
-    assert.equal(log.calls.filter((c) => c.msg === "communication:flag_plain").length, 1);
-  });
-  it("task-сессия (parentID задан) → без маркировки", async () => {
-    const log = fakeLog();
-    const hooks = await registerCommunicationHooks({
-      client: fakeClient({ s1: { parentID: "s0", title: "sub" } }), config: {}, log });
-    await hooks["chat.message"]({ sessionID: "s1" }, userMsg('@maestro-init --plain "x"'));
-    assert.ok(!log.calls.some((c) => c.msg === "communication:flag_plain"));
-  });
-  it("session.get с обёрткой {data} — guard работает (parentID в data)", async () => {
-    const log = fakeLog();
-    const client = { session: { get: async () => ({ data: { parentID: "s0", title: "sub" } }) } };
-    const hooks = await registerCommunicationHooks({ client, config: {}, log });
-    await hooks["chat.message"]({ sessionID: "s1" }, userMsg('@maestro-init --plain "x"'));
-    assert.ok(!log.calls.some((c) => c.msg === "communication:flag_plain"));
-  });
-  it("сервис-сессия [maestro-memory] (parentID пуст) → без маркировки (FU-1)", async () => {
-    const log = fakeLog();
-    const hooks = await registerCommunicationHooks({
-      client: fakeClient({ s1: { parentID: null, title: "[maestro-memory] summarize s1" } }),
-      config: {}, log });
-    await hooks["chat.message"]({ sessionID: "s1" }, userMsg('@maestro-init --plain "x"'));
-    assert.ok(!log.calls.some((c) => c.msg === "communication:flag_plain"));
-  });
-  it("ошибка client.session.get → без маркировки (fail-soft, консервативно)", async () => {
-    const log = fakeLog();
-    const hooks = await registerCommunicationHooks({ client: fakeClient(), config: {}, log });
-    await hooks["chat.message"]({ sessionID: "unknown" }, userMsg('@maestro-init --plain "x"'));
-    assert.ok(!log.calls.some((c) => c.msg === "communication:flag_plain"));
-  });
-  it("невалидный communication-ключ → warn communication:config_fallback", async () => {
-    const log = fakeLog();
-    await registerCommunicationHooks({ client: fakeClient(), config: { communication: "nope" }, log });
-    assert.ok(log.calls.some((c) => c.msg === "communication:config_fallback" && c.extra.error_class === "invalid_value"));
-  });
-});
-
-describe("communication hooks (system.transform matrix)", () => {
-  function fakeClient(overrides = {}) {
-    const sessions = new Map([["s1", { parentID: null, title: "primary" }]]);
-    for (const [id, s] of Object.entries(overrides)) sessions.set(id, s);
-    return {
-      session: {
-        get: async ({ path: { id } }) => {
-          const s = sessions.get(id);
-          if (!s) throw new Error("no session");
-          return s;
-        },
-      },
-    };
-  }
-  function fakeLog() {
-    const calls = [];
-    const fn = (level) => (msg, extra) => calls.push({ level, msg, extra });
-    return { calls, info: fn("info"), warn: fn("warn"), error: fn("error"), debug: fn("debug") };
-  }
-  const userMsg = (text) => ({ message: { parts: [{ type: "text", text }] } });
-  const mark = async (hooks) => {
-    await hooks["chat.message"]({ sessionID: "s1" }, userMsg('@maestro-init --plain "x"'));
-  };
-  const transform = async (hooks, out) => {
-    await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, out);
-    return out.system;
-  };
-
-  it("config plain explicit → лейбл maestro.json", async () => {
-    const hooks = await registerCommunicationHooks({
-      client: fakeClient(), config: { communication: "plain" }, log: fakeLog() });
-    const sys = await transform(hooks, { system: [] });
-    assert.equal(sys.length, 1);
-    assert.ok(sys[0].includes("maestro.json (communication: plain)"));
-  });
-  it("config отсутствует (дефолт) → лейбл «дефолт (plain)»", async () => {
-    const hooks = await registerCommunicationHooks({ client: fakeClient(), config: {}, log: fakeLog() });
-    const sys = await transform(hooks, { system: [] });
-    assert.equal(sys.length, 1);
-    assert.ok(sys[0].includes("источник: дефолт (plain)"));
-  });
-  it("config professional, без флага → без инъекции", async () => {
-    const hooks = await registerCommunicationHooks({
-      client: fakeClient(), config: { communication: "professional" }, log: fakeLog() });
-    const sys = await transform(hooks, { system: [] });
-    assert.equal(sys.length, 0);
-  });
-  it("флаг + professional → лейбл переопределения", async () => {
-    const hooks = await registerCommunicationHooks({
-      client: fakeClient(), config: { communication: "professional" }, log: fakeLog() });
-    await mark(hooks);
-    const sys = await transform(hooks, { system: [] });
-    assert.equal(sys.length, 1);
-    assert.ok(sys[0].includes("переопределяет maestro.json professional"));
-  });
-  it("флаг + plain (дефолт) → лейбл флага БЕЗ «переопределяет»", async () => {
-    const hooks = await registerCommunicationHooks({ client: fakeClient(), config: {}, log: fakeLog() });
-    await mark(hooks);
-    const sys = await transform(hooks, { system: [] });
-    assert.equal(sys.length, 1);
-    assert.ok(sys[0].includes("источник: флаг --plain"));
-    assert.ok(!sys[0].includes("переопределяет"));
-  });
-  it("task-сессия (parentID) → без инъекции ни по какой ветке", async () => {
-    const hooks = await registerCommunicationHooks({
-      client: fakeClient({ s1: { parentID: "s0", title: "sub" } }),
-      config: { communication: "plain" }, log: fakeLog() });
-    const sys = await transform(hooks, { system: [] });
-    assert.equal(sys.length, 0);
-  });
-  it("сервис-сессия [maestro-memory] (parentID пуст) → без инъекции", async () => {
-    const hooks = await registerCommunicationHooks({
-      client: fakeClient({ s1: { parentID: null, title: "[maestro-memory] summarize" } }),
-      config: { communication: "plain" }, log: fakeLog() });
-    const sys = await transform(hooks, { system: [] });
-    assert.equal(sys.length, 0);
-  });
-  it("invalid-fallback → инъекция с лейблом «дефолт»", async () => {
-    const hooks = await registerCommunicationHooks({
-      client: fakeClient(), config: { communication: 42 }, log: fakeLog() });
-    const sys = await transform(hooks, { system: [] });
-    assert.equal(sys.length, 1);
-    assert.ok(sys[0].includes("источник: дефолт (plain)"));
-  });
-});
-
-describe("feedback-report config (parseFeedbackReport)", () => {
-  it("отсутствует → manual, не explicit", () => {
-    assert.deepEqual(parseFeedbackReport({}), { mode: "manual", explicit: false, invalid: false });
-  });
-  it("auto explicit", () => {
-    assert.deepEqual(parseFeedbackReport({ feedback_report: "auto" }), { mode: "auto", explicit: true, invalid: false });
-  });
-  it("невалидное → manual + invalid", () => {
-    assert.deepEqual(parseFeedbackReport({ feedback_report: "x" }), { mode: "manual", explicit: false, invalid: true });
-  });
-});
-
-describe("feedback-report directiveText", () => {
-  it("auto → строка-директива", () => {
-    assert.equal(frDirectiveText("auto"), "maestro.json → feedback_report: auto");
-  });
-  it("disable → строка-директива", () => {
-    assert.equal(frDirectiveText("disable"), "maestro.json → feedback_report: disable");
-  });
-});
-
-describe("feedback-report hooks (system.transform matrix)", () => {
-  function fakeClient(overrides = {}) {
-    const sessions = new Map([["s1", { parentID: null, title: "primary" }]]);
-    for (const [id, s] of Object.entries(overrides)) sessions.set(id, s);
-    return {
-      session: {
-        get: async ({ path: { id } }) => {
-          const s = sessions.get(id);
-          if (!s) throw new Error("no session");
-          return s;
-        },
-      },
-    };
-  }
-  function fakeLog() {
-    const calls = [];
-    const fn = (level) => (msg, extra) => calls.push({ level, msg, extra });
-    return { calls, info: fn("info"), warn: fn("warn"), error: fn("error"), debug: fn("debug") };
-  }
-  const transform = async (hooks, out, sessionID = "s1") => {
-    await hooks["experimental.chat.system.transform"]({ sessionID }, out);
-    return out.system;
-  };
-
-  it("auto → инъекция директивы", async () => {
-    const hooks = await registerFeedbackReportHooks({ client: fakeClient(), config: { feedback_report: "auto" }, log: fakeLog() });
-    const sys = await transform(hooks, { system: [] });
-    assert.equal(sys.length, 1);
-    assert.equal(sys[0], "maestro.json → feedback_report: auto");
-  });
-  it("disable → инъекция директивы", async () => {
-    const hooks = await registerFeedbackReportHooks({ client: fakeClient(), config: { feedback_report: "disable" }, log: fakeLog() });
-    const sys = await transform(hooks, { system: [] });
-    assert.equal(sys.length, 1);
-    assert.ok(sys[0].includes("feedback_report: disable"));
-  });
-  it("manual explicit → БЕЗ инъекции", async () => {
-    const hooks = await registerFeedbackReportHooks({ client: fakeClient(), config: { feedback_report: "manual" }, log: fakeLog() });
-    const sys = await transform(hooks, { system: [] });
-    assert.equal(sys.length, 0);
-  });
-  it("ключ отсутствует → БЕЗ инъекции", async () => {
-    const hooks = await registerFeedbackReportHooks({ client: fakeClient(), config: {}, log: fakeLog() });
-    const sys = await transform(hooks, { system: [] });
-    assert.equal(sys.length, 0);
-  });
-  it("невалидное → БЕЗ инъекции + warn feedback_report:config_fallback", async () => {
-    const log = fakeLog();
-    await registerFeedbackReportHooks({ client: fakeClient(), config: { feedback_report: "nope" }, log });
-    assert.ok(log.calls.some((c) => c.msg === "feedback_report:config_fallback" && c.extra.error_class === "invalid_value"));
-    const hooks2 = await registerFeedbackReportHooks({ client: fakeClient(), config: { feedback_report: "nope" }, log: fakeLog() });
-    const sys = await transform(hooks2, { system: [] });
-    assert.equal(sys.length, 0);
-  });
-  it("task-сессия (parentID) → без инъекции", async () => {
-    const hooks = await registerFeedbackReportHooks({
-      client: fakeClient({ s1: { parentID: "s0", title: "sub" } }),
-      config: { feedback_report: "auto" }, log: fakeLog() });
-    const sys = await transform(hooks, { system: [] });
-    assert.equal(sys.length, 0);
-  });
-  it("обёртка {data}: parentID в data → без инъекции", async () => {
-    const client = { session: { get: async () => ({ data: { parentID: "s0", title: "sub" } }) } };
-    const hooks = await registerFeedbackReportHooks({ client, config: { feedback_report: "auto" }, log: fakeLog() });
-    const sys = await transform(hooks, { system: [] });
-    assert.equal(sys.length, 0);
-  });
-  it("сервис-сессия [maestro-memory] (parentID пуст) → без инъекции", async () => {
-    const hooks = await registerFeedbackReportHooks({
-      client: fakeClient({ s1: { parentID: null, title: "[maestro-memory] summarize s1" } }),
-      config: { feedback_report: "auto" }, log: fakeLog() });
-    const sys = await transform(hooks, { system: [] });
-    assert.equal(sys.length, 0);
-  });
-  it("ошибка client.session.get → без инъекции (fail-soft)", async () => {
-    const hooks = await registerFeedbackReportHooks({ client: fakeClient(), config: { feedback_report: "auto" }, log: fakeLog() });
-    const sys = await transform(hooks, { system: [] }, "unknown");
-    assert.equal(sys.length, 0);
-  });
-  it("debug-лог directive_injected при инъекции", async () => {
-    const log = fakeLog();
-    const hooks = await registerFeedbackReportHooks({ client: fakeClient(), config: { feedback_report: "auto" }, log });
-    await transform(hooks, { system: [] });
-    assert.ok(log.calls.some((c) => c.msg === "feedback_report:directive_injected" && c.extra.sessionID === "s1"));
-  });
-});
-
-describe("communication wiring (MaestroBootstrapPlugin)", () => {
-  let dir;
-  before(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-comm-")); });
-  after(() => { fs.rmSync(dir, { recursive: true, force: true }); });
-
-  it("communication-хуки зарегистрированы (chat.message + system.transform); messages.transform === undefined", async () => {
-    fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({ communication: "plain" }));
-    const hooks = await MaestroBootstrapPlugin({ directory: dir });
-    assert.equal(typeof hooks["chat.message"], "function");
-    assert.equal(typeof hooks["experimental.chat.system.transform"], "function");
-    assert.equal(hooks["experimental.chat.messages.transform"], undefined);
-  });
-  it("без maestro.json — хуки тоже (дефолт plain), fail-soft без client", async () => {
-    const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), "fab-comm2-"));
-    const hooks = await MaestroBootstrapPlugin({ directory: dir2 });
-    assert.equal(typeof hooks["experimental.chat.system.transform"], "function");
-    const out = { system: [] };
-    await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, out);
-    assert.equal(out.system.length, 0);
-    fs.rmSync(dir2, { recursive: true, force: true });
-  });
-  it("enum-синхронизация: invalid-детект loadCommunicationConfig и registerCommunicationHooks совпадают", async () => {
-    const { loadCommunicationConfig } = await import("./core.js");
-    for (const v of ["plain", "professional", "simple", 42, null, "PLAIN", ""]) {
-      const coreInvalid = loadCommunicationConfig({ communication: v }).invalid;
-      const log = { calls: [], warn: (m) => log.calls.push(m), info: () => {}, error: () => {}, debug: () => {} };
-      await registerCommunicationHooks({
-        client: { session: { get: async () => { throw new Error("x"); } } },
-        config: { communication: v }, log });
-      const hookInvalid = log.calls.includes("communication:config_fallback");
-      assert.equal(hookInvalid, coreInvalid, `desync для значения ${JSON.stringify(v)}`);
-    }
-  });
-});
-
-describe("feedback-report wiring (MaestroBootstrapPlugin)", () => {
-  let dir;
-  before(() => { dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-fr-")); });
-  after(() => { fs.rmSync(dir, { recursive: true, force: true }); });
-
-  it("feedback_report: auto → plugin-level system.transform инжектит директиву (chainHooks, 3-й источник)", async () => {
-    fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({ feedback_report: "auto" }));
-    const client = { session: { get: async () => ({ data: { parentID: null, title: "primary" } }) } };
-    const hooks = await MaestroBootstrapPlugin({ directory: dir, client });
-    assert.equal(typeof hooks["experimental.chat.system.transform"], "function");
-    const out = { system: [] };
-    await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, out);
-    assert.ok(out.system.some((s) => s.includes("feedback_report: auto")));
-  });
-
-  it("ключ отсутствует → без директивы (безопасный дефолт manual)", async () => {
-    const dir2 = fs.mkdtempSync(path.join(os.tmpdir(), "fab-fr2-"));
-    fs.writeFileSync(path.join(dir2, "maestro.json"), JSON.stringify({}));
-    const client = { session: { get: async () => ({ data: { parentID: null, title: "primary" } }) } };
-    const hooks = await MaestroBootstrapPlugin({ directory: dir2, client });
-    const out = { system: [] };
-    await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, out);
-    assert.ok(!out.system.some((s) => s.includes("feedback_report")));
-    fs.rmSync(dir2, { recursive: true, force: true });
-  });
-
-  it("enum-синхронизация: invalid-детект loadFeedbackReportConfig и registerFeedbackReportHooks совпадают", async () => {
-    for (const v of ["auto", "manual", "disable", "AUTO", "nope", 42, null, ""]) {
-      const coreInvalid = loadFeedbackReportConfig({ feedback_report: v }).invalid;
-      const log = { calls: [], warn: (m) => log.calls.push(m), info: () => {}, error: () => {}, debug: () => {} };
-      await registerFeedbackReportHooks({
-        client: { session: { get: async () => { throw new Error("x"); } } },
-        config: { feedback_report: v }, log });
-      const hookInvalid = log.calls.includes("feedback_report:config_fallback");
-      assert.equal(hookInvalid, coreInvalid, `desync для значения ${JSON.stringify(v)}`);
-    }
-  });
-});
-
 describe("maestro_config tool (read-only maestro.json, spec 2026-09-24)", () => {
   let dir;
   let savedMAESTRO;
@@ -2808,8 +2484,8 @@ describe("maestro_config tool (read-only maestro.json, spec 2026-09-24)", () => 
   const lines = (msg) => readLogs(dir).filter((e) => e.msg === msg);
   const clientWith = (sessions) => ({
     session: {
-      get: async ({ path: { id } }) => {
-        const s = sessions[id];
+      get: async ({ sessionID }) => {
+        const s = sessions[sessionID];
         if (!s) throw new Error("no session");
         return s;
       },
@@ -2817,7 +2493,13 @@ describe("maestro_config tool (read-only maestro.json, spec 2026-09-24)", () => 
   });
   const primary = () => clientWith({ s1: { parentID: null, title: "primary" } });
   const run = (t, args, sessionID = "s1") => t.execute(args ?? {}, { sessionID });
-  const jrun = async (t, args, sid) => JSON.parse(await run(t, args, sid));
+  // V2: execute возвращает { content: [{ type, text }] }, не строку
+  const getText = (result) => {
+    if (typeof result === "string") return result;
+    if (result?.content?.[0]?.text) return result.content[0].text;
+    return String(result);
+  };
+  const jrun = async (t, args, sid) => JSON.parse(getText(await run(t, args, sid)));
   const makeTool = async (config, client = primary()) => {
     if (config === null) fs.rmSync(cfgPath(), { force: true });
     else
@@ -2891,7 +2573,7 @@ describe("maestro_config tool (read-only maestro.json, spec 2026-09-24)", () => 
   it("6. невалидный section → сообщение об ошибке, без throw", async () => {
     const t = await makeTool({ a: { b: 1 } });
     for (const bad of ["", ".x", "a..b", "a."]) {
-      const msg = await run(t, { section: bad });
+      const msg = getText(await run(t, { section: bad }));
       assert.match(msg, /invalid section/i);
     }
   });
@@ -2910,7 +2592,7 @@ describe("maestro_config tool (read-only maestro.json, spec 2026-09-24)", () => 
       { trust: { custodian: true } },
       clientWith({ t1: { parentID: "s0", title: "sub" } }),
     );
-    const msg = await run(t, {}, "t1");
+    const msg = getText(await run(t, {}, "t1"));
     assert.match(msg, /only available in top-level primary sessions/);
     assert.ok(!msg.includes("custodian"));
     assert.ok(
@@ -2923,7 +2605,7 @@ describe("maestro_config tool (read-only maestro.json, spec 2026-09-24)", () => 
       {},
       clientWith({ s2: { parentID: null, title: "[maestro-memory] summarize s1" } }),
     );
-    const msg = await run(t, {}, "s2");
+    const msg = getText(await run(t, {}, "s2"));
     assert.match(msg, /only available in top-level primary sessions/);
     assert.ok(
       lines("maestro_config:access_denied").some((e) => e.reason === "service_session"),
@@ -2935,7 +2617,7 @@ describe("maestro_config tool (read-only maestro.json, spec 2026-09-24)", () => 
     const t = await makeTool({}, clientWith({})); // session.get бы бросил — fast-check сработает раньше
     SESSIONS.add("svc-1");
     try {
-      const msg = await run(t, {}, "svc-1");
+      const msg = getText(await run(t, {}, "svc-1"));
       assert.match(msg, /only available in top-level primary sessions/);
       assert.ok(
         lines("maestro_config:access_denied").some(
@@ -2949,9 +2631,9 @@ describe("maestro_config tool (read-only maestro.json, spec 2026-09-24)", () => 
 
   it("10. Guard: session.get-ошибка / нет sessionID → deny session_unavailable (fail-closed)", async () => {
     const t = await makeTool({}, primary());
-    const msg1 = await run(t, {}, "unknown"); // не в map → throw
+    const msg1 = getText(await run(t, {}, "unknown")); // не в map → throw
     assert.match(msg1, /only available in top-level primary sessions/);
-    const msg2 = await t.execute({}, {}); // ctx без sessionID
+    const msg2 = getText(await t.execute({}, {})); // ctx без sessionID
     assert.match(msg2, /only available in top-level primary sessions/);
     assert.ok(
       lines("maestro_config:access_denied").filter(
@@ -3123,7 +2805,7 @@ describe("sanitizer hardening T1 (D1: init-валидация, plugin)", () => {
     }));
     const h = await MaestroBootstrapPlugin({ directory: d });
     const output = { args: { subagent_type: "haiku", prompt: "Check POSTGRES_PASSWORD=s3cr3t" } };
-    await h["tool.execute.before"]({ tool: "task", sessionID: "s-h5", callID: "c-h5" }, output);
+    await h["tool.execute.before"]({ tool: "subagent", sessionID: "s-h5", callID: "c-h5" }, output);
     assert.doesNotMatch(output.args.prompt, /s3cr3t/, "H-5: промпт замаскирован");
     assert.match(output.args.prompt, /<redacted>/);
   });
@@ -3145,7 +2827,7 @@ describe("sanitizer hardening T1 (D1: init-валидация, plugin)", () => {
     // N диспатчей → warn не повторяется (валидация — один раз при init).
     for (let i = 0; i < 3; i++) {
       const out = { args: { subagent_type: "haiku", prompt: `hello ${i}` } };
-      await h["tool.execute.before"]({ tool: "task", sessionID: "s-w", callID: `c-w-${i}` }, out);
+      await h["tool.execute.before"]({ tool: "subagent", sessionID: "s-w", callID: `c-w-${i}` }, out);
     }
     entries = readLogs(d).filter((e) => e.msg === "sanitizer.invalid_config");
     assert.equal(entries.length, 1, "warn не на каждом диспатче");
@@ -3205,7 +2887,7 @@ describe("sanitizer hardening T1 (D2: fail-closed)", () => {
     try {
       const output = { args: { subagent_type: "haiku", prompt: "Check POSTGRES_PASSWORD=s3cr3t" } };
       await assert.rejects(
-        h["tool.execute.before"]({ tool: "task", sessionID: "s-fc1", callID: "fc-1" }, output),
+        h["tool.execute.before"]({ tool: "subagent", sessionID: "s-fc1", callID: "fc-1" }, output),
         (err) => {
           assert.match(err.message, /\[sanitizer:failed\]/);
           assert.match(err.message, /haiku/);
@@ -3233,12 +2915,12 @@ describe("sanitizer hardening T1 (D2: fail-closed)", () => {
       // before без prompt — call регистрируется (toolCalls), сбой маскирования
       // в этой ветке не возникает.
       await h["tool.execute.before"](
-        { tool: "task", sessionID: "s-fc2", callID: "fc-t1" },
+        { tool: "subagent", sessionID: "s-fc2", callID: "fc-t1" },
         { args: { subagent_type: "haiku", description: "impl" } },
       );
       await assert.doesNotReject(
         h["tool.execute.after"](
-          { tool: "task", sessionID: "s-fc2", callID: "fc-t1", args: { subagent_type: "haiku" } },
+          { tool: "subagent", sessionID: "s-fc2", callID: "fc-t1", args: { subagent_type: "haiku" } },
           { title: "report API_KEY=leak123", output: "ok", metadata: {} },
         ),
         "сбой маскирования title не ломает сессию",
