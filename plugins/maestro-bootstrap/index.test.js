@@ -16,6 +16,7 @@ import {
   directiveText as frDirectiveText,
   registerFeedbackReportHooks,
 } from "./feedback-report.js";
+import { clearPipelineStatus } from "./pipeline-status.js";
 import opencodePlugin from "./index.js";
 
 function readLogs(dir, filePrefix = "maestro-bootstrap") {
@@ -3053,5 +3054,89 @@ describe("sanitizer hardening T1 (D2: fail-closed)", () => {
     } finally {
       fs.rmSync(d, { recursive: true, force: true });
     }
+  });
+});
+
+// =============================================================================
+// Pipeline Status Integration (Task 4)
+// =============================================================================
+
+describe("pipeline-status integration", () => {
+  let dir, savedEnv;
+  const ENV = [
+    "MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL",
+    "MAESTRO_BOOTSTRAP_LOG_DIR", "MAESTRO_CONFIG",
+  ];
+
+  before(() => {
+    savedEnv = {};
+    for (const k of ENV) { savedEnv[k] = process.env[k]; delete process.env[k]; }
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-ps-integration-"));
+  });
+
+  after(() => {
+    for (const k of ENV) {
+      if (savedEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedEnv[k];
+    }
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+
+  it("pipeline-status hooks are registered during plugin creation", async () => {
+    const p = await MaestroBootstrapPlugin({ directory: dir });
+    assert.ok(p.contextHandlers.length > 0, "pipeline-status hook should be registered");
+    p.dispose();
+  });
+
+  it("pipeline-status tool is registered in transformed tools", async () => {
+    const p = await MaestroBootstrapPlugin({ directory: dir });
+    assert.ok("maestro_pipeline_status" in p.tool, "tool should be registered");
+    assert.equal(typeof p.tool.maestro_pipeline_status.execute, "function");
+    p.dispose();
+  });
+
+  it("pipeline-status tool returns idle status when not set", async () => {
+    clearPipelineStatus();
+    const p = await MaestroBootstrapPlugin({ directory: dir });
+    const tool = p.tool.maestro_pipeline_status;
+    const result = await tool.execute({ action: "get" }, { sessionID: "s1" });
+    const out = typeof result === "string" ? result : result.content?.[0]?.text;
+    const parsed = JSON.parse(out);
+    assert.equal(parsed.active, false, "status should be idle");
+    p.dispose();
+  });
+
+  it("pipeline-status tool set and clear works", async () => {
+    const mockClient = {
+      session: {
+        get: async ({ sessionID }) => ({ data: { parentID: null, title: "test" } }),
+      },
+    };
+    const p = await MaestroBootstrapPlugin({ directory: dir, client: mockClient });
+    const tool = p.tool.maestro_pipeline_status;
+
+    // Set status
+    const setResult = await tool.execute(
+      { action: "set", step: 5, totalSteps: 18.5, description: "testing" },
+      { sessionID: "s1" },
+    );
+    const setResultText = typeof setResult === "string" ? setResult : setResult.content?.[0]?.text;
+    assert.equal(JSON.parse(setResultText).ok, true);
+
+    // Get status
+    const getResult = await tool.execute({ action: "get" }, { sessionID: "s1" });
+    const getText = typeof getResult === "string" ? getResult : getResult.content?.[0]?.text;
+    const status = JSON.parse(getText);
+    assert.equal(status.active, true);
+    assert.equal(status.step, 5);
+    assert.equal(status.totalSteps, 18.5, "totalSteps preserved as input value");
+    assert.equal(status.description, "testing");
+
+    // Clear status
+    const clearResult = await tool.execute({ action: "clear" }, { sessionID: "s1" });
+    const clearText = typeof clearResult === "string" ? clearResult : clearResult.content?.[0]?.text;
+    assert.equal(JSON.parse(clearText).ok, true);
+
+    p.dispose();
   });
 });

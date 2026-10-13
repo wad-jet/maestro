@@ -200,6 +200,11 @@ init), следует его правилам, затем решает и про
 **Режим шагов:** 🟡 Plan mode — чтение/анализ/опрос; 🟢 Build mode — изменение
 файлов авторизовано (см. Mode protocol в Overview).
 
+**Pipeline status indication:** каждый анонс шага сопровождается вызовом
+`maestro_pipeline_status(action: "set", step: N, totalSteps: "18.5", description: "...")`.
+Это обновляет статус-блок в system prompt и делает статус доступным по `action: "get"`.
+По завершении пайплайна — `action: "clear"`. Канон: `manual_docs/reference/pipeline-status.md`.
+
 ```
 🟡  0. [agent] Load Project Context
       — Читает docs/project-context.md (если существует)
@@ -1046,6 +1051,7 @@ init), следует его правилам, затем решает и про
         ссылающихся на текущую версию, отдельный коммит
         `chore: bump version to X.Y.Z — <содержание> (changelog/version)` на
         base-ветке (до push, если push ещё не выполнен).
+— После шага 18: `maestro_pipeline_status(action: "clear")`
 🟢 18.5. [agent] Feedback report (ретроспектива) — режим `feedback_report`
       — **Источник режима — директива плагина в system-контексте:** строка
         `maestro.json → feedback_report: <mode>` (инжектится плагин при явном

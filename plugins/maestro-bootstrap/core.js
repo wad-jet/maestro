@@ -23,6 +23,7 @@ import { classifyMemoryConfig } from "./memory/config.js";
 import { SESSIONS as MEMORY_SERVICE_SESSIONS } from "./memory/summarize.js";
 import { registerCommunicationHooks } from "./communication.js";
 import { registerFeedbackReportHooks } from "./feedback-report.js";
+import { registerPipelineStatusHooks, makePipelineStatusTool } from "./pipeline-status.js";
 import { detectGuardCommand, checkMergeMarker, resolveMergeGuardConf } from "./merge-guard.js";
 
 const LOG_LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
@@ -755,6 +756,15 @@ export async function createBootstrapPlugin(ctx) {
     log.error("feedback_report: init failed", { error: err instanceof Error ? err.message : String(err) });
   }
 
+  // --- Pipeline Status hooks ---
+  let pipelineStatusDispose = () => {};
+  try {
+    const psResult = await registerPipelineStatusHooks({ client: ctx, config, log });
+    pipelineStatusDispose = psResult.dispose || (() => {});
+  } catch (err) {
+    log.error("pipeline-status: init failed", { error: err instanceof Error ? err.message : String(err) });
+  }
+
   // --- Event subscription ---
   const eventController = new AbortController();
   void (async () => {
@@ -924,6 +934,8 @@ export async function createBootstrapPlugin(ctx) {
   const toolTransformRegistration = await ctx.tool.transform((editor) => {
     // Register memory tools (delegated to memory module, but register maestro_config here)
     editor.add(makeMaestroConfigTool({ client: ctx, root, log }));
+    // Pipeline Status tool — always available (guard in tool itself)
+    editor.add(makePipelineStatusTool({ client: ctx, log }));
   });
 
   // --- Cleanup ---
@@ -935,6 +947,7 @@ export async function createBootstrapPlugin(ctx) {
     memoryDispose();
     commDispose();
     fbDispose();
+    pipelineStatusDispose();
     log.info("plugin disposing", {});
   };
 }
