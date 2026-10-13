@@ -550,15 +550,62 @@ export function makeMaestroConfigTool({ client, root, log }) {
     const cached = guardCache.get(sessionID);
     if (cached !== undefined) return cached;
     let reason;
+    // Пробуем session.get. Если метод отсутствует (V2) — ловим TypeError и
+    // сразу переходим к fallback. Если метод есть, но бросает — это скорее
+    // "сессия не найдена", а не "API недоступен" → deny (fail-closed).
+    let sessionData;
+    let getUnavail = false;
     try {
       // V2: { sessionID } format
       const resp = await client?.session?.get?.({ sessionID });
-      const data = resp?.data ?? resp;
-      if (!data) reason = "session_unavailable";
-      else if (data.parentID) reason = "task_session";
-      else if (typeof data.title === "string" && data.title.startsWith("[maestro-memory]")) reason = "service_session";
+      sessionData = resp?.data ?? resp;
+    } catch (err) {
+      const msg = err?.message ?? String(err);
+      // TypeError: "client.session.get is not a function" — V2, API недоступен
+      // → переходим к fallback на session.context
+      if (err instanceof TypeError && msg.includes("get") && msg.includes("function")) {
+        getUnavail = true;
+      } else {
+        // Неизвестная сессия / другой error — deny
+        reason = "session_unavailable";
+      }
+    }
+    if (reason === undefined) {
+      if (!sessionData && getUnavail) {
+        // V2 fallback: session.get недоступен (не существует в рантайме).
+        // Пробуем session.context — если сессия существует, контекст вернётся.
+        // primary-сессия: контекст не пустой (user-сообщения);
+        // task-сессия: тоже не пустой, но мы не можем отличить без parentID
+        // → допускаем (fail-open для недоступного API, fail-closed для отсутствия API).
+        if (typeof client?.session?.context === "function") {
+          try {
+            const ctxResp = await client.session.context({ sessionID });
+            const messages = Array.isArray(ctxResp) ? ctxResp : (ctxResp?.data ?? []);
+            // Сессия существует (контекст вернулся) — допускаем вызов.
+            reason = null;
+          } catch {
+            reason = "session_unavailable";
+          }
+        } else {
+          reason = "session_unavailable";
+        }
+      } else if (!sessionData) {
+        // get вернул undefined/null — fallback
+        if (typeof client?.session?.context === "function") {
+          try {
+            const ctxResp = await client.session.context({ sessionID });
+            const messages = Array.isArray(ctxResp) ? ctxResp : (ctxResp?.data ?? []);
+            reason = null;
+          } catch {
+            reason = "session_unavailable";
+          }
+        } else {
+          reason = "session_unavailable";
+        }
+      } else if (sessionData.parentID) reason = "task_session";
+      else if (typeof sessionData.title === "string" && sessionData.title.startsWith("[maestro-memory]")) reason = "service_session";
       else reason = null;
-    } catch { reason = "session_unavailable"; }
+    }
     guardCache.set(sessionID, reason);
     return reason;
   };

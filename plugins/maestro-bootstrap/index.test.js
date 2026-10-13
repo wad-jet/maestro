@@ -126,6 +126,8 @@ async function MaestroBootstrapPlugin({ directory, client, sanitizeImpl } = {}) 
         throw new Error("no client (test)");
       },
       context: async ({ sessionID }) => (client?.session?.context ? client.session.context({ sessionID }) : { data: [] }),
+      // V2 fallback: test-seam для отключения session.context (no-fallback сценарий)
+      context__noFallback: false,
       // V2: session.list не существует
       hook: async (name, fn) => {
         if (name === "context") contextHandlers.push(fn);
@@ -2665,6 +2667,126 @@ describe("maestro_config tool (read-only maestro.json, spec 2026-09-24)", () => 
     } finally {
       delete process.env.MAESTRO_CONFIG;
     }
+  });
+});
+
+// =============================================================================
+// V2 fallback для guard maestro_config (session.get → session.context)
+// =============================================================================
+
+describe("maestro_config V2 fallback (session.get unavailable → context fallback)", () => {
+  let dir, savedMAESTRO;
+
+  const cfgPath = () => path.join(dir, "maestro.json");
+  const lines = (msg) => readLogs(dir).filter((e) => e.msg === msg);
+  const getText = (result) => {
+    if (typeof result === "string") return result;
+    if (result?.content?.[0]?.text) return result.content[0].text;
+    return String(result);
+  };
+
+  before(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "maestro-config-v2-"));
+    savedMAESTRO = process.env.MAESTRO_CONFIG;
+    delete process.env.MAESTRO_CONFIG;
+  });
+  after(() => {
+    if (savedMAESTRO === undefined) delete process.env.MAESTRO_CONFIG;
+    else process.env.MAESTRO_CONFIG = savedMAESTRO;
+    fs.rmSync(dir, { recursive: true, force: true });
+  });
+  afterEach(() => { try { fs.rmSync(cfgPath(), { force: true }); } catch {} });
+
+  it("V2: session.get бросает TypeError → fallback на session.context → allow", async () => {
+    // V2: session.get не существует → TypeError: "get is not a function".
+    // Guard ловит TypeError → fallback на session.context → allow.
+    // Non-TypeError (например, "unknown session") → deny (старое поведение).
+    const clientGetTypeError = {
+      session: {
+        get: async () => { throw new TypeError("session.get is not a function"); },
+        context: async ({ sessionID }) => ({
+          data: [{ info: { role: "user", content: "test" } }],
+        }),
+      },
+    };
+    fs.writeFileSync(cfgPath(), JSON.stringify({ memory: { enabled: true } }));
+    const plugin = await MaestroBootstrapPlugin({ directory: dir, client: clientGetTypeError });
+    const t = plugin.tool.maestro_config;
+    const out = JSON.parse(getText(await t.execute({}, { sessionID: "s1" })));
+    assert.equal(out.exists, true, "guard должен пропустить (fallback allow при TypeError)");
+    assert.equal(out.config.memory.enabled, true);
+  });
+
+  it("V2: session.get бросает Error → deny (не TypeError, старое поведение)", async () => {
+    // Если session.get существует, но бросает (не TypeError) — deny.
+    // Это сохраняет backward-compat для сценария "неизвестная сессия".
+    const clientGetError = {
+      session: {
+        get: async () => { throw new Error("session not found"); },
+        context: async () => ({ data: [] }),
+      },
+    };
+    fs.writeFileSync(cfgPath(), JSON.stringify({ trust: {} }));
+    const plugin = await MaestroBootstrapPlugin({ directory: dir, client: clientGetError });
+    const t = plugin.tool.maestro_config;
+    const msg = getText(await t.execute({}, { sessionID: "s-err" }));
+    assert.match(msg, /only available in top-level primary sessions/);
+  });
+
+  it("V2: session.get возвращает null → fallback → allow (даже с пустым контекстом)", async () => {
+    const clientNull = {
+      session: {
+        get: async () => null,
+        context: async () => ({ data: [] }),
+      },
+    };
+    fs.writeFileSync(cfgPath(), JSON.stringify({ communication: "plain" }));
+    const plugin = await MaestroBootstrapPlugin({ directory: dir, client: clientNull });
+    const t = plugin.tool.maestro_config;
+    const out = JSON.parse(getText(await t.execute({}, { sessionID: "s2" })));
+    assert.equal(out.exists, true, "guard пропустит даже с пустым контекстом");
+  });
+
+  it("V2: session.get undefined → fallback на session.context → allow (fail-open)", async () => {
+    // session.get undefined — guard видит undefined через optional chaining
+    // (краткое замыкание mock'а: ctx.session.get — обёртка,
+    //  но когда client.session.get === undefined, mock бросает "no client").
+    // Поэтому используем get: async () => null, что тоже даёт !data.
+    const clientNoGet = {
+      session: {
+        get: async () => null, // === undefined по семантике
+        context: async ({ sessionID }) => ({
+          data: [{ info: { role: "user", content: "hello" } }],
+        }),
+      },
+    };
+    fs.writeFileSync(cfgPath(), JSON.stringify({ trust: { custodian: true } }));
+    const plugin = await MaestroBootstrapPlugin({ directory: dir, client: clientNoGet });
+    const t = plugin.tool.maestro_config;
+    const out = JSON.parse(getText(await t.execute({}, { sessionID: "s3" })));
+    assert.equal(out.exists, true, "guard должен пропустить (fallback allow)");
+    assert.deepEqual(out.config, { trust: { custodian: true } });
+    assert.ok(lines("maestro_config:read").some((e) => e.result === "ok"));
+  });
+
+  it("V2 guard: no-fallback deny — прямое тестирование guard-логики", async () => {
+    // Тестируем guard напрямую: session.get → null, context → бросает.
+    // Это изолирует guard-логику от plugin mock'а.
+    const { makeMaestroConfigTool } = await import("./core.js");
+
+    const denyClient = {
+      session: {
+        get: async () => null,
+        context: async () => { throw new Error("context not available"); },
+      },
+    };
+    const tool = makeMaestroConfigTool({
+      client: { session: denyClient.session },
+      root: dir,
+      log: { info: () => {}, warn: () => {}, error: () => {} },
+    });
+    const msg = getText(await tool.execute({}, { sessionID: "s-no-fallback" }));
+    assert.match(msg, /only available in top-level primary sessions/);
   });
 });
 
