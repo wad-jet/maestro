@@ -180,10 +180,53 @@ function normalizeModel(infoModel) {
   return null;
 }
 
+// Диспатч субагента: V1 — tool "task", V2 — "subagent" (одно действие, разные имена).
+const isTaskTool = (name) => name === "task" || name === "subagent";
+// Shell-инструмент: V1 — "bash", V2 — "shell"; оба идут в bash-агрегацию по первому слову команды.
+const isBashTool = (name) => name === "bash" || name === "shell";
+
+// Нормализатор сообщений экспорта (V1 и V2) → единая внутренняя форма:
+//   { role: "user"|"assistant", ts: number|null, parts, tokens, cost } | null.
+// V1 (старый CLI): { info: { role, time: { created }, tokens, cost }, parts: [...] } — чтение как раньше.
+// V2 (новый CLI):  { type, time: { created }, content: [...], tokens, cost } — плоская структура.
+// Неролевые/служебные сообщения (V1 без role; V2 idle/synthetic/system/compaction/…) → null (пропуск).
+function normalizeMessage(m) {
+  if (!m || typeof m !== "object") return null;
+  // --- V1 ---
+  if (m.info && typeof m.info === "object") {
+    const role = m.info.role;
+    if (role !== "user" && role !== "assistant") return null;
+    const ts = m.info.time && typeof m.info.time.created === "number" ? m.info.time.created : null;
+    return { role, ts, parts: Array.isArray(m.parts) ? m.parts : [], tokens: m.info.tokens, cost: m.info.cost };
+  }
+  // --- V2 ---
+  if (m.type === "user" || m.type === "assistant") {
+    const ts = m.time && typeof m.time.created === "number" ? m.time.created : null;
+    const parts = [];
+    for (const c of (Array.isArray(m.content) ? m.content : [])) {
+      if (!c || typeof c !== "object" || c.type !== "tool") continue;
+      const st = c.state && typeof c.state === "object" ? c.state : undefined;
+      if (st) {
+        // V2-ключи → V1-канон (??= — существующие ключи не затираем):
+        // agent → subagent_type, sessionID → sessionId, description → title (диспатчи task/subagent).
+        if (st.input && typeof st.input === "object") st.input.subagent_type ??= st.input.agent;
+        if (st.metadata && typeof st.metadata === "object") st.metadata.sessionId ??= st.metadata.sessionID;
+        if (isTaskTool(c.name) && st.input && typeof st.input === "object") st.title ??= st.input.description;
+      }
+      parts.push({ type: "tool", tool: c.name, state: st });
+    }
+    return { role: m.type, ts, parts, tokens: m.tokens, cost: m.cost };
+  }
+  return null;
+}
+
 const allTs = messages.map(m => m.info && m.info.time && m.info.time.created).filter(t => typeof t === "number");
 const sessionStart = allTs.length ? Math.min(...allTs) : null;
 const sessionEnd = allTs.length ? Math.max(...allTs) : null;
 const sessionDurationMs = sessionStart !== null && sessionEnd !== null ? sessionEnd - sessionStart : null;
+
+// Нормализованные сообщения (V1/V2 → единая форма); три прохода агрегации ниже читают только их.
+const norm = messages.map(normalizeMessage);
 
 let toolOpsCount = 0;
 let toolTimeMs = 0;
@@ -199,14 +242,12 @@ const timeline = [];
 const gaps = [];
 let assistantTs = null;
 
-for (const msg of messages) {
-  const role = (msg.info && msg.info.role) || null;
-  const ts = msg.info && msg.info.time && typeof msg.info.time.created === "number"
-    ? msg.info.time.created : null;
-  if (!role || ts === null) continue;
-  if (role !== "user" && role !== "assistant") continue;
+for (const n of norm) {
+  if (!n || n.ts === null) continue;
+  const role = n.role;
+  const ts = n.ts;
 
-  const parts = Array.isArray(msg.parts) ? msg.parts : [];
+  const parts = n.parts;
   const toolParts = parts.filter(p => typeof p === "object" && p.type === "tool");
   const toolStates = toolParts.map(p => p.state).filter(s => typeof s === "object" && s);
 
@@ -242,7 +283,7 @@ for (const msg of messages) {
       toolTimeMs += dur;
     }
 
-    if (toolName === "task") {
+    if (isTaskTool(toolName)) {
       const agent = (tp.state && tp.state.input && tp.state.input.subagent_type) || "unknown";
       if (!agents[agent]) agents[agent] = { count: 0, totalMs: 0, maxMs: 0 };
       agents[agent].count++;
@@ -256,7 +297,7 @@ for (const msg of messages) {
     tools[toolName].maxMs = Math.max(tools[toolName].maxMs, dur !== null ? dur : 0);
 
     let bashCmdKey = null;
-    if (toolName === "bash" && tp.state && tp.state.input && typeof tp.state.input.command === "string") {
+    if (isBashTool(toolName) && tp.state && tp.state.input && typeof tp.state.input.command === "string") {
       const rawCmd = tp.state.input.command.trim().replace(/^["']+|["']+$/g, "");
       const key = rawCmd ? rawCmd.split(/\s+/)[0] : "unknown";
       const firstWord = key.startsWith("/") ? key.split("/").pop() : key;
@@ -271,10 +312,10 @@ for (const msg of messages) {
     if (dur !== null) {
       topOps.push({
         tool: toolName,
-        agent: toolName === "task"
+        agent: isTaskTool(toolName)
           ? (tp.state && tp.state.input && tp.state.input.subagent_type) || null
           : null,
-        cmd: toolName === "bash" ? bashCmdKey : null,
+        cmd: isBashTool(toolName) ? bashCmdKey : null,
         durationMs: dur,
         start: typeof t.start === "number" ? t.start : null,
       });
@@ -311,10 +352,10 @@ let reviewDispatches = 0;
 const reviewCycles = [];
 const REVIEW_RE = /\breview\b|ревью/i;
 
-for (const msg of messages) {
-  const msgInfo = msg.info || {};
-  if (msgInfo.role === "assistant") {
-    const t = msgInfo.tokens;
+for (const n of norm) {
+  if (!n) continue;
+  if (n.role === "assistant") {
+    const t = n.tokens;
     if (t && typeof t === "object") {
       mInput += t.input || 0;
       mOutput += t.output || 0;
@@ -322,13 +363,13 @@ for (const msg of messages) {
       mCacheRead += (t.cache && t.cache.read) || 0;
       mCacheWrite += (t.cache && t.cache.write) || 0;
     }
-    if (typeof msgInfo.cost === "number" && msgInfo.cost > 0) { costSum += msgInfo.cost; costSeen = true; }
+    if (typeof n.cost === "number" && n.cost > 0) { costSum += n.cost; costSeen = true; }
   }
-  const parts = Array.isArray(msg.parts) ? msg.parts : [];
+  const parts = n.parts;
   for (const p of parts) {
     if (typeof p !== "object" || !p || p.type !== "tool") continue;
     if (p.tool === "question") questionCount++;
-    if (p.tool === "task") {
+    if (isTaskTool(p.tool)) {
       const st = p.state;
       if (st && st.status === "completed" && typeof st.title === "string" && REVIEW_RE.test(st.title)) {
         reviewDispatches++;
@@ -387,10 +428,10 @@ if (!noChildren) {
   // --- metrics.tokensByAgent (child-экспорт) ---
   const agentBuckets = {};
   const uniqueChildren = new Map(); // sessionId -> agent (первое вхождение)
-  for (const msg of messages) {
-    const parts = Array.isArray(msg.parts) ? msg.parts : [];
-    for (const p of parts) {
-      if (typeof p !== "object" || !p || p.type !== "tool" || p.tool !== "task") continue;
+  for (const n of norm) {
+    if (!n) continue;
+    for (const p of n.parts) {
+      if (typeof p !== "object" || !p || p.type !== "tool" || !isTaskTool(p.tool)) continue;
       const st = p.state;
       if (!st || st.status !== "completed") continue;
       const sid = st.metadata && st.metadata.sessionId;

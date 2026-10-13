@@ -243,6 +243,30 @@ const fixtureFast = {
   ],
 };
 
+// --- V2-экспорт (новый формат opencode): плоская структура (type/time/content на самом сообщении) ---
+const fixtureV2 = {
+  info: { id: "ses_v2", model: { providerID: "akash", id: "X/Y" },
+          time: { created: 1000, updated: 9000 } },
+  messages: [
+    { id: "m1", time: { created: 1000 }, type: "user", text: "go", files: [], agents: [] },
+    { id: "m2", time: { created: 2000, streamed: 2001, completed: 6000 }, type: "assistant",
+      agent: "haiku", model: { id: "X/Y", providerID: "akash" },
+      content: [
+        { type: "text", text: "ok" },
+        { type: "tool", id: "t1", name: "shell", executed: true,
+          state: { status: "completed", input: { command: "node test.js" } } },
+        { type: "tool", id: "t2", name: "subagent", executed: true,
+          state: { status: "completed", input: { agent: "sonnet", description: "Review feature X", prompt: "p" },
+                   metadata: { sessionID: "child_v2a", status: "completed", truncated: false } } },
+        { type: "tool", id: "t3", name: "question", executed: true,
+          state: { status: "completed", input: { questions: [] } } },
+      ],
+      tokens: { input: 100, output: 50, reasoning: 5, cache: { read: 10, write: 2 } },
+      cost: 0.001, finish: "stop" },
+    { id: "m3", time: { created: 8500 }, type: "idle" },
+  ],
+};
+
 test("aggregates agents/tools/bash", () => {
   const data = runFixture(fixtureAgentsTools, "agents_tools");
   assert.equal(data.totals.toolOps, 8);
@@ -1108,4 +1132,29 @@ test("metrics.cost — round6: граница на 6-м знаке (0.0000004999
   assert.equal(a.metrics.cost.primaryUsd, 0, "0.0000004999 * 1e6 = 0.4999 < 0.5 → 0");
   const b = runFixture(mkWithCost("ses_r6b", 0.0000005001), "cost-r6-b");
   assert.equal(b.metrics.cost.primaryUsd, 0.000001, "0.0000005001 * 1e6 = 0.5001 ≥ 0.5 → 1/1e6");
+});
+
+test("V2-экспорт: структура (roles/tools/agents/bash/metrics)", () => {
+  const exportDir = join(tmpDir, "child-export-v2");
+  mkdirSync(exportDir, { recursive: true });
+  writeFileSync(join(exportDir, "child_v2a.json"), JSON.stringify({
+    info: { id: "child_v2a", tokens: { input: 70, output: 7, reasoning: 0, cache: { read: 0, write: 0 } } },
+    messages: [],
+  }));
+  const out = runFixture(fixtureV2, "v2_struct", { MAESTRO_TIMELINE_EXPORT_DIR: exportDir });
+  assert.equal(out.totals.userMessages, 1);
+  assert.equal(out.totals.toolOps, 3);
+  assert.equal(out.tools.shell.count, 1);
+  assert.equal(out.tools.subagent.count, 1);
+  assert.equal(out.tools.question.count, 1);
+  assert.equal(out.agents.sonnet.count, 1);          // input.agent → агент
+  assert.equal(out.bash.node.count, 1);              // shell → bash-агрегация по первому слову
+  assert.deepEqual(out.metrics.tokens, { input: 100, output: 50, reasoning: 5, cacheRead: 10, cacheWrite: 2, cost: 0.001 });
+  assert.equal(out.metrics.questionCount, 1);
+  assert.equal(out.metrics.reviewCycles.length, 1);   // title из input.description
+  assert.equal(out.metrics.reviewCycles[0].titleShort, "Review feature X");
+  assert.equal(out.session.model, "akash/X/Y");
+  // child-атрибуция (fixture-mode): metadata.sessionID → sessionId, input.agent → subagent_type
+  assert.equal(out.metrics.tokensByAgent.sonnet.count, 1);
+  assert.equal(out.metrics.tokensByAgent.sonnet.input, 70);
 });
