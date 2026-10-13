@@ -686,13 +686,14 @@ export async function createBootstrapPlugin(ctx) {
     filterEnv: "MAESTRO_MEMORY",
   });
 
-  // V2-only: fail-loud если контекст не V2 (session.context — маркер V2)
+  // V2 detection: session.context — маркер V2 API.
+  // Если отсутствует — warning, НЕ error (целевое приложение может быть на V1).
+  // Plugin continues but some features may not work.
   const isV2 = typeof ctx?.session?.context === "function";
   if (!isV2) {
-    const msg = "[maestro-bootstrap] Требуется OpenCode V2 runtime (session.context). " +
-      "Обновите opencode до версии с V2 plugin API.";
-    log.error("v2_runtime_required", { error: msg });
-    throw new Error(msg);
+    const msg = "[maestro-bootstrap] Warning: OpenCode V2 runtime required for full functionality. " +
+      "session.context not available — some features may not work.";
+    log.warn("v2_runtime_not_available", { warning: msg });
   }
 
   const config = loadMaestroConfig(undefined, root);
