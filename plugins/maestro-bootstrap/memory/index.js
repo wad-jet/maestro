@@ -234,6 +234,16 @@ function toF32(v) {
  * Register memory hooks for V2 plugin.
  * Returns { dispose: fn }.
  */
+/**
+ * Возвращает базовый каталог данных: XDG_DATA_HOME / macOS Application
+ * Support / ~/.local/share.
+ */
+export function defaultDataDir() {
+  if (process.env.XDG_DATA_HOME) return process.env.XDG_DATA_HOME;
+  if (process.platform === "darwin") return join(os.homedir(), "Library", "Application Support");
+  return join(os.homedir(), ".local", "share");
+}
+
 export async function registerMemoryHooks({ client, config: maestroConfig, log, memoryLog = null, root, deps = {} }) {
   const memLog = memoryLog ?? log;
   const logInfo = (msg, extra) => memLog?.info?.(msg, extra);
