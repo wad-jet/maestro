@@ -9,7 +9,14 @@
 
 ## [Unreleased]
 
-> **Версия 5.6.7** — Minor: pipeline status indication
+## [2026-10-14]
+
+> **Версия 5.6.8** — Patch: исправление дрейфа документации (pipeline-overview, feature-classification) от канона SKILL.md.
+
+### Исправлено
+
+- **pipeline-overview.md:** маршрут простой фичи `→7b→13→…→17→…` (был `→11→…`, пропущен гейт 17), mermaid-диаграмма исправлена, добавлен Spike-маршрут, раскрыты auto-answer/auto-ai режимы (never-auto, auto-гейты, диспатч tiers), Gate 0 предупреждение, ⚑4 sensitivity guard.
+- **feature-classification.md:** pipeline простой фичи `→ короткий дизайн → 7b → SDD(13) → 14–18.5` (было `→ план(11-12)`).
 
 - Инструмент `maestro_pipeline_status` для индикации текущего шага пайплайна.
 - Статус-блок в system prompt: `maestro pipeline: active (step X/Y, Description)`.
