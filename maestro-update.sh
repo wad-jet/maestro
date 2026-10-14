@@ -287,6 +287,56 @@ else
   info "удалено записей кэша: $MATCHED"
 fi
 
+# --- 4a. Перезапуск фоновой службы OpenCode (V2) ----------------------------
+#
+# В OpenCode V2 плагины принадлежат фоновой службе (`serve --service`),
+# а не TUI-клиенту. Перезапуск клиента не перезагружает плагин.
+# После очистки кэша в V2 служба должна быть перезапущена, чтобы подхватить
+# свежий клон. Предлагаем перезапуск HITL — чтобы не прерывать работу
+# пользователя без согласия.
+
+opencode_cmd="$(command -v opencode 2>/dev/null || command -v opencode.exe 2>/dev/null || true)"
+if [[ -n "$opencode_cmd" ]]; then
+  if "$opencode_cmd" service status >/dev/null 2>&1; then
+    warn "обнаружена запущенная служба opencode"
+    info "после очистки кэша плагина (V2) службу нужно перезапустить,"
+    info "иначе она продолжит использовать старую версию из памяти."
+    say ""
+    say "[maestro-update] Перезапустить фоновую службу opencode?"
+    say "  Это прервёт активные сессии в ТУИ."
+    say "  (a) Да, перезапустить"
+    say "  (c) Нет, перезапущу вручную: '$opencode_cmd service restart'"
+    while :; do
+      printf '[maestro-update] выбор (a/c): '
+      read -r svc_choice || svc_choice=""
+      case "$svc_choice" in
+        a)
+          info "перезапускаю службу opencode..."
+          "$opencode_cmd" service restart || warn "не удалось перезапустить службу (попробуйте вручную: '$opencode_cmd service restart')"
+          info "снова проверю статус..."
+          if "$opencode_cmd" service status >/dev/null 2>&1; then
+            info "служба перезапущена успешно — плагин загрузится заново из свежего кэша"
+          else
+            warn "служба не ответила после перезапуска — возможно, opencode не установлен"
+          fi
+          break
+          ;;
+        c)
+          info "перезапуск пропущен (перезапустите вручную: '$opencode_cmd service restart')"
+          break
+          ;;
+        *)
+          info "введите a или c"
+          ;;
+      esac
+    done
+  else
+    info "служба opencode не запущена (кэш всё ещё нужен для первого запуска)"
+  fi
+else
+  info "'opencode' не найден в PATH — перезапуск службы пропущен (сделайте вручную: opencode service restart)"
+fi
+
 # --- 5. Пин версии (опционально) ---------------------------------------------
 
 GLOBAL_CONFIG="${XDG_CONFIG_HOME:-$HOME/.config}/opencode/opencode.json"
@@ -379,7 +429,9 @@ cat <<EOT
   - плагин: $PLUGIN_SPEC${PIN:+#$PIN}
 
 Что дальше:
-  1. Перезапустите opencode (обязательно — плагин загрузится заново).
+  1. Перезапустите фоновую службу opencode (обязательно — в V2 плагины принадлежат службе, а не клиенту):
+     $opencode_cmd service restart
+     (если служба уже перезапущена выше — пропустите)
   2. Проверьте версию: /maestro-version  (покажет фактическую версию плагина)
 
 Русский — рабочий язык. Источник: $REPO_URL
