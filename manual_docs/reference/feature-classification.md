@@ -12,7 +12,7 @@
 | Категория | Примеры | Pipeline | Spec Review | SDD | Модель SDD |
 |---|---|---|---|---|---|
 | **Trivial fix** (1–2 строки) | Typos, rename, single-line bugfix | TDD + commit напрямую; pipeline не запускается | Нет | Нет | — |
-| **Простая фича** | Simple endpoint, UI-компонент без стейта, добавление поля в DTO | Шаги 2-7 → план (11-12) → SDD (13) | Нет | 1-2 task без review-package | **Haiku** |
+| **Простая фича** | Simple endpoint, UI-компонент без стейта, добавление поля в DTO | Шаги 2-7 → короткий дизайн в чате → HITL-гейт 7b (аппрув) → SDD (13) → 14–18.5 | Нет | 1-2 task без review-package | **Haiku** |
 | **Сложная фича** | Новая сущность с миграцией, multi-step flow, endpoint с auth | Полный pipeline: 2-7 → spec (8) → опц. Spec Review (9) → gate (10) → план (11-12) → SDD (13) | Рекомендован | Multi-task, review-package | **Sonnet** (**Opus** для key task) |
 | **Архитектурная фича** | Новая таблица + сервис + контроллер, breaking change, cross-module refactoring | Полный pipeline + обязательный Spec Review | **Обязателен** | Multi-task, redesign после review если `revise` | **Opus** |
 
