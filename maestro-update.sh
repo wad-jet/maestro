@@ -20,7 +20,10 @@
 #      directory-level swap commands/, agents/. Чужие объекты без маркера
 #      .maestro-deployed НЕ трогаются; именование-конфликт → guard (die).
 #   9. Атомарный manifest (tmp + mv): {"version","sha_m","sha_s","deployed":[...]}.
-#  10. (global) глобальный maestro.json создаётся при отсутствии (privacy-safe).
+#  10. (global) глобальный maestro.json создаётся при отсутствии (privacy-safe);
+#      plugin-version (фактическая версия задеплоенного коммита из package.json
+#      clone) → .maestro/plugin-version (best-effort, идемпотентно; также в
+#      no-op-ветке; fallback /maestro-version).
 #  11. Очистка кэша плагина: $HOME/.cache/opencode/npm/git-maestro-* + legacy packages/.
 #  12. Плагин re-reg (idempotent, de-dup is_ours; --pin → spec#sha).
 #  13. (global) дубликат плагина в проектном .opencode/opencode.json (cwd) →
@@ -663,6 +666,39 @@ PY
   return 0
 }
 
+# --- Global plugin-version (spec §3.7, /maestro-version fallback) --------------
+
+# write_global_plugin_version — (global) best-effort: фактическая версия
+# задеплоенного коммита (version из package.json clone) → $STATE_DIR/plugin-version.
+# Идемпотентно (не перезаписывает при совпадении); сбой НЕ блокирует (warning).
+write_global_plugin_version() {
+  [ "$MODE" = global ] || return 0
+  local f="$STATE_DIR/plugin-version" ver
+  ver=$(python3 - "$TMP_ROOT/maestro/package.json" <<'PY' 2>/dev/null
+import json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        v = json.load(fh).get("version")
+    print(v if isinstance(v, str) and v else "")
+except Exception:
+    pass
+PY
+  ) || ver=""
+  if [ -z "$ver" ]; then
+    warn "plugin-version: версия не определена (package.json clone) — пропускаю, не блокирую."
+    return 0
+  fi
+  if [ -f "$f" ] && [ "$(cat "$f" 2>/dev/null)" = "$ver" ]; then
+    return 0
+  fi
+  if ! printf '%s\n' "$ver" > "$f" 2>/dev/null; then
+    warn "plugin-version: не удалось записать $f — не блокирую."
+    return 0
+  fi
+  info "plugin-version: $f ($ver)"
+  return 0
+}
+
 # --- Дубликат плагина (Review Focus #5, spec §3.3: v1 — warning + инструкция) ---
 
 # check_project_duplicate — (global) в cwd-проекте .opencode/opencode.json с
@@ -870,6 +906,10 @@ main() {
   old_s=$(old_sha "$STATE_DIR/manifest.json" sha_s)
   if [ "$old_m" = "$SHA_M" ] && [ "$old_s" = "$SHA_S" ]; then
     info "актуальная версия (maestro $SHA_M; superpowers $SHA_S) — обновлений не требуется."
+    # (global) дописать при отсутствии; best-effort, идемпотентно; dry-run — 0 мутаций
+    if [ "$DRY_RUN" != 1 ]; then
+      write_global_plugin_version
+    fi
     exit 0
   fi
 
@@ -896,6 +936,7 @@ main() {
   write_manifest
   if [ "$MODE" = global ]; then
     ensure_global_maestro_json
+    write_global_plugin_version
   fi
   cache_clean
   local spec

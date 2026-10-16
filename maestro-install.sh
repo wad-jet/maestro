@@ -14,7 +14,9 @@
 #   5. Атомарный manifest (tmp + mv): {"version","sha_m","sha_s","deployed":[...]}.
 #   6. Регистрация плагина (de-dup: filter is_ours + append, атомарная запись).
 #   7. (global) глобальный maestro.json создаётся при отсутствии
-#      (memory: enabled=false — privacy-safe default).
+#      (memory: enabled=false — privacy-safe default); plugin-version
+#      (фактическая версия задеплоенного коммита из package.json clone) →
+#      .maestro/plugin-version (best-effort, идемпотентно; fallback /maestro-version).
 #
 # Режимы:
 #   --project (default) — проектная: .opencode/ + .maestro/manifest.json
@@ -773,6 +775,39 @@ PY
   return 0
 }
 
+# --- Global plugin-version (spec §3.7, /maestro-version fallback) --------------
+
+# write_global_plugin_version — (global) best-effort: фактическая версия
+# задеплоенного коммита (version из package.json clone) → $STATE_DIR/plugin-version.
+# Идемпотентно (не перезаписывает при совпадении); сбой НЕ блокирует (warning).
+write_global_plugin_version() {
+  [ "$MODE" = global ] || return 0
+  local f="$STATE_DIR/plugin-version" ver
+  ver=$(python3 - "$TMP_ROOT/maestro/package.json" <<'PY' 2>/dev/null
+import json, sys
+try:
+    with open(sys.argv[1], encoding="utf-8") as fh:
+        v = json.load(fh).get("version")
+    print(v if isinstance(v, str) and v else "")
+except Exception:
+    pass
+PY
+  ) || ver=""
+  if [ -z "$ver" ]; then
+    warn "plugin-version: версия не определена (package.json clone) — пропускаю, не блокирую."
+    return 0
+  fi
+  if [ -f "$f" ] && [ "$(cat "$f" 2>/dev/null)" = "$ver" ]; then
+    return 0
+  fi
+  if ! printf '%s\n' "$ver" > "$f" 2>/dev/null; then
+    warn "plugin-version: не удалось записать $f — не блокирую."
+    return 0
+  fi
+  info "plugin-version: $f ($ver)"
+  return 0
+}
+
 # --- Auto-derive namespace (spec §3.2.3, bash-эквивалент для --migrate) --------
 #
 # Правила:
@@ -1264,6 +1299,7 @@ main() {
   register_plugin
   if [ "$MODE" = global ]; then
     ensure_global_maestro_json
+    write_global_plugin_version
   fi
   if [ "$MIGRATE" = 1 ]; then
     migrate_post

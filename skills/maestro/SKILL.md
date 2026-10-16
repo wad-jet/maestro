@@ -7,9 +7,20 @@ description: Use when implementing a feature end-to-end — orchestrates brainst
 
 **Язык HITL:** русский.
 
-1. **Маркер проекта.** Если в корне проекта есть `maestro.json` — это проект под
-   управлением maestro, выполняется проверка плагина (шаг 2). Если `maestro.json`
-   НЕТ — проект не под maestro, гейт пропускается, работаем как обычно.
+1. **Маркер проекта (многоуровневый).** «Проект под maestro» = резолвер нашёл конфиг
+   в любом из слоёв: `<root>/maestro.json` (в git, командная фиксация) →
+   `<root>/.maestro/maestro.json` (не в git) → глобальный
+   `~/.config/opencode/.maestro/maestro.json` (XDG-aware: если `XDG_CONFIG_HOME`
+   задан — `$XDG_CONFIG_HOME/opencode/.maestro/`) → `MAESTRO_CONFIG` env (полный
+   override, debug: если задан — приоритетнее всех остальных слоёв).
+   - Конфиг найден в любом слое → проект под управлением maestro, выполняется
+     проверка плагина (шаг 2).
+   - **Только глобальный конфиг** (нет root `maestro.json` и нет `.maestro/`):
+     гейт проходит; до `/maestro-setup` (создаст `.maestro/maestro.json`) memory
+     disabled с причиной `namespace_missing`.
+   - **Конфига нет нигде** — проект не под maestro: гейт пропускается, работаем
+     как обычно (fail-closed для confidential). Показать message:
+     «`maestro.json` отсутствует; запустите `/maestro-setup` для настройки».
 
 2. **Плагин реально работал.** Открой самый свежий файл
    `.maestro/logs/maestro-bootstrap-<дата>.log` (по имени-дате). Найди строку
