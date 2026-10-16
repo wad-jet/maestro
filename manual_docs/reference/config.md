@@ -8,20 +8,38 @@
 или глобальный конфиг) и переменных окружения, которые управляют поведением скилла
 `maestro` и плагина `maestro-bootstrap`.
 
-## 📄 maestro.json
+## 📄 maestro.json (4-слойный конфиг)
 
-Консолидированный конфиг в корне проекта. Коммитится
-в git — он описывает security-политику и trust-модель проекта. Файл состоит из
-нескольких секций: `trust`, `confidential`, `sanitizer_whitelist`, `communication` (опц.), `feedback_report` (опц.), `review.parallel` (опц.), `memory` (опц.).
+Консолидированный конфиг скилла `maestro` и плагина `maestro-bootstrap`
+(trust-модель, security-политика, память). Конфигурация — **4 слоя**, от
+высшего к низшему приоритету:
 
-Путь к файлу resolves в таком порядке:
-1. Переменная окружения `MAESTRO_CONFIG`
-2. `<project>/maestro.json` (по умолчанию)
+| # | Слой | Путь | Где живёт |
+|---|---|---|---|
+| 1 | `MAESTRO_CONFIG` (env) | произвольный путь | **debug-only**: полный override (replace всего), другие слои не проверяются |
+| 2 | Проектный (командный) | `<project>/maestro.json` | в git — командная фиксация |
+| 3 | Проектный (локальный) | `<project>/.maestro/maestro.json` | вне git (`.maestro/` в `.gitignore`) |
+| 4 | Глобальный (машинный) | `~/.config/opencode/.maestro/maestro.json` | XDG-aware: если задан `XDG_CONFIG_HOME` — `$XDG_CONFIG_HOME/opencode/.maestro/` |
 
-Если файл отсутствует — все сабагенты untrusted,
+**Активный файл = ПЕРВЫЙ ПАРСИРУЕМЫЙ слой** (порядок 2 → 3 → 4; слой 1 —
+путь как есть). Сломанный JSON слоя → warning в лог плагина + переход к
+следующему слою (fail-soft: плагин не падает). Если все слои сломаны или
+отсутствуют — пустой конфиг `{}` + warning: все сабагенты untrusted,
 дефолтные sanitizer-правила (fail-open).
 
-Старые файлы `trust-config.json`, `.maestro/sanitizer-whitelist.json` **не поддерживаются**.
+> **Hybrid-семантика (6.0.0):** non-`memory` ключи берутся **только из
+> активного файла** (replace — файлы-слои не мержатся); ключи `memory.*` —
+> **soft-merge** активного файла с глобальным слоем (см. секцию `memory`
+> ниже: `enabled` и `embedding.model` — из активного, при отсутствии — из
+> глобального, при отсутствии — встроенный default; `namespace` — только из
+> активного файла, глобальный слой его не содержит).
+
+Файл состоит из нескольких секций: `trust`, `confidential`,
+`sanitizer_whitelist`, `communication` (опц.), `feedback_report` (опц.),
+`review.parallel` (опц.), `merge_guard` (опц.), `memory` (опц.).
+
+Старые файлы `trust-config.json`, `.maestro/sanitizer-whitelist.json`
+**не поддерживаются**.
 
 > **Генерация/настройка конфига — через `/maestro-assistant`.** Полный JSON-канон
 > `maestro.json` и правила вывода секций из контекста живут в скилле `maestro-assistant`
@@ -458,10 +476,22 @@ xoxb-, bare `sk-proj-`), XML `<password>`, 2-сегментный JWT, URI-сх�
 ### Секция `memory` (опциональный memory layer)
 
 Векторная память сессий плагина `maestro-bootstrap`: авто-саммаризация,
-`memory_search`, авто-вспоминание. **Опциональный модуль** — не входит в
-стандартную установку; включается явно. **Default:** секции нет **или**
-`enabled: false` → память полностью выключена (хуки не регистрируются,
-зависимости не загружаются, LLM-вызовов нет).
+`memory_search`, авто-вспоминание. **Опциональный модуль** — включается
+явно, per-project. **Default:** глобальный слой — `memory.enabled: false`
+(privacy-safe); секции нет **или** `enabled: false` → память полностью
+выключена (хуки не регистрируются, зависимости не загружаются, LLM-вызовов
+нет). Включение — project-слой (root `maestro.json` /
+`.maestro/maestro.json`): `enabled: true` + `namespace` (см.
+[Как включить память](../how-to/enable-memory.md)).
+
+**Soft-merge `memory.*` (hybrid, 6.0.0):**
+
+| Ключ | Резолв |
+|---|---|
+| `enabled` | активный файл → глобальный слой → `false` |
+| `embedding.model` | активный файл → глобальный слой → встроенный `Xenova/paraphrase-multilingual-MiniLM-L12-v2` |
+| `namespace` | **только** активный файл (`?? null`); глобальный слой namespace **не содержит** |
+| остальные `memory.*` (`storage`, `top_k`, `retention_days`, `related`, `mainline`, …) | из активного файла (replace) |
 
 ```json
 {
@@ -506,7 +536,7 @@ xoxb-, bare `sk-proj-`), XML `<password>`, 2-сегментный JWT, URI-сх�
 
 | Ключ | Тип | Дефолт | Описание |
 |---|---|---|---|
-| `enabled` | `boolean` | `false` | Включает память. Нет секции / `false` → полностью off |
+| `enabled` | `boolean` | `false` | Включает память. Soft-merge: активный файл → глобальный слой → `false`; нет секции / `false` → полностью off |
 | `auto_recall` | `boolean` | `true` | Авто-вспоминание: первое сообщение top-level primary сессии → блок контекста в system prompt |
 | `embedding_model` | `string` | `Xenova/paraphrase-multilingual-MiniLM-L12-v2` | **Legacy-алиас** для `embedding.model` (только при `provider: local`). Модель эмбеддингов (transformers.js, dim 384, RU+EN, q8 ~120 МБ, кэш локально). Для `openai` `model` берётся строго из `embedding.model` |
 | `embedding.provider` | `string` | `local` | Провайдер эмбеддингов: `local` (default) \| `openai` (внешний OpenAI-совместимый `/embeddings` API, осознанный opt-in) |
@@ -520,7 +550,7 @@ xoxb-, bare `sk-proj-`), XML `<password>`, 2-сегментный JWT, URI-сх�
 | Модель саммаризации | — | — | Без ключа в `maestro.json` (4.0.0, zero-key): резолв из opencode-конфига, см. [Память maestro (reference)](memory.md) → «Резолв модели саммаризации» |
 | `identity` | `string` \| `null` | `null` | Явный override identity (напр. сервисный аккаунт) |
 | `identity_env` | `string` \| `null` | `null` | Имя env-переменной с identity (per-machine, не в общем `maestro.json`) |
-| `namespace` | `string` | — | **Обязателен** (v5.1). Ключ изоляции памяти; формат `microservices.sales.pay` (1–3 сегмента, lowercase, разделитель `.`); нормализация trim+lowercase. Отсутствует/невалиден → память disabled (`namespace_missing`/`namespace_invalid`) |
+| `namespace` | `string` | — | **Обязателен** (v5.1). Ключ изоляции памяти; формат `microservices.sales.pay` (1–3 сегмента, lowercase, разделитель `.`); нормализация trim+lowercase. Живёт **только в project-слоях** (root / `.maestro/`); глобальный слой namespace не содержит (один бакет на все проекты = cross-project bleed). При глобальной установке — auto-derive в `/maestro-setup` (записывается в `.maestro/maestro.json`; см. [Память maestro (reference)](memory.md) → «Auto-derive namespace»). Отсутствует/невалиден → память disabled (`namespace_missing`/`namespace_invalid`) |
 | `related` | `string[]` | `[]` | Кросс-доменные связи: массив namespace-префиксов (≤16), merged-only точечная связь с записями другого домена. Невалиден (не массив / >16 / не namespace-префикс) → память disabled (`related_invalid`) |
 | `domain_recall` | `boolean` | `true` | Авто-related по домену (родитель + братья namespace, merged-only) в recall. `false` — off-switch. Невалиден (не boolean) → память disabled (`domain_recall_invalid`) |
 | `module_dir` | `string` \| `null` | `null` | Каталог кода модуля; `null` → `<data-dir>/maestro/memory/module` |
@@ -835,8 +865,12 @@ merge-config (`.opencode/opencode.json`
 
 ### `MAESTRO_CONFIG`
 
-Пользовательский путь к `maestro.json`. Переопределяет дефолтное расположение
-`<project>/maestro.json`:
+**Debug-only** слой конфига (верхний, слой 1): произвольный путь к файлу
+конфига. Полный override — заменяет все остальные слои: путь берётся как есть
+(без проверки существования, без fallback на другие слои); файл отсутствует
+или содержит сломанный JSON → пустой конфиг `{}` (сломанный — + warning в
+лог). Использовать только для отладки; в CI/automation — **запрещено**
+(security boundary: полностью заменяет все слои конфига).
 
 ```bash
 export MAESTRO_CONFIG="/custom/path/to/maestro.json"
@@ -913,9 +947,11 @@ MAESTRO_MEMORY_LOG_DIR="/var/log/maestro"
 
 | Путь | Назначение | В git? |
 |---|---|---|
-| `maestro.json` | Консолидированный конфиг (trust, confidential, sanitizer_whitelist) | Да |
-| `.opencode/opencode.json` | Плагин (альтернативно) + модели сабагентов | Нет (в `.gitignore`) |
-| `.opencode/` (скиллы/агенты/команды) | Доставляемая конфигурация средств (вручную/agpack) | Нет (в `.gitignore`) |
+| `maestro.json` (root) | Слой 2 конфига — командный (trust, confidential, sanitizer_whitelist, …) | Да |
+| `.maestro/maestro.json` | Слой 3 конфига — локальный (per-machine) | Нет (в `.gitignore`) |
+| `~/.config/opencode/.maestro/maestro.json` | Слой 4 конфига — глобальный (per-machine, XDG-aware) | — (вне проекта) |
+| `.opencode/opencode.json` | Плагин (проектная установка) + модели сабагентов | Нет (в `.gitignore`) |
+| `.opencode/` (скиллы/агенты/команды) | Проектная установка: wholesale copy (`maestro-install.sh`/`maestro-update.sh`) или вручную | Нет (в `.gitignore`) |
 | `docs/project-context.md` | Проектовый контекст шага 0 (14 категорий) | Да |
 | `docs/superpowers/specs/*.md` | Spec-файлы | Да |
 | `docs/superpowers/plans/*.md` | План реализации | Да |

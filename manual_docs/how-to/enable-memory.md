@@ -9,8 +9,11 @@
 авто-вспоминание). Полный справочник конфигурации — в
 [Память maestro (reference)](../reference/memory.md).
 
-Память — **не обязательная часть maestro**: стандартная установка
-(`maestro-install.sh`, agpack) её не включает. Включается **по запросу**.
+Память — **не обязательная часть maestro**: глобальный default —
+`memory.enabled: false` (privacy-safe — память не включается автоматически во
+всех проектах). Включается **per-project**: штатно через `/maestro-setup`
+(создаёт `.maestro/maestro.json` с `enabled: true` + auto-derive namespace из
+git remote) или вручную (project-слой конфига, ниже).
 
 **Зачем включать:** память — индекс прошлых сессий, а спеки/планы в
 `docs/superpowers/{specs,plans}/` — источник истины для контекста фичи.
@@ -28,19 +31,27 @@
 
 ## ✅ Краткая инструкция (default — локальный sqlite)
 
-1. В `maestro.json` добавить секцию:
+1. Включить память в **project-слое** конфига (root `maestro.json` или
+   `.maestro/maestro.json`; глобальный слой namespace не содержит):
 
-   ```json
-   {
-     "memory": { "enabled": true }
-   }
-   ```
+   - **Штатно (глобальная установка):** выполнить `/maestro-setup` — он создаст
+     `.maestro/maestro.json` с `memory: { "enabled": true, "namespace":
+     <auto-derive> }`. Auto-derive namespace — из git remote: `domain.owner.repo`
+     (домен без TLD: `github.com` → `github`), monorepo (проект в подкаталоге
+     репо) — `owner.repo.segment`, без git — `parent_dir.project_dir.local`;
+     1–3 сегмента. Если namespace задан явно — не перезаписывает.
+   - **Вручную:** секция в `<project>/.maestro/maestro.json` (вне git) или
+     root `maestro.json` (в git):
 
-   > Альтернатива: при установке maestro ответить «да» на опциональный шаг
-   > `maestro-install.sh` «Подключить memory layer? (y/N)» — скрипт поставит
-   > файл-маркер `<data-dir>/maestro/memory/enabled.flag`, который учтёт
-   > `/maestro-setup` при генерации `maestro.json` (секция `memory` появится
-   > автоматически).
+     ```json
+     {
+       "memory": { "enabled": true, "namespace": "github.wad-jet.shop-frontend" }
+     }
+     ```
+
+     `namespace` **обязателен** (без него память disabled:
+     `namespace_missing`); формат — 1–3 сегмента, lowercase, разделитель `.`
+     (см. «Командная память: identity и namespace» ниже).
 
    > **Канонический способ настройки — через `/maestro-assistant`.** Ручное
    > редактирование `maestro.json` допустимо, но конфигурация памяти (включение,
@@ -257,7 +268,13 @@ commit-узлам (head-хеши, ветки, тиры).
   override (напр. сервисный аккаунт).
 - **`namespace`** — **обязателен** (v5.1): ключ изоляции памяти. Формат
   `microservices.sales.pay` — 1–3 сегмента, lowercase, разделитель `.`;
-  нормализация trim+lowercase. Примеры:
+  нормализация trim+lowercase. Живёт **только в project-слоях** конфига
+  (root `maestro.json` / `.maestro/maestro.json`); **глобальный слой
+  namespace не содержит** (один бакет на все проекты = cross-project
+  bleed). При глобальной установке его auto-derive — `/maestro-setup`
+  (записывает в `.maestro/maestro.json`; стабилен при смене git remote;
+  пересчёт — `/maestro-setup --derive-namespace`; приоритет: явное
+  значение в конфиге > auto-derive). Примеры:
   - **Monorepo** (один remote, несколько подпроектов): общий `namespace` →
     общая память подпроектов (напр. `microservices.sales` для всех подпроектов
     sales).
@@ -394,7 +411,6 @@ warmup-строкой. Результат кэшируется в `state.json` �
 
 | Что удалить | Что произойдёт |
 |---|---|
-| `<data-dir>/maestro/memory/enabled.flag` | Маркер install.sh снят; последующие `/maestro-setup` не добавляют секцию `memory` (уже добавленная секция в `maestro.json` остаётся) |
 | `module_dir` (`<data-dir>/maestro/memory/module/`) | Удаляется код модуля + `node_modules` (переустановка deps). **Данные не трогаются** |
 | `<data-dir>/maestro/memory/<hash>/memory.db` | Удаляется локальная память проекта (sqlite) |
 | `<data-dir>/maestro/memory/state.json` | Сбрасывается retry/skip/first-run состояние (backfill-окно отсчитывается заново) |

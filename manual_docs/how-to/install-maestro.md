@@ -4,128 +4,126 @@
 
 ## 🎯 Назначение
 
-Как впервые установить `maestro` (скиллы/команды/агенты + плагин `maestro-bootstrap`)
-в целевой проект. Это первый шаг; дальнейшая настройка проекта (контекст, конфиг,
-модели) — в [Настройке проекта](../tutorials/setup-project.md).
+Как впервые установить `maestro` (скиллы/команды/агенты + плагин
+`maestro-bootstrap`) — в **глобальном** режиме (рекомендуется, на всю
+машину) или в **проектном** режиме (локально, в `.opencode/`). Дальнейшая
+настройка проекта (контекст, конфиг, модели) — в [Настройке проекта](../tutorials/setup-project.md).
 
-> Разграничение: **этот документ** — про развёртывание скиллов/команд/агентов и
-> плагина; [Настройка проекта](../tutorials/setup-project.md) — про настройку
+> Разграничение: **этот документ** — про развёртывание скиллов/команд/агентов
+> и плагина; [Настройка проекта](../tutorials/setup-project.md) — про настройку
 > проекта под maestro (project-context, `maestro.json`, модели агентов).
 
-## 🔀 Способы установки
+## 🔀 Режимы установки
 
-Установить `maestro` в целевой проект можно тремя способами: через **скрипт**
-`maestro-install.sh` (проще всего), через **agpack** (рекомендуется) или **вручную**.
+Оба режима — один и тот же скрипт `maestro-install.sh` с единым механизмом
+доставки: `git clone` (https-only, shallow) + **wholesale copy** всего
+`skills/`, `commands/`, `agents/` (включая superpowers-скиллы) + manifest +
+JSON-регистрация плагина (python3 — любой версии, только для JSON-операций).
+Списков/whitelist компонентов нет: новый компонент = авто-deploy при
+следующей установке/обновлении.
 
-### Вариант 0 — скрипт `maestro-install.sh` (проще всего)
+| Режим | Целевые каталоги | Регистрация плагина | Состояние (manifest) |
+|---|---|---|---|
+| `--global` (рекомендуется) | `~/.config/opencode/{skills,commands,agents}/` | глобальный `~/.config/opencode/opencode.json` | `~/.config/opencode/.maestro/manifest.json` |
+| `--project` (default) | `<project>/.opencode/{skills,commands,agents}/` | `<project>/.opencode/opencode.json` | `<project>/.maestro/manifest.json` |
 
-Скрипт автоматизирует установку для нового или существующего проекта, где maestro
-ранее не применялся: устанавливает `agpack`, создаёт `agpack.yml`, запускает
-`agpack sync` (разворачивает skills/commands/agents в `.opencode/`), подключает
-плагин `maestro-bootstrap` и выдаёт инструкцию для `/maestro-setup`.
+> Пути резолвятся через `XDG_CONFIG_HOME`: если задан —
+> `$XDG_CONFIG_HOME/opencode/...`, иначе `~/.config/opencode/...`.
+
+### Вариант A — глобальная установка (рекомендуется)
+
+Одна команда раскатывает скиллы/команды/агенты и плагин на всю машину. Скиллы
+доступны во всех проектах без `.opencode/` зеркала. В git проекта не попадает
+ни одного maestro-файла (исключение — опциональный `maestro.json` в корне
+проекта — см. [Конфигурация](../reference/config.md)).
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/wad-jet/maestro/main/maestro-install.sh -o maestro-install.sh
-bash maestro-install.sh          # опции: --global (плагин в global-конфиг), --help
+bash maestro-install.sh --global    # опции: --pin <sha>, --dry-run, --migrate, --help
 ```
 
-> Предусловия: bash (macOS/Linux), python3 ≥ 3.11, git, curl или wget, сеть.
+> Предусловия: bash (macOS/Linux), git, curl/wget, python3 (любой версии —
+> только для JSON-регистрации плагина), сеть.
 > Windows — через WSL или Git Bash (глобальный opencode-путь может отличаться).
-> Содержимое `agpack.yml` скрипт скачивает из канона `maestro-install/agpack.yml`
-> репозитория (тот же источник, что использует `maestro-update.sh`), — единый
-> источник зависимостей без дублирования в скрипте.
-> Детали — в разделе «Быстрый старт» README репозитория.
 
-После скрипта — перезапустите OpenCode и выполните [Настройку проекта](../tutorials/setup-project.md)
-(`/maestro-setup`).
+Что делает скрипт:
 
-> **Обновление** после установки — скрипт `maestro-update.sh` (см.
-> [Обновление maestro](update-maestro.md)). `maestro-install.sh` — только первичная
-> установка; он также **сразу загружает** `maestro-update.sh` в каталог проекта,
-> так что отдельно скачивать его не нужно.
+1. **Clone-first:** клонирует maestro + superpowers (shallow, https-only)
+   **до** любых изменений — если clone не удался, система в оригинальном
+   состоянии (fail-fast).
+2. **Блокировка:** mkdir-based lock; конкурентные запуски блокируются
+   (stale-lock старше 30 мин — warning).
+3. **Collision detection:** пользовательские скиллы/команды/агенты без
+   маркера `.maestro-deployed` → HITL (overwrite / rename `-user-` / skip);
+   non-interactive (stdin не tty) — abort (fail-closed).
+4. **Wholesale copy** (атомарно: staging + mv): всё содержимое `skills/`,
+   `commands/`, `agents/` (maestro + superpowers) в глобальные каталоги.
+5. **Manifest** `~/.config/opencode/.maestro/manifest.json` (атомарная
+   запись) — фиксирует, что развёрнуто (sha коммитов, список путей).
+6. **Регистрация плагина** в глобальном `~/.config/opencode/opencode.json`
+   (idempotent, de-dup: чужие записи в `plugins` не трогаются).
+7. Создаёт глобальный `maestro.json`
+   (`~/.config/opencode/.maestro/maestro.json`) при отсутствии — default
+   `memory.enabled: false` (privacy-safe: память не включается
+   автоматически во всех проектах).
 
-### Вариант A — через agpack
+После скрипта — **перезапустите OpenCode** и выполните
+[Настройку проекта](../tutorials/setup-project.md) (`/maestro-setup`): в
+глобальном режиме создаёт `.maestro/maestro.json` с auto-derive namespace
+памяти из git remote (память включается per-project), модели, `.gitignore`.
 
-[`agpack`](https://github.com/PhilippTh/agpack) — пакетный менеджер для AI-кодинг-
-тулов: объявляешь зависимости в `agpack.yml`, запускаешь `agpack sync` — и
-скиллы/команды/агенты разворачиваются в `.opencode/` целевого проекта.
+> **Обновление** после установки — `maestro-update.sh --global` (см.
+> [Обновление maestro](update-maestro.md)). `maestro-install.sh` — только
+> первичная установка.
 
-```bash
-pipx install agpack            # или: uv tool install agpack
-agpack init                    # создаёт agpack.yml
-```
+### Вариант B — проектная установка (default)
 
-> **macOS (pipx):** после установки `agpack` может не находиться в новых
-> консольных сессиях — pipx кладёт бинари в `~/.local/bin`, который не всегда
-> в `PATH`. Исправьте:
-> ```bash
-> pipx ensurepath    # добавляет ~/.local/bin в PATH (перезапустите консоль)
-> # или временно:  export PATH="$HOME/.local/bin:$PATH"
-> ```
-
-Минимальный `agpack.yml` для `maestro`:
-
-```yaml
-targets:
-  - opencode
-
-dependencies:
-  skills:
-    - url: https://github.com/wad-jet/maestro
-      path: skills/maestro
-    - url: https://github.com/wad-jet/maestro
-      path: skills/maestro-setup
-    - url: https://github.com/wad-jet/maestro
-      path: skills/maestro-design
-    - url: https://github.com/wad-jet/maestro
-      path: skills/maestro-assistant
-    - url: https://github.com/wad-jet/maestro
-      path: skills/maestro-feedback-report
-    - url: https://github.com/wad-jet/maestro
-      path: skills/manual-docs
-    - url: https://github.com/obra/superpowers
-      path: skills
-  commands:
-    - url: https://github.com/wad-jet/maestro
-      path: commands
-  agents:
-    - url: https://github.com/wad-jet/maestro
-      path: agents
-```
-
-Затем:
+Развёртывание в один проект — для тех, кто держит скиллы/команды/агенты
+локально (`.opencode/`-зеркало, gitignored):
 
 ```bash
-agpack sync                    # разворачивает skills/commands/agents в .opencode/
+bash maestro-install.sh --project      # то же, что `bash maestro-install.sh` (--project — default)
+bash maestro-install.sh --project --dry-run   # план без изменений (0 мутаций)
 ```
 
-> **Примечание:** agpack не покрывает плагин `maestro-bootstrap` (ставится из git —
-> см. ниже) и конфиги (`maestro.json`, `.gitignore`, `regression/`; модели/плагин —
-> в `.opencode/opencode.json` или global) — их создаёт `/maestro-setup`.
+- Целевые каталоги: `<project>/.opencode/{skills,commands,agents}/`;
+  manifest — `<project>/.maestro/manifest.json`;
+  регистрация плагина — `<project>/.opencode/opencode.json`.
+- Механизм доставки — тот же wholesale copy, что и в глобальном режиме.
 
-### Вариант B — вручную (копированием)
+После установки — то же: перезапуск OpenCode + `/maestro-setup`.
+
+### Миграция с legacy-установки (`--migrate`)
+
+`bash maestro-install.sh --global --migrate` (или `--project --migrate`) —
+миграция установки дореформенной (предыдущей) схемы: разворачивает штатным
+механизмом, записывает `.maestro/maestro.json` с `memory.enabled: true` +
+auto-derive namespace из git remote, удаляет legacy-файлы проекта (HITL).
+Read-only legacy-файлы — warning + пропуск (не деструктивно).
+
+### Вариант C — вручную (копированием)
 
 Скопируйте файлы из авторского репозитория `maestro-agent` в целевой проект.
 Карта путей (источник → целевой проект):
 
 ```
-authors/repo              →  target/app
-skills/maestro/SKILL.md   →  .opencode/skills/maestro/SKILL.md
-skills/maestro-setup/       →  .opencode/skills/maestro-setup/skills/maestro-design/    →  .opencode/skills/maestro-design/
-skills/manual-docs/       →  .opencode/skills/manual-docs/
-agents/*.md               →  .opencode/agents/*.md
-commands/*.md             →  .opencode/commands/*.md
+skills/**        → .opencode/skills/**       (глобально: ~/.config/opencode/skills/**)
+agents/*.md      → .opencode/agents/*.md
+commands/*.md    → .opencode/commands/*.md
 ```
 
-> Изменили источник → обновите копию (тот же перенос).
+> Изменили источник → обновите копию (тот же перенос). При ручной установке
+> плагин нужно подключить вручную (см. ниже).
 
 ## Подключение плагина
 
 Плагин `maestro-bootstrap` поставляется из git-репозитория `wad-jet/maestro`
-(публикация в npm не используется) и подключается до запуска пайплайна.
+(публикация в npm не используется). Оба режима установки **подключают его
+автоматически** (idempotent, de-dup: только «наши» записи в `plugins`
+заменяются, чужие не трогаются).
 
-**Из git (рекомендуется)** — в `~/.config/opencode/opencode.json` (реком.) или
-`.opencode/opencode.json`:
+**Из git (рекомендуется)** — `--global`: `~/.config/opencode/opencode.json`;
+`--project`: `.opencode/opencode.json`:
 
 ```json
 {
@@ -161,8 +159,12 @@ commands/*.md             →  .opencode/commands/*.md
 
 ## После установки
 
-Выполните [Настройку проекта](../tutorials/setup-project.md) (`/maestro-setup`):
-project-context, `maestro.json`, модели агентов, `.gitignore`, каталоги.
+1. **Перезапустите OpenCode** (чтобы плагин подхватился).
+2. Выполните [Настройку проекта](../tutorials/setup-project.md)
+   (`/maestro-setup`) в каждом проекте: конфиг, модели, `.gitignore`, каталоги.
+   В глобальном режиме — `.maestro/maestro.json` с auto-derive namespace
+   памяти (см. [Как включить память](enable-memory.md)).
+3. Запуск фичи: `/maestro-init "ваша задача"`.
 
 Обновление maestro (повторная доставка) — [Обновление maestro](update-maestro.md).
 
@@ -171,3 +173,4 @@ project-context, `maestro.json`, модели агентов, `.gitignore`, ка
 - [Обновление maestro](update-maestro.md)
 - [Настройка проекта для maestro](../tutorials/setup-project.md)
 - [Кастомизация скилла](customize-maestro.md)
+- [Конфигурация](../reference/config.md) — 4 слоя `maestro.json`

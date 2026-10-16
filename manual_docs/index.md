@@ -25,7 +25,7 @@ primary-сессии.
 ## How-to (инструкции)
 
 - [Запуск багфикса](how-to/run-a-bugfix.md) — debug sub-pipeline
-- [Первая установка maestro](how-to/install-maestro.md) — развернуть скилы/агенты/плагин в целевой проект (agpack/вручную)
+- [Первая установка maestro](how-to/install-maestro.md) — глобальная (рекомендуется) и проектная установка: скиллы/команды/агенты + плагин
 - [Работа с реестром регрессии](how-to/use-regression-registry.md) — `/regression`
 - [Управление конфиденциальными путями](how-to/manage-confidential-paths.md) — добавление пути к confidential (I3, адресный diff, OP-1)
 - [Кастомизация скилла](how-to/customize-maestro.md) — правка и синхронизация

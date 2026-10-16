@@ -38,7 +38,7 @@
 | Обновление/доставка до версии (skills + plugin, контроль) | `how-to/update-maestro.md` |
 | Security Review / sanitizer-сабагент | `explanation/agents-and-trust.md`, `reference/model-selection.md`, `reference/hitl-gates.md` |
 | Реестр регрессии | `how-to/use-regression-registry.md` |
-| Добавлен новый скилл/команда/агент | `maestro-install/agpack.yml` (канон доставки) + корневой `agpack.yml` (dogfooding) — иначе компонент не доставится в целевые приложения |
+| Добавлен новый скилл/команда/агент | Регистрация не требуется — доставка **wholesale copy** всего `skills/`, `commands/`, `agents/` (новый компонент = авто-deploy при следующей установке/обновлении, `maestro-install.sh`/`maestro-update.sh`); детерминированные проверки — `npm test` (docs-drift) |
 | Шаг 14 (docs: diff-сверка, HITL при расхождении) | `explanation/pipeline-overview.md`, `tutorials/run-first-feature.md` |
 | `DOCS_COVERAGE_COMMAND` (fallback diff-сверка) | `explanation/project-context.md`, `skills/maestro/stack-detection.md` |
 | Правила наполнения/гигиены project-context.md (/maestro-setup, Задача 2, шаг 8.5) | `explanation/project-context.md` |
@@ -60,7 +60,15 @@
   (кроме `changelog.md`) + `README.md`;
 - **D2 устаревшие имена** — STALE_NAMES vs поверхности;
 - **D3 счётчик-строк** — «~N строк» vs `wc -l`;
-- **D4 статусы** — «Выполнено/реализовано (X.Y.Z)» в roadmap/TODO ↔ changelog.
+- **D4 статусы** — «Выполнено/реализовано (X.Y.Z)» в roadmap/TODO ↔ changelog;
+- **D5 pipeline compliance** — инвариантные маркеры в SKILL.md и
+  `auto-ai-decision-prompt.md`;
+- **D6 корневые скрипты** — `maestro-install.sh` / `maestro-update.sh` в
+  корне репо (доставка — скрипты + manifest, 6.0.0);
+- **D7 отсутствие legacy-доставки** — имя удалённого legacy-пакетного
+  менеджера (удалён в 6.0.0, доставка — wholesale copy) case-insensitive
+  отсутствует в `manual_docs/how-to/**`, `manual_docs/reference/**`,
+  `manual_docs/index.md`.
 
 Дрейф = failing test.
 
@@ -83,7 +91,7 @@
 | Дока «на потом», отдельно от правки скилла | Обновлять `manual_docs/` в том же коммите/PR |
 | Изменил шаги pipeline, забыл туториал | Сверять по чек-листу |
 | Не обновил `changelog.md` | Добавлять запись в каждом PR по скиллу |
-| Переименовал метку/термин в одном месте | **Grep-синхронизация по ВСЕЙ поверхности** (manual_docs/, skills/, commands/, agents/, plugins/, SECURITY.md, README, AGENTS.md, скрипты `maestro-*.sh` + `maestro-install/`, docs/project-context.md, зеркало `.opencode/`) до завершения фичи. Пример: метка «схема v1»→«v3» разошлась по 6 точкам (09-07) — переименование в одном месте без глобального grep = дефект. Образец — ⚑-grep паттерн (invariants.md). |
+| Переименовал метку/термин в одном месте | **Grep-синхронизация по ВСЕЙ поверхности** (manual_docs/, skills/, commands/, agents/, plugins/, SECURITY.md, README, AGENTS.md, скрипты `maestro-*.sh` + `maestro-install/`, docs/project-context.md) до завершения фичи. Зеркало `.opencode/` ручным объектом синхронизации **не является** — доставляется wholesale copy при обновлении. Пример: метка «схема v1»→«v3» разошлась по 6 точкам (09-07) — переименование в одном месте без глобального grep = дефект. Образец — ⚑-grep паттерн (invariants.md). |
 
 ## 🔗 Связанные разделы
 

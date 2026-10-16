@@ -438,6 +438,42 @@ function checkD6(repoRoot) {
   return violations;
 }
 
+// ============================================================
+// D7 — отсутствие legacy-имени доставки (6.0.0: wholesale copy)
+// ============================================================
+
+// 6.0.0 — legacy-механизм доставки удалён (wholesale copy вместо него).
+// Его имя должно отсутствовать (case-insensitive) в пользовательских доках:
+// manual_docs/how-to/**, manual_docs/reference/**, manual_docs/index.md.
+// explanation/overview и root-файлы (README/AGENTS/SECURITY) — вне этой
+// проверки (чистятся отдельно).
+const LEGACY_DELIVERY_NAME = "agpack";
+
+function checkD7(repoRoot) {
+  const violations = [];
+  const files = [];
+  for (const dir of ["how-to", "reference"]) {
+    for (const fp of globRecursive(join("manual_docs", dir), /\.md$/, repoRoot)) {
+      files.push(fp);
+    }
+  }
+  const indexMd = join(repoRoot, "manual_docs", "index.md");
+  if (existsSync(indexMd)) files.push(indexMd);
+
+  for (const fp of files) {
+    const rel = fp.slice(repoRoot.length + 1);
+    const lines = readFileSync(fp, "utf8").split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].toLowerCase().includes(LEGACY_DELIVERY_NAME)) {
+        violations.push(
+          `${rel}:${i + 1} — legacy-доставка «${LEGACY_DELIVERY_NAME}» (удалена в 6.0.0; доставка — wholesale copy)`
+        );
+      }
+    }
+  }
+  return violations;
+}
+
 // Fixtures
 // ============================================================
 
@@ -590,6 +626,26 @@ test("docs-drift fixtures: каждый check возвращает наруше�
     [],
     `D6 real fixture should pass: ${JSON.stringify(checkD6(TMP_DIR))}`
   );
+  // D7 — planted legacy-имя доставки в how-to
+  writeFileSync(
+    join(TMP_DIR, "manual_docs", "how-to", "legacy-planted.md"),
+    "Доставка через legacy-пакетный менеджер AgPack\n"
+  );
+  const d7 = checkD7(TMP_DIR);
+  assert.ok(
+    d7.some((v) => v.includes("legacy-planted.md")),
+    `D7 fixture violation: ${JSON.stringify(d7)}`
+  );
+  // D7 — planted имя в index.md тоже ловится
+  writeFileSync(
+    join(TMP_DIR, "manual_docs", "index.md"),
+    "Навигация: установка через AgPack\n"
+  );
+  const d7b = checkD7(TMP_DIR);
+  assert.ok(
+    d7b.some((v) => v.includes("manual_docs/index.md")),
+    `D7 index.md fixture violation: ${JSON.stringify(d7b)}`
+  );
   // D5 — pipeline compliance: все маркеры отсутствуют в fixture → violation
   const d5 = checkD5(TMP_DIR);
   assert.ok(
@@ -655,6 +711,11 @@ test("docs-drift real repo: 0 нарушений", () => {
   if (d6.length) {
     totalViolations += d6.length;
     all = all.concat(d6);
+  }
+  const d7 = checkD7(ROOT);
+  if (d7.length) {
+    totalViolations += d7.length;
+    all = all.concat(d7);
   }
 
   assert.deepEqual(

@@ -17,9 +17,11 @@
 > гарантируют миграцию при обновлении. Используйте с учётом этого ограничения
 > (например, в командном сценарии — согласуйте единую версию/модель заранее).
 
-Память — **опциональный модуль**: не входит в стандартную установку maestro,
-включается явно секцией `memory` в `maestro.json`. Без неё плагин работает
-идентично (нулевой footprint — зависимости не загружаются, LLM-вызовов нет).
+Память — **опциональный модуль**: глобальный default — `memory.enabled: false`
+(privacy-safe); включается явно **per-project** секцией `memory` в
+project-слое конфига (root `maestro.json` / `.maestro/maestro.json`). Без неё
+плагин работает идентично (нулевой footprint — зависимости не загружаются,
+LLM-вызовов нет).
 
 Включение и настройка — в [Как включить память](../how-to/enable-memory.md).
 Безопасность — в [Агенты и модель доверия](../explanation/agents-and-trust.md)
@@ -30,7 +32,15 @@
 **Default (важно):** секции `memory` нет **или** `enabled: false` → память
 полностью выключена: хуки не регистрируются, зависимости не загружаются,
 фоновых LLM-вызовов и загрузки модели нет. Память включается только явным
-`"memory": { "enabled": true }` — никакого silent opt-in при обновлении maestro.
+`"memory": { "enabled": true }` в project-слое конфига — никакого silent
+opt-in при обновлении maestro.
+
+**Слои (hybrid, 6.0.0):** `enabled` — soft-merge (активный файл →
+глобальный слой → `false`); `namespace` — **только project-слои**
+(root `maestro.json` / `.maestro/maestro.json`), глобальный слой namespace
+**не содержит**; при глобальной установке namespace ставит auto-derive в
+`/maestro-setup` (см. «Auto-derive namespace» ниже). Остальные ключи
+`memory.*` — из активного файла (replace).
 
 ```json
 {
@@ -77,7 +87,7 @@
 
 | Ключ | Тип | Дефолт | Описание |
 |---|---|---|---|
-| `enabled` | `boolean` | `false` | Включает память. Нет секции / `false` → полностью off |
+| `enabled` | `boolean` | `false` | Включает память. Soft-merge: активный файл → глобальный слой → `false`; нет секции / `false` → полностью off |
 | `auto_recall` | `boolean` | `true` | Авто-вспоминание: первое сообщение top-level primary сессии → блок контекста в system prompt |
 | `embedding_model` | `string` | `Xenova/paraphrase-multilingual-MiniLM-L12-v2` | **Legacy-алиас** для `embedding.model` (только при `provider: local`). Модель эмбеддингов (transformers.js, dim 384, RU+EN, q8 ~120 МБ, кэш локально). Для `openai` `model` берётся строго из `embedding.model` |
 | `embedding.provider` | `string` | `local` | Провайдер эмбеддингов: `local` (default) \| `openai` (внешний OpenAI-совместимый `/embeddings` API, осознанный opt-in) |
@@ -93,7 +103,7 @@
 
 | `identity` | `string` \| `null` | `null` | Явный override identity (напр. сервисный аккаунт). Обычно identity берётся из `identity_env` → git `user.name` |
 | `identity_env` | `string` \| `null` | `null` | Имя env-переменной с identity (per-machine, не в общем `maestro.json`) |
-| `namespace` | `string` | — | **Обязателен** (v5.1). Ключ изоляции памяти; формат `microservices.sales.pay` (1–3 сегмента, lowercase, разделитель `.`); нормализация trim+lowercase. Отсутствует/невалиден → память disabled (`namespace_missing`/`namespace_invalid`) |
+| `namespace` | `string` | — | **Обязателен** (v5.1). Ключ изоляции памяти; формат `microservices.sales.pay` (1–3 сегмента, lowercase, разделитель `.`); нормализация trim+lowercase. **Только project-слои** (root `maestro.json` / `.maestro/maestro.json`); глобальный слой не содержит. Глобальная установка — auto-derive в `/maestro-setup` (см. «Auto-derive namespace»). Отсутствует/невалиден → память disabled (`namespace_missing`/`namespace_invalid`) |
 | `module_dir` | `string` \| `null` | `null` | Каталог кода модуля; `null` → `<data-dir>/maestro/memory/module` |
 | `idle_debounce_min` | `number` | `10` | Debounce индексации после события `session.idle` (минуты) |
 | `min_new_messages` | `number` | `3` | Мин. новых сообщений с последнего саммари для повторной индексации |
@@ -295,6 +305,32 @@ LLM делает один `read` — полный контекст вместо 
 (авто-related). Сервис `microservices.checkout.notifications` с
 `related: ["microservices.sales.orders"]` — точечная merged-связь с записями
 `orders` (без общего домена).
+
+### Auto-derive namespace (глобальная установка, `/maestro-setup`)
+
+При глобальной установке namespace проекта вычисляется **в `/maestro-setup`**
+(не в рантайме плагина) и **записывается** в `.maestro/maestro.json` —
+namespace стабилен при смене git remote (форк, переименование). **Приоритет:**
+явное значение в конфиге (любой слой) > auto-derive. Пересчёт —
+`/maestro-setup --derive-namespace`.
+
+Правила (1–3 сегмента, разделитель `.`):
+
+1. **Git remote (вариант A):** `git remote get-url origin` →
+   `domain.owner.repo`, где domain — **без TLD** (последний лейбл домена
+   отбрасывается: `github.com` → `github`):
+   `git@github.com:wad-jet/shop-frontend.git` → `github.wad-jet.shop-frontend`.
+   Поддерживаются SSH/HTTPS/ssh:// URL (GitHub/GitLab/Bitbucket).
+2. **Monorepo** (проект в подкаталоге git-репо): домен выбрасывается —
+   `owner.repo.segment` (segment = последний компонент пути относительно git
+   root): `/workspace/backend` из `github:org/repo` → `org.repo.backend`.
+3. **Fallback (вариант C):** нет git remote / не git URL →
+   `parent_dir.project_dir.local`.
+4. **Normalisation:** <3 сегментов — pad (`workspace`, `unknown`); >3 —
+   truncate до 3; пустой/невалидный → `workspace.unknown.unknown`.
+
+Self-hosted single-component (напр. `git@gitlab.internal:project.git`) →
+`gitlab.unknown.project` (3 сегмента).
 
 ## 🌿 Branch-aware memory (v3)
 

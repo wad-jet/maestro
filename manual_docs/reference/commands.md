@@ -5,8 +5,12 @@
 ## 🎯 Назначение
 
 Справочник доступных `@command` для работы со скиллом `maestro`. Конфиги живут
-в `commands/*.md` (authoring-репо); доставляются в целевое приложение штатным механизмом
-(вручную из удалённого репозитория или через `agpack`).
+в `commands/*.md` (authoring-репо); доставляются в целевое приложение
+штатным механизмом: `maestro-install.sh` / `maestro-update.sh`
+(wholesale copy из git-репозитория) или вручную из удалённого репозитория.
+При **глобальной установке** OpenCode загружает команды из
+`~/.config/opencode/commands/` (доступны во всех проектах); при проектной —
+из `.opencode/commands/` проекта.
 
 ## 📖 Команды
 
@@ -67,6 +71,13 @@ spec) и на ресече bugfix — сначала `memory_search` по тем
 создан позже через `/maestro-design`). Использует скилл `maestro-setup`.
 Проверяет: `AGENTS.md` (встроенный `/init`), скилы superpowers (предлагает
 установку через HITL), плагин `maestro-bootstrap` (не блокер).
+
+**Глобальная установка** (`maestro-install.sh --global`): создаёт
+`.maestro/maestro.json` с `memory.enabled: true` + auto-derive namespace из
+git remote (1–3 сегмента; см. [Память maestro](memory.md) → «Auto-derive
+namespace»); по умолчанию **не** создаёт root `maestro.json` и `.opencode/`
+зеркало (скиллы глобальные); модели агентов — в глобальном
+`~/.config/opencode/opencode.json`.
 
 ### `/maestro-design`
 
@@ -152,8 +163,11 @@ primary-сессия при чтении того же файла получае
 ### `/maestro-version`
 
 Показать фактическую версию плагина `maestro-bootstrap`, подключённого в текущей
-сессии. Читает `.maestro/plugin-version` (пишется при инициализации плагина). Если
-файла нет — сообщает, что плагин не инициализирован или версия неизвестна
+сессии. Читает `.maestro/plugin-version` (пишется при инициализации плагина);
+при **глобальной установке** — fallback на глобальный
+`~/.config/opencode/.maestro/plugin-version` (пишут
+`maestro-install.sh --global` / `maestro-update.sh --global`). Если обоих
+файлов нет — сообщает, что плагин не инициализирован или версия неизвестна
 (признак сбоя init плагина).
 
 ### `/maestro-assistant`

@@ -95,8 +95,11 @@ node <путь-к-плагину>/memory/backup-cli.js restore --file <путь>
   `.opencode/opencode.json` / глобальном конфиге); при разработке — каталог
   репо плагина. **Не `module_dir`**: там копия `memory/` без `core.js`, CLI
   оттуда не работает.
-- Запуск — из корня (или подкаталога) git-репозитория проекта с
-  `maestro.json`, где включена память (`storage.type: sqlite` — v1).
+- Запуск — из корня (или подкаталога) git-репозитория проекта, где включена
+  память (`storage.type: sqlite` — v1). Конфиг резолвится **теми же 4 слоями**,
+  что и у плагина: `MAESTRO_CONFIG` env > `<root>/maestro.json` >
+  `<root>/.maestro/maestro.json` > глобальный
+  `~/.config/opencode/.maestro/maestro.json` (см. [Конфигурация](../reference/config.md)).
 - sqlite-драйвер загружается из `module_dir` — там должен быть выполнен
   `npm install` (онбординг ниже).
 - `--replace` — только из **интерактивного терминала** (TTY): CLI попросит
@@ -109,10 +112,11 @@ node <путь-к-плагину>/memory/backup-cli.js restore --file <путь>
 
 ### С другой машины (bootstrap-последовательность)
 
-1. Установите плагин штатно: agpack или
+1. Установите плагин штатно: `maestro-install.sh --global` / `--project`
+   (wholesale copy + JSON-регистрация плагина) или
    `git+https://github.com/wad-jet/maestro.git` в `.opencode/opencode.json` /
-   глобальном конфиге; в `maestro.json` — секция `memory` (`enabled`,
-   `namespace`, `storage.type: sqlite`).
+   глобальном конфиге; в project-слое конфига (`maestro.json`) — секция
+   `memory` (`enabled: true`, `namespace`, `storage.type: sqlite`).
 2. Первый запуск opencode — плагин выполнит **self-provisioning**: создаст
    `module_dir`, запишет `package.json`, скопирует исходники модуля.
 3. `npm install` в `module_dir` (default
