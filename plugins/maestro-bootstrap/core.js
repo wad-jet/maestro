@@ -16,10 +16,11 @@
  */
 
 import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { execSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { classifyMemoryConfig } from "./memory/config.js";
+import { classifyMemoryConfig, DEFAULTS } from "./memory/config.js";
 import { SESSIONS as MEMORY_SERVICE_SESSIONS } from "./memory/summarize.js";
 import { registerCommunicationHooks } from "./communication.js";
 import { registerFeedbackReportHooks } from "./feedback-report.js";
@@ -181,19 +182,99 @@ export function sanitize(prompt, opts = {}) {
   return { text, count };
 }
 
-// --- Config -----------------------------------------------------------------
+// --- Config (4-слойный резолв + hybrid merge, 6.0.0) -------------------------
+//
+// Слои конфига, от высшего к низшему приоритету:
+//   1. MAESTRO_CONFIG (env)            — debug-only, полный override (replace всего)
+//   2. <root>/maestro.json             — командная фиксация (в git)
+//   3. <root>/.maestro/maestro.json    — локальные дополнения (вне git)
+//   4. <globalDir>/maestro.json        — глобальные дефолты (resolveGlobalDir)
+//
+// Active-файл = ПЕРВЫЙ ПАРСИРУЕМЫЙ слой. Сломанный JSON слоя → warning +
+// переход к следующему (fail-soft: плагин не падает, не «память выключена»).
+// Hybrid merge: non-memory ключи — из active-файла (replace); memory.* —
+// soft-merge active.memory с базой global.memory (enabled/embedding/namespace).
 
-export function loadMaestroConfig(file, dir) {
-  const resolved = file || process.env.MAESTRO_CONFIG || path.join(dir || process.cwd(), "maestro.json");
+export function resolveGlobalDir() {
+  // XDG-aware: единственная точка резолва глобального каталога установки.
+  // Хардкод ~/.config запрещён (spec V4/V11).
+  return path.join(
+    process.env.XDG_CONFIG_HOME || path.join(os.homedir(), ".config"),
+    "opencode", ".maestro",
+  );
+}
+
+// Safe reader: read + JSON.parse в try/catch. Различает «файла нет» (missing)
+// от «сломанный JSON» (parse error) — для warning-логики.
+function tryReadJson(file) {
+  let raw;
   try {
-    return JSON.parse(fs.readFileSync(resolved, "utf8"));
+    raw = fs.readFileSync(file, "utf8");
   } catch {
-    return {};
+    return { ok: false, missing: true };
+  }
+  try {
+    return { ok: true, value: JSON.parse(raw) };
+  } catch {
+    return { ok: false, missing: false };
   }
 }
 
-export function resolveConfigFile(root) {
-  return process.env.MAESTRO_CONFIG || path.join(root, "maestro.json");
+const isPlainObject = (v) => v !== null && typeof v === "object" && !Array.isArray(v);
+
+export function resolveConfigFile(root, globalDir) {
+  // MAESTRO_CONFIG — debug override: полный replace, без проверки других файлов
+  // (spec Q3). Путь возвращается как есть (без проверки существования/парсинга).
+  const envPath = process.env.MAESTRO_CONFIG;
+  if (envPath) return envPath;
+  const candidates = [
+    path.join(root, "maestro.json"),
+    path.join(root, ".maestro", "maestro.json"),
+    path.join(globalDir ?? resolveGlobalDir(), "maestro.json"),
+  ];
+  for (const file of candidates) {
+    const res = tryReadJson(file);
+    if (res.ok) return file;
+    if (!res.missing) {
+      console.warn(`[maestro-bootstrap] config: ${file} — invalid JSON, falling back to next layer`);
+    }
+  }
+  return null;
+}
+
+export function loadMaestroConfig(file, dir) {
+  const root = dir || process.cwd();
+  // Active = явный file (debug-швом) или MAESTRO_CONFIG (debug override) или
+  // первый парсируемый слой. Явный/env-путь — полный replace: при отсутствии
+  // или сломанном JSON — {}, без fallback к другим слоям (spec Q3).
+  const activePath = file || process.env.MAESTRO_CONFIG || resolveConfigFile(root);
+  let active = {};
+  if (activePath) {
+    const res = tryReadJson(activePath);
+    if (res.ok) {
+      if (isPlainObject(res.value)) active = res.value;
+      else console.warn(`[maestro-bootstrap] config: ${activePath} — top-level JSON is not an object, using empty config`);
+    } else if (!res.missing) {
+      console.warn(`[maestro-bootstrap] config: ${activePath} — invalid JSON, using empty config`);
+    }
+  }
+
+  // globalBase = парсинг глобального файла ({} при отсутствии/сбое) — база
+  // для soft-merge memory (не зависит от того, какой слой активен).
+  const gRes = tryReadJson(path.join(resolveGlobalDir(), "maestro.json"));
+  const globalBase = gRes.ok && isPlainObject(gRes.value) ? gRes.value : {};
+
+  const aMem = isPlainObject(active.memory) ? active.memory : {};
+  const gMem = isPlainObject(globalBase.memory) ? globalBase.memory : {};
+  const merged = { ...active };
+  merged.memory = {
+    ...aMem, // остальные memory-ключи (storage, top_k, retention_days, related, mainline…) — replace из активного
+    embedding: { ...gMem.embedding, ...aMem.embedding,
+                 model: aMem.embedding?.model ?? gMem.embedding?.model ?? DEFAULTS.embedding_model },
+    enabled:   aMem.enabled ?? gMem.enabled ?? false,
+    namespace: aMem.namespace ?? null, // глобальный НЕ содержит namespace (Q6)
+  };
+  return merged;
 }
 
 export function loadWhitelist(config) {
@@ -632,9 +713,11 @@ export function makeMaestroConfigTool({ client, root, log }) {
       if (reason) return deny(sessionID, reason);
       const section = args?.section;
       const file = resolveConfigFile(root);
-      if (!fs.existsSync(file)) {
+      if (!file || !fs.existsSync(file)) {
+        // file === null: ни один слой не найден (4-слойный резолв, 6.0.0);
+        // !exists: env-override путь, который не существует на диске.
         log?.info?.("maestro_config:read", { sessionID, section: section ?? null, result: "file_missing" });
-        return { content: [{ type: "text", text: JSON.stringify({ exists: false, config: {}, path: file }) }] };
+        return { content: [{ type: "text", text: JSON.stringify({ exists: false, config: {}, path: file ?? null }) }] };
       }
       let config;
       try { config = JSON.parse(fs.readFileSync(file, "utf8")); }

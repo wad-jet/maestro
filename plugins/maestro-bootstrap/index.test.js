@@ -3,7 +3,8 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, validateWhitelist, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile, loadCommunicationConfig, loadFeedbackReportConfig, makeMaestroConfigTool, resolveConfigFile } from "./core.js";
+import { createBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, validateWhitelist, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile, loadCommunicationConfig, loadFeedbackReportConfig, makeMaestroConfigTool, resolveConfigFile, resolveGlobalDir } from "./core.js";
+import { DEFAULTS } from "./memory/config.js";
 import {
   detectPlainFlag,
   SOURCE_LABELS,
@@ -31,6 +32,22 @@ function readLogs(dir, filePrefix = "maestro-bootstrap") {
   }
   return out;
 }
+
+// Изоляция глобального слоя конфига (6.0.0): тесты не должны зависеть от реального
+// ~/.config/opencode/.maestro (или XDG_CONFIG_HOME) машины — resolveGlobalDir()
+// смотрит в пустой временный каталог. Глобальный слой для отдельных тестов
+// создаётся явно внутри XDG_TEST_HOME (никогда — в реальном home).
+const savedXDG = process.env.XDG_CONFIG_HOME;
+const XDG_TEST_HOME = fs.mkdtempSync(path.join(os.tmpdir(), "maestro-test-xdg-"));
+process.env.XDG_CONFIG_HOME = XDG_TEST_HOME;
+const globalConfigPath = () => path.join(XDG_TEST_HOME, "opencode", ".maestro", "maestro.json");
+const clearGlobalConfig = () => fs.rmSync(path.join(XDG_TEST_HOME, "opencode"), { recursive: true, force: true });
+after(() => {
+  clearGlobalConfig();
+  if (savedXDG === undefined) delete process.env.XDG_CONFIG_HOME;
+  else process.env.XDG_CONFIG_HOME = savedXDG;
+  fs.rmSync(XDG_TEST_HOME, { recursive: true, force: true });
+});
 
 // ─────────────────────────────────────────────────────────────────────────────
 // V1→V2 compat: тесты написаны под V1-интерфейс (фабрика возвращает hooks-объект
@@ -749,8 +766,12 @@ describe("maestro-bootstrap sanitize (Context Sanitizer, Level 1)", () => {
     );
   });
 
-  it("loadMaestroConfig returns {} when file missing", () => {
-    assert.deepEqual(loadMaestroConfig("/nonexistent/maestro.json"), {});
+  it("loadMaestroConfig: файл отсутствует → нет non-memory ключей, memory — дефолты (6.0.0)", () => {
+    const config = loadMaestroConfig("/nonexistent/maestro.json");
+    assert.ok(!("communication" in config), "non-memory ключи должны отсутствовать");
+    assert.equal(config.memory.enabled, false);
+    assert.equal(config.memory.namespace, null);
+    assert.equal(config.memory.embedding.model, DEFAULTS.embedding_model);
   });
 
   it("loadMaestroConfig parses valid maestro.json", () => {
@@ -2479,6 +2500,268 @@ describe("communication directive (directiveText)", () => {
   });
 });
 
+// =============================================================================
+// Config resolve: 4-слойный резолв + hybrid merge (6.0.0, global install)
+// Слои: MAESTRO_CONFIG (env, debug-only full override) > <root>/maestro.json
+// > <root>/.maestro/maestro.json > <globalDir>/maestro.json (XDG-aware).
+// Global-слой в тестах — через XDG_TEST_HOME (см. топ уровня) или явный
+// globalDir-аргумент resolveConfigFile; реальный ~/.config не затрагивается.
+// =============================================================================
+
+describe("config resolve (4-layer, 6.0.0)", () => {
+  const makeDirs = (prefix) => ({
+    root: fs.mkdtempSync(path.join(os.tmpdir(), `mc-${prefix}-root-`)),
+    gd: fs.mkdtempSync(path.join(os.tmpdir(), `mc-${prefix}-gd-`)),
+  });
+  const writeJson = (p, objOrStr) => {
+    fs.mkdirSync(path.dirname(p), { recursive: true });
+    fs.writeFileSync(p, typeof objOrStr === "string" ? objOrStr : JSON.stringify(objOrStr));
+  };
+  const withEnv = (fn) => {
+    const saved = process.env.MAESTRO_CONFIG;
+    delete process.env.MAESTRO_CONFIG;
+    try { return fn(); }
+    finally {
+      if (saved === undefined) delete process.env.MAESTRO_CONFIG;
+      else process.env.MAESTRO_CONFIG = saved;
+    }
+  };
+
+  // --- resolveGlobalDir ---
+
+  it("resolveGlobalDir: XDG_CONFIG_HOME → <xdg>/opencode/.maestro", () => {
+    assert.equal(resolveGlobalDir(), path.join(XDG_TEST_HOME, "opencode", ".maestro"));
+  });
+
+  it("resolveGlobalDir: без XDG_CONFIG_HOME → <home>/.config/opencode/.maestro", () => {
+    const saved = process.env.XDG_CONFIG_HOME;
+    delete process.env.XDG_CONFIG_HOME;
+    try {
+      assert.equal(resolveGlobalDir(), path.join(os.homedir(), ".config", "opencode", ".maestro"));
+    } finally {
+      if (saved === undefined) delete process.env.XDG_CONFIG_HOME;
+      else process.env.XDG_CONFIG_HOME = saved;
+    }
+  });
+
+  // --- resolveConfigFile ---
+
+  it("resolveConfigFile: env override wins over all files", () => {
+    const d = makeDirs("env");
+    try {
+      writeJson(path.join(d.root, "maestro.json"), {});
+      writeJson(path.join(d.root, ".maestro", "maestro.json"), {});
+      writeJson(path.join(d.gd, "maestro.json"), {});
+      return withEnv(() => {
+        process.env.MAESTRO_CONFIG = path.join(d.gd, "debug-maestro.json");
+        assert.equal(resolveConfigFile(d.root, d.gd), path.join(d.gd, "debug-maestro.json"));
+      });
+    } finally {
+      fs.rmSync(d.root, { recursive: true, force: true });
+      fs.rmSync(d.gd, { recursive: true, force: true });
+    }
+  });
+
+  it("resolveConfigFile: root beats .maestro and global", () => {
+    const d = makeDirs("root");
+    try {
+      writeJson(path.join(d.root, "maestro.json"), {});
+      writeJson(path.join(d.root, ".maestro", "maestro.json"), {});
+      writeJson(path.join(d.gd, "maestro.json"), {});
+      return withEnv(() => {
+        assert.equal(resolveConfigFile(d.root, d.gd), path.join(d.root, "maestro.json"));
+      });
+    } finally {
+      fs.rmSync(d.root, { recursive: true, force: true });
+      fs.rmSync(d.gd, { recursive: true, force: true });
+    }
+  });
+
+  it("resolveConfigFile: .maestro beats global (root отсутствует)", () => {
+    const d = makeDirs("local");
+    try {
+      writeJson(path.join(d.root, ".maestro", "maestro.json"), {});
+      writeJson(path.join(d.gd, "maestro.json"), {});
+      return withEnv(() => {
+        assert.equal(resolveConfigFile(d.root, d.gd), path.join(d.root, ".maestro", "maestro.json"));
+      });
+    } finally {
+      fs.rmSync(d.root, { recursive: true, force: true });
+      fs.rmSync(d.gd, { recursive: true, force: true });
+    }
+  });
+
+  it("resolveConfigFile: global only → global path", () => {
+    const d = makeDirs("global");
+    try {
+      writeJson(path.join(d.gd, "maestro.json"), {});
+      return withEnv(() => {
+        assert.equal(resolveConfigFile(d.root, d.gd), path.join(d.gd, "maestro.json"));
+      });
+    } finally {
+      fs.rmSync(d.root, { recursive: true, force: true });
+      fs.rmSync(d.gd, { recursive: true, force: true });
+    }
+  });
+
+  it("resolveConfigFile: none → null", () => {
+    const d = makeDirs("none");
+    try {
+      return withEnv(() => {
+        assert.equal(resolveConfigFile(d.root, d.gd), null);
+      });
+    } finally {
+      fs.rmSync(d.root, { recursive: true, force: true });
+      fs.rmSync(d.gd, { recursive: true, force: true });
+    }
+  });
+
+  it("resolveConfigFile: broken root JSON → .maestro path (fallback, не выбрасывает)", () => {
+    const d = makeDirs("broken-root");
+    try {
+      writeJson(path.join(d.root, "maestro.json"), "{invalid");
+      writeJson(path.join(d.root, ".maestro", "maestro.json"), {});
+      writeJson(path.join(d.gd, "maestro.json"), {});
+      return withEnv(() => {
+        assert.doesNotThrow(() => {
+          assert.equal(resolveConfigFile(d.root, d.gd), path.join(d.root, ".maestro", "maestro.json"));
+        });
+      });
+    } finally {
+      fs.rmSync(d.root, { recursive: true, force: true });
+      fs.rmSync(d.gd, { recursive: true, force: true });
+    }
+  });
+
+  it("resolveConfigFile: all broken → null + не выбрасывает", () => {
+    const d = makeDirs("all-broken");
+    try {
+      writeJson(path.join(d.root, "maestro.json"), "{invalid");
+      writeJson(path.join(d.root, ".maestro", "maestro.json"), "{invalid");
+      writeJson(path.join(d.gd, "maestro.json"), "{invalid");
+      return withEnv(() => {
+        assert.doesNotThrow(() => {
+          assert.equal(resolveConfigFile(d.root, d.gd), null);
+        });
+      });
+    } finally {
+      fs.rmSync(d.root, { recursive: true, force: true });
+      fs.rmSync(d.gd, { recursive: true, force: true });
+    }
+  });
+
+  // --- loadMaestroConfig: hybrid merge ---
+
+  it("loadMaestroConfig: non-memory keys из активного файла (replace, не merge)", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "mc-hm-nm-root-"));
+    try {
+      writeJson(path.join(root, "maestro.json"), { communication: "professional" });
+      writeJson(globalConfigPath(), { communication: "plain" });
+      const config = loadMaestroConfig(undefined, root);
+      assert.equal(config.communication, "professional");
+    } finally {
+      clearGlobalConfig();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("loadMaestroConfig: memory soft-merge — global enabled + project namespace", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "mc-hm-soft-root-"));
+    try {
+      writeJson(globalConfigPath(), { memory: { enabled: true, embedding: { model: "M1" } } });
+      writeJson(path.join(root, ".maestro", "maestro.json"), { memory: { namespace: "a.b.c" } });
+      const config = loadMaestroConfig(undefined, root);
+      assert.equal(config.memory.enabled, true);
+      assert.equal(config.memory.namespace, "a.b.c");
+      assert.equal(config.memory.embedding.model, "M1");
+    } finally {
+      clearGlobalConfig();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("loadMaestroConfig: project enabled:false блокирует global enabled:true", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "mc-hm-block-root-"));
+    try {
+      writeJson(globalConfigPath(), { memory: { enabled: true } });
+      writeJson(path.join(root, "maestro.json"), { memory: { enabled: false } });
+      const config = loadMaestroConfig(undefined, root);
+      assert.equal(config.memory.enabled, false);
+    } finally {
+      clearGlobalConfig();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("loadMaestroConfig: embedding.model — project override global", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "mc-hm-model-root-"));
+    try {
+      writeJson(globalConfigPath(), { memory: { embedding: { model: "M1" } } });
+      writeJson(path.join(root, "maestro.json"), { memory: { embedding: { model: "M2" } } });
+      const config = loadMaestroConfig(undefined, root);
+      assert.equal(config.memory.embedding.model, "M2");
+    } finally {
+      clearGlobalConfig();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("loadMaestroConfig: memory нигде нет → enabled:false, namespace:null, model===DEFAULTS", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "mc-hm-none-root-"));
+    try {
+      const config = loadMaestroConfig(undefined, root);
+      assert.equal(config.memory.enabled, false);
+      assert.equal(config.memory.namespace, null);
+      assert.equal(config.memory.embedding.model, DEFAULTS.embedding_model);
+    } finally {
+      clearGlobalConfig();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("loadMaestroConfig: broken root → non-memory fallback к .maestro/", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "mc-hm-brk-root-"));
+    try {
+      writeJson(path.join(root, "maestro.json"), "{invalid");
+      writeJson(path.join(root, ".maestro", "maestro.json"), { feedback_report: "auto" });
+      const config = loadMaestroConfig(undefined, root);
+      assert.equal(config.feedback_report, "auto");
+    } finally {
+      clearGlobalConfig();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("loadMaestroConfig: активный файл без memory наследует global memory", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "mc-hm-inh-root-"));
+    try {
+      writeJson(path.join(root, "maestro.json"), { communication: "x" });
+      writeJson(globalConfigPath(), { memory: { enabled: true } });
+      const config = loadMaestroConfig(undefined, root);
+      assert.equal(config.communication, "x");
+      assert.equal(config.memory.enabled, true);
+      assert.equal(config.memory.namespace, null);
+    } finally {
+      clearGlobalConfig();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("loadMaestroConfig: global как активный файл → idempotent (не дублирует, не ломает)", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "mc-hm-ga-root-"));
+    try {
+      writeJson(globalConfigPath(), { memory: { enabled: true, embedding: { model: "MG" } } });
+      const config = loadMaestroConfig(undefined, root);
+      assert.equal(config.memory.enabled, true);
+      assert.equal(config.memory.namespace, null);
+      assert.equal(config.memory.embedding.model, "MG");
+    } finally {
+      clearGlobalConfig();
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("maestro_config tool (read-only maestro.json, spec 2026-09-24)", () => {
   let dir;
   let savedMAESTRO;
@@ -2566,11 +2849,28 @@ describe("maestro_config tool (read-only maestro.json, spec 2026-09-24)", () => 
     assert.ok(lines("maestro_config:read").some((e) => e.result === "file_missing"));
   });
 
-  it("5. невалидный JSON → parse_error: true + аудит parse_error", async () => {
+  it("5. невалидный JSON в root → fallback-цепочка исчерпана → exists:false (6.0.0); env со сломанным JSON → parse_error", async () => {
+    // 4-слойный резолв: сломанный root — это warning + fallback к следующим
+    // слоям, а не parse_error (spec §3.2.1). Все слои пусты → file_missing.
     const t = await makeTool("{ not json");
     const out = await jrun(t, {});
-    assert.equal(out.parse_error, true);
-    assert.ok(lines("maestro_config:read").some((e) => e.result === "parse_error"));
+    assert.equal(out.exists, false);
+    assert.deepEqual(out.config, {});
+    assert.ok(lines("maestro_config:read").some((e) => e.result === "file_missing"));
+
+    // parse_error сохраняется для MAESTRO_CONFIG env-override (debug) со сломанным JSON.
+    const envFile = path.join(dir, "env-broken.json");
+    fs.writeFileSync(envFile, "{ not json");
+    process.env.MAESTRO_CONFIG = envFile;
+    try {
+      const t2 = await makeTool(null);
+      const out2 = await jrun(t2, {});
+      assert.equal(out2.parse_error, true);
+      assert.ok(lines("maestro_config:read").some((e) => e.result === "parse_error"));
+    } finally {
+      fs.rmSync(envFile, { force: true });
+      delete process.env.MAESTRO_CONFIG;
+    }
   });
 
   it("6. невалидный section → сообщение об ошибке, без throw", async () => {
