@@ -422,6 +422,22 @@ function checkD5(repoRoot) {
   return violations;
 }
 
+// ============================================================
+// D6 — install/update-скрипты существуют в корне (6.0.0: доставка через скрипты + manifest)
+// ============================================================
+
+const INSTALL_SCRIPTS = ["maestro-install.sh", "maestro-update.sh"];
+
+function checkD6(repoRoot) {
+  const violations = [];
+  for (const name of INSTALL_SCRIPTS) {
+    if (!existsSync(join(repoRoot, name))) {
+      violations.push(`корневой скрипт ${name} не найден (delivery сломана)`);
+    }
+  }
+  return violations;
+}
+
 // Fixtures
 // ============================================================
 
@@ -560,6 +576,20 @@ test("docs-drift fixtures: каждый check возвращает наруше�
     d4.some((v) => v.includes("7.7.7") && v.includes("changelog")),
     `D4 fixture violation: ${JSON.stringify(d4)}`
   );
+  // D6 — в fixture нет maestro-install.sh (maestro-update.sh есть — D2 probe) → violation
+  const d6 = checkD6(TMP_DIR);
+  assert.deepEqual(
+    d6,
+    ["корневой скрипт maestro-install.sh не найден (delivery сломана)"],
+    `D6 fixture violation: ${JSON.stringify(d6)}`
+  );
+  // D6 real fixture: скрипт создан → 0 нарушений
+  writeFileSync(join(TMP_DIR, "maestro-install.sh"), "#!/bin/sh\n");
+  assert.deepEqual(
+    checkD6(TMP_DIR),
+    [],
+    `D6 real fixture should pass: ${JSON.stringify(checkD6(TMP_DIR))}`
+  );
   // D5 — pipeline compliance: все маркеры отсутствуют в fixture → violation
   const d5 = checkD5(TMP_DIR);
   assert.ok(
@@ -620,6 +650,11 @@ test("docs-drift real repo: 0 нарушений", () => {
   if (d5.length) {
     totalViolations += d5.length;
     all = all.concat(d5);
+  }
+  const d6 = checkD6(ROOT);
+  if (d6.length) {
+    totalViolations += d6.length;
+    all = all.concat(d6);
   }
 
   assert.deepEqual(
