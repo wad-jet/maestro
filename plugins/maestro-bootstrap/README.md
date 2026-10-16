@@ -358,9 +358,10 @@ primary и untrusted-субагентов (trusted субагенты — `read`
   (`export-<key16hex>-<ts>.jsonl`). Вне git. Бэкапы `memory_backup` — в
   каталоге проекта `memory.backup.path` (default `.maestro/memory/backup`),
   **не в `module_dir`** (module_dir — только код, стирается при resync).
-- **Установка:** `maestro-install.sh` — опциональный шаг (y/N) ставит маркер
-  `<data-dir>/maestro/memory/enabled.flag` + preflight npm/bun (зависимости
-  ставит плагин, не install.sh).
+- **Включение:** не часть стандартной установки; per-project opt-in через
+  `/maestro-setup` (project-слой `maestro.json`: `memory.enabled: true` +
+  namespace). Зависимости ставит плагин (self-provisioning, `npm install` в
+  `module_dir`), не install.sh.
 
 Полный справочник — `manual_docs/reference/memory.md`; включение —
 `manual_docs/how-to/enable-memory.md`.

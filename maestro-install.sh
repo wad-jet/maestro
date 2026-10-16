@@ -218,10 +218,11 @@ ask_choice() {
   done
 }
 
-# confirm_y <prompt> — y/N; EOF → n. Выводит y|n.
+# confirm_y <prompt> — y/N; EOF → n. Prompt — на stderr (stdout захвачен
+# под ответ при вызове в command substitution). Выводит y|n.
 confirm_y() {
   local prompt="$1" ans
-  printf '%s' "$prompt"
+  printf '%s' "$prompt" >&2
   if ! IFS= read -r ans; then ans="n"; fi
   case "$ans" in
     [yY]|[yY][eE][sS]*) printf 'y' ;;

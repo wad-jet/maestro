@@ -123,8 +123,9 @@ description: Use when the user asks for help configuring maestro, organizing pro
 ### Секция `memory` (опциональный memory layer)
 
 **Опциональный модуль** плагина (векторная память сессий). НЕ часть стандартной
-установки; включается только по явному запросу HITL (или по маркеру
-`enabled.flag` от `maestro-install.sh`). **Default:** секции нет / `enabled: false`
+установки; включается только по явному запросу HITL (per-project opt-in через
+`/maestro-setup`: `memory.enabled: true` в project-слое конфига). **Default:**
+секции нет / `enabled: false`
 → память полностью off (хуки не регистрируются, зависимости не загружаются,
 LLM-вызовов нет). Канон JSON — inline выше (поле `memory`).
 
@@ -251,9 +252,9 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
 
 Правила вывода (для `/maestro-setup` и консультаций):
 
-- Секция `memory` добавляется в `maestro.json` **только** если: (а) пользователь
-  явно запросил память, или (б) существует маркер
-  `<data-dir>/maestro/memory/enabled.flag` (поставлен `maestro-install.sh`).
+- Секция `memory` добавляется в `maestro.json` **только** если пользователь
+  явно запросил память (per-project opt-in через `/maestro-setup`,
+  `memory.enabled: true` в project-слое конфига).
   Без этого — секцию НЕ добавлять (никакого silent opt-in).
 - При добавлении — минимальный канон `{ "enabled": true }` (все остальные ключи
   — дефолты); расширять только по запросу HITL (бэкенд, namespace, identity_env,

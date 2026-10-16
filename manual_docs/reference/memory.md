@@ -1020,7 +1020,6 @@ sessions → возможна пара (реальная + синтетичес�
 | `<data-dir>/maestro/memory/export-<key16hex>-<ts>.jsonl` | Экспорт `memory_export` (по умолчанию; путь можно задать явно) | Нет |
 | `<git-root>/<memory.backup.path>` (default `.maestro/memory/backup/`) | Пары бэкапов `backup-<key>-<ts>.jsonl` + `.manifest.json` (`memory_backup`, 4.7.0) | Нет по умолчанию (`.maestro/` в `.gitignore`; осознанный коммит — только в приватные репо, WARN при каждом бэкапе, если каталог не gitignored) |
 | `<data-dir>/maestro/memory/` | Кэш модели эмбеддингов (transformers.js) | Нет |
-| `<data-dir>/maestro/memory/enabled.flag` | Маркер `maestro-install.sh` (читается `/maestro-setup`) | Нет |
 
 **Разделение code/data:** код модуля — `module_dir`; runtime-данные (state.json,
 БД, кэш модели) — `<data-dir>/maestro/memory/`. Удаление `module_dir`
