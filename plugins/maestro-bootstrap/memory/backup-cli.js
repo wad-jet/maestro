@@ -12,7 +12,8 @@
  * `safeRealpath(process.argv[1]) === safeRealpath(fileURLToPath(import.meta.url))`.
  *
  * Запуск: node <plugin>/memory/backup-cli.js <backup|restore --file <путь> [--replace]|list>
- * (из корня или подкаталога git-репозитория проекта с maestro.json).
+ * (из корня или подкаталога git-репозитория проекта; конфиг — 4-слойный
+ * резолв: MAESTRO_CONFIG > root > .maestro/ > global, как в плагине).
  *
  * @module backup-cli
  */
@@ -30,7 +31,7 @@ import {
   sanitizeDirName,
 } from "./config.js";
 import { deriveProjectKey } from "./project.js";
-import { getGitConfig, loadConfidentialConfig, readPluginVersion } from "../core.js";
+import { getGitConfig, loadConfidentialConfig, readPluginVersion, resolveConfigFile, resolveGlobalDir } from "../core.js";
 // defaultDataDir — существующий экспорт memory/index.js (data-dir-резолв parity
 // с registerMemoryHooks); топ-уровень модуля без side-effects (dynamic import
 // @opencode-ai/plugin обёрнут в try/catch с shim).
@@ -51,8 +52,11 @@ export const HELP = `Аварийный CLI memory backup/restore (spec §3) —
   list                    Перечислить бэкапы в каталоге memory.backup.path
   --help                  Показать эту справку
 
-Запуск: из корня (или подкаталога) git-репозитория проекта с maestro.json,
-где включена память (memory.enabled=true, storage.type=sqlite — v1).
+Запуск: из корня (или подкаталога) git-репозитория проекта, где включена
+память (memory.enabled=true, storage.type=sqlite — v1). Конфиг резолвится
+4-слойно (как в плагине): MAESTRO_CONFIG (env) > <root>/maestro.json
+> <root>/.maestro/maestro.json > <global>/maestro.json
+($XDG_CONFIG_HOME/opencode/.maestro или ~/.config/opencode/.maestro).
 `;
 
 /**
@@ -212,9 +216,23 @@ export async function main() {
     return 1;
   }
 
-  // maestro.json в git-корне (или cwd) — как в плагине (root = запуск opencode).
-  const maestroPath = join(root, "maestro.json");
+  // 4-слойный резолв (6.0.0) — тот же порядок, что в плагине
+  // (resolveConfigFile core.js): MAESTRO_CONFIG (env) > root/maestro.json
+  // > root/.maestro/maestro.json > global (<XDG>/opencode/.maestro/maestro.json).
+  const maestroPath = resolveConfigFile(root, resolveGlobalDir());
+  if (!maestroPath) {
+    // Ни один слой не найден — ошибка со списком проверенных путей (actionable).
+    const checked = [
+      join(root, "maestro.json"),
+      join(root, ".maestro", "maestro.json"),
+      join(resolveGlobalDir(), "maestro.json"),
+    ];
+    process.stderr.write(`backup-cli: maestro.json не найден ни в одном слое (проверены):\n  - ${checked.join("\n  - ")}\n`);
+    return 1;
+  }
   if (!existsSync(maestroPath)) {
+    // MAESTRO_CONFIG (env) — resolveConfigFile возвращает путь как есть,
+    // без проверки существования (debug-only слой).
     process.stderr.write(`backup-cli: не найден maestro.json: ${maestroPath}\n`);
     return 1;
   }

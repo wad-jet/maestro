@@ -150,7 +150,8 @@ Security-фактура по доступу пишется в **отдельны
 
 ## Конфигурация: maestro.json
 
-Единый файл конфигурации в корне проекта (`maestro.json`). Коммитится в git
+Файл конфигурации `maestro.json`, резолвится по 4 слоям (6.0.0); активный
+файл — первый парсируемый слой. Слой `<project>/maestro.json` коммитится в git
 (project policy). Содержит три секции:
 
 ```json
@@ -180,21 +181,43 @@ Security-фактура по доступу пишется в **отдельны
   Лог-события: `communication:flag_plain` (info), `communication:config_fallback`
   (warn), `communication:directive_injected` (debug).
 
-### Разрешение конфигов (resolution order)
+### Разрешение конфигов (resolution order, 4 слоя — 6.0.0)
 
 `maestro.json` — **единственный** источник конфигурации. Все секции
-(`trust`, `confidential`, `sanitizer_whitelist`) читаются из него одним
-загрузчиком `loadMaestroConfig()`.
+(`trust`, `confidential`, `sanitizer_whitelist`) читаются из активного файла
+одним загрузчиком `loadMaestroConfig()`.
 
-Порядок разрешения пути к файлу:
+Порядок разрешения пути к файлу (4 слоя):
 
-1. **Env override** — `MAESTRO_CONFIG` (путь к `maestro.json`).
-2. **По умолчанию** — `<project>/maestro.json`.
+1. **`MAESTRO_CONFIG`** (env) — путь к `maestro.json`. **debug-only**: полный
+   override — при его задании другие слои не читаются (файл отсутствует/сломан
+   → пустой конфиг `{}`, без fallback).
+2. **`<project>/maestro.json`** — проектный конфиг (в git).
+3. **`<project>/.maestro/maestro.json`** — локальные дополнения (вне git).
+4. **`<globalDir>/maestro.json`** — глобальные дефолты (глобальная установка);
+   `globalDir` — XDG-aware: `$XDG_CONFIG_HOME/opencode/.maestro` или
+   `~/.config/opencode/.maestro`.
+
+Активный файл — **первый парсируемый** слой: сломанный JSON слоя →
+`console.warn` + переход к следующему слою (fail-soft: плагин не падает,
+память не «выключается»).
+
+**Hybrid merge (6.0.0):** non-`memory` ключи — из активного файла (replace);
+`memory.*` — soft-merge активного `memory` с базой глобального слоя
+(резерв `enabled`/`embedding`); `memory.namespace` — только из активного
+файла (глобальный слой namespace не содержит).
 
 Старые файлы `trust-config.json`, `.maestro/sanitizer-whitelist.json` **не поддерживаются** (не читаются).
 
-Если `maestro.json` отсутствует — плагин работает (fail-open): все агенты
+Если все слои отсутствуют — плагин работает (fail-open): все агенты
 untrusted, дефолтные sanitizer-правила.
+
+**Активный конфиг — confidential (P6, 6.0.0):** активный файл (любой из 4
+слоёв, включая глобальный вне проекта) автоматически попадает в
+confidential-контур: `read`/`write`/`edit` через нативные тулы — deny для
+primary и untrusted-субагентов (trusted субагенты — `read` allow по
+умолчанию, `trusted.read`). Чтение параметров в сессии — только через
+санкционированный канал: плагин-тул `maestro_config`.
 
 ## Memory layer (опционально)
 
@@ -423,7 +446,7 @@ bootstrap-лог **не пишутся** — они только в аудит-�
 | `MAESTRO_MEMORY_LOG_LEVEL` | порог детализации аудит-лога memory layer (`maestro-memory-*.log`) | `info` |
 | `MAESTRO_MEMORY_LOG_MASK` | список включённых уровней через запятую (memory-лог) | выводится из `LOG_LEVEL` |
 | `MAESTRO_MEMORY_LOG_DIR` | каталог для аудит-лога memory layer | каталог bootstrap-лога |
-| `MAESTRO_CONFIG` | путь к maestro.json (консолидированный конфиг) | `<project>/maestro.json` |
+| `MAESTRO_CONFIG` | путь к maestro.json — **debug-only**: полный override 4-слойного резолва (без fallback на другие слои) | не задан (4-слойный резолв) |
 | `MAESTRO_MEMORY_IDENTITY` | identity для подписи записей памяти (через `memory.identity_env`) | — |
 | `MAESTRO_MEMORY_QDRANT_KEY` | API-ключ Qdrant (через `memory.storage.qdrant.api_key_env`) | — |
 | `MAESTRO_MEMORY_PG_DSN` | DSN Postgres для pgvector (через `memory.storage.pgvector.connection_string_env`) | — |
@@ -522,6 +545,17 @@ OpenCode установит плагин автоматически (Bun) при
 > `.maestro/logs/maestro-bootstrap-<дата>.log` с записью `plugin initialized`.
 
 В обоих случаях перезапустите opencode, чтобы плагин подхватился.
+
+### Глобальная установка (6.0.0)
+
+Плагин можно зарегистрировать глобально для всех проектов машины — в
+`~/.config/opencode/opencode.json` (XDG: `$XDG_CONFIG_HOME/opencode/opencode.json`).
+Тогда `maestro.json` резолвится по 4 слоям (см. «Разрешение конфигов»):
+глобальный слой `<globalDir>/maestro.json`
+(`$XDG_CONFIG_HOME/opencode/.maestro/maestro.json` или
+`~/.config/opencode/.maestro/maestro.json`) — общие дефолты для всех
+проектов; проектные слои (`<project>/maestro.json`,
+`<project>/.maestro/maestro.json`) имеют приоритет.
 
 ## Требования
 

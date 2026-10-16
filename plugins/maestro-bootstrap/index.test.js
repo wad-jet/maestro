@@ -3,7 +3,7 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { createBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, validateWhitelist, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile, loadCommunicationConfig, loadFeedbackReportConfig, makeMaestroConfigTool, resolveConfigFile, resolveGlobalDir } from "./core.js";
+import { createBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, validateWhitelist, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile, isMaestroConfigPath, loadCommunicationConfig, loadFeedbackReportConfig, makeMaestroConfigTool, resolveConfigFile, resolveGlobalDir } from "./core.js";
 import { DEFAULTS } from "./memory/config.js";
 import {
   detectPlainFlag,
@@ -1660,6 +1660,121 @@ describe("maestro-bootstrap built-in confidential (OQ-3, Task 2b)", () => {
   });
 });
 
+describe("maestro-bootstrap active config masking (6.0.0, P6)", () => {
+  // Активный конфиг (любой из 4 слоёв резолва) — автоматически в confidential-
+  // контуре: primary/untrusted — deny read/write/edit; trusted субагенты —
+  // read allow по умолчанию (trusted.read). Санкционированный канал чтения в
+  // сессии — тул maestro_config. Глобальный слой (вне проекта) — по абсолютному
+  // пути, не через repo-relative glob.
+  let dir, hooks, savedLogEnv;
+  const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR", "MAESTRO_CONFIG"];
+
+  function makeClient(sessions) {
+    return {
+      session: {
+        get: async ({ sessionID }) => {
+          const rec = sessions[sessionID];
+          if (!rec) throw new Error("not found");
+          return { data: rec.session };
+        },
+        context: async ({ sessionID }) => {
+          const rec = sessions[sessionID];
+          if (!rec) return { data: [] };
+          return { data: rec.messages };
+        },
+      },
+    };
+  }
+
+  const rootSessions = {
+    root: { session: { id: "root" }, messages: [] },
+    childTrusted: {
+      session: { id: "childTrusted", parentID: "root" },
+      messages: [{ info: { role: "assistant", mode: "custodian" }, parts: [] }],
+    },
+    childUntrusted: {
+      session: { id: "childUntrusted", parentID: "root" },
+      messages: [{ info: { role: "assistant", mode: "haiku" }, parts: [] }],
+    },
+  };
+
+  before(async () => {
+    savedLogEnv = {};
+    for (const k of LOG_ENV) { savedLogEnv[k] = process.env[k]; delete process.env[k]; }
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-cfgmask-"));
+    // НЕТ секции confidential — защита активного конфига работает без неё.
+    fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({
+      trust: { custodian: true },
+    }));
+    hooks = await MaestroBootstrapPlugin({ directory: dir, client: makeClient(rootSessions) });
+  });
+
+  after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    for (const k of LOG_ENV) {
+      if (savedLogEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedLogEnv[k];
+    }
+  });
+
+  it("denies untrusted subagent read of active config (root maestro.json)", async () => {
+    const out = { args: { filePath: "maestro.json" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "childUntrusted", callID: "cm-u-read" }, out),
+      /confidential:deny/,
+    );
+  });
+
+  it("denies primary/root read of active config (санкционированный канал — тул maestro_config)", async () => {
+    const out = { args: { filePath: "maestro.json" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "cm-root-read" }, out),
+      /confidential:deny/,
+    );
+  });
+
+  it("allows trusted subagent read of active config (trusted.read default allow)", async () => {
+    const out = { args: { filePath: "maestro.json" } };
+    await hooks["tool.execute.before"]({ tool: "read", sessionID: "childTrusted", callID: "cm-t-read" }, out);
+    assert.ok(true);
+  });
+
+  it("denies write/edit of active config", async () => {
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "write", sessionID: "root", callID: "cm-write" },
+        { args: { filePath: "maestro.json", content: "{}" } }),
+      /confidential:deny/,
+    );
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "edit", sessionID: "root", callID: "cm-edit" },
+        { args: { filePath: "maestro.json", oldString: "a", newString: "b" } }),
+      /confidential:deny/,
+    );
+  });
+
+  it("denies untrusted subagent read of .maestro/maestro.json (local layer)", async () => {
+    const out = { args: { filePath: ".maestro/maestro.json" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "childUntrusted", callID: "cm-local" }, out),
+      /confidential:deny/,
+    );
+  });
+
+  it("denies untrusted subagent read of global config (absolute path, outside project)", async () => {
+    const out = { args: { filePath: globalConfigPath() } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "childUntrusted", callID: "cm-global" }, out),
+      /confidential:deny/,
+    );
+  });
+
+  it("does not block non-config files (no over-masking)", async () => {
+    const out = { args: { filePath: "src/app.ts" } };
+    await hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "cm-neg" }, out);
+    assert.ok(true);
+  });
+});
+
 describe("maestro-bootstrap confidential path normalization", () => {
   const root = "/proj";
 
@@ -2647,6 +2762,68 @@ describe("config resolve (4-layer, 6.0.0)", () => {
     } finally {
       fs.rmSync(d.root, { recursive: true, force: true });
       fs.rmSync(d.gd, { recursive: true, force: true });
+    }
+  });
+
+  // --- isMaestroConfigPath (P6: активный конфиг → confidential, 6.0.0) ---
+  // True для любого из 4 слоёв резолва (MAESTRO_CONFIG > root > .maestro > global);
+  // проверка по пути (не glob) — глобальный слой вне проекта.
+
+  it("isMaestroConfigPath: true для root maestro.json (активный слой)", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "mc-mask-root-"));
+    try {
+      assert.equal(isMaestroConfigPath(root, "maestro.json"), true);
+      assert.equal(isMaestroConfigPath(root, path.join(root, "maestro.json")), true);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("isMaestroConfigPath: true для .maestro/maestro.json (локальный слой)", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "mc-mask-local-"));
+    try {
+      assert.equal(isMaestroConfigPath(root, ".maestro/maestro.json"), true);
+      assert.equal(isMaestroConfigPath(root, path.join(root, ".maestro", "maestro.json")), true);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("isMaestroConfigPath: true для глобального конфига (absolute, вне проекта)", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "mc-mask-global-"));
+    try {
+      const globalCfg = path.join(XDG_TEST_HOME, "opencode", ".maestro", "maestro.json");
+      assert.equal(isMaestroConfigPath(root, globalCfg), true);
+      assert.equal(isMaestroConfigPath(root, path.join(resolveGlobalDir(), "maestro.json")), true);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
+    }
+  });
+
+  it("isMaestroConfigPath: MAESTRO_CONFIG env-слой (debug override)", () => {
+    const d = makeDirs("mask-env");
+    try {
+      return withEnv(() => {
+        process.env.MAESTRO_CONFIG = path.join(d.root, "debug-maestro.json");
+        assert.equal(isMaestroConfigPath(d.root, "debug-maestro.json"), true);
+        assert.equal(isMaestroConfigPath(d.root, "maestro.json"), true); // root-слой тоже кандидат
+      });
+    } finally {
+      fs.rmSync(d.root, { recursive: true, force: true });
+      fs.rmSync(d.gd, { recursive: true, force: true });
+    }
+  });
+
+  it("isMaestroConfigPath: false для обычного файла", () => {
+    const root = fs.mkdtempSync(path.join(os.tmpdir(), "mc-mask-neg-"));
+    try {
+      assert.equal(isMaestroConfigPath(root, "docs/specs/x.md"), false);
+      assert.equal(isMaestroConfigPath(root, "src/maestro.json"), false); // вложенный, не root-слой
+      assert.equal(isMaestroConfigPath(root, ".maestro/logs/x.log"), false);
+      assert.equal(isMaestroConfigPath(root, ""), false);
+      assert.equal(isMaestroConfigPath(root, null), false);
+    } finally {
+      fs.rmSync(root, { recursive: true, force: true });
     }
   });
 

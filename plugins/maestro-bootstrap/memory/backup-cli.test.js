@@ -24,10 +24,75 @@ test("cli: без команды → usage, exit 1", () => {
   assert.equal(r.status, 1);
 });
 
-test("cli: не-git-каталог без maestro.json → понятная ошибка, exit 1", () => {
-  const r = spawnSync(process.execPath, [CLI, "list"], { encoding: "utf8", cwd: "/tmp" });
-  assert.equal(r.status, 1);
-  assert.match(r.stdout + r.stderr, /maestro\.json/i);
+test("cli: не-git-каталог без maestro.json → понятная ошибка со списком слоёв, exit 1", () => {
+  const base = mkdtempSync(join(tmpdir(), "maestro-cli-nocfg-"));
+  try {
+    const xdg = join(base, "xdg");
+    mkdirSync(xdg, { recursive: true });
+    const r = spawnSync(process.execPath, [CLI, "list"], {
+      encoding: "utf8", cwd: "/tmp",
+      // Изоляция глобального слоя: пустой XDG_CONFIG_HOME (реальный home не читать)
+      env: { ...process.env, XDG_CONFIG_HOME: xdg },
+    });
+    assert.equal(r.status, 1);
+    assert.match(r.stdout + r.stderr, /maestro\.json/i);
+    // Список проверенных путей: root + .maestro + global
+    assert.match(r.stderr, /\/maestro\.json$/m);
+    assert.match(r.stderr, /\.maestro\/maestro\.json/);
+    assert.ok(
+      r.stderr.includes(join(xdg, "opencode", ".maestro", "maestro.json")),
+      `global-слой в списке проверенных путей. stderr:\n${r.stderr}`,
+    );
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+// ── 4-слойный резолв конфига (6.0.0): .maestro/ слой и global-слой ──
+
+test("cli: 4-слойный резолв — конфиг в .maestro/maestro.json (не в корне) → list работает", () => {
+  const base = mkdtempSync(join(tmpdir(), "maestro-cli-4layer-"));
+  try {
+    const repo = join(base, "repo");
+    mkdirSync(join(repo, ".maestro"), { recursive: true });
+    spawnSync("git", ["init", "-q"], { cwd: repo, stdio: "ignore" });
+    writeFileSync(join(repo, ".maestro", "maestro.json"), JSON.stringify({
+      memory: { enabled: true, namespace: "test-ns" },
+    }));
+    const xdg = join(base, "xdg");
+    mkdirSync(xdg, { recursive: true });
+    const r = spawnSync(process.execPath, [CLI, "list"], {
+      cwd: repo, encoding: "utf8",
+      env: { ...process.env, XDG_CONFIG_HOME: xdg },
+    });
+    assert.equal(r.status, 0, `stderr:\n${r.stderr}`);
+    assert.match(r.stdout, /бэкапов нет/i);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
+});
+
+test("cli: 4-слойный резолв — конфиг только в global-слое → list работает", () => {
+  const base = mkdtempSync(join(tmpdir(), "maestro-cli-4layer-g-"));
+  try {
+    const repo = join(base, "repo");
+    mkdirSync(repo, { recursive: true });
+    spawnSync("git", ["init", "-q"], { cwd: repo, stdio: "ignore" });
+    // В репо maestro.json НЕТ — только глобальный слой.
+    const xdg = join(base, "xdg");
+    mkdirSync(join(xdg, "opencode", ".maestro"), { recursive: true });
+    writeFileSync(join(xdg, "opencode", ".maestro", "maestro.json"), JSON.stringify({
+      memory: { enabled: true, namespace: "test-ns" },
+    }));
+    const r = spawnSync(process.execPath, [CLI, "list"], {
+      cwd: repo, encoding: "utf8",
+      env: { ...process.env, XDG_CONFIG_HOME: xdg },
+    });
+    assert.equal(r.status, 0, `stderr:\n${r.stderr}`);
+    assert.match(r.stdout, /бэкапов нет/i);
+  } finally {
+    rmSync(base, { recursive: true, force: true });
+  }
 });
 
 // ── I-1: corrupt DB → actionable-ошибка с dbPath (+ restore-подсказка) ──

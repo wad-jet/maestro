@@ -495,6 +495,24 @@ export function isPluginMetaFile(root, target) {
   return t === ".maestro/plugin-version";
 }
 
+export function isMaestroConfigPath(root, target) {
+  // Активный конфиг — confidential (P6, 6.0.0): автоматически попадает в
+  // confidential-контур (read/write/edit). True для любого из 4 слоёв резолва
+  // (MAESTRO_CONFIG > root > .maestro > global). Проверка по пути, не glob:
+  // глобальный слой лежит вне проекта и не покрывается repo-relative масками.
+  if (typeof target !== "string" || !target) return false;
+  const abs = path.isAbsolute(target) ? path.normalize(target) : path.resolve(root, target);
+  const candidates = [
+    path.join(root, "maestro.json"),
+    path.join(root, ".maestro", "maestro.json"),
+    path.join(resolveGlobalDir(), "maestro.json"),
+  ];
+  // MAESTRO_CONFIG (debug-only) — верхний слой; относительный путь fs
+  // резолвит от cwd, нормализуем тем же образом.
+  if (process.env.MAESTRO_CONFIG) candidates.push(path.resolve(process.env.MAESTRO_CONFIG));
+  return candidates.includes(abs);
+}
+
 export function isConfidentialTarget(root, patterns, target) {
   const rel = normalizeTarget(root, target);
   if (!rel) return false;
@@ -914,7 +932,9 @@ export async function createBootstrapPlugin(ctx) {
         const target = filePathOf(input.tool, event.input);
         const isConfTarget = target && !isPluginMetaFile(root, target) &&
           ((confidential.exists && isConfidentialTarget(root, confidential.paths, target)) ||
-           isConfidentialTarget(root, confidential.builtin, target));
+           isConfidentialTarget(root, confidential.builtin, target) ||
+           // Активный конфиг (любой из 4 слоёв) — всегда в confidential-контуре (P6, 6.0.0)
+           isMaestroConfigPath(root, target));
         if (isConfTarget) {
           let trustInfo = sessionTrustCache.get(input.sessionID);
           if (trustInfo === undefined) {
