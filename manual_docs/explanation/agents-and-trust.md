@@ -58,18 +58,39 @@ Trust-статус управляет **двумя** измерениями за
 > defense-in-depth. Runtime-верификация merge-семантики (agent allow vs global
 > deny) — V1 (pending).
 
-### trust-config → maestro.json
+### trust-config → maestro.json (4-слойный конфиг)
 
-Файл `maestro.json` в корне проекта — консолидированный
-конфиг с тремя секциями: `trust`, `confidential`,
-`sanitizer_whitelist`. Секция
-`trust` перечисляет **только trusted** сабагентов. Всё, чего нет в файле —
-untrusted. Если файла нет — все untrusted.
+Консолидированный конфиг `maestro.json` (секции `trust`, `confidential`,
+`sanitizer_whitelist` + опциональные `communication`, `feedback_report`,
+`memory` и др.) — **4 слоя** (6.0.0), от высшего к низшему приоритету:
 
-`maestro.json` **генерируется `/maestro-setup`** (задача «Конфигурация maestro», по канону
-скилла `maestro-assistant`) и коммитится в git. Настройка/консультации по конфигурации в
-течение жизни проекта — через `/maestro-assistant`. `custodian` и `sanitizer` — trusted по роли;
-модели у них **независимые** (trusted — атрибут безопасности, не мощность).
+| # | Слой | Путь | Где живёт |
+|---|---|---|---|
+| 1 | `MAESTRO_CONFIG` (env) | произвольный путь | **debug-only**: полный override, другие слои не проверяются |
+| 2 | Проектный (командный) | `<project>/maestro.json` | в git — командная фиксация |
+| 3 | Проектный (локальный) | `<project>/.maestro/maestro.json` | вне git (`.maestro/` в `.gitignore`) |
+| 4 | Глобальный (машинный) | `~/.config/opencode/.maestro/maestro.json` | XDG-aware; создаётся `maestro-install.sh --global` |
+
+**Активный файл = ПЕРВЫЙ ПАРСИРУЕМЫЙ слой** (порядок 2 → 3 → 4; слой 1 —
+путь как есть): root выигрывает; сломанный JSON слоя → warning + переход к
+следующему (fail-soft). **Hybrid-семантика:** non-`memory` ключи берутся
+**только из активного файла** (replace — файлы-слои не мержатся); `memory.*` —
+soft-merge с глобальным слоем (`enabled`/`embedding.model` — из активного,
+при отсутствии — из глобального, при отсутствии — встроенный default;
+`namespace` — только из проектного слоя, глобальный слой его не содержит).
+Справочник — [Конфигурация](../reference/config.md).
+
+Секция `trust` перечисляет **только trusted** сабагентов. Всё, чего нет в
+файле — untrusted. Если файла нет — все untrusted. `trust` — пер-проектное
+решение: из глобального слоя не наследуется.
+
+`maestro.json` **генерируется `/maestro-setup`** (задача «Конфигурация
+maestro», по канону скилла `maestro-assistant`): проектный режим — root-файл
+(коммитится в git); глобальный режим — `.maestro/maestro.json` (вне git) с
+auto-derive `memory.namespace`. Настройка/консультации по конфигурации в
+течение жизни проекта — через `/maestro-assistant`. `custodian` и `sanitizer`
+— trusted по роли; модели у них **независимые** (trusted — атрибут
+безопасности, не мощность).
 
 ```json
 {
@@ -81,13 +102,16 @@ untrusted. Если файла нет — все untrusted.
 ```
 
 - Ключ в `trust` — имя сабагента; значение только `true` = trusted.
-- Файл коммитится в git — trust-level policy проекта.
-- Оркестратор читает его один раз на шаге 0 и кэширует.
+- Проектный слой (root `maestro.json`) коммитится в git — trust-level
+  policy проекта; слой 3 (`.maestro/`) — личное, вне git.
+- Оркестратор читает активный конфиг один раз на шаге 0 и кэширует.
 - `custodian` — trusted по роли (читает confidential-источники, отвечает
   агрегатами без значений; spec пишет primary).
 - `sanitizer` — trusted по роли (видит сырые данные, чтобы пометить).
-- `maestro.json` — единственный источник конфигурации. Старые `trust-config.json`
-  и отдельные файлы в `.maestro/` больше не читаются плагином.
+- Активный `maestro.json` (любой из 4 слоёв) — единственный источник
+  конфигурации. Старые `trust-config.json` и прочие отдельные файлы в
+  `.maestro/` (кроме `.maestro/maestro.json` — слой 3) больше не читаются
+  плагином.
 
 ## 📖 Security Review (двухуровневая защита)
 
@@ -117,12 +141,20 @@ permission-слой (trusted-исключения — per-agent allow).
 (deny/ask в `.opencode/opencode.json`); плагин больше не блокирует `read`.
 `bash`/`glob`/`grep` — нативные permissions (эвристический deny-слой).
 
-> **`maestro.json` защищается нативно** — deny `read`/`glob`/`grep` + edit-ask
-> в `.opencode/opencode.json` (fail-closed, см. [`SECURITY.md`](../../SECURITY.md) → P6).
-> Санкционированный канал чтения параметров в сессии — плагин-тул
+> **Активный `maestro.json` защищается** (P6, 6.0.0) — любой из 4 слоёв
+> резолва (root, `.maestro/`, глобальный, `MAESTRO_CONFIG`), включая
+> глобальный абсолютный путь вне проекта. Защита многоуровневая:
+> **нативно** (deny `read`/`glob`/`grep` + edit-ask в
+> `.opencode/opencode.json`, fail-closed) и **плагином** — путь активного
+> конфига **автоматически** попадает в confidential-контур (`read`/`write`/
+> `edit`, `isMaestroConfigPath`: точное совпадение пути, не glob), а его
+> содержание маскируется в sanitize-цепочке; см.
+> [`SECURITY.md`](../../SECURITY.md) → P6.
+> Primary и untrusted-агенты **не читают** его нативным `read`;
+> санкционированный канал чтения параметров в сессии — плагин-тул
 > `maestro_config` (permission `ask`, только top-level primary; сабагенты —
-> per-agent deny + плагинный fail-closed guard); bash-чтение запрещено
-> процессным каноном.
+> per-agent deny + плагинный fail-closed guard); trusted-сабагенты читать
+> могут; bash-чтение запрещено процессным каноном.
 > Расширение `isPluginMetaFile` касается **только одного semver-метафайла**
 > (`.maestro/plugin-version`) — `/maestro-version` использует его, не ослабляя
 > доступ к конфигу.
@@ -327,6 +359,14 @@ Confidential покрывает **исходные данные**, а не оч�
   плагин не имеет границы учётных записей: любой член команды с ключом
   читает всю память проекта. Per-account RBAC (role-based access control)
   /приватные записи — server-side задача, вне scope плагина.
+- **Источник namespace и включение (6.0.0).** `memory.namespace` — только из
+  активного проектного слоя (root `maestro.json` или `.maestro/maestro.json`);
+  глобальный слой его **не содержит** (один бакет на все проекты = cross-
+  project bleed). Глобальный дефолт — `memory.enabled: false` (privacy-safe):
+  память включается **per-project** через `/maestro-setup` (auto-derive
+  namespace из git remote, запись в `.maestro/maestro.json`; приоритет:
+  явное значение в конфиге > auto-derive). Без namespace — память disabled с
+  причиной `namespace_missing`.
 - **Prompt-injection через память — остаточный риск.** Память — исторический
   контекст, который может содержать враждебные инструкции (например, из
   транскрипта чужой сессии).

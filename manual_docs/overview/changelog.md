@@ -9,6 +9,33 @@
 
 ## [Unreleased]
 
+## [2026-10-17]
+
+> **Версия 6.0.0** — Major: глобальная установка, wholesale delivery, полный отказ от agpack, 3-layer hybrid config, namespace auto-derive, deinstall/prune.
+
+### Добавлено
+
+- **Глобальная установка (6.0.0):** `maestro-install.sh --global` — одна команда раскатывает скиллы/команды/агенты (maestro + superpowers) и плагин на всю машину: `git clone` (https-only, shallow) + wholesale copy в `~/.config/opencode/{skills,commands,agents}/` (XDG-aware) + manifest `~/.config/opencode/.maestro/manifest.json` (`{"version","sha_m","sha_s","deployed[]"}`, атомарная запись) + idempotent-регистрация плагина в глобальном `~/.config/opencode/opencode.json` (JSON, python3 любой версии — только для JSON-операций) + создание глобального `maestro.json` (`memory.enabled: false` — privacy-safe default). Новый компонент (скилл/команда/агент) доставляется **автоматически** — регистрация в каноне доставки не нужна (path-листинг дореформенной доставки удалён).
+- **Проектный режим и опции скриптов:** `--project` (default; `.opencode/` + `.maestro/manifest.json`), `--pin <sha>` (maestro и superpowers на одном коммите; плагин — `spec#sha`), `--dry-run` (план без изменений, 0 мутаций), `--migrate` (миграция с дореформенной установки: auto-derive namespace + удаление legacy-файлов — HITL), `--deinstall` (HITL-подтверждение; whitelist `--preserve <file,…>`).
+- **Глобальное обновление:** `maestro-update.sh --global` — обновление на всю машину: self-check (warn + инструкция, silent self-update запрещён) → clone → manifest diff → wholesale copy → очистка кэша плагина → re-reg → HITL-рестарт службы с предупреждением «прервёт все проекты»; `--prune` — HITL-удаление stale-компонентов (JSON-листинг); no-op при совпадении sha.
+- **4-слойный конфиг:** `MAESTRO_CONFIG` (env, **debug-only**, полный override — другие слои не проверяются) → `<project>/maestro.json` (в git) → `<project>/.maestro/maestro.json` (вне git; `.maestro/` в `.gitignore`) → глобальный `~/.config/opencode/.maestro/maestro.json` (XDG-aware). Активный файл = **первый парсируемый** (сломанный JSON слоя → warning + переход к следующему, fail-soft). **Hybrid-семантика:** non-`memory` ключи — replace из активного файла (слои-файлы не мержатся); `memory.*` — soft-merge с глобальным слоем (`enabled`: активный ?? глобальный ?? `false`; `embedding.model`: активный ?? глобальный ?? встроенный default; `namespace` — только из проектного слоя, глобальный его не содержит).
+- **Namespace auto-derive (`/maestro-setup`):** в глобальном режиме `.maestro/maestro.json` создаётся с `memory.enabled: true` + `namespace`, выведенным из git remote (формат 3 сегментов, monorepo-fallback по относительному пути, path-based fallback; нормализация/валидация по канону). Приоритет: явное значение в конфиге > auto-derive; пересчёт — `/maestro-setup --derive-namespace`. Память — per-project opt-in (глобальный default `enabled: false`); без namespace — `namespace_missing`.
+- **Gate 0 (multi-layer):** «проект под maestro» = конфиг найден в **любом** из слоёв; только глобальный конфиг → гейт проходит, без namespace память disabled (`namespace_missing`).
+- **P6 — расширение на активный конфиг:** активный конфиг (любой из 4 слоёв, включая глобальный абсолютный путь вне проекта) — **confidential**: автоматически в confidential-контуре плагина (`isMaestroConfigPath`, `read`/`write`/`edit`, fail-closed) + маскирование содержания в sanitize-цепочке; primary/untrusted-агенты не читают его нативно (санкционированный канал — плагин-тул `maestro_config`), trusted-сабагенты — могут.
+- **Доки:** how-to (install/update — глобальный вариант), reference (`config.md` — 4 слоя, `memory.md`, `commands.md`), explanation, index; docs-drift проверки D6 (установочные скрипты в корне) и D7 (отсутствие legacy-имени доставки в how-to/reference/index) + D8 (root/explanation/overview с допуском исторических пометок).
+
+### Изменено
+
+- **Механизм доставки (breaking):** `maestro-install.sh` / `maestro-update.sh` — корневые скрипты нового механизма: `git clone` (https-only, shallow, clone-first) + wholesale copy (staging + атомарный swap) + manifest + mkdir-based lock (macOS-совместимо, без `flock`); collision detection пользовательских объектов без маркера `.maestro-deployed` → HITL (overwrite / rename `-user-` / skip), non-interactive (stdin не tty) — fail-closed (abort). Зависимость от legacy-механизма доставки (python ≥ 3.11, uv/pipx) убрана — python3 любой версии (только JSON-регистрация плагина).
+- **Плагин `maestro-bootstrap`:** 4-слойный резолв конфига + hybrid memory-merge (`loadMaestroConfig`/`resolveConfigFile`); активный конфиг — в confidential-контуре и в маскировке (`isMaestroConfigPath`); `backup-cli.js` — 4-слойный резолв, синхронный с плагином; версия — `plugin-version` из задеплоенного коммита.
+- **`/maestro-setup` (глобальный режим):** создаёт `.maestro/maestro.json` с auto-derive namespace; не создаёт `.opencode/`-зеркало и root `maestro.json` по умолчанию; модели агентов — глобально в `~/.config/opencode/opencode.json`.
+- **Доки:** `SECURITY.md` (раздел «Глобальная установка — trust»), `AGENTS.md` (секция доставки — wholesale copy, корневые скрипты), README, explanation/overview; `docs/roadmap.md` + `TODO.md` — статус 6.0.0.
+
+### Удалено
+
+- **Legacy-механизм доставки agpack (breaking, полный отказ):** `maestro-install/agpack.yml`, корневой `agpack.yml`, `.agpack.lock.yml`, тесты `agpack-coverage.test.mjs` и `commands-skill-coverage.test.mjs`; зависимость agpack (python ≥ 3.11, uv/pipx) из установочных/обновляющих скриптов. Доставка — wholesale copy (новый компонент = авто-deploy).
+- **Регистрация компонентов в каноне доставки** (path-листинг `agpack.yml`) — заменена wholesale copy (листинг не нужен; «инцидент 4.13.0» больше не возможен — скилл/команда/агент доставляются в полном составе).
+
 ## [2026-10-15]
 
 > **Версия 5.6.10** — Patch: терминология quick-start («бот» → «оркестратор») + версионные маркеры.

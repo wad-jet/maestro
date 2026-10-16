@@ -443,10 +443,13 @@ function checkD6(repoRoot) {
 // ============================================================
 
 // 6.0.0 — legacy-механизм доставки удалён (wholesale copy вместо него).
-// Его имя должно отсутствовать (case-insensitive) в пользовательских доках:
+// D7: его имя должно отсутствовать (case-insensitive) в пользовательских доках:
 // manual_docs/how-to/**, manual_docs/reference/**, manual_docs/index.md.
-// explanation/overview и root-файлы (README/AGENTS/SECURITY) — вне этой
-// проверки (чистятся отдельно).
+// D8: root-файлы (README/AGENTS/SECURITY), manual_docs/explanation/** и
+// manual_docs/overview/what-is-maestro.md — с допуском исторических пометок
+// (строки с «удалён/удалены/отказ/legacy/removed/obsolete»).
+// manual_docs/overview/changelog.md — вне обеих проверок (entry 6.0.0
+// легитимно упоминает «отказ от legacy-механизма»).
 const LEGACY_DELIVERY_NAME = "agpack";
 
 function checkD7(repoRoot) {
@@ -465,6 +468,49 @@ function checkD7(repoRoot) {
     const lines = readFileSync(fp, "utf8").split("\n");
     for (let i = 0; i < lines.length; i++) {
       if (lines[i].toLowerCase().includes(LEGACY_DELIVERY_NAME)) {
+        violations.push(
+          `${rel}:${i + 1} — legacy-доставка «${LEGACY_DELIVERY_NAME}» (удалена в 6.0.0; доставка — wholesale copy)`
+        );
+      }
+    }
+  }
+  return violations;
+}
+
+// ============================================================
+// D8 — отсутствие legacy-имени доставки в root/explanation/overview (6.0.0)
+// ============================================================
+
+// Строки с историческими пометками допустимы (case-insensitive):
+// «удалён/удалены/отказ/legacy/removed/obsolete».
+const LEGACY_DELIVERY_HISTORY =
+  /удалён|удалены|отказ|legacy|removed|obsolete/i;
+
+function checkD8(repoRoot) {
+  const violations = [];
+  const files = [];
+  for (const rel of [
+    "README.md",
+    "AGENTS.md",
+    "SECURITY.md",
+    "manual_docs/overview/what-is-maestro.md",
+  ]) {
+    const fp = join(repoRoot, rel);
+    if (existsSync(fp)) files.push(fp);
+  }
+  for (const fp of globRecursive(
+    join("manual_docs", "explanation"),
+    /\.md$/,
+    repoRoot
+  )) {
+    files.push(fp);
+  }
+  for (const fp of files) {
+    const rel = fp.slice(repoRoot.length + 1);
+    const lines = readFileSync(fp, "utf8").split("\n");
+    for (let i = 0; i < lines.length; i++) {
+      if (lines[i].toLowerCase().includes(LEGACY_DELIVERY_NAME)) {
+        if (LEGACY_DELIVERY_HISTORY.test(lines[i])) continue;
         violations.push(
           `${rel}:${i + 1} — legacy-доставка «${LEGACY_DELIVERY_NAME}» (удалена в 6.0.0; доставка — wholesale copy)`
         );
@@ -646,6 +692,40 @@ test("docs-drift fixtures: каждый check возвращает наруше�
     d7b.some((v) => v.includes("manual_docs/index.md")),
     `D7 index.md fixture violation: ${JSON.stringify(d7b)}`
   );
+  // D8 — planted legacy-имя в README.md (без исторической пометки) → violation
+  const readmeBase = readFileSync(join(TMP_DIR, "README.md"), "utf8");
+  writeFileSync(
+    join(TMP_DIR, "README.md"),
+    readmeBase + "Доставка через agpack sync\n"
+  );
+  const d8 = checkD8(TMP_DIR);
+  assert.ok(
+    d8.some((v) => v.includes("README.md") && v.includes("agpack")),
+    `D8 fixture violation: ${JSON.stringify(d8)}`
+  );
+  // D8 — planted legacy-имя в explanation → violation
+  const explDir = join(TMP_DIR, "manual_docs", "explanation");
+  if (!existsSync(explDir)) mkdirSync(explDir, { recursive: true });
+  writeFileSync(
+    join(explDir, "planted.md"),
+    "Настройка через agpack\n"
+  );
+  assert.ok(
+    checkD8(TMP_DIR).some((v) => v.includes("explanation/planted.md")),
+    `D8 explanation fixture violation: ${JSON.stringify(checkD8(TMP_DIR))}`
+  );
+  // D8 — историческая пометка «удалён в 6.0.0» → allowlist (0 нарушений)
+  writeFileSync(
+    join(TMP_DIR, "README.md"),
+    readmeBase + "Legacy-механизм доставки agpack удалён в 6.0.0\n"
+  );
+  rmSync(join(explDir, "planted.md"), { force: true });
+  const d8allow = checkD8(TMP_DIR);
+  assert.deepEqual(
+    d8allow,
+    [],
+    `D8 history-allowlist fixture should pass: ${JSON.stringify(d8allow)}`
+  );
   // D5 — pipeline compliance: все маркеры отсутствуют в fixture → violation
   const d5 = checkD5(TMP_DIR);
   assert.ok(
@@ -716,6 +796,11 @@ test("docs-drift real repo: 0 нарушений", () => {
   if (d7.length) {
     totalViolations += d7.length;
     all = all.concat(d7);
+  }
+  const d8 = checkD8(ROOT);
+  if (d8.length) {
+    totalViolations += d8.length;
+    all = all.concat(d8);
   }
 
   assert.deepEqual(

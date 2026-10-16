@@ -4,8 +4,8 @@
 через OpenCode. Pipeline от дизайна до мержа: ** brainstorm → spec → plan → SDD → review → docs ** —
 с HITL-гейтами на ключевых точках.
 
-> Это **authoring-репозиторий** (источник скиллов, агентов, команд). Нет приложения — скопируйте
-> `.opencode/`, `skills/`, `commands/` и плагин в целевой проект (см.
+> Это **authoring-репозиторий** (источник скиллов, агентов, команд). Нет приложения —
+> установите скриптом `maestro-install.sh` (глобальный или проектный режим; см.
 > [Документация](manual_docs/index.md)).
 
 ## Что это
@@ -51,29 +51,37 @@
 
 ### 1. Настройте проект
 
-**Самый простой способ — скрипт `maestro-install.sh`** (новый или существующий проект,
-где maestro ранее не применялся). Он устанавливает `agpack`, создаёт `agpack.yml`,
-запускает `agpack sync`, подключает плагин `maestro-bootstrap` и загружает
-`maestro-update.sh` (для будущих обновлений):
+**Самый простой способ — скрипт `maestro-install.sh`** (новый или существующий
+проект, где maestro ранее не применялся). **Глобальный режим** (рекомендуется)
+раскатывает скиллы/команды/агенты и плагин на всю машину — в git проекта не
+попадает ни одного maestro-файла:
 
 ```bash
 curl -fsSL https://raw.githubusercontent.com/wad-jet/maestro/main/maestro-install.sh -o maestro-install.sh
-bash maestro-install.sh
+bash maestro-install.sh --global    # опции: --pin <sha>, --dry-run, --migrate, --help
 ```
 
-> Предусловия: bash (macOS/Linux), python3 ≥ 3.11, git, curl или wget, сеть.
+> Предусловия: bash (macOS/Linux), git, curl/wget, python3 (любой версии —
+> только для JSON-регистрации плагина), сеть.
 > Windows — запускайте через WSL или Git Bash. После скрипта — перезапустите
 > OpenCode и выполните `/maestro-setup` (см. шаг 3 ниже).
 
-Установить `maestro` можно также через **agpack** (вручную) или **копированием**.
-Подробная инструкция с `agpack.yml`, картой путей и подключением плагина —
+Проектный режим (скиллы/команды/агенты в `.opencode/` проекта) —
+`bash maestro-install.sh --project`. Оба режима — один механизм доставки:
+`git clone` (https-only, shallow) + **wholesale copy** всего `skills/`,
+`commands/`, `agents/` (включая superpowers) + manifest. Подробная инструкция
+с картой путей и ручным подключением плагина —
 [Первая установка maestro](manual_docs/how-to/install-maestro.md).
 
 ### 2. Подключите плагин
 
 Плагин `maestro-bootstrap` (санитайзинг промптов, audit-логи)
-подключается **до** запуска пайплайна. Он поставляется из git-репозитория `wad-jet/maestro`
-(публикация в npm не используется). Подключение (из git или локально) — в
+подключается **до** запуска пайплайна. Установочный скрипт подключает его
+**автоматически** в обоих режимах (idempotent, de-dup: только «наши» записи в
+`plugins`): глобальный — в `~/.config/opencode/opencode.json`, проектный — в
+`.opencode/opencode.json`. Плагин поставляется из git-репозитория
+`wad-jet/maestro` (публикация в npm не используется); ручное подключение
+(в т.ч. из локальных исходников) — в
 [Первая установка maestro](manual_docs/how-to/install-maestro.md).
 
 > **Версия плагина.** Единственный источник версии — **корневой** `package.json`
@@ -86,17 +94,19 @@ bash maestro-install.sh
 
 Версия **и плагина, и скилов — единая** (корневой `package.json → version`).
 
-- **Рекомендуемый способ — `maestro-update.sh`:** одна команда определяет целевую
-  версию, запускает `agpack sync`, очищает кэш плагина; опционально `--pin <sha>`.
-  Перед обновлением скрипт сам проверяет собственную актуальность и при
-  расхождении предлагает самообновиться (интерактивно).
-- **Скиллы/команды/агенты:** `agpack sync` (либо вручную из репозитория).
+- **Глобальное обновление — `maestro-update.sh --global`:** одна команда
+  обновляет скиллы/команды/агенты и плагин на всю машину (clone → manifest
+  diff → prune HITL → wholesale copy → очистка кэша плагина → re-reg).
+  Рестарт службы — HITL с предупреждением «прервёт все проекты». Опционально
+  `--pin <sha>` (maestro и superpowers на одном коммите).
+- **Проектное обновление — `maestro-update.sh` (default `--project`):** тот же
+  механизм для одного проекта (`.opencode/` + manifest проекта).
 - **Плагин:** кэшируется в `~/.cache/opencode/npm/git-maestro-*` (V2-layout) и НЕ
   обновляется при перезапуске OpenCode — перезапуск сам по себе не подтянет новую
   версию. Кэш очищает `maestro-update.sh`; при ручном обновлении — очистить кэш
   вручную (`rm -rf ~/.cache/opencode/npm/git-maestro-*`) + перезапуск.
-  Для фиксации коммита — fragment `#<commit-sha>`. Регистрация — ключ `plugins`
-  (V2; legacy `plugin` не смешивать — двойная регистрация).
+  Для фиксации коммита — `--pin <sha>` (регистрация `spec#sha`). Регистрация —
+  ключ `plugins` (V2; legacy `plugin` не смешивать — двойная регистрация).
 - **Контроль версии:** `/maestro-version` — показывает фактическую версию
   плагина (`.maestro/plugin-version`).
 
@@ -116,9 +126,8 @@ bash maestro-install.sh
 
 > **Внимание (v2.0.0):** команда `/maestro-init` теперь — **вход в пайплайн фич**
 > (ранее была bootstrap). Bootstrap нового проекта — `/maestro-setup`. Старая команда
-> `/maestro` удалена. При переходе обновите `agpack.yml` целевого проекта
-> (`skills/maestro-init` → `skills/maestro-setup`) или перезапустите `maestro-install.sh`/
-> `maestro-update.sh` — они сделают это автоматически.
+> `/maestro` удалена. Для установок дореформенной схемы — миграция
+> `maestro-install.sh --global --migrate` (или `--project --migrate`).
 
 Подробности — [Настройка проекта](manual_docs/tutorials/setup-project.md).
 
@@ -230,12 +239,15 @@ qdrant/pgvector. Управление: `memory_forget`, `memory_export`/`memory_
 ## Структура
 
 ```
-agents/          — конфиги субагентов (custodian, haiku, sonnet, opus, fable, reviewer, sanitizer)
-commands/        — @command конфиги (/maestro-init, /maestro-setup, /regression, /test-agents)
-plugins/         — maestro-bootstrap (ESM-плагин: sanitize, observability)
-skills/          — скиллы (maestro, maestro-setup, maestro-design, manual-docs — generic user-docs)
-specs/           — дизайн-спеки и план-ы этого репо (never in root!)
-manual_docs/     — пользовательская документация скилла (Diátaxis)
+agents/            — конфиги субагентов (custodian, haiku, sonnet, opus, fable, reviewer, sanitizer)
+commands/          — @command конфиги (/maestro-init, /maestro-setup, /regression, /test-agents)
+plugins/           — maestro-bootstrap (ESM-плагин: sanitize, observability)
+skills/            — скиллы (maestro, maestro-setup, maestro-design, manual-docs — generic user-docs)
+specs/             — дизайн-спеки и план-ы этого репо (never in root!)
+manual_docs/       — пользовательская документация скилла (Diátaxis)
+maestro-install.sh — установочный скрипт (глобальный/проектный режим, 6.0.0)
+maestro-update.sh  — скрипт обновления (глобальный/проектный режим, 6.0.0)
+maestro-install/   — детерминированные тесты (docs-drift, test-coverage)
 ```
 
 ## Тесты плагина

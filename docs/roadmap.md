@@ -1,7 +1,7 @@
 # Роадмап maestro-agent
 
-**Текущая версия:** `5.6.1`
-**Дата обновления:** 2026-10-07
+**Текущая версия:** `6.0.0`
+**Дата обновления:** 2026-10-17
 
 > Архив закрытых волн и детализированная история — в `git log` и `manual_docs/overview/changelog.md`.
 
@@ -91,6 +91,9 @@
 
 ~~31. **Feature: надёжность отчётов implementer (self-check + scope haiku)**~~
     - ✅ **решено (5.5.1, 2026-10-05):** `implementer-prompt.md` - self-check перед отчётом (фактический SHA, фактический вывод тестов, чистое дерево, структурная проверка; пропуск → `DONE_WITH_CONCERNS`); `references/model-selection.md` - scope haiku: без structural markdown (doc/шаблон-правки и multi-file → sonnet); обоснование - факт 2026-10-05: батч 5.4.0 (3/3 дефектных отчёта) vs батч 5.5.0 (3/3 полных)
+
+~~32. **Feature: глобальная установка maestro (скиллы/команды/агенты + плагин на всю машину, 4-слойный конфиг, wholesale-доставка)**~~
+    - ✅ **Выполнено (6.0.0, 2026-10-17):** `maestro-install.sh --global` / `maestro-update.sh --global` (git clone https-only + wholesale copy ВСЕГО skills/commands/agents (+superpowers) + manifest + регистрация плагина в глобальный конфиг; `--project`/`--pin`/`--prune`/`--dry-run`/`--migrate`/`--deinstall`); 4-слойный конфиг (MAESTRO_CONFIG debug > root в git > .maestro/ вне git > global XDG-aware) с hybrid-семантикой (non-memory replace, memory soft-merge); namespace auto-derive в `/maestro-setup` (per-project opt-in памяти, global default `enabled: false`); P6 — активный конфиг (любой слой) в confidential-контуре (маскер); полный отказ от legacy-механизма доставки (breaking); доки — SECURITY.md («Глобальная установка — trust»), AGENTS.md (доставка), how-to/reference, docs-drift D6/D7/D8
 
 ### Приоритет P3 (отложить)
 
@@ -186,6 +189,12 @@
 ---
 
 ## Закрытые волны (архив)
+
+### 6.0 (major) — глобальная установка, wholesale-доставка
+- Полный отказ от legacy-механизма доставки (breaking): корневые скрипты `git clone` (https-only) + wholesale copy + manifest
+- 4-слойный конфиг (root/.maestro/global/env-debug) + hybrid memory-merge; namespace auto-derive
+- P6 — активный конфиг (любой слой) в confidential-контуре (маскер)
+- **Результат:** version 6.0.0, `npm test` зелёные
 
 ### 5.0 (major) — чистка (C1)
 - **#91** — back-compat cleanup, #117 simplification (ledger_entry → удалён, patterns → allow_values)

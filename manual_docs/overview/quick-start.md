@@ -9,8 +9,9 @@
 
 ## 📋 Предпосылки
 
-- Целевое приложение содержит `.opencode/` с агентами, скиллами и командами maestro
-  (доставляются из авторского репо вручную или через `agpack`).
+- maestro установлен: скиллы/агенты/команды доступны глобально
+  (`maestro-install.sh --global`) или в `.opencode/` проекта (проектный режим) —
+  см. [Первая установка maestro](../how-to/install-maestro.md).
 - Проект настроен: `docs/project-context.md` (секция 14 — Commands), конфигурация
   maestro. Если ещё не настроен — выполните
   [Настройку проекта для maestro](../tutorials/setup-project.md) (`/maestro-setup`).
