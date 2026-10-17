@@ -1713,6 +1713,52 @@ test("memory_stats_detail clusters via scan", async () => {
   }
 });
 
+test("V2 registration: memory tool execute returns V2 content shape (string → {content:[{type:'text'}]})", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-v2shape-"));
+  const saved = process.env.XDG_DATA_HOME;
+  process.env.XDG_DATA_HOME = dir;
+  try {
+    const storage = mkMockStorage();
+    storage.stats = async () => ({ entries: 1 });
+    storage.scan = async () => [
+      { session_id: "s1", title: "T1", author: "alice", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]) },
+    ];
+    const added = [];
+    const client = {
+      ...mkClient(),
+      tool: {
+        transform: async (fn) => {
+          fn({ add: (t) => added.push(t) });
+          return { dispose: () => {} };
+        },
+      },
+    };
+    const hooks = await registerMemoryHooks({
+      client,
+      config: mkConfig(dir),
+      log: silentLog,
+      root: dir,
+      deps: { storage, embeddings: mkMockEmbeddings() },
+    });
+    try {
+      const v2 = added.find((t) => t.name === "memory_stats_detail");
+      assert.ok(v2, "memory_stats_detail must be registered via V2 tool.transform");
+      const res = await v2.execute({}, { sessionID: "s1" });
+      assert.equal(typeof res, "object", "V2 execute must return object (not plain string)");
+      assert.ok(Array.isArray(res.content), "V2 result must have content array");
+      assert.equal(res.content.length, 1);
+      assert.equal(res.content[0].type, "text");
+      assert.match(res.content[0].text, /Записей: 1/, "text must carry the report body");
+    } finally {
+      await hooks.dispose?.();
+    }
+  } finally {
+    if (saved === undefined) delete process.env.XDG_DATA_HOME;
+    else process.env.XDG_DATA_HOME = saved;
+    rmSync(dir, { recursive: true, force: true });
+  }
+});
+
 test("memory_stats_detail graph edges above threshold", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mem-graph-"));
   const saved = process.env.XDG_DATA_HOME;

@@ -2021,7 +2021,14 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
         ...(Object.keys(properties).length > 0
           ? { input: { type: "object", properties, ...(required.length > 0 ? { required } : {}) } }
           : {}),
-        execute: t?.execute,
+        // V2-контракт: результат execute — объект {content: [{type:"text", text}]}.
+        // V1-execute memory-тулов возвращает plain string — оборачиваем
+        // (V2-рантайм/Code Mode-мост падают на строке: "a is not an Object").
+        execute: async (args, ctx) => {
+          const res = await t?.execute?.(args, ctx);
+          if (res && typeof res === "object" && Array.isArray(res.content)) return res;
+          return { content: [{ type: "text", text: res == null ? "" : String(res) }] };
+        },
       };
     };
 
