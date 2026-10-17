@@ -499,7 +499,7 @@ opencode service restart
 | V8 | Блокировка: concurrent installs serialized, stale lock cleanup | Запуск двух инсталляций; вторая блокируется, stale lock (30 мин) — warning |
 | V9 | Атомарная запись manifest: temp file + mv; partial install не ломает state | Убить скрипт после cp, но до manifest write; повторный запуск восстанавливает |
 | V10 | Collision detection: user skill not overwritten silently | Создать `~/.config/opencode/skills/my-skill/` без `.maestro-deployed`; install должен warn + HITL |
-| V11 | XDG fallback: XDG_CONFIG_HOME non-writable → fallback + warning | Set XDG to readonly dir; installer falls back to $HOME/.config |
+| V11 | XDG non-writable: fail-closed (решение live-верификации 2026-10-17: fallback на $HOME/.config отклонён как небезопасный — установка в неожиданный каталог при явном XDG_CONFIG_HOME) | Set XDG to readonly dir; installer **die** «не удалось создать каталог … (права?)», реальный $HOME/.config не затрагивается |
 | V12 | --dry-run: показывает план без изменений | `bash maestro-install.sh --global --dry-run` — clone + diff, 0 мутаций на диск |
 | V13 | Parse error fallback: broken root → .maestro/ → global | Создать root/maestro.json с `{invalid`; verify fallback to lower layers |
 | V14 | Memory soft-merge: global.enabled + project.namespace | Global: `memory.enabled: true, memory.embedding.model: "..."`; Project: `memory.namespace: "..."` → effective: both keys present |
