@@ -520,8 +520,200 @@ function checkD8(repoRoot) {
   return violations;
 }
 
+// ============================================================
+// D9 — порядок слоёв 4-слойного конфига (6.1.0: слой 2 = .maestro/, слой 3 = root)
+// ============================================================
+
+// Положительная часть: 4-слойные таблицы, где строка слоя 2 —
+// `.maestro/maestro.json`, строка слоя 3 — корневой `maestro.json`.
+const D9_LAYER_TABLE_FILES = [
+  "manual_docs/reference/config.md",
+  "manual_docs/explanation/agents-and-trust.md",
+];
+
+// Отрицательная часть — whitelist «живых» доков (spec §3.6-2). Исторические
+// файлы (changelog.md, docs/roadmap.md, TODO.md, specs/**, docs/superpowers/**)
+// намеренно вне сканирования: записи версий до 6.1.0 легитимно описывают
+// старый порядок.
+const D9_WHITELIST = [
+  "manual_docs/reference/config.md",
+  "manual_docs/explanation/agents-and-trust.md",
+  "manual_docs/explanation/plain-language.md",
+  "manual_docs/how-to/customize-maestro.md",
+  "manual_docs/how-to/memory-backup-restore.md",
+  "plugins/maestro-bootstrap/README.md",
+  "skills/maestro/SKILL.md",
+  "skills/maestro-setup/SKILL.md",
+];
+
+// Формы путей проектных слоёв в доках — в backtick'ах, с префиксом
+// <project>/ или <root>/. Глобальный `~/.config/opencode/.maestro/maestro.json`
+// и безпрефиксные упоминания («root `maestro.json`», «`.maestro/maestro.json`»)
+// не покрываются — ложные срабатывания исключены.
+const D9_ROOT_FORM = /`<(?:project|root)>\/maestro\.json`/g; // слой 3 (root)
+const D9_DOT_FORMS = [
+  "`<project>/.maestro/maestro.json`", // слой 2 (.maestro/)
+  "`<root>/.maestro/maestro.json`",
+];
+// Цепочка старого порядка: root-слой ПЕРЕД .maestro/-слоем. Соседние пункты
+// цепочки: ровно один разделитель (→ или >) между слоями, без второго
+// разделителя и без другого упоминания maestro.json между ними; окно ≤ 150
+// символов (скобочные пометки «(в git)» + перенос строки).
+const D9_GAP_MAX = 150;
+
+function d9LineAt(content, index) {
+  return content.slice(0, index).split("\n").length;
+}
+
+// Позиция разделителя цепочки. Для «>» важно: символ «>» входит в префикс
+// <root> путей — такая «>» разделителем не считается.
+function d9SepIndex(text, sep) {
+  if (sep !== ">") return text.indexOf(sep);
+  let i = 0;
+  for (;;) {
+    i = text.indexOf(">", i);
+    if (i === -1) return -1;
+    if (!text.slice(i - 5, i).endsWith("<root")) return i;
+    i += 1;
+  }
+}
+
+function findOldOrderChains(content, sep) {
+  const hits = [];
+  for (const m of content.matchAll(D9_ROOT_FORM)) {
+    const start = m.index + m[0].length;
+    const rest = content.slice(start, start + D9_GAP_MAX * 2);
+    const sepIdx = d9SepIndex(rest, sep);
+    if (sepIdx === -1 || sepIdx > D9_GAP_MAX) continue;
+    // до разделителя — пометка (например « (в git)»); чужое упоминание
+    // maestro.json не допустимо
+    if (rest.slice(0, sepIdx).includes("maestro.json")) continue;
+    // после разделителя — до следующего (соседство: второго разделителя нет)
+    const after = rest.slice(sepIdx + sep.length);
+    const nextSep = d9SepIndex(after, sep);
+    const window =
+      nextSep === -1 ? after.slice(0, D9_GAP_MAX) : after.slice(0, nextSep);
+    if (D9_DOT_FORMS.some((f) => window.includes(f))) hits.push(m.index);
+  }
+  return hits;
+}
+
+function findOldOrderLists(content) {
+  const hits = [];
+  // Нумерованный список: root-пункт перед .maestro/-пунктом. Метка пункта —
+  // сам путь (после «N.» — только пробелы/табы и **); .maestro/-пункт —
+  // следующий пункт того же списка (≤ 3 строки продолжения, без пустых).
+  const re =
+    /(?:^|\n)[ \t]*\d+\.[ \t]*(?:\*\*)?[ \t]*`<(?:project|root)>\/maestro\.json`/g;
+  for (const m of content.matchAll(re)) {
+    const after = content.slice(m.index + m[0].length, m.index + m[0].length + 300);
+    const next =
+      /^[^\n]*(?:\n(?![ \t]*\d+\.)(?!\n)[^\n]*){0,3}\n[ \t]*\d+\.[ \t]*(?:\*\*)?[ \t]*`<(?:project|root)>\/\.maestro\/maestro\.json`/;
+    if (next.test(after)) hits.push(m.index);
+  }
+  return hits;
+}
+
+function checkD9LayerTable(content, file) {
+  const violations = [];
+  const lines = content.split("\n");
+  // Блоки таблицы: последовательные строки, начинающиеся с |
+  const blocks = [];
+  let cur = [];
+  for (const l of lines) {
+    if (/^\s*\|/.test(l)) {
+      cur.push(l);
+    } else if (cur.length) {
+      blocks.push(cur);
+      cur = [];
+    }
+  }
+  if (cur.length) blocks.push(cur);
+  // Таблица 4 слоёв — по строке слоя 1 с MAESTRO_CONFIG
+  const table = blocks.find(
+    (b) => b.some((l) => /^\s*\|\s*1\s*\|/.test(l) && l.includes("MAESTRO_CONFIG"))
+  );
+  if (!table) {
+    violations.push(`${file} — не найдена таблица 4 слоёв (слой 1 = MAESTRO_CONFIG)`);
+    return violations;
+  }
+  const row2 = table.find((l) => /^\s*\|\s*2\s*\|/.test(l));
+  const row3 = table.find((l) => /^\s*\|\s*3\s*\|/.test(l));
+  if (!row2) {
+    violations.push(`${file} — не найдена строка слоя 2 в таблице 4 слоёв`);
+  } else if (!row2.includes(".maestro/maestro.json")) {
+    violations.push(
+      `${file} — строка слоя 2: ожидалось \`<project>/.maestro/maestro.json\` (с 6.1.0: слой 2 = .maestro/, слой 3 = root)`
+    );
+  }
+  if (!row3) {
+    violations.push(`${file} — не найдена строка слоя 3 в таблице 4 слоёв`);
+  } else if (
+    !/`<(?:project|root)>\/maestro\.json`/.test(row3) ||
+    row3.includes(".maestro/maestro.json")
+  ) {
+    violations.push(
+      `${file} — строка слоя 3: ожидался корневой \`<project>/maestro.json\` (без префикса .maestro/)`
+    );
+  }
+  return violations;
+}
+
+function checkD9(repoRoot) {
+  const violations = [];
+
+  // 1. Положительная: 4-слойные таблицы — слой 2 = .maestro/, слой 3 = root.
+  for (const file of D9_LAYER_TABLE_FILES) {
+    if (!existsSync(join(repoRoot, file))) {
+      violations.push(`${file} — не найден`);
+      continue;
+    }
+    violations.push(...checkD9LayerTable(read(file, repoRoot), file));
+  }
+
+  // 2. Отрицательная: цепочки (→, >) и нумерованные списки старого порядка —
+  // только по whitelist (исторические файлы не читаются).
+  for (const file of D9_WHITELIST) {
+    const fp = join(repoRoot, file);
+    if (!existsSync(fp)) continue; // нет файла (fixture) — нечего сканировать
+    // Blockquote-декорация не есть синтаксис цепочки: ведущий «> » снимается,
+    // чтобы цепочка в блокквоте анализировалась так же.
+    const content = read(file, repoRoot)
+      .split("\n")
+      .map((l) => l.replace(/^\s*>\s?/, ""))
+      .join("\n");
+    // Все найденные места (дедупликация: одна цепочка может попасть под оба
+    // разделителя; сортировка по позиции)
+    const hits = [
+      ...new Set([
+        ...findOldOrderChains(content, "→"),
+        ...findOldOrderChains(content, ">"),
+        ...findOldOrderLists(content),
+      ]),
+    ].sort((a, b) => a - b);
+    for (const hit of hits) {
+      violations.push(
+        `${file}:${d9LineAt(content, hit)} — старый порядок слоёв (root перед .maestro/): с 6.1.0 слой 2 = .maestro/maestro.json, слой 3 = root maestro.json`
+      );
+    }
+  }
+
+  return violations;
+}
+
 // Fixtures
 // ============================================================
+
+// D9 fixture: 4-слойная таблица с верным порядком (6.1.0: слой 2 = .maestro/,
+// слой 3 = root). Используется createFixtures() и D9-кейсами self-тестов.
+const D9_TABLE = [
+  "| # | Слой | Путь | Где живёт |",
+  "|---|---|---|---|",
+  "| 1 | `MAESTRO_CONFIG` (env) | произвольный путь | debug-only |",
+  "| 2 | Проектный (локальный) | `<project>/.maestro/maestro.json` | вне git |",
+  "| 3 | Проектный (командный) | `<project>/maestro.json` | в git |",
+  "| 4 | Глобальный (машинный) | `~/.config/opencode/.maestro/maestro.json` | машина |",
+].join("\n");
 
 let TMP_DIR;
 
@@ -595,6 +787,15 @@ function createFixtures() {
   writeFileSync(
     join(aiFixDir, "auto-ai-decision-prompt.md"),
     "## Hard Rules\n1. Security rule only\n"
+  );
+  // D9 fixture: 4-слойные таблицы с ВЕРНЫМ порядком (слой 2 = .maestro/,
+  // слой 3 = root) — положительная часть должна пройти
+  writeFileSync(join(referenceDir, "config.md"), `# Конфигурация\n\n${D9_TABLE}\n`);
+  const explFixDir = join(TMP_DIR, "manual_docs", "explanation");
+  if (!existsSync(explFixDir)) mkdirSync(explFixDir, { recursive: true });
+  writeFileSync(
+    join(explFixDir, "agents-and-trust.md"),
+    `# Trust-модель\n\n${D9_TABLE}\n`
   );
 }
 
@@ -726,6 +927,134 @@ test("docs-drift fixtures: каждый check возвращает наруше�
     [],
     `D8 history-allowlist fixture should pass: ${JSON.stringify(d8allow)}`
   );
+  // D9 — положительная: 4-слойные таблицы с верным порядком (слой 2 =
+  // .maestro/, слой 3 = root) → 0 нарушений
+  assert.deepEqual(
+    checkD9(TMP_DIR),
+    [],
+    `D9 fixture: correct-order tables should pass: ${JSON.stringify(
+      checkD9(TMP_DIR)
+    )}`
+  );
+  // D9 — set-mention (неупорядоченное перечисление без приоритета) НЕ триггерит
+  const customizeFix = join(
+    TMP_DIR,
+    "manual_docs",
+    "how-to",
+    "customize-maestro.md"
+  );
+  writeFileSync(
+    customizeFix,
+    "Слои конфига — неупорядоченный набор: (root `<project>/maestro.json`, " +
+      "`<project>/.maestro/maestro.json`, глобальный) — приоритет не описан.\n"
+  );
+  assert.deepEqual(
+    checkD9(TMP_DIR),
+    [],
+    `D9 fixture: set-mention should not trigger: ${JSON.stringify(
+      checkD9(TMP_DIR)
+    )}`
+  );
+  // D9 — цепочка `→` старого порядка в «живом» доке (whitelist) → violation
+  writeFileSync(
+    customizeFix,
+    readFileSync(customizeFix, "utf8") +
+      "Приоритет: `MAESTRO_CONFIG` env → `<project>/maestro.json` (в git) → " +
+      "`<project>/.maestro/maestro.json` (вне git) → глобальный.\n"
+  );
+  assert.ok(
+    checkD9(TMP_DIR).some((v) => v.includes("customize-maestro.md")),
+    `D9 fixture: old arrow-chain in live doc should fail: ${JSON.stringify(
+      checkD9(TMP_DIR)
+    )}`
+  );
+  // D9 — та же цепочка старого порядка в «историческом» файле (changelog,
+  // вне whitelist) → PASS (не сканируется)
+  const changelogFix = join(TMP_DIR, "manual_docs", "overview", "changelog.md");
+  writeFileSync(
+    changelogFix,
+    readFileSync(changelogFix, "utf8") +
+      "- **4-слойный конфиг:** `MAESTRO_CONFIG` env → `<project>/maestro.json` " +
+      "(в git) → `<project>/.maestro/maestro.json` (вне git) → глобальный.\n"
+  );
+  assert.ok(
+    !checkD9(TMP_DIR).some((v) => v.includes("changelog")),
+    `D9 fixture: historical changelog must not be scanned: ${JSON.stringify(
+      checkD9(TMP_DIR)
+    )}`
+  );
+  // D9 — цепочка `>` старого порядка (multi-line) в whitelist-доке → violation
+  const memoryFix = join(
+    TMP_DIR,
+    "manual_docs",
+    "how-to",
+    "memory-backup-restore.md"
+  );
+  writeFileSync(
+    memoryFix,
+    "Резолв: `MAESTRO_CONFIG` env > `<root>/maestro.json` >\n" +
+      "`<root>/.maestro/maestro.json` > глобальный\n"
+  );
+  assert.ok(
+    checkD9(TMP_DIR).some((v) => v.includes("memory-backup-restore.md")),
+    `D9 fixture: old gt-chain should fail: ${JSON.stringify(
+      checkD9(TMP_DIR)
+    )}`
+  );
+  // D9 — нумерованный список: root-пункт ПЕРЕД .maestro/-пунктом → violation
+  const pluginFixDir = join(TMP_DIR, "plugins", "maestro-bootstrap");
+  if (!existsSync(pluginFixDir)) mkdirSync(pluginFixDir, { recursive: true });
+  writeFileSync(
+    join(pluginFixDir, "README.md"),
+    "Порядок разрешения (4 слоя):\n\n" +
+      "1. **`MAESTRO_CONFIG`** (env)\n" +
+      "2. **`<project>/maestro.json`** (в git)\n" +
+      "3. **`<project>/.maestro/maestro.json`** (вне git)\n" +
+      "4. **`<globalDir>/maestro.json`** (глобальный)\n"
+  );
+  assert.ok(
+    checkD9(TMP_DIR).some((v) => v.includes("maestro-bootstrap/README.md")),
+    `D9 fixture: old numbered list should fail: ${JSON.stringify(
+      checkD9(TMP_DIR)
+    )}`
+  );
+  // D9 — таблица с НЕверным порядком (root = слой 2) → violation
+  const configFix = join(TMP_DIR, "manual_docs", "reference", "config.md");
+  writeFileSync(
+    configFix,
+    "# Конфигурация\n" +
+      "\n" +
+      [
+        "| # | Слой | Путь | Где живёт |",
+        "|---|---|---|---|",
+        "| 1 | `MAESTRO_CONFIG` (env) | произвольный путь | debug-only |",
+        "| 2 | Проектный (командный) | `<project>/maestro.json` | в git |",
+        "| 3 | Проектный (локальный) | `<project>/.maestro/maestro.json` | вне git |",
+        "| 4 | Глобальный (машинный) | `~/.config/opencode/.maestro/maestro.json` | машина |",
+      ].join("\n") +
+      "\n"
+  );
+  assert.ok(
+    checkD9(TMP_DIR).some(
+      (v) => v.includes("reference/config.md") && v.includes("слоя 2")
+    ),
+    `D9 fixture: wrong-order table should fail: ${JSON.stringify(
+      checkD9(TMP_DIR)
+    )}`
+  );
+  // D9 — возврат верного порядка в таблице → табличная часть чистая
+  writeFileSync(configFix, `# Конфигурация\n\n${D9_TABLE}\n`);
+  const d9tables = checkD9(TMP_DIR).filter(
+    (v) =>
+      v.includes("reference/config.md") || v.includes("agents-and-trust.md")
+  );
+  assert.deepEqual(
+    d9tables,
+    [],
+    `D9 fixture: correct-order tables should pass after restore: ${JSON.stringify(
+      d9tables
+    )}`
+  );
   // D5 — pipeline compliance: все маркеры отсутствуют в fixture → violation
   const d5 = checkD5(TMP_DIR);
   assert.ok(
@@ -801,6 +1130,11 @@ test("docs-drift real repo: 0 нарушений", () => {
   if (d8.length) {
     totalViolations += d8.length;
     all = all.concat(d8);
+  }
+  const d9 = checkD9(ROOT);
+  if (d9.length) {
+    totalViolations += d9.length;
+    all = all.concat(d9);
   }
 
   assert.deepEqual(
