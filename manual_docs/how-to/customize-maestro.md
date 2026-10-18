@@ -22,8 +22,8 @@ plugins/maestro-bootstrap/     ← ESM-плагин OpenCode
 ```
 
 > **Конфиг проекта — 4 слоя:** `MAESTRO_CONFIG` env (debug-only) →
-> `<project>/maestro.json` (в git) → `<project>/.maestro/maestro.json`
-> (вне git) → глобальный `~/.config/opencode/.maestro/maestro.json`;
+> `<project>/.maestro/maestro.json` (вне git) → `<project>/maestro.json`
+> (в git) → глобальный `~/.config/opencode/.maestro/maestro.json`;
 > hybrid-семантика мержа (non-memory replace, `memory.*` soft-merge).
 > Подробности — [Конфигурация](../reference/config.md).
 
