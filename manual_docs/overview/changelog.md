@@ -9,6 +9,16 @@
 
 ## [Unreleased]
 
+### Добавлено
+
+- **Приоритет `.maestro/maestro.json` выше корневого `maestro.json` (свап слоёв 2/3 резолва):** новый порядок 4 слоёв — `MAESTRO_CONFIG` (env, debug-only) → `<project>/.maestro/maestro.json` (вне git; более специфичный — приоритетнее, аналогия `.opencode/` > корневой конфиг) → `<project>/maestro.json` (в git — командная фиксация) → глобальный. Активный файл = первый парсируемый (fail-soft), `memory.*` soft-merge с глобальным слоем — без изменений.
+- **`/maestro-setup` (project-режим): warn-строка** при наличии `.maestro/maestro.json` перед записью root конфига (не блокирует): non-memory ключи (включая `trust`/`confidential`/`sanitizer_whitelist`) и `memory.namespace` берутся из `.maestro/`; если в `.maestro/` нет `memory.namespace`, а в root есть — память выключена (`namespace_missing`).
+- **D9 — docs-drift проверка порядка слоёв:** детерминированный guard в `npm test` (положительная: таблицы в `config.md`/`agents-and-trust.md`; отрицательная: цепочки старого порядка в whitelist из 8 живых доков; fixture self-тесты по прецеденту D6–D8).
+
+### Изменено
+
+- **Порядок проектных слоёв конфига (behaviour change):** в проектах, где существуют оба проектных файла и значения конфликтуют, эффективным становится `.maestro/maestro.json`. Источник эффективной trust/confidential/sanitizer-политики — теперь `.maestro/` (если существует), иначе root (в git). При разных `memory.namespace` в двух файлах эффективный бакет памяти меняется: существующие записи становятся невидимы для recall (данные не теряются — старый бакет остаётся в БД; восстановление — вернуть namespace в `.maestro/maestro.json`).
+
 ## [2026-10-18]
 
 > **Версия 6.1.0** — `/test-agents`: фактическая модель из session export, variant, self-report сверка.
