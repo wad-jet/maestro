@@ -9,6 +9,14 @@
 
 ## [Unreleased]
 
+## [2026-10-18]
+
+> **Версия 6.1.0** — `/test-agents`: фактическая модель из session export, variant, self-report сверка.
+
+### Добавлено
+
+- **`/test-agents` — фактическая модель и variant:** после диспатча берётся `sessionID` child-сессии → `opencode session export` извлекает `info.model` (`providerID/id/variant`). Таблица теперь содержит: `Модель (факт)`, `Variant`, `Self-report` (сверка с фактом ⚠ при расхождении), `OK / FAIL`, `Причина`. Модель теперь определяется не self-report (модели часто врут о себе), а runtime-метаданными OpenCode.
+
 ## [2026-10-17]
 
 > **Версия 6.0.0** — Major: глобальная установка, wholesale delivery, полный отказ от agpack, 3-layer hybrid config, namespace auto-derive, deinstall/prune.
