@@ -67,12 +67,13 @@ Trust-статус управляет **двумя** измерениями за
 | # | Слой | Путь | Где живёт |
 |---|---|---|---|
 | 1 | `MAESTRO_CONFIG` (env) | произвольный путь | **debug-only**: полный override, другие слои не проверяются |
-| 2 | Проектный (командный) | `<project>/maestro.json` | в git — командная фиксация |
-| 3 | Проектный (локальный) | `<project>/.maestro/maestro.json` | вне git (`.maestro/` в `.gitignore`) |
+| 2 | Проектный (локальный) | `<project>/.maestro/maestro.json` | вне git (`.maestro/` в `.gitignore`) — более специфичный, приоритетнее (аналогия `.opencode/` > корневой) |
+| 3 | Проектный (командный) | `<project>/maestro.json` | в git — командная фиксация |
 | 4 | Глобальный (машинный) | `~/.config/opencode/.maestro/maestro.json` | XDG-aware; создаётся `maestro-install.sh --global` |
 
 **Активный файл = ПЕРВЫЙ ПАРСИРУЕМЫЙ слой** (порядок 2 → 3 → 4; слой 1 —
-путь как есть): root выигрывает; сломанный JSON слоя → warning + переход к
+путь как есть): `.maestro/` выигрывает (если существует); сломанный JSON
+слоя → warning + переход к
 следующему (fail-soft). **Hybrid-семантика:** non-`memory` ключи берутся
 **только из активного файла** (replace — файлы-слои не мержатся); `memory.*` —
 soft-merge с глобальным слоем (`enabled`/`embedding.model` — из активного,
@@ -102,15 +103,16 @@ auto-derive `memory.namespace`. Настройка/консультации по
 ```
 
 - Ключ в `trust` — имя сабагента; значение только `true` = trusted.
-- Проектный слой (root `maestro.json`) коммитится в git — trust-level
-  policy проекта; слой 3 (`.maestro/`) — личное, вне git.
+- Источник эффективной trust-политики — активный проектный слой: с 6.1.0
+  это `.maestro/maestro.json` (вне git), если существует, иначе root
+  `maestro.json` (в git); коммит в git — больше не фактор приоритета.
 - Оркестратор читает активный конфиг один раз на шаге 0 и кэширует.
 - `custodian` — trusted по роли (читает confidential-источники, отвечает
   агрегатами без значений; spec пишет primary).
 - `sanitizer` — trusted по роли (видит сырые данные, чтобы пометить).
 - Активный `maestro.json` (любой из 4 слоёв) — единственный источник
   конфигурации. Старые `trust-config.json` и прочие отдельные файлы в
-  `.maestro/` (кроме `.maestro/maestro.json` — слой 3) больше не читаются
+  `.maestro/` (кроме `.maestro/maestro.json` — слой 2) больше не читаются
   плагином.
 
 ## 📖 Security Review (двухуровневая защита)

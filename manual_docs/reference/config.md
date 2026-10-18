@@ -17,8 +17,8 @@
 | # | Слой | Путь | Где живёт |
 |---|---|---|---|
 | 1 | `MAESTRO_CONFIG` (env) | произвольный путь | **debug-only**: полный override (replace всего), другие слои не проверяются |
-| 2 | Проектный (командный) | `<project>/maestro.json` | в git — командная фиксация |
-| 3 | Проектный (локальный) | `<project>/.maestro/maestro.json` | вне git (`.maestro/` в `.gitignore`) |
+| 2 | Проектный (локальный) | `<project>/.maestro/maestro.json` | вне git (`.maestro/` в `.gitignore`) — более специфичный, приоритетнее (аналогия `.opencode/` > корневой) |
+| 3 | Проектный (командный) | `<project>/maestro.json` | в git — командная фиксация |
 | 4 | Глобальный (машинный) | `~/.config/opencode/.maestro/maestro.json` | XDG-aware: если задан `XDG_CONFIG_HOME` — `$XDG_CONFIG_HOME/opencode/.maestro/` |
 
 **Активный файл = ПЕРВЫЙ ПАРСИРУЕМЫЙ слой** (порядок 2 → 3 → 4; слой 1 —
@@ -947,8 +947,8 @@ MAESTRO_MEMORY_LOG_DIR="/var/log/maestro"
 
 | Путь | Назначение | В git? |
 |---|---|---|
-| `maestro.json` (root) | Слой 2 конфига — командный (trust, confidential, sanitizer_whitelist, …) | Да |
-| `.maestro/maestro.json` | Слой 3 конфига — локальный (per-machine) | Нет (в `.gitignore`) |
+| `.maestro/maestro.json` | Слой 2 конфига — локальный (per-machine) | Нет (в `.gitignore`) |
+| `maestro.json` (root) | Слой 3 конфига — командный (trust, confidential, sanitizer_whitelist, …) | Да |
 | `~/.config/opencode/.maestro/maestro.json` | Слой 4 конфига — глобальный (per-machine, XDG-aware) | — (вне проекта) |
 | `.opencode/opencode.json` | Плагин (проектная установка) + модели сабагентов | Нет (в `.gitignore`) |
 | `.opencode/` (скиллы/агенты/команды) | Проектная установка: wholesale copy (`maestro-install.sh`/`maestro-update.sh`) или вручную | Нет (в `.gitignore`) |

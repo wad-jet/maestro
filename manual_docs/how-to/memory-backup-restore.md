@@ -97,8 +97,8 @@ node <путь-к-плагину>/memory/backup-cli.js restore --file <путь>
   оттуда не работает.
 - Запуск — из корня (или подкаталога) git-репозитория проекта, где включена
   память (`storage.type: sqlite` — v1). Конфиг резолвится **теми же 4 слоями**,
-  что и у плагина: `MAESTRO_CONFIG` env > `<root>/maestro.json` >
-  `<root>/.maestro/maestro.json` > глобальный
+  что и у плагина: `MAESTRO_CONFIG` env > `<root>/.maestro/maestro.json` >
+  `<root>/maestro.json` > глобальный
   `~/.config/opencode/.maestro/maestro.json` (см. [Конфигурация](../reference/config.md)).
 - sqlite-драйвер загружается из `module_dir` — там должен быть выполнен
   `npm install` (онбординг ниже).

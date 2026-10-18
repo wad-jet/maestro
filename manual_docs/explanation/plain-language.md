@@ -13,7 +13,7 @@
    (primary-сессии не читают активный конфиг нативно — deny + confidential-
    контур; санкционированный канал — плагин-тул `maestro_config`). Значение
    может прийти из **любого слоя** 4-слойного конфига: активный файл = первый
-   парсируемый (root → `.maestro/` → global; `MAESTRO_CONFIG` — debug-only).
+   парсируемый (`.maestro/` → root → global; `MAESTRO_CONFIG` — debug-only).
    Скиллы не парсят конфиг — они содержат правила и реагируют на директиву.
 2. Плагин инжектит короткую самодостаточную директиву в system-контекст
    top-level primary-сессии (`experimental.chat.system.transform`). Guard:

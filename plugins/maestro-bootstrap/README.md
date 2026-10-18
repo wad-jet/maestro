@@ -192,8 +192,9 @@ Security-фактура по доступу пишется в **отдельны
 1. **`MAESTRO_CONFIG`** (env) — путь к `maestro.json`. **debug-only**: полный
    override — при его задании другие слои не читаются (файл отсутствует/сломан
    → пустой конфиг `{}`, без fallback).
-2. **`<project>/maestro.json`** — проектный конфиг (в git).
-3. **`<project>/.maestro/maestro.json`** — локальные дополнения (вне git).
+2. **`<project>/.maestro/maestro.json`** — более специфичный, приоритетнее
+   (вне git; аналогия `.opencode/` > корневой).
+3. **`<project>/maestro.json`** — проектный конфиг (в git, командная фиксация).
 4. **`<globalDir>/maestro.json`** — глобальные дефолты (глобальная установка);
    `globalDir` — XDG-aware: `$XDG_CONFIG_HOME/opencode/.maestro` или
    `~/.config/opencode/.maestro`.
@@ -555,8 +556,8 @@ OpenCode установит плагин автоматически (Bun) при
 глобальный слой `<globalDir>/maestro.json`
 (`$XDG_CONFIG_HOME/opencode/.maestro/maestro.json` или
 `~/.config/opencode/.maestro/maestro.json`) — общие дефолты для всех
-проектов; проектные слои (`<project>/maestro.json`,
-`<project>/.maestro/maestro.json`) имеют приоритет.
+проектов; проектные слои (`<project>/.maestro/maestro.json`,
+`<project>/maestro.json`) имеют приоритет.
 
 ## Требования
 

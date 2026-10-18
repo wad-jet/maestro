@@ -8,8 +8,9 @@ description: Use when implementing a feature end-to-end — orchestrates brainst
 **Язык HITL:** русский.
 
 1. **Маркер проекта (многоуровневый).** «Проект под maestro» = резолвер нашёл конфиг
-   в любом из слоёв: `<root>/maestro.json` (в git, командная фиксация) →
-   `<root>/.maestro/maestro.json` (не в git) → глобальный
+   в любом из слоёв: `<root>/.maestro/maestro.json` (не в git, более
+   специфичный) → `<root>/maestro.json` (в git, командная фиксация) →
+   глобальный
    `~/.config/opencode/.maestro/maestro.json` (XDG-aware: если `XDG_CONFIG_HOME`
    задан — `$XDG_CONFIG_HOME/opencode/.maestro/`) → `MAESTRO_CONFIG` env (полный
    override, debug: если задан — приоритетнее всех остальных слоёв).
