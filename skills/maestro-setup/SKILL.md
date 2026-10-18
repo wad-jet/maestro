@@ -91,6 +91,7 @@ description: Initialize maestro for a new or existing project — quick setup (A
 
 - `sanitizer_whitelist: {}` = плагин применяет `DEFAULT_RULES` (все 7 правил маскирования ON, fail-closed по построению)
 - Существующий файл → diff-merge (сохраняет пользовательские правки)
+- **Warn (6.1.0):** перед записью root конфига проверить существование `<root>/.maestro/maestro.json`; если существует — вывести предупреждение (не блокирует, далее по setup как есть): «⚠ .maestro/maestro.json существует — имеет приоритет над root (с 6.1.0): non-memory ключи (включая trust/confidential/sanitizer_whitelist) и memory.namespace берутся из него. Если в .maestro/ нет memory.namespace, а в root есть — память будет выключена (reason: namespace_missing).»
 - Вопрос `communication`: (a) plain — (b) professional
 
 #### Нативные permissions (`agent.<name>.permission` в `.opencode/opencode.json`)
@@ -121,7 +122,7 @@ description: Initialize maestro for a new or existing project — quick setup (A
 Глобальная установка существует — флоу состоит ровно из 6 пунктов:
 
 1. Создаёт `.maestro/` (если нет) + `.gitignore` entry `.maestro/` (если нет).
-2. Создаёт `.maestro/maestro.json` с `memory: { enabled: true, namespace: <auto-derive> }`. Auto-derive: Вариант A из git remote (domain.owner.repo), fallback C (parent_dir.project_dir.local), pad/truncate до 3 сегментов. Если namespace уже задан в root/maestro.json — не перезаписывает.
+2. Создаёт `.maestro/maestro.json` с `memory: { enabled: true, namespace: <auto-derive> }`. Auto-derive: Вариант A из git remote (domain.owner.repo), fallback C (parent_dir.project_dir.local), pad/truncate до 3 сегментов. Если namespace уже задан явно в любом проектном слое (`.maestro/maestro.json` или root) — не перезаписывает.
 3. Опционально: создаёт root `maestro.json` — только если пользователь просит «зафиксировать в репозитории». В глобальном режиме по умолчанию — root-файл не создаётся.
 4. Не создаёт `.opencode/` зеркало (скиллы глобальные).
 5. Не создаёт `agpack.yml` (agpack удалён полностью).
