@@ -2617,8 +2617,9 @@ describe("communication directive (directiveText)", () => {
 
 // =============================================================================
 // Config resolve: 4-слойный резолв + hybrid merge (6.0.0, global install)
-// Слои: MAESTRO_CONFIG (env, debug-only full override) > <root>/maestro.json
-// > <root>/.maestro/maestro.json > <globalDir>/maestro.json (XDG-aware).
+// Слои (6.1.0: .maestro/ выше root): MAESTRO_CONFIG (env, debug-only full
+// override) > <root>/.maestro/maestro.json > <root>/maestro.json
+// > <globalDir>/maestro.json (XDG-aware).
 // Global-слой в тестах — через XDG_TEST_HOME (см. топ уровня) или явный
 // globalDir-аргумент resolveConfigFile; реальный ~/.config не затрагивается.
 // =============================================================================
@@ -2677,14 +2678,14 @@ describe("config resolve (4-layer, 6.0.0)", () => {
     }
   });
 
-  it("resolveConfigFile: root beats .maestro and global", () => {
+  it("resolveConfigFile: .maestro/ beats root and global (6.1.0)", () => {
     const d = makeDirs("root");
     try {
       writeJson(path.join(d.root, "maestro.json"), {});
       writeJson(path.join(d.root, ".maestro", "maestro.json"), {});
       writeJson(path.join(d.gd, "maestro.json"), {});
       return withEnv(() => {
-        assert.equal(resolveConfigFile(d.root, d.gd), path.join(d.root, "maestro.json"));
+        assert.equal(resolveConfigFile(d.root, d.gd), path.join(d.root, ".maestro", "maestro.json"));
       });
     } finally {
       fs.rmSync(d.root, { recursive: true, force: true });
@@ -2731,15 +2732,15 @@ describe("config resolve (4-layer, 6.0.0)", () => {
     }
   });
 
-  it("resolveConfigFile: broken root JSON → .maestro path (fallback, не выбрасывает)", () => {
-    const d = makeDirs("broken-root");
+  it("resolveConfigFile: broken .maestro/ JSON → root path (fallback, не выбрасывает)", () => {
+    const d = makeDirs("broken-local");
     try {
-      writeJson(path.join(d.root, "maestro.json"), "{invalid");
-      writeJson(path.join(d.root, ".maestro", "maestro.json"), {});
+      writeJson(path.join(d.root, "maestro.json"), {});
+      writeJson(path.join(d.root, ".maestro", "maestro.json"), "{invalid");
       writeJson(path.join(d.gd, "maestro.json"), {});
       return withEnv(() => {
         assert.doesNotThrow(() => {
-          assert.equal(resolveConfigFile(d.root, d.gd), path.join(d.root, ".maestro", "maestro.json"));
+          assert.equal(resolveConfigFile(d.root, d.gd), path.join(d.root, "maestro.json"));
         });
       });
     } finally {
@@ -2765,8 +2766,132 @@ describe("config resolve (4-layer, 6.0.0)", () => {
     }
   });
 
+  // --- 6.1.0: .maestro/ выше root (свап проектных слоёв 2/3) ---
+
+  it("both project files → .maestro/ wins (non-memory replace)", () => {
+    const d = makeDirs("swap-nm");
+    try {
+      writeJson(path.join(d.root, "maestro.json"), { trust: { by_agent: {} }, feedback_report: "auto" });
+      writeJson(path.join(d.root, ".maestro", "maestro.json"), { feedback_report: "manual" });
+      return withEnv(() => {
+        // активный путь = .maestro/maestro.json
+        assert.equal(resolveConfigFile(d.root, d.gd), path.join(d.root, ".maestro", "maestro.json"));
+        const config = loadMaestroConfig(undefined, d.root);
+        assert.equal(config.feedback_report, "manual");
+      });
+    } finally {
+      clearGlobalConfig();
+      fs.rmSync(d.root, { recursive: true, force: true });
+      fs.rmSync(d.gd, { recursive: true, force: true });
+    }
+  });
+
+  it("trust keys from .maestro/ win (replace из активного файла)", () => {
+    const d = makeDirs("swap-trust");
+    try {
+      writeJson(path.join(d.root, "maestro.json"), { trust: { sanitizer: false } });
+      writeJson(path.join(d.root, ".maestro", "maestro.json"), { trust: { sanitizer: true } });
+      return withEnv(() => {
+        const config = loadMaestroConfig(undefined, d.root);
+        assert.equal(config.trust.sanitizer, true);
+      });
+    } finally {
+      clearGlobalConfig();
+      fs.rmSync(d.root, { recursive: true, force: true });
+      fs.rmSync(d.gd, { recursive: true, force: true });
+    }
+  });
+
+  it("both files, different memory.namespace → .maestro/ wins", () => {
+    const d = makeDirs("swap-ns");
+    try {
+      writeJson(path.join(d.root, "maestro.json"), { memory: { namespace: "a.b.c" } });
+      writeJson(path.join(d.root, ".maestro", "maestro.json"), { memory: { namespace: "x.y.z" } });
+      return withEnv(() => {
+        const config = loadMaestroConfig(undefined, d.root);
+        assert.equal(config.memory.namespace, "x.y.z");
+      });
+    } finally {
+      clearGlobalConfig();
+      fs.rmSync(d.root, { recursive: true, force: true });
+      fs.rmSync(d.gd, { recursive: true, force: true });
+    }
+  });
+
+  it(".maestro/ активен без memory.namespace, в root есть → null (namespace — только из активного, без ошибки)", () => {
+    const d = makeDirs("swap-ns-none");
+    try {
+      writeJson(path.join(d.root, "maestro.json"), { memory: { namespace: "a.b.c" } });
+      writeJson(path.join(d.root, ".maestro", "maestro.json"), { communication: "plain" });
+      return withEnv(() => {
+        assert.doesNotThrow(() => {
+          const config = loadMaestroConfig(undefined, d.root);
+          assert.equal(config.memory.namespace, null);
+        });
+      });
+    } finally {
+      clearGlobalConfig();
+      fs.rmSync(d.root, { recursive: true, force: true });
+      fs.rmSync(d.gd, { recursive: true, force: true });
+    }
+  });
+
+  it("broken .maestro/ JSON + valid root → root active (warning, не выбрасывает)", () => {
+    const d = makeDirs("swap-broken-local");
+    try {
+      writeJson(path.join(d.root, "maestro.json"), { feedback_report: "auto" });
+      writeJson(path.join(d.root, ".maestro", "maestro.json"), "{broken");
+      writeJson(path.join(d.gd, "maestro.json"), {});
+      return withEnv(() => {
+        assert.doesNotThrow(() => {
+          assert.equal(resolveConfigFile(d.root, d.gd), path.join(d.root, "maestro.json"));
+        });
+      });
+    } finally {
+      fs.rmSync(d.root, { recursive: true, force: true });
+      fs.rmSync(d.gd, { recursive: true, force: true });
+    }
+  });
+
+  it("both project broken + valid global → global active (не выбрасывает)", () => {
+    const d = makeDirs("swap-broken-both");
+    try {
+      writeJson(path.join(d.root, "maestro.json"), "{broken");
+      writeJson(path.join(d.root, ".maestro", "maestro.json"), "{broken");
+      writeJson(path.join(d.gd, "maestro.json"), {});
+      return withEnv(() => {
+        assert.doesNotThrow(() => {
+          assert.equal(resolveConfigFile(d.root, d.gd), path.join(d.gd, "maestro.json"));
+        });
+      });
+    } finally {
+      fs.rmSync(d.root, { recursive: true, force: true });
+      fs.rmSync(d.gd, { recursive: true, force: true });
+    }
+  });
+
+  it("MAESTRO_CONFIG set → full override, project layers not read (regression)", () => {
+    const d = makeDirs("swap-env");
+    try {
+      const envFile = path.join(d.root, "env-override.json");
+      writeJson(envFile, { feedback_report: "env" });
+      writeJson(path.join(d.root, "maestro.json"), { feedback_report: "root" });
+      writeJson(path.join(d.root, ".maestro", "maestro.json"), { feedback_report: "local" });
+      return withEnv(() => {
+        process.env.MAESTRO_CONFIG = envFile;
+        assert.equal(resolveConfigFile(d.root, d.gd), envFile);
+        const config = loadMaestroConfig(undefined, d.root);
+        assert.equal(config.feedback_report, "env");
+      });
+    } finally {
+      clearGlobalConfig();
+      fs.rmSync(d.root, { recursive: true, force: true });
+      fs.rmSync(d.gd, { recursive: true, force: true });
+    }
+  });
+
   // --- isMaestroConfigPath (P6: активный конфиг → confidential, 6.0.0) ---
-  // True для любого из 4 слоёв резолва (MAESTRO_CONFIG > root > .maestro > global);
+  // True для любого из 4 слоёв резолва (MAESTRO_CONFIG > .maestro > root > global);
   // проверка по пути (не glob) — глобальный слой вне проекта.
 
   it("isMaestroConfigPath: true для root maestro.json (активный слой)", () => {
@@ -2896,9 +3021,11 @@ describe("config resolve (4-layer, 6.0.0)", () => {
     }
   });
 
-  it("loadMaestroConfig: broken root → non-memory fallback к .maestro/", () => {
+  it("loadMaestroConfig: broken root не мешает .maestro/ — primary-хит (6.1.0)", () => {
     const root = fs.mkdtempSync(path.join(os.tmpdir(), "mc-hm-brk-root-"));
     try {
+      // .maestro/ — верхний проектный слой: валидный JSON → активен сразу,
+      // сломанный root не читается (не fallback, а primary-хит).
       writeJson(path.join(root, "maestro.json"), "{invalid");
       writeJson(path.join(root, ".maestro", "maestro.json"), { feedback_report: "auto" });
       const config = loadMaestroConfig(undefined, root);

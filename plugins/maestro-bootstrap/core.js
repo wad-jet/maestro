@@ -186,8 +186,10 @@ export function sanitize(prompt, opts = {}) {
 //
 // Слои конфига, от высшего к низшему приоритету:
 //   1. MAESTRO_CONFIG (env)            — debug-only, полный override (replace всего)
-//   2. <root>/maestro.json             — командная фиксация (в git)
-//   3. <root>/.maestro/maestro.json    — локальные дополнения (вне git)
+//   2. <root>/.maestro/maestro.json    — локальные дополнения (вне git; более
+//                                        специфичный — приоритетнее, аналогия
+//                                        .opencode/ > корневой конфиг) [6.1.0]
+//   3. <root>/maestro.json             — командная фиксация (в git)
 //   4. <globalDir>/maestro.json        — глобальные дефолты (resolveGlobalDir)
 //
 // Active-файл = ПЕРВЫЙ ПАРСИРУЕМЫЙ слой. Сломанный JSON слоя → warning +
@@ -227,9 +229,10 @@ export function resolveConfigFile(root, globalDir) {
   // (spec Q3). Путь возвращается как есть (без проверки существования/парсинга).
   const envPath = process.env.MAESTRO_CONFIG;
   if (envPath) return envPath;
+  // 6.1.0: .maestro/ — верхний проектный слой (более специфичный, вне git).
   const candidates = [
-    path.join(root, "maestro.json"),
     path.join(root, ".maestro", "maestro.json"),
+    path.join(root, "maestro.json"),
     path.join(globalDir ?? resolveGlobalDir(), "maestro.json"),
   ];
   for (const file of candidates) {
@@ -498,13 +501,13 @@ export function isPluginMetaFile(root, target) {
 export function isMaestroConfigPath(root, target) {
   // Активный конфиг — confidential (P6, 6.0.0): автоматически попадает в
   // confidential-контур (read/write/edit). True для любого из 4 слоёв резолва
-  // (MAESTRO_CONFIG > root > .maestro > global). Проверка по пути, не glob:
+  // (MAESTRO_CONFIG > .maestro > root > global). Проверка по пути, не glob:
   // глобальный слой лежит вне проекта и не покрывается repo-relative масками.
   if (typeof target !== "string" || !target) return false;
   const abs = path.isAbsolute(target) ? path.normalize(target) : path.resolve(root, target);
   const candidates = [
-    path.join(root, "maestro.json"),
     path.join(root, ".maestro", "maestro.json"),
+    path.join(root, "maestro.json"),
     path.join(resolveGlobalDir(), "maestro.json"),
   ];
   // MAESTRO_CONFIG (debug-only) — верхний слой; относительный путь fs

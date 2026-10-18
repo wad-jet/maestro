@@ -13,7 +13,7 @@
  *
  * Запуск: node <plugin>/memory/backup-cli.js <backup|restore --file <путь> [--replace]|list>
  * (из корня или подкаталога git-репозитория проекта; конфиг — 4-слойный
- * резолв: MAESTRO_CONFIG > root > .maestro/ > global, как в плагине).
+ * резолв: MAESTRO_CONFIG > .maestro/ > root > global, как в плагине).
  *
  * @module backup-cli
  */
@@ -54,8 +54,8 @@ export const HELP = `Аварийный CLI memory backup/restore (spec §3) —
 
 Запуск: из корня (или подкаталога) git-репозитория проекта, где включена
 память (memory.enabled=true, storage.type=sqlite — v1). Конфиг резолвится
-4-слойно (как в плагине): MAESTRO_CONFIG (env) > <root>/maestro.json
-> <root>/.maestro/maestro.json > <global>/maestro.json
+4-слойно (как в плагине): MAESTRO_CONFIG (env) > <root>/.maestro/maestro.json
+> <root>/maestro.json > <global>/maestro.json
 ($XDG_CONFIG_HOME/opencode/.maestro или ~/.config/opencode/.maestro).
 `;
 
@@ -216,15 +216,15 @@ export async function main() {
     return 1;
   }
 
-  // 4-слойный резолв (6.0.0) — тот же порядок, что в плагине
-  // (resolveConfigFile core.js): MAESTRO_CONFIG (env) > root/maestro.json
-  // > root/.maestro/maestro.json > global (<XDG>/opencode/.maestro/maestro.json).
+  // 4-слойный резолв (6.0.0; порядок 6.1.0) — тот же порядок, что в плагине
+  // (resolveConfigFile core.js): MAESTRO_CONFIG (env) > root/.maestro/maestro.json
+  // > root/maestro.json > global (<XDG>/opencode/.maestro/maestro.json).
   const maestroPath = resolveConfigFile(root, resolveGlobalDir());
   if (!maestroPath) {
     // Ни один слой не найден — ошибка со списком проверенных путей (actionable).
     const checked = [
-      join(root, "maestro.json"),
       join(root, ".maestro", "maestro.json"),
+      join(root, "maestro.json"),
       join(resolveGlobalDir(), "maestro.json"),
     ];
     process.stderr.write(`backup-cli: maestro.json не найден ни в одном слое (проверены):\n  - ${checked.join("\n  - ")}\n`);
