@@ -288,7 +288,7 @@ deny. Trust не наследуется вложенными субагента�
 Плагин `maestro-bootstrap` пишет JSONL-логи в `.maestro/logs/` (весь `.maestro/` в gitignore,
 разбивка по дням) — **два** лога с разным назначением:
 
-- `maestro-bootstrap-<дата>.log` — **observability**: task-диспатчи, ошибки/повторы
+- `maestro-bootstrap-<дата>.log` — **observability**: subagent-диспатчи, ошибки/повторы
   сессий, sanitizer. Подчиняется `MAESTRO_BOOTSTRAP_LOG_MASK`/`LOG_LEVEL`.
 - `maestro-audit-<дата>.log` — **security-фактура**: доступ к confidential
   (`allow`/`deny`). Пишется **всегда**, не зависит
@@ -310,7 +310,7 @@ deny. Trust не наследуется вложенными субагента�
 | `msg` | Уровень | Доп. поля |
 |---|---|---|
 | `plugin initialized` | info | `version`, `logDir`, `level`, `mask` |
-| `tool.execute.before` | info | `tool` (=task) |
+| `tool.execute.before` | info | `tool` (=subagent) |
 | `tool.execute.after` | info | `tool`, `durationMs`, `title` (санитизирован, SEC-4) |
 | `tool.execute.after.empty_result` | warn | `tool` |
 | `session.error` | warn | `errorType` (`name ?? type`, для строки — "Error"), `errorMessage` (`data?.message ?? message`, для строки — сама строка), `aborted` (true = MessageAbortedError/прерывание пользователем) |
@@ -347,7 +347,7 @@ deny. Trust не наследуется вложенными субагента�
 - `confidential.access` — доступ к confidential-пути. `action: "allow"` — trusted-
   субагент читал/писал (уровень `info`); `action: "deny"` — заблокировано для
   untrusted/primary или trusted с `trusted.<tool>: deny` (уровень `warn`).
-- `sanitizer.failed` — сбой маскирования при task-диспатче (fail-closed, 4.21.0):
+- `sanitizer.failed` — сбой маскирования при subagent-диспатче (fail-closed, 4.21.0):
   диспатч untrusted сабагента блокируется (промпт не уходит), уровень
   `warn`; поля — `tool`, `agent` (без содержимого промпта).
 
@@ -478,7 +478,7 @@ bootstrap-лог (ровно один при init; в событии — тол�
 `extra_uri_schemes` — полный escape: любой строковый элемент строит валидный
 regex (ранее `["bad("]` вызывал SyntaxError на каждом диспатче).
 
-**Fail-closed (4.21.0):** сбой маскирования при task-диспатче (untrusted) →
+**Fail-closed (4.21.0):** сбой маскирования при subagent-диспатче (untrusted) →
 `sanitizer.failed` в аудит-лог + **блокировка диспатча** (previously fail-open:
 ошибка проглатывалась, промпт уходил в сабагента несанитизированным).
 Title-ветка (логирование): сбой не ломает сессию — title `<unavailable>`.
