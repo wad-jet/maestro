@@ -69,6 +69,32 @@ SDD-шаблон:  Subagent (general-purpose): model: haiku
 OpenCode:    task(subagent_type="haiku", prompt="...")
 ```
 
+#### 💡 Variant (вариант сэмплирования)
+
+`#variant` — суффикс в model ID (синтаксис OpenCode, не отдельный ключ maestro). Это часть model ID, **не** параметр конфигурации maestro.
+
+- `#high` — максимальное качество (дороже, медленнее)
+- `#medium` — баланс
+- `#low` — экономия (быстрее, дешевле)
+- **без суффикса** — дефолт провайдера
+
+Пример: `akash/Qwen/Qwen3.6-35B-A3B#high`
+
+**Где задавать:** в `agent.<name>.model` в `opencode.json` (project или global). Variant записывается вместе с model:
+
+```json
+{
+  "agent": {
+    "haiku": { "model": "akash/Qwen/Qwen3.6-35B-A3B#high" },
+    "sonnet": { "model": "akash/deepseek-ai/DeepSeek-V4-Flash#medium" }
+  }
+}
+```
+
+**Отношение к trust-модели.** Variant не связан с доверием: `custodian`/`sanitizer` могут использовать `#high` (мощная модель для Q/A по confidential), а `haiku` — `#low` (лёгкая модель для механических задач). Trust определяется в `maestro.json → trust`, variant — в `agent.<name>.model` opencode.json.
+
+**Таблица variant в тестировании.** Команда `/test-agents` показывает variant из `info.model.variant` child-сессии. Если поле отсутствует — `—`.
+
 ## 💡 Настройка моделей через `/maestro-setup`
 
 `/maestro-setup` настраивает модели агентов в `.opencode/opencode.json` или global (M1):
