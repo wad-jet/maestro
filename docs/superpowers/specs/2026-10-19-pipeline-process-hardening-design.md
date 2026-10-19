@@ -169,8 +169,8 @@ check»** (read-only: только `git status`/`git log`). Действует �
    последовательности есть ≥1 промежуточный шаг → ответ тула содержит
    `{"ok":true,"warning":"step_jump","skipped":[...]}` + `log.info("pipeline_status:step_jump", ...)`;
    без промежуточных → `{"ok":true}`. Нотация `skipped` — **полная каноническая**
-   (включая подшаги 7b/7d/10b/12a/15a как отдельные элементы; маппинг на родителей
-   используется только для сравнения позиций, не для вывода).
+   (включая 7b/7d/10b/12a/13f/15a как отдельные элементы последовательности;
+   маппинг на родителей используется только для сравнения позиций, не для вывода).
 2. `set` **назад** (fix-loop, re-review, 10b→9) или повтор того же шага — без warning
    (легальные циклы).
 3. `clear` — сброс трекера (следующий `set` — без warning, «первый после clear»).
@@ -388,12 +388,12 @@ warning может быть ложным для второй сессии. Фи�
 <!-- maestro:sanitize
 status: CLEAN
 date: 2026-10-19
-hash: 06120cd8fade823f9246d05ddb60e1c6a740d23d29caddfb0614c2e63db3c94b
+hash: 1cc7f60677c279e815dd052f04f97fcc45d8f9b5c6a9a4d7d00aa1059e73e426
 -->
 
 <!-- maestro:review
 status: APPROVE
 date: 2026-10-19
 rounds: 3 (revise -> revise -> approve)
-hash: 06120cd8fade823f9246d05ddb60e1c6a740d23d29caddfb0614c2e63db3c94b
+hash: 1cc7f60677c279e815dd052f04f97fcc45d8f9b5c6a9a4d7d00aa1059e73e426
 -->

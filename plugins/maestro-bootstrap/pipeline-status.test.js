@@ -283,4 +283,27 @@ describe("progression warning", () => {
     assert.equal(res.ok, true);
     assert.equal(res.warning, undefined);
   });
+
+  it("unknown step \"13z\" — no warning, lastStep not updated", async () => {
+    const tool = makeTool();
+    await setStep(tool, 13);
+    const res = await setStep(tool, "13z");
+    assert.equal(res.ok, true);
+    assert.equal(res.warning, undefined);
+    assert.equal(res.skipped, undefined);
+    assert.equal(ps.getPipelineStatus().lastStep, "13");
+  });
+
+  it("unknown step does not skew jump base: 13 → \"13z\" → 14 warns from 13", async () => {
+    const tool = makeTool();
+    await setStep(tool, 13);
+    const mid = await setStep(tool, "13z");
+    assert.equal(mid.ok, true);
+    assert.equal(mid.warning, undefined);
+    const res = await setStep(tool, 14);
+    assert.equal(res.ok, true);
+    assert.equal(res.warning, "step_jump");
+    assert.deepEqual(res.skipped, ["13f"]);
+    assert.equal(ps.getPipelineStatus().lastStep, "14");
+  });
 });
