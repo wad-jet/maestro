@@ -216,7 +216,10 @@ init), следует его правилам, затем решает и про
 **Pipeline status indication:** каждый анонс шага сопровождается вызовом
 `maestro_pipeline_status(action: "set", step: N, totalSteps: "18.5", description: "...")`.
 Это обновляет статус-блок в system prompt и делает статус доступным по `action: "get"`.
-По завершении пайплайна — `action: "clear"`. Канон: `manual_docs/reference/pipeline-status.md`.
+Forward-прыжок через канонические шаги возвращает `warning: "step_jump"` с
+списком `skipped` — на warning обязательна одна строка в чат (обоснование
+skip-path по канону или откат к пропущенному шагу). По завершении пайплайна —
+`action: "clear"`. Канон: `manual_docs/reference/pipeline-status.md`.
 
 ```
 🟡 -1. [agent] Формулировка задачи (если не передана в @maestro-init)
