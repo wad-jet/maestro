@@ -9,6 +9,8 @@
 
 ## [Unreleased]
 
+- **Упрощение команды `/test-agents`:** именование тулзы приведено к канону OpenCode (`subagent`/`agent`, было V1-имя `task`/`subagent_type`); удалена колонка `Self-report` (эмпирически ненадёжна — 4/7 искажений в прогоне 2026-10-19), тест-задача упрощена до «Верни OK»; заметка «Почему в таблице нет Temperature» перенесена в `manual_docs/reference/commands.md`; синхронизированы: `manual_docs/tutorials/setup-project.md`, `README.md`
+
 ## [2026-10-19]
 
 > **Версия 6.2.1** — Patch: confidential-канал — V2-идентичность сабагентов (плоская форма V2 + авторитетное `session.agent` в resolveIsTrustedSubagent/agentNameFromMessages); fail-closed и V1-совместимость сохранены, 6 новых тестов; P1/P3 trusted-канал (SECURITY.md) восстановлен.

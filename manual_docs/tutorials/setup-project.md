@@ -272,19 +272,18 @@ roadmap, как в Варианте A.
 
 **Что делает проверка:**
 
-1. **Диспатч всех 7 сабагентов** — `custodian`, `haiku`, `sonnet`, `opus`, `fable`, `reviewer`, `sanitizer` — через `task`-тул реальным диспатчем (`subagent(agent="<type>")`). Каждому агенту даётся одинаковая тривиальная задача.
+1. **Диспатч всех 7 сабагентов** — `custodian`, `haiku`, `sonnet`, `opus`, `fable`, `reviewer`, `sanitizer` — через `subagent`-тул реальным диспатчем (`agent="<type>"`). Каждому агенту даётся одинаковая тривиальная задача.
 
 2. **Фактическая модель** — из `opencode session export <sessionID>` извлекается `info.model` → `{providerID, id, variant?}`.
 
 3. **Сводная таблица статусов:**
 
-| Агент | Статус | Модель (факт) | Variant | Self-report | Причина |
-|---|---|---|---|---|---|
-| custodian | OK / FAIL | akash/provider/model | high/medium/low/— | имя модели | — |
+| Агент | Статус | Модель (факт) | Variant | Причина |
+|---|---|---|---|---|
+| custodian | OK / FAIL | akash/provider/model | high/medium/low/— | — |
 
 - **Модель (факт)** — из session export child-сессии, НЕ из конфига.
 - **Variant** — `info.model.variant` из экспорта.
-- **Self-report** — что агент сообщил о себе. ⚠ при расхождении с фактом.
 
 4. **Проверка confidential-инварианта** (P1/P3, `SECURITY.md`) — trusted-агент должен прочитать `docs/confidential/**`, primary — получить `confidential:deny`. Статус: `PASS` / `FAIL` / `skipped` (нет конфидициала).
 
