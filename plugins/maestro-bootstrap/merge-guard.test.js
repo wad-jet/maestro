@@ -3,7 +3,8 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
-import { detectGuardCommand, checkMergeMarker, resolveMergeGuardConf } from "./merge-guard.js";
+import { detectGuardCommand, checkMergeMarker, resolveMergeGuardConf,
+  detectCommitCommand, hasMainlineSwitch, checkCommitGuard } from "./merge-guard.js";
 import { createBootstrapPlugin } from "./core.js";
 
 // V2 mock-контекст: перехватывает зарегистрированные tool-хуки под V1-именами
@@ -93,6 +94,100 @@ describe("merge-guard detectGuardCommand", () => {
   });
 });
 
+describe("merge-guard detectCommitCommand (R4)", () => {
+  it("git commit -m x → true", () =>
+    assert.equal(detectCommitCommand("git commit -m x"), true));
+
+  it("git commit-graph verify → false", () =>
+    assert.equal(detectCommitCommand("git commit-graph verify"), false));
+
+  it("git commit-tree → false", () =>
+    assert.equal(detectCommitCommand("git commit-tree"), false));
+
+  it("echo git commit → false", () =>
+    assert.equal(detectCommitCommand("echo git commit"), false));
+
+  it("npm run x → false", () =>
+    assert.equal(detectCommitCommand("npm run x"), false));
+});
+
+describe("merge-guard hasMainlineSwitch (R4)", () => {
+  it("git checkout main && git commit -am x → true", () =>
+    assert.equal(hasMainlineSwitch("git checkout main && git commit -am x"), true));
+
+  it("git switch master && git commit → true", () =>
+    assert.equal(hasMainlineSwitch("git switch master && git commit"), true));
+
+  it("git checkout feature/x && git commit → false", () =>
+    assert.equal(hasMainlineSwitch("git checkout feature/x && git commit"), false));
+
+  it("git checkout main -- path → true (documented false positive)", () =>
+    assert.equal(hasMainlineSwitch("git checkout main -- path"), true));
+});
+
+describe("merge-guard checkCommitGuard (DI execGit, R4)", () => {
+  let root;
+  const now = 1_000_000_000_000;
+  const conf = { enabled: true, ttlSec: 600 };
+
+  before(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "mg-commit-"));
+  });
+
+  after(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  function marker(sid) {
+    const g = path.join(root, ".maestro", "gates");
+    fs.mkdirSync(g, { recursive: true });
+    fs.writeFileSync(
+      path.join(g, `merge-${sid}.json`),
+      JSON.stringify({ sessionID: sid, ts: now - 1000, gate: 17, decision: "a" }),
+    );
+  }
+
+  const exec = (out) => ({ execGit: () => out });
+  const throwExec = { execGit: () => { throw new Error("git boom"); } };
+
+  it("not-mainline branch → allow/not_mainline", () =>
+    assert.deepEqual(
+      checkCommitGuard("git commit -m x", root, root, "s", now, conf, "warn", exec("feature/x")),
+      { allow: true, reason: "not_mainline" }));
+
+  it("main + valid marker → allow/marker_ok", () => {
+    marker("s-ok");
+    assert.deepEqual(
+      checkCommitGuard("git commit -m x", root, root, "s-ok", now, conf, "warn", exec("main")),
+      { allow: true, reason: "marker_ok" });
+  });
+
+  it("main + no marker, warn → allow/no_marker", () =>
+    assert.deepEqual(
+      checkCommitGuard("git commit -m x", root, root, "s-nm", now, conf, "warn", exec("main")),
+      { allow: true, reason: "no_marker" }));
+
+  it("main + no marker, deny → deny/no_marker", () =>
+    assert.deepEqual(
+      checkCommitGuard("git commit -m x", root, root, "s-nm", now, conf, "deny", exec("main")),
+      { allow: false, reason: "no_marker" }));
+
+  it("detached (empty branch), warn → allow/branch_unknown", () =>
+    assert.deepEqual(
+      checkCommitGuard("git commit -m x", root, root, "s-d", now, conf, "warn", exec("")),
+      { allow: true, reason: "branch_unknown" }));
+
+  it("execGit throws, deny → deny/guard_error (fail-closed)", () =>
+    assert.deepEqual(
+      checkCommitGuard("git commit -m x", root, root, "s-e", now, conf, "deny", throwExec),
+      { allow: false, reason: "guard_error" }));
+
+  it("execGit throws, warn → allow/guard_error", () =>
+    assert.deepEqual(
+      checkCommitGuard("git commit -m x", root, root, "s-e", now, conf, "warn", throwExec),
+      { allow: true, reason: "guard_error" }));
+});
+
 describe("merge-guard checkMergeMarker", () => {
   let root;
   const conf = { enabled: true, ttlSec: 600 };
@@ -119,12 +214,12 @@ describe("merge-guard checkMergeMarker", () => {
   });
 
   it("fresh valid marker → marker_ok, allow", () => {
-    writeMarker("ses_b", { sessionID: "ses_b", ts: now - 1000 });
+    writeMarker("ses_b", { sessionID: "ses_b", ts: now - 1000, gate: 17, decision: "a" });
     assert.deepEqual(checkMergeMarker(root, "ses_b", now, conf), { allow: true, reason: "marker_ok" });
   });
 
   it("expired marker (ts = now − 700s, ttl 600) → marker_expired, deny", () => {
-    writeMarker("ses_c", { sessionID: "ses_c", ts: now - 700_000 });
+    writeMarker("ses_c", { sessionID: "ses_c", ts: now - 700_000, gate: 17, decision: "a" });
     assert.deepEqual(checkMergeMarker(root, "ses_c", now, conf), { allow: false, reason: "marker_expired" });
   });
 
@@ -149,23 +244,51 @@ describe("merge-guard checkMergeMarker", () => {
     fs.mkdirSync(path.join(gates, "merge-ses_g.json"));
     assert.deepEqual(checkMergeMarker(root, "ses_g", now, conf), { allow: false, reason: "guard_error" });
   });
+
+  it("marker without gate/decision → marker_incomplete, deny", () => {
+    writeMarker("ses_h", { sessionID: "ses_h", ts: now - 1000 });
+    assert.deepEqual(checkMergeMarker(root, "ses_h", now, conf), { allow: false, reason: "marker_incomplete" });
+  });
+
+  it("marker with gate:12 → marker_incomplete, deny", () => {
+    writeMarker("ses_i", { sessionID: "ses_i", ts: now - 1000, gate: 12, decision: "a" });
+    assert.deepEqual(checkMergeMarker(root, "ses_i", now, conf), { allow: false, reason: "marker_incomplete" });
+  });
 });
 
 describe("merge-guard resolveMergeGuardConf", () => {
-  it("undefined config → { enabled: true, ttlSec: 600 }", () => {
-    assert.deepEqual(resolveMergeGuardConf(undefined), { enabled: true, ttlSec: 600 });
+  it("undefined config → { enabled: true, ttlSec: 600, commitGuard: 'warn' }", () => {
+    assert.deepEqual(resolveMergeGuardConf(undefined), { enabled: true, ttlSec: 600, commitGuard: "warn" });
   });
 
   it("explicit enabled: false", () => {
-    assert.deepEqual(resolveMergeGuardConf({ merge_guard: { enabled: false } }), { enabled: false, ttlSec: 600 });
+    assert.deepEqual(resolveMergeGuardConf({ merge_guard: { enabled: false } }),
+      { enabled: false, ttlSec: 600, commitGuard: "warn" });
   });
 
   it("non-numeric ttlSec → 600", () => {
-    assert.deepEqual(resolveMergeGuardConf({ merge_guard: { ttlSec: "x" } }), { enabled: true, ttlSec: 600 });
+    assert.deepEqual(resolveMergeGuardConf({ merge_guard: { ttlSec: "x" } }),
+      { enabled: true, ttlSec: 600, commitGuard: "warn" });
   });
 
   it("valid ttlSec → kept", () => {
-    assert.deepEqual(resolveMergeGuardConf({ merge_guard: { ttlSec: 120 } }), { enabled: true, ttlSec: 120 });
+    assert.deepEqual(resolveMergeGuardConf({ merge_guard: { ttlSec: 120 } }),
+      { enabled: true, ttlSec: 120, commitGuard: "warn" });
+  });
+
+  it("commit_guard: 'deny' → commitGuard 'deny'", () => {
+    assert.deepEqual(resolveMergeGuardConf({ merge_guard: { commit_guard: "deny" } }),
+      { enabled: true, ttlSec: 600, commitGuard: "deny" });
+  });
+
+  it("commit_guard: 'off' → commitGuard 'off'", () => {
+    assert.deepEqual(resolveMergeGuardConf({ merge_guard: { commit_guard: "off" } }),
+      { enabled: true, ttlSec: 600, commitGuard: "off" });
+  });
+
+  it("commit_guard: 'bogus' → soft-fallback 'warn'", () => {
+    assert.deepEqual(resolveMergeGuardConf({ merge_guard: { commit_guard: "bogus" } }),
+      { enabled: true, ttlSec: 600, commitGuard: "warn" });
   });
 });
 
@@ -208,7 +331,7 @@ describe("merge-guard hook integration (tool.execute.before)", () => {
     fs.mkdirSync(gates, { recursive: true });
     fs.writeFileSync(
       path.join(gates, "merge-ses_x.json"),
-      JSON.stringify({ sessionID: "ses_x", ts: Date.now() }),
+      JSON.stringify({ sessionID: "ses_x", ts: Date.now(), gate: 17, decision: "a" }),
     );
     await assert.doesNotReject(
       hooks["tool.execute.before"](
@@ -226,7 +349,9 @@ describe("merge-guard hook integration (tool.execute.before)", () => {
     );
   });
 
-  it("allows non-guard bash commands", async () => {
+  it("allows git commit in default (warn) commit-guard mode — not rejected", async () => {
+    // R4: git commit is now detected by the commit guard; the temp dir is not
+    // a git repo → guard_error → warn mode → allow + log (no rejection).
     await assert.doesNotReject(
       hooks["tool.execute.before"](
         { tool: "shell", sessionID: "ses_z", callID: "c4", input: { command: 'git commit -m "x"' } },
