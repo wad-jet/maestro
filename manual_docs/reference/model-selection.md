@@ -54,19 +54,19 @@
 - пояснить сложный абстрактный термин через пример/«историю».
 
 Все субагенты, кроме `reviewer`, объявлены `hidden: true`
-(вызываются только программно через `task` tool). `task: deny` — субагенты не
+(вызываются только программно через `subagent` tool). `task: deny` — субагенты не
 диспатчат вложенные под-агенты (один уровень вложенности).
 
 ## 💡 Как диспатч работает в OpenCode
 
 Модель жёстко привязана к именованному сабагенту в merge-конфиге
 (`agent.{custodian,haiku,sonnet,opus}.model` в `.opencode/opencode.json` или global).
-`task` tool не принимает параметр `model` —
+`subagent` tool не принимает параметр `model` —
 оркестратор выбирает **сабагента** по таблице «Шаг → Tier».
 
 ```
 SDD-шаблон:  Subagent (general-purpose): model: haiku
-OpenCode:    task(subagent_type="haiku", prompt="...")
+OpenCode:    subagent(agent="haiku", prompt="...")
 ```
 
 #### 💡 Variant (вариант сэмплирования)

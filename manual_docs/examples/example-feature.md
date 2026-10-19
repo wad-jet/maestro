@@ -32,7 +32,7 @@
         - Primary пишет spec (activation flow, idempotency, error handling)
         - Открытых вопросов нет
 Шаг 9:  HITL: предложен Spec Review (фича сложная) -> подтверждено
-        - Диспатч opus-сабагента (subagent_type=opus, mode=spec)
+        - Диспатч opus-сабагента (agent=opus, mode=spec)
         - Spec Review: verdict "approve"
 Шаг 10: HITL: рекомендую (a) Approve, потому что вердикт ревью approve
         -> (a) Approve
