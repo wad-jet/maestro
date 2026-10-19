@@ -9,7 +9,13 @@
 
 ## [Unreleased]
 
-- **Упрощение команды `/test-agents`:** именование тулзы приведено к канону OpenCode (`subagent`/`agent`, было V1-имя `task`/`subagent_type`); удалена колонка `Self-report` (эмпирически ненадёжна — 4/7 искажений в прогоне 2026-10-19), тест-задача упрощена до «Верни OK»; заметка «Почему в таблице нет Temperature» перенесена в `manual_docs/reference/commands.md`; синхронизированы: `manual_docs/tutorials/setup-project.md`, `README.md`
+## [2026-10-19]
+
+> **Версия 6.3.0** — Minor: упрощение команды `/test-agents` (именование тулзы приведено к канону OpenCode V2: `subagent`/`agent`; удалена колонка `Self-report` — эмпирически ненадёжна; тест-задача «Верни OK»; заметка о Temperature перенесена в `manual_docs/reference/commands.md`); V1→V2 именование диспатч-тулзы в доках (6 файлов).
+
+### Изменено
+
+- **Упрощение команды `/test-agents`:** именование тулзы приведено к канону OpenCode (`subagent`/`agent`, было V1-имя `task`/`subagent_type`); удалена колонка `Self-report` (эмпирически ненадёжна — 4/7 искажений в прогоне 2026-10-19), тест-задача упрощена до «Верни OK»; заметка «Почему в таблице нет Temperature» перенесена в `manual_docs/reference/commands.md`; синхронизированы: `manual_docs/` (reference: commands/config/model-selection, tutorials, overview, examples) и `README.md`
 
 ## [2026-10-19]
 
