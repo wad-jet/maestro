@@ -9,6 +9,12 @@
 
 ## [Unreleased]
 
+## [2026-10-19]
+
+> **Версия 6.2.1** — Patch: confidential-канал — V2-идентичность сабагентов (плоская форма V2 + авторитетное `session.agent` в resolveIsTrustedSubagent/agentNameFromMessages); fail-closed и V1-совместимость сохранены, 6 новых тестов; P1/P3 trusted-канал (SECURITY.md) восстановлен.
+
+### Исправлено
+
 - **Bugfix — confidential-канал: V2-идентичность сабагентов (plugins/maestro-bootstrap/core.js):** гейт `confidential/**` отклонял trusted-сабагентов (custodian/sanitizer) при чтении конфиденциальных путей — плагин резолвил идентичность только по V1-форме сообщений (`m.info.agent`/`m.info.mode`), тогда как OpenCode V2 возвращает плоскую форму (`session.agent` в топе сессии, `m.type === "assistant" → m.agent` в контексте). Исправление: V2-проверки + авторитетное `session.agent`; все fail-closed-ветки и V1-совместимость сохранены; 6 новых тестов (юнит-проверки + интеграционный guard через реальный хук). Восстановлен P1/P3 trusted-канал (SECURITY.md).
 
 ## [2026-10-19]
