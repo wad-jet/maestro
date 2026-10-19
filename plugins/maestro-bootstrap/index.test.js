@@ -3823,7 +3823,7 @@ describe("commit-guard integration (R4)", () => {
     }
   });
 
-  it("valid gate-17 marker on mainline → allow without warn", async () => {
+  it("valid gate-17 marker on mainline → allow WITHOUT warn (no warn log, no notice)", async () => {
     const d = path.join(baseDir, "warn-ok");
     initGitRepo(d, "main");
     writeCfg(d, { merge_guard: { enabled: true, ttlSec: 600 } });
@@ -3840,9 +3840,11 @@ describe("commit-guard integration (R4)", () => {
           { tool: "shell", sessionID: "cg-ok", callID: "cg-c1b", input: { command: "git commit -m x" } },
         ),
       );
-      // warn-mode marker_ok still goes through the warn path (log + one-time notice)
-      const w = readLogs(d).find((x) => x.msg === "commit_guard" && x.action === "warn" && x.reason === "marker_ok");
-      assert.ok(w, "warn-mode marker_ok is logged");
+      // marker_ok is a legitimate gate-17 flow: allowed quietly, no warn log, no notice
+      const warns = readLogs(d).filter((x) => x.msg === "commit_guard" && x.action === "warn");
+      assert.equal(warns.length, 0, "no commit_guard warn entry for marker_ok");
+      const ev = await runContextHandlers(p, "cg-ok");
+      assert.equal(countNotices(ev), 0, "no commit-guard notice for marker_ok");
     } finally {
       p.dispose();
     }

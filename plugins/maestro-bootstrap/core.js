@@ -966,8 +966,9 @@ export async function createBootstrapPlugin(ctx) {
           const res = checkCommitGuard(cmd, typeof event.input?.workdir === "string" ? event.input.workdir : root, root, input.sessionID, Date.now(), mergeGuardConf, mergeGuardConf.commitGuard);
           const base = { sessionID: input.sessionID, callID: input.callID, mode: mergeGuardConf.commitGuard, reason: res.reason };
           if (res.allow) {
-            if (res.reason !== "not_mainline" && res.reason !== "branch_unknown") {
+            if (res.reason !== "not_mainline" && res.reason !== "branch_unknown" && res.reason !== "marker_ok") {
               // mainline commit without a proper gate-17 marker — warn path
+              // (marker_ok = legitimate gate-17 flow after (a): allow quietly)
               log.warn("commit_guard", { action: "warn", ...base });
               warnedCommitSessions.add(input.sessionID);
             } else { log.debug?.("commit_guard", { action: "allow", ...base }); }

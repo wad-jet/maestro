@@ -45,8 +45,8 @@ export function detectGuardCommand(command) {
 /**
  * Проверка маркера HITL-аппрува на merge/push-mainline.
  * Путь маркера: `<root>/.maestro/gates/merge-<sessionID>.json`, содержимое —
- * JSON `{ sessionID, ts }` (ts — epoch ms). Fail-closed: любое исключение в
- * теле → `{ allow: false, reason: "guard_error" }`.
+ * JSON `{"sessionID","ts","gate":17,"decision":"a"}` (ts — epoch ms).
+ * Fail-closed: любое исключение в теле → `{ allow: false, reason: "guard_error" }`.
  * @param {string} root  Корень проекта.
  * @param {string} sessionID  sessionID текущей сессии.
  * @param {number} nowMs  Текущее время, ms (инъектируемо для тестов).
