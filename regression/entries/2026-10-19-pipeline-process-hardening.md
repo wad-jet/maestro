@@ -1,0 +1,21 @@
+# Regression — Pipeline Process Hardening (R1–R6)
+
+- **version:** 1
+- **feature:** укрепление процесса пайплайна: R1 late-entry протокол, R2 баннер-контракт режима, R3 guard прогрессии `maestro_pipeline_status` (step_jump), R4 commit guard + валидация маркера, R5 дисциплина финального ревью, R6 дисциплина версии
+- **added:** 2026-10-19
+- **anchor:** 981181025371d8e77d335e401bc18c50096f7962 (HEAD при записи)
+- **status:** active
+- **risk:** HIGH — возврат к «тихому» обходу процесса: поздний вход без маршрута, авто-режим без строки контракта, непрокомментированные прыжки по шагам, `git commit` на mainline без маркера гейта 17, «ревью по описанию», merge без строки версии.
+- **category:** pipeline process enforcement (late-entry, mode banner, step_jump, commit-guard, review/version discipline)
+- **scenarios:**
+  - **unit:** `node --test plugins/maestro-bootstrap/index.test.js` — все PASS
+  - **[Manual] late-entry:** tree с uncommitted → сигнал (a) + вопрос пакетом с маршрутом
+  - **[Manual] banner:** старт с `-aa` → строка контракта в чате
+  - **[Manual] step_jump:** `maestro_pipeline_status` set 0 → set 14 → warning `step_jump` + одна строка в чат
+  - **[Manual] commit-guard warn (default):** `git commit` на main без маркера → system-notice в сессию один раз
+  - **[Manual] commit-guard deny:** `merge_guard.commit_guard: "deny"` → то же → блок `[commit-guard:deny]`
+  - **[Manual] commit-guard effective-ветка:** `git checkout main && git commit -am "…"` → эффективная ветка = mainline (substring-детекция)
+  - **[Manual] commit-guard fail-closed:** git-сбой в deny-режиме → deny (`reason: guard_error`); warn-режим → allow + log
+  - **[Manual] marker_incomplete:** маркер без `gate`/`decision` → `marker_incomplete` (deny; оркестратор пересоздаёт маркер)
+  - **[Manual] negative — review по описанию:** финальное ревью без доступа сабагента к фактическому дифу → вердикт недействителен, re-dispatch (issue: «review невалиден»)
+  - **[Manual] negative — гейт 17 без строки версии:** `Версионирование: да` + правила в контексте, строки версии нет → неполный гейт (оркестратор возвращает подготовку)

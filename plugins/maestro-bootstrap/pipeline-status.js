@@ -1,18 +1,76 @@
 // Pipeline Status module — V2 migration.
 // Self-contained module: NOT importing core.js (ESM-cycle guard).
 
-let state = { active: false, step: null, totalSteps: null, description: '' };
+// Canonical pipeline step sequence (R3 progression tracking).
+// Substeps (7b/7d/10b/12a) are distinct elements — positions are compared
+// in full notation (final review fix).
+const CANON_STEPS = ["-1","0","1","1.5","2","3","4","5","6","7","7b","7d","8","8.5","8.6","9","10","10b","11","12","12a","13","13f","14","15","15a","16","17","18","18.5"];
+
+let state = {
+  active: false,
+  step: null,
+  totalSteps: null,
+  description: '',
+  lastStep: null,
+  firstAfterClear: true,
+  lastWarning: null,
+  lastSkipped: null,
+};
+
+// Module-level log sink (set by the tool factory); optional, never required.
+let moduleLog = null;
+
+export function setPipelineStatusLog(log) {
+  moduleLog = log;
+}
+
+function normalizeStep(step) {
+  return String(step).trim();
+}
+
+function stepPosition(s) {
+  return CANON_STEPS.indexOf(s);
+}
 
 export function getPipelineStatus() {
   return { ...state };
 }
 
 export function setPipelineStatus({ step, totalSteps, description }) {
-  state = { active: true, step, totalSteps, description };
+  const next = normalizeStep(step);
+  const pos = stepPosition(next);
+  let lastWarning = null;
+  let lastSkipped = null;
+  let lastStep = state.lastStep;
+
+  if (pos === -1) {
+    // Unknown step: no warning, tracker (lastStep) is NOT updated.
+    moduleLog?.info?.("pipeline_status:unknown_step", { step });
+  } else {
+    if (lastStep !== null && !state.firstAfterClear) {
+      const lastPos = stepPosition(lastStep);
+      if (pos > lastPos && pos > lastPos + 1) {
+        lastWarning = "step_jump";
+        lastSkipped = CANON_STEPS.slice(CANON_STEPS.indexOf(lastStep) + 1, pos);
+      }
+    }
+    lastStep = next;
+  }
+
+  state = { ...state, active: true, step, totalSteps, description, lastStep, firstAfterClear: false, lastWarning, lastSkipped };
 }
 
 export function clearPipelineStatus() {
-  state = { active: false, step: null, totalSteps: null, description: '' };
+  state = {
+    active: false,
+    step: null,
+    totalSteps: null,
+    description: '',
+    lastStep: null,
+    firstAfterClear: true,
+    lastWarning: null,
+    lastSkipped: null,
+  };
 }
 
 export function formatStatusBlock() {
@@ -46,6 +104,7 @@ export async function registerPipelineStatusHooks({ client, config, log }) {
 // ---------------------------------------------------------------------------
 
 export function makePipelineStatusTool({ client, log }) {
+  setPipelineStatusLog(log);
   const guard = async (sessionID) => {
     if (!sessionID) return "session_unavailable";
     try {
@@ -60,12 +119,12 @@ export function makePipelineStatusTool({ client, log }) {
 
   return {
     name: "maestro_pipeline_status",
-    description: "Pipeline status indication: set, clear, or get current maestro pipeline state. Call 'set' after each pipeline step announcement, 'clear' when done, 'get' to query current status.",
+    description: "Pipeline status indication: set, clear, or get current maestro pipeline state. Call 'set' after each pipeline step announcement, 'clear' when done, 'get' to query current status. A forward jump over canonical steps returns a step_jump warning — respond with one line in chat (justify the skip-path or roll back).",
     input: {
       type: "object",
       properties: {
         action: { type: "string", enum: ["set", "clear", "get"], description: "Action: set, clear, or get pipeline status" },
-        step: { type: "integer", description: "Current step number (required for set)" },
+        step: { type: ["number", "string"], description: "Current step (required for set; supports '7b', '18.5', '-1')" },
         totalSteps: { type: ["integer", "string"], description: "Total steps (supports '18.5' format; required for set)" },
         description: { type: "string", description: "Step description (required for set)" },
       },
@@ -89,7 +148,11 @@ export function makePipelineStatusTool({ client, log }) {
           return { content: [{ type: "text", text: 'maestro_pipeline_status: missing required params: step, totalSteps, description' }] };
         }
         setPipelineStatus({ step: args.step, totalSteps: args.totalSteps, description: args.description });
-        return { content: [{ type: "text", text: JSON.stringify({ ok: true }) }] };
+        const { lastWarning, lastSkipped } = getPipelineStatus();
+        const payload = lastWarning
+          ? { ok: true, warning: lastWarning, skipped: lastSkipped }
+          : { ok: true };
+        return { content: [{ type: "text", text: JSON.stringify(payload) }] };
       }
 
       if (action === "clear") {

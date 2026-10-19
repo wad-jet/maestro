@@ -3,6 +3,7 @@ import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { execFileSync } from "node:child_process";
 import { createBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, validateWhitelist, filePathOf, loadTrustConfig, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile, isMaestroConfigPath, loadCommunicationConfig, loadFeedbackReportConfig, makeMaestroConfigTool, resolveConfigFile, resolveGlobalDir } from "./core.js";
 import { DEFAULTS } from "./memory/config.js";
 import {
@@ -3742,5 +3743,183 @@ describe("pipeline-status integration", () => {
     assert.equal(JSON.parse(clearText).ok, true);
 
     p.dispose();
+  });
+});
+
+// =============================================================================
+// Commit-guard integration (R4, Task 2)
+// =============================================================================
+
+describe("commit-guard integration (R4)", () => {
+  let baseDir, savedEnv;
+  const ENV = [
+    "MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL",
+    "MAESTRO_BOOTSTRAP_LOG_DIR", "MAESTRO_CONFIG",
+  ];
+
+  // Real git repo on the given branch (checkout -b; symbolic-ref fallback for
+  // empty repos where the initial branch already exists).
+  function initGitRepo(dir, branch) {
+    execFileSync("git", ["init", "-q", dir]);
+    try {
+      execFileSync("git", ["-C", dir, "checkout", "-q", "-b", branch], { stdio: "ignore" });
+    } catch {
+      execFileSync("git", ["-C", dir, "symbolic-ref", "HEAD", `refs/heads/${branch}`], { stdio: "ignore" });
+    }
+  }
+
+  function writeCfg(dir, cfg) {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify(cfg));
+  }
+
+  function countNotices(ev) {
+    return (ev.system || []).filter(
+      (s) => typeof s.text === "string" && s.text.includes("[commit-guard]"),
+    ).length;
+  }
+
+  async function runContextHandlers(p, sessionID) {
+    const ev = { sessionID };
+    for (const h of p.contextHandlers) await h(ev);
+    return ev;
+  }
+
+  before(() => {
+    savedEnv = {};
+    for (const k of ENV) { savedEnv[k] = process.env[k]; delete process.env[k]; }
+    baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-cg-"));
+  });
+
+  after(() => {
+    for (const k of ENV) {
+      if (savedEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedEnv[k];
+    }
+    fs.rmSync(baseDir, { recursive: true, force: true });
+  });
+
+  it("warn (default): mainline commit without marker → allow + warn log + one-time notice", async () => {
+    const d = path.join(baseDir, "warn");
+    initGitRepo(d, "main");
+    writeCfg(d, { merge_guard: { enabled: true, ttlSec: 600 } });
+    const p = await MaestroBootstrapPlugin({ directory: d });
+    try {
+      await assert.doesNotReject(
+        p["tool.execute.before"](
+          { tool: "shell", sessionID: "cg-warn", callID: "cg-c1", input: { command: "git commit -m x" } },
+        ),
+      );
+      const w = readLogs(d).find((x) => x.msg === "commit_guard" && x.action === "warn" && x.reason === "no_marker");
+      assert.ok(w, "commit_guard warn/no_marker log entry");
+
+      const ev = await runContextHandlers(p, "cg-warn");
+      assert.equal(countNotices(ev), 1, "exactly one commit-guard notice on first pass");
+
+      const ev2 = await runContextHandlers(p, "cg-warn");
+      assert.equal(countNotices(ev2), 0, "no notice on second pass (one per session)");
+    } finally {
+      p.dispose();
+    }
+  });
+
+  it("valid gate-17 marker on mainline → allow WITHOUT warn (no warn log, no notice)", async () => {
+    const d = path.join(baseDir, "warn-ok");
+    initGitRepo(d, "main");
+    writeCfg(d, { merge_guard: { enabled: true, ttlSec: 600 } });
+    const gates = path.join(d, ".maestro", "gates");
+    fs.mkdirSync(gates, { recursive: true });
+    fs.writeFileSync(
+      path.join(gates, "merge-cg-ok.json"),
+      JSON.stringify({ sessionID: "cg-ok", ts: Date.now(), gate: 17, decision: "a" }),
+    );
+    const p = await MaestroBootstrapPlugin({ directory: d });
+    try {
+      await assert.doesNotReject(
+        p["tool.execute.before"](
+          { tool: "shell", sessionID: "cg-ok", callID: "cg-c1b", input: { command: "git commit -m x" } },
+        ),
+      );
+      // marker_ok is a legitimate gate-17 flow: allowed quietly, no warn log, no notice
+      const warns = readLogs(d).filter((x) => x.msg === "commit_guard" && x.action === "warn");
+      assert.equal(warns.length, 0, "no commit_guard warn entry for marker_ok");
+      const ev = await runContextHandlers(p, "cg-ok");
+      assert.equal(countNotices(ev), 0, "no commit-guard notice for marker_ok");
+    } finally {
+      p.dispose();
+    }
+  });
+
+  it("commit_guard: 'deny' → mainline commit without marker throws [commit-guard:deny]", async () => {
+    const d = path.join(baseDir, "deny");
+    initGitRepo(d, "main");
+    writeCfg(d, { merge_guard: { enabled: true, ttlSec: 600, commit_guard: "deny" } });
+    const p = await MaestroBootstrapPlugin({ directory: d });
+    try {
+      await assert.rejects(
+        p["tool.execute.before"](
+          { tool: "shell", sessionID: "cg-deny", callID: "cg-c2", input: { command: "git commit -m x" } },
+        ),
+        /\[commit-guard:deny\]/,
+      );
+    } finally {
+      p.dispose();
+    }
+  });
+
+  it("commit_guard: 'off' → detection disabled, no commit_guard log entries", async () => {
+    const d = path.join(baseDir, "off");
+    initGitRepo(d, "main");
+    writeCfg(d, { merge_guard: { enabled: true, ttlSec: 600, commit_guard: "off" } });
+    const p = await MaestroBootstrapPlugin({ directory: d });
+    try {
+      await assert.doesNotReject(
+        p["tool.execute.before"](
+          { tool: "shell", sessionID: "cg-off", callID: "cg-c3", input: { command: "git commit -m x" } },
+        ),
+      );
+      const entries = readLogs(d).filter((x) => x.msg === "commit_guard");
+      assert.equal(entries.length, 0, "no commit_guard entries in off mode");
+    } finally {
+      p.dispose();
+    }
+  });
+
+  it("feature-branch workdir → allow without warn (not_mainline)", async () => {
+    const feat = path.join(baseDir, "feat");
+    initGitRepo(feat, "feature/x");
+    const d = path.join(baseDir, "feat-root");
+    writeCfg(d, { merge_guard: { enabled: true, ttlSec: 600 } });
+    const p = await MaestroBootstrapPlugin({ directory: d });
+    try {
+      await assert.doesNotReject(
+        p["tool.execute.before"](
+          { tool: "shell", sessionID: "cg-feat", callID: "cg-c4", input: { command: "git commit -m x", workdir: feat } },
+        ),
+      );
+      const warns = readLogs(d).filter((x) => x.msg === "commit_guard" && x.action === "warn");
+      assert.equal(warns.length, 0, "no warn for a feature-branch commit");
+    } finally {
+      p.dispose();
+    }
+  });
+
+  it("git checkout main && git commit from feature workdir → warn/no_marker (effective=mainline)", async () => {
+    const feat = path.join(baseDir, "feat2");
+    initGitRepo(feat, "feature/x");
+    const d = path.join(baseDir, "feat2-root");
+    writeCfg(d, { merge_guard: { enabled: true, ttlSec: 600 } });
+    const p = await MaestroBootstrapPlugin({ directory: d });
+    try {
+      await assert.doesNotReject(
+        p["tool.execute.before"](
+          { tool: "shell", sessionID: "cg-eff", callID: "cg-c5", input: { command: "git checkout main && git commit", workdir: feat } },
+        ),
+      );
+      const w = readLogs(d).find((x) => x.msg === "commit_guard" && x.action === "warn" && x.reason === "no_marker");
+      assert.ok(w, "warn/no_marker for an effective-mainline command");
+    } finally {
+      p.dispose();
+    }
   });
 });

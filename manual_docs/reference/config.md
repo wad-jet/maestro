@@ -159,6 +159,7 @@ bash-команды агента `git merge` (любую) и `git push` в mainl
 |---|---|---|---|
 | `enabled` | boolean | `true` | гард вкл/выкл; `false` — explicit opt-out (гард выключен; warn `merge_guard.disabled` при init) |
 | `ttlSec` | number > 0 | `600` | TTL (секунды) маркера аппрува: после явного (a) на гейте 17 маркер действителен `ttlSec` секунд |
+| `commit_guard` | string | `"warn"` | mainline commit guard (6.2.0): `"warn"` / `"deny"` / `"off"`; действует при `enabled: true` |
 
 - Поведение: нет маркера / просрочен / чужой `sessionID` / аномалия проверки →
   **deny (fail-closed)**: bash-вызов блокируется ошибкой
@@ -166,6 +167,24 @@ bash-команды агента `git merge` (любую) и `git push` в mainl
   `marker_session_mismatch` / `marker_bad_json` / `guard_error`). Свежий маркер
   текущей сессии → allow (маркер не удаляется — retry merge в пределах TTL
   допустим).
+- **Commit guard (6.2.0, `commit_guard`):** `git commit` в mainline
+  (текущая `main`/`master` или `git checkout main && git commit`) без маркера
+  гейта 17 → `warn` (default): log + system-notice (один на сессию), команда
+  не блокируется; `deny`: блок команды ошибкой `[commit-guard:deny]`;
+  `off`: выключено. Git-сбой: `deny` → fail-closed deny (`guard_error`),
+  `warn` → allow + log. Маркер гейта 17 обязан содержать
+  `gate: 17, decision: "a"` (иначе `marker_incomplete`) — валидация общая
+  для merge/push/commit.
+  Известные ограничения: (1) гард действует глобально (tool-хук на все
+  сессии процесса), не только на пайплайн maestro — коммиты в mainline
+  вне пайплайна в `warn`-режиме дают notice-шум; (2) детект
+  «checkout/switch на mainline» — substring-хэвистика:
+  `git checkout main -- <path>` (восстановление файла из main)
+  детектится как mainline-коммит — задокументированный FP, в `deny`
+  режиме блокирует такую команду; также детектся любая ветка,
+  содержащая `main`/`master` как компонент имени (напр. `feature/main`)
+  — эффективная ветка определяется как mainline только при сочетании
+  с `git commit` в одной команде.
 - Невалидные значения → default + soft fallback (паттерн плагина).
 - Логи (bootstrap-лог): `merge_guard` — `{ action: "allow"|"deny",
   kind: "merge"|"push-mainline", reason, sessionID }`; текст команд в лог не

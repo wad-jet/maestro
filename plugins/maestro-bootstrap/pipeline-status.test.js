@@ -201,3 +201,151 @@ describe("makePipelineStatusTool", () => {
     assert.ok(result.content[0].text.toLowerCase().includes("required"));
   });
 });
+
+// ---------------------------------------------------------------------------
+// progression warning (R3)
+// ---------------------------------------------------------------------------
+
+describe("progression warning", () => {
+  beforeEach(() => ps.clearPipelineStatus());
+
+  function makeTool() {
+    return ps.makePipelineStatusTool({ client: {}, log: {} });
+  }
+
+  async function setStep(tool, step, totalSteps = "18.5") {
+    const result = await tool.execute(
+      { action: "set", step, totalSteps, description: `step ${step}` },
+      { sessionID: "primary-session" },
+    );
+    return JSON.parse(result.content[0].text);
+  }
+
+  it("jump 0→14 warns with full canonical skipped list", async () => {
+    const tool = makeTool();
+    const first = await setStep(tool, 0);
+    assert.equal(first.warning, undefined);
+    const res = await setStep(tool, 14);
+    assert.equal(res.ok, true);
+    assert.equal(res.warning, "step_jump");
+    assert.deepEqual(res.skipped, [
+      "1", "1.5", "2", "3", "4", "5", "6", "7", "7b", "7d",
+      "8", "8.5", "8.6", "9", "10", "10b", "11", "12", "12a", "13", "13f",
+    ]);
+  });
+
+  it("consecutive forward (0→1) — no warning", async () => {
+    const tool = makeTool();
+    await setStep(tool, 0);
+    const res = await setStep(tool, 1);
+    assert.equal(res.ok, true);
+    assert.equal(res.warning, undefined);
+    assert.equal(res.skipped, undefined);
+  });
+
+  it("backward (13→10) — no warning", async () => {
+    const tool = makeTool();
+    await setStep(tool, 13);
+    const res = await setStep(tool, 10);
+    assert.equal(res.ok, true);
+    assert.equal(res.warning, undefined);
+  });
+
+  it("repeat (10→10) — no warning", async () => {
+    const tool = makeTool();
+    await setStep(tool, 10);
+    const res = await setStep(tool, 10);
+    assert.equal(res.ok, true);
+    assert.equal(res.warning, undefined);
+  });
+
+  it("clear resets tracker: first set after clear has no warning", async () => {
+    const tool = makeTool();
+    await setStep(tool, 5);
+    await tool.execute({ action: "clear" }, { sessionID: "primary-session" });
+    const res = await setStep(tool, 14);
+    assert.equal(res.ok, true);
+    assert.equal(res.warning, undefined);
+  });
+
+  it("substep adjacency (7→7b) — no warning", async () => {
+    const tool = makeTool();
+    await setStep(tool, 7);
+    const res = await setStep(tool, "7b");
+    assert.equal(res.ok, true);
+    assert.equal(res.warning, undefined);
+  });
+
+  it("string steps work: \"1.5\" → \"2\" no warning (normalization)", async () => {
+    const tool = makeTool();
+    await setStep(tool, "1.5");
+    const res = await setStep(tool, "2");
+    assert.equal(res.ok, true);
+    assert.equal(res.warning, undefined);
+  });
+
+  it("unknown step \"13z\" — no warning, lastStep not updated", async () => {
+    const tool = makeTool();
+    await setStep(tool, 13);
+    const res = await setStep(tool, "13z");
+    assert.equal(res.ok, true);
+    assert.equal(res.warning, undefined);
+    assert.equal(res.skipped, undefined);
+    assert.equal(ps.getPipelineStatus().lastStep, "13");
+  });
+
+  it("unknown step does not skew jump base: 13 → \"13z\" → 14 warns from 13", async () => {
+    const tool = makeTool();
+    await setStep(tool, 13);
+    const mid = await setStep(tool, "13z");
+    assert.equal(mid.ok, true);
+    assert.equal(mid.warning, undefined);
+    const res = await setStep(tool, 14);
+    assert.equal(res.ok, true);
+    assert.equal(res.warning, "step_jump");
+    assert.deepEqual(res.skipped, ["13f"]);
+    assert.equal(ps.getPipelineStatus().lastStep, "14");
+  });
+
+  it("7d→8 no warning (adjacent in full notation)", async () => {
+    const tool = makeTool();
+    await setStep(tool, "7d");
+    const res = await setStep(tool, 8);
+    assert.equal(res.ok, true);
+    assert.equal(res.warning, undefined);
+  });
+
+  it("10b→11 no warning", async () => {
+    const tool = makeTool();
+    await setStep(tool, "10b");
+    const res = await setStep(tool, 11);
+    assert.equal(res.ok, true);
+    assert.equal(res.warning, undefined);
+  });
+
+  it("12a→13 no warning", async () => {
+    const tool = makeTool();
+    await setStep(tool, "12a");
+    const res = await setStep(tool, 13);
+    assert.equal(res.ok, true);
+    assert.equal(res.warning, undefined);
+  });
+
+  it("7→8 warns with skipped [\"7b\",\"7d\"]", async () => {
+    const tool = makeTool();
+    await setStep(tool, 7);
+    const res = await setStep(tool, 8);
+    assert.equal(res.ok, true);
+    assert.equal(res.warning, "step_jump");
+    assert.deepEqual(res.skipped, ["7b", "7d"]);
+  });
+
+  it("7d→8.5 warns with skipped [\"8\"]", async () => {
+    const tool = makeTool();
+    await setStep(tool, "7d");
+    const res = await setStep(tool, "8.5");
+    assert.equal(res.ok, true);
+    assert.equal(res.warning, "step_jump");
+    assert.deepEqual(res.skipped, ["8"]);
+  });
+});

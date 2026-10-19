@@ -25,7 +25,7 @@ import { SESSIONS as MEMORY_SERVICE_SESSIONS } from "./memory/summarize.js";
 import { registerCommunicationHooks } from "./communication.js";
 import { registerFeedbackReportHooks } from "./feedback-report.js";
 import { registerPipelineStatusHooks, makePipelineStatusTool } from "./pipeline-status.js";
-import { detectGuardCommand, checkMergeMarker, resolveMergeGuardConf } from "./merge-guard.js";
+import { detectGuardCommand, checkMergeMarker, resolveMergeGuardConf, detectCommitCommand, checkCommitGuard } from "./merge-guard.js";
 
 const LOG_LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
 
@@ -812,6 +812,9 @@ export async function createBootstrapPlugin(ctx) {
   if (!mergeGuardConf.enabled) {
     log.warn("merge_guard.disabled", { sessionID: undefined });
   }
+  // Commit-guard (R4): sessions warned about a mainline commit without a
+  // gate-17 marker (one notice per session).
+  const warnedCommitSessions = new Set();
   const trustedAgents = loadTrustConfig(config);
   const unsafePatterns = detectUnsafePatterns(whitelist);
   if (unsafePatterns.length > 0) {
@@ -869,6 +872,32 @@ export async function createBootstrapPlugin(ctx) {
     log.error("pipeline-status: init failed", { error: err instanceof Error ? err.message : String(err) });
   }
 
+  // --- Commit-guard notice (R4): one warning per session for a mainline
+  // commit without a gate-17 marker (warn path). Fail-soft, same
+  // context-hook pattern as pipeline-status / communication.
+  let commitGuardNoticeDispose = () => {};
+  try {
+    const cgNoticeReg = await ctx.session.hook?.("context", async (event) => {
+      try {
+        const sessionID = event?.sessionID;
+        if (!sessionID || !warnedCommitSessions.has(sessionID)) return;
+        warnedCommitSessions.delete(sessionID);
+        if (!event.system) event.system = [];
+        event.system.push({ type: "text", text:
+          `⚠️ [commit-guard] Зафиксирован git commit в mainline без маркера гейта 17 (инвариант ⚑1). ` +
+          `Если это мерж maestro — пройди гейт 17 (явный (a)) и создай маркер ` +
+          `.maestro/gates/merge-${sessionID}.json {"sessionID","ts","gate":17,"decision":"a"}. ` +
+          `Если коммит вне maestro — проигнорируй (режим warn).` });
+        log.debug?.("commit_guard", { action: "notice_injected", sessionID });
+      } catch (err) {
+        log?.error?.("commit_guard:notice_failed", { error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+    commitGuardNoticeDispose = () => { try { cgNoticeReg?.dispose?.(); } catch { /* fail-soft */ } };
+  } catch (err) {
+    log.error("commit_guard: notice hook init failed", { error: err instanceof Error ? err.message : String(err) });
+  }
+
   // --- Event subscription ---
   const eventController = new AbortController();
   void (async () => {
@@ -924,6 +953,34 @@ export async function createBootstrapPlugin(ctx) {
             );
             err.mergeGuard = true;
             throw err;
+          }
+        }
+      }
+
+      // Commit guard (R4): `git commit` in mainline without an explicit
+      // gate-17 marker. warn (default) — allow + log + one-time notice;
+      // deny — fail-closed throw; off — disabled.
+      if (input.tool === "shell" && mergeGuardConf.enabled && mergeGuardConf.commitGuard !== "off") {
+        const cmd = typeof event.input?.command === "string" ? event.input.command : "";
+        if (detectCommitCommand(cmd)) {
+          const res = checkCommitGuard(cmd, typeof event.input?.workdir === "string" ? event.input.workdir : root, root, input.sessionID, Date.now(), mergeGuardConf, mergeGuardConf.commitGuard);
+          const base = { sessionID: input.sessionID, callID: input.callID, mode: mergeGuardConf.commitGuard, reason: res.reason };
+          if (res.allow) {
+            if (res.reason !== "not_mainline" && res.reason !== "branch_unknown" && res.reason !== "marker_ok") {
+              // mainline commit without a proper gate-17 marker — warn path
+              // (marker_ok = legitimate gate-17 flow after (a): allow quietly)
+              log.warn("commit_guard", { action: "warn", ...base });
+              warnedCommitSessions.add(input.sessionID);
+            } else { log.debug?.("commit_guard", { action: "allow", ...base }); }
+          } else {
+            if (mergeGuardConf.commitGuard === "deny") {
+              log.warn("commit_guard", { action: "deny", ...base });
+              const err = new Error(`[commit-guard:deny] git commit в mainline заблокирован: нет явного HITL-аппрува гейта 17 (маркер). Обсуди гейт 17, после явного (a) создай маркер и повтори.`);
+              err.mergeGuard = true;
+              throw err;
+            }
+            log.warn("commit_guard", { action: "warn_guard_error", ...base });
+            warnedCommitSessions.add(input.sessionID);
           }
         }
       }
@@ -1054,6 +1111,7 @@ export async function createBootstrapPlugin(ctx) {
     commDispose();
     fbDispose();
     pipelineStatusDispose();
+    commitGuardNoticeDispose();
     log.info("plugin disposing", {});
   };
 }
