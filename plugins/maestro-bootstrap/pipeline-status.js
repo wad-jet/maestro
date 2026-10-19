@@ -2,10 +2,9 @@
 // Self-contained module: NOT importing core.js (ESM-cycle guard).
 
 // Canonical pipeline step sequence (R3 progression tracking).
+// Substeps (7b/7d/10b/12a) are distinct elements — positions are compared
+// in full notation (final review fix).
 const CANON_STEPS = ["-1","0","1","1.5","2","3","4","5","6","7","7b","7d","8","8.5","8.6","9","10","10b","11","12","12a","13","13f","14","15","15a","16","17","18","18.5"];
-
-// Substeps resolve to their parent for position comparison.
-const PARENT_STEPS = { "7b": "7", "7d": "7", "10b": "10", "12a": "12" };
 
 let state = {
   active: false,
@@ -29,12 +28,8 @@ function normalizeStep(step) {
   return String(step).trim();
 }
 
-function parentStep(s) {
-  return PARENT_STEPS[s] ?? s;
-}
-
 function stepPosition(s) {
-  return CANON_STEPS.indexOf(parentStep(s));
+  return CANON_STEPS.indexOf(s);
 }
 
 export function getPipelineStatus() {

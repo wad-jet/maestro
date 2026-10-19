@@ -306,4 +306,46 @@ describe("progression warning", () => {
     assert.deepEqual(res.skipped, ["13f"]);
     assert.equal(ps.getPipelineStatus().lastStep, "14");
   });
+
+  it("7d→8 no warning (adjacent in full notation)", async () => {
+    const tool = makeTool();
+    await setStep(tool, "7d");
+    const res = await setStep(tool, 8);
+    assert.equal(res.ok, true);
+    assert.equal(res.warning, undefined);
+  });
+
+  it("10b→11 no warning", async () => {
+    const tool = makeTool();
+    await setStep(tool, "10b");
+    const res = await setStep(tool, 11);
+    assert.equal(res.ok, true);
+    assert.equal(res.warning, undefined);
+  });
+
+  it("12a→13 no warning", async () => {
+    const tool = makeTool();
+    await setStep(tool, "12a");
+    const res = await setStep(tool, 13);
+    assert.equal(res.ok, true);
+    assert.equal(res.warning, undefined);
+  });
+
+  it("7→8 warns with skipped [\"7b\",\"7d\"]", async () => {
+    const tool = makeTool();
+    await setStep(tool, 7);
+    const res = await setStep(tool, 8);
+    assert.equal(res.ok, true);
+    assert.equal(res.warning, "step_jump");
+    assert.deepEqual(res.skipped, ["7b", "7d"]);
+  });
+
+  it("7d→8.5 warns with skipped [\"8\"]", async () => {
+    const tool = makeTool();
+    await setStep(tool, "7d");
+    const res = await setStep(tool, "8.5");
+    assert.equal(res.ok, true);
+    assert.equal(res.warning, "step_jump");
+    assert.deepEqual(res.skipped, ["8"]);
+  });
 });

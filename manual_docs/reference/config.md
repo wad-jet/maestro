@@ -181,7 +181,10 @@ bash-команды агента `git merge` (любую) и `git push` в mainl
   «checkout/switch на mainline» — substring-хэвистика:
   `git checkout main -- <path>` (восстановление файла из main)
   детектится как mainline-коммит — задокументированный FP, в `deny`
-  режиме блокирует такую команду.
+  режиме блокирует такую команду; также детектся любая ветка,
+  содержащая `main`/`master` как компонент имени (напр. `feature/main`)
+  — эффективная ветка определяется как mainline только при сочетании
+  с `git commit` в одной команде.
 - Невалидные значения → default + soft fallback (паттерн плагина).
 - Логи (bootstrap-лог): `merge_guard` — `{ action: "allow"|"deny",
   kind: "merge"|"push-mainline", reason, sessionID }`; текст команд в лог не
