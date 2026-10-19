@@ -246,8 +246,8 @@ plugins/           — maestro-bootstrap (ESM-плагин: sanitize, observabil
 skills/            — скиллы (maestro, maestro-setup, maestro-design, manual-docs — generic user-docs)
 specs/             — дизайн-спеки и план-ы этого репо (never in root!)
 manual_docs/       — пользовательская документация скилла (Diátaxis)
-maestro-install.sh — установочный скрипт (глобальный/проектный режим, 6.1.0)
-maestro-update.sh  — скрипт обновления (глобальный/проектный режим, 6.1.0)
+maestro-install.sh — установочный скрипт (глобальный/проектный режим, 6.2.0)
+maestro-update.sh  — скрипт обновления (глобальный/проектный режим, 6.2.0)
 maestro-install/   — детерминированные тесты (docs-drift, test-coverage)
 ```
 
