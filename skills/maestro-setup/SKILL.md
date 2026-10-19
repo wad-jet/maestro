@@ -127,6 +127,16 @@ description: Initialize maestro for a new or existing project — quick setup (A
 4. Не создаёт `.opencode/` зеркало (скиллы глобальные).
 5. Не создаёт `agpack.yml` (agpack удалён полностью).
 6. Модели агентов (`agent.custodian.model` и т.д.) — задаются глобально в `~/.config/opencode/opencode.json`; per-project override — осознанный след (файл в проекте).
+6b. **Per-agent permissions для trusted-агентов.** Если в global `opencode.json` отсутствует `agent.custodian.permission` или `agent.sanitizer.permission` — предложить HITL добавить:
+    ```json
+    {
+      "agent": {
+        "custodian": { "permission": { "read": { "docs/confidential/*": "allow" }, "glob": { "docs/confidential/*": "allow" }, "grep": { "docs/confidential/*": "allow" } } },
+        "sanitizer": { "permission": { "read": { "docs/confidential/*": "allow" }, "glob": { "docs/confidential/*": "allow" }, "grep": { "docs/confidential/*": "allow" } } }
+      }
+    }
+    ```
+    Это необходимо для чтения `docs/confidential/*` trusted-агентами (поверх глобального deny). Канон разрешений — в `agents/custodian.md` и `agents/sanitizer.md`; требования ИБ (P1–P3) — в `SECURITY.md` → «Trusted agents».
 
 **M1 (7 HITL-вопросов по моделям)** — как в подпункте «Плагин + модели», но целевой файл — глобальный `~/.config/opencode/opencode.json` (п. 6).
 
