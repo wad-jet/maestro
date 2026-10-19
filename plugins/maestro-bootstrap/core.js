@@ -408,6 +408,8 @@ export function resolveConfidentialAction(conf, tool, isTrustedSubagent) {
 
 function agentNameFromMessages(messages) {
   for (const m of messages ?? []) {
+    // V2: flat message shape — agent lives on the assistant message itself
+    if (m && m.type === "assistant" && typeof m.agent === "string" && m.agent) return m.agent;
     const info = m?.info ?? {};
     if (typeof info.agent === "string" && info.agent) return info.agent;
     if (typeof info.mode === "string" && info.mode) return info.mode;
@@ -430,6 +432,10 @@ export async function resolveIsTrustedSubagent(client, trustedAgents, sessionID)
     return { trusted: false, agent: undefined };
   }
   if (!session?.parentID) return { trusted: false, agent: undefined };
+  // V2: the session object carries the agent at top level — authoritative source
+  if (typeof session?.agent === "string" && session.agent) {
+    return { trusted: trustedAgents.has(session.agent), agent: session.agent };
+  }
   try {
     // V2: session.context({ sessionID }) → readonly SessionMessageInfo[]
     const mresp = await client.session.context({ sessionID });

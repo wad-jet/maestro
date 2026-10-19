@@ -1359,6 +1359,54 @@ describe("maestro-bootstrap confidential subagent identity", () => {
     assert.equal(res.trusted, false);
     assert.equal(res.agent, undefined);
   });
+
+  it("resolves trusted by session.agent (V2 session-level shape)", async () => {
+    const client = mockClient({
+      session: { id: "child", parentID: "root", agent: "custodian" },
+      messages: [
+        { id: "mu", type: "user", text: "Прочитай файл." },
+        { id: "ma", type: "assistant", agent: "custodian", content: [] },
+      ],
+    });
+    const res = await resolveIsTrustedSubagent(client, new Set(["custodian"]), "child");
+    assert.equal(res.trusted, true);
+    assert.equal(res.agent, "custodian");
+  });
+
+  it("denies untrusted by session.agent (V2 session-level shape)", async () => {
+    const client = mockClient({
+      session: { id: "child", parentID: "root", agent: "haiku" },
+      messages: [{ id: "ma", type: "assistant", agent: "haiku", content: [] }],
+    });
+    const res = await resolveIsTrustedSubagent(client, new Set(["custodian"]), "child");
+    assert.equal(res.trusted, false);
+    assert.equal(res.agent, "haiku");
+  });
+
+  it("resolves trusted by V2 flat assistant message when session.agent is absent (fallback)", async () => {
+    const client = mockClient({
+      session: { id: "child", parentID: "root" },
+      messages: [
+        { id: "mu", type: "user", text: "Прочитай файл." },
+        { id: "ma", type: "assistant", agent: "custodian", content: [] },
+      ],
+    });
+    const res = await resolveIsTrustedSubagent(client, new Set(["custodian"]), "child");
+    assert.equal(res.trusted, true);
+    assert.equal(res.agent, "custodian");
+  });
+
+  it("session.agent wins even when session.context rejects", async () => {
+    const client = {
+      session: {
+        get: async () => ({ data: { id: "child", parentID: "root", agent: "custodian" } }),
+        context: async () => { throw new Error("no context"); },
+      },
+    };
+    const res = await resolveIsTrustedSubagent(client, new Set(["custodian"]), "child");
+    assert.equal(res.trusted, true);
+    assert.equal(res.agent, "custodian");
+  });
 });
 
 describe("maestro-bootstrap filePathOf for confidential tools", () => {
@@ -1411,6 +1459,22 @@ describe("maestro-bootstrap confidential enforcement", () => {
       session: { id: "childUntrusted", parentID: "root" },
       messages: [{ info: { role: "assistant", mode: "haiku" }, parts: [] }],
     },
+    childTrustedV2: {
+      // РЕАЛЬНЫЙ V2-шейп (live OpenCode API): session.agent top-level,
+      // flat context messages {type, agent} без info/parts
+      session: { id: "childTrustedV2", parentID: "root", agent: "custodian" },
+      messages: [
+        { id: "mv2u", type: "user", text: "Прочитай файл." },
+        { id: "mv2a", type: "assistant", agent: "custodian", model: { id: "m", providerID: "p", variant: "default" }, content: [] },
+      ],
+    },
+    childUntrustedV2: {
+      session: { id: "childUntrustedV2", parentID: "root", agent: "haiku" },
+      messages: [
+        { id: "mu2u", type: "user", text: "Прочитай файл." },
+        { id: "mu2a", type: "assistant", agent: "haiku", content: [] },
+      ],
+    },
   };
 
   before(async () => {
@@ -1436,6 +1500,20 @@ describe("maestro-bootstrap confidential enforcement", () => {
     const out = { args: { filePath: "docs/confidential/secrets.md" } };
     await hooks["tool.execute.before"]({ tool: "read", sessionID: "childTrusted", callID: "c1" }, out);
     assert.ok(true);
+  });
+
+  it("allows trusted subagent read of confidential — V2 real shape (session.agent + flat context)", async () => {
+    const out = { args: { filePath: "docs/confidential/secrets.md" } };
+    await hooks["tool.execute.before"]({ tool: "read", sessionID: "childTrustedV2", callID: "c-v2-1" }, out);
+    assert.ok(true);
+  });
+
+  it("denies untrusted subagent read of confidential — V2 real shape (negative guard)", async () => {
+    const out = { args: { filePath: "docs/confidential/secrets.md" } };
+    await assert.rejects(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "childUntrustedV2", callID: "c-v2-2" }, out),
+      /confidential:deny/,
+    );
   });
 
   it("denies trusted subagent write to confidential (write=deny)", async () => {
