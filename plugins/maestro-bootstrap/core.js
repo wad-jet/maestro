@@ -555,9 +555,11 @@ export function isConfidentialTarget(root, patterns, target) {
 // `agent.*.permission.read`: deny → dataPaths, allow → agentAllows.
 // Асимметричный конфиг (deny только edit/write) не попадает в набор.
 // Мерж: на уровне «scope → pattern» последний (более близкий) слой побеждает;
-// deny в любом слое без override в более высоком → в набор. Консервативная
-// over-аппроксимация безопасна (больше путей → больше custodian-маршрутизации,
-// утечки нет); under-аппроксимация запрещена.
+// в пределах одного слоя deny выживает при конфликте файлов слоя (allow в том
+// же слое не отменяет deny того же слоя); deny в любом слое без override в
+// более высоком → в набор. Консервативная over-аппроксимация безопасна
+// (больше путей → больше custodian-маршрутизации, утечки нет);
+// under-аппроксимация запрещена.
 // Exclusion из dataPaths — защита-конфиг/ядро, не «данные»: точные
 // maestro.json, .maestro/**, built-in-секреты ядра (BUILTIN_CONFIDENTIAL_PATTERNS).
 // Сломанный/отсутствующий файл — пропускается (fail-soft, без throw).
@@ -648,29 +650,44 @@ export function loadNativeRestrictedSet(root, ops = {}) {
     if (xdgDir) globalDirs.add(path.join(xdgDir, "opencode"));
     globalDirs.add(path.join(home, ".config", "opencode"));
 
-    const files = [];
-    for (const d of globalDirs) for (const name of NATIVE_CONFIG_NAMES) files.push(path.join(d, name));
-    files.push(path.join(root, "opencode.json"), path.join(root, "opencode.jsonc"));
-    files.push(path.join(root, ".opencode", "opencode.json"), path.join(root, ".opencode", "opencode.jsonc"));
+    const layers = [
+      [...globalDirs].flatMap((d) => NATIVE_CONFIG_NAMES.map((n) => path.join(d, n))),
+      [path.join(root, "opencode.json"), path.join(root, "opencode.jsonc")],
+      [path.join(root, ".opencode", "opencode.json"), path.join(root, ".opencode", "opencode.jsonc")],
+    ];
 
-    const scopes = new Map(); // scope → Map<pattern, action> (последний слой побеждает)
-    const sink = (scope, pattern, action) => {
-      let rules = scopes.get(scope);
-      if (!rules) { rules = new Map(); scopes.set(scope, rules); }
-      rules.set(pattern, action);
-    };
-    for (const file of files) {
-      let raw;
-      try { raw = fs.readFileSync(file, "utf8"); } catch { continue; } // файла нет — пропускаем
-      let layer;
-      try { layer = JSON.parse(stripJsonComments(raw)); } catch { continue; } // битый JSON — пропускаем
-      if (!isPlainObject(layer)) continue;
-      collectNativeReadRules(layer, undefined, sink);
-      const agents = layer.agent;
-      if (isPlainObject(agents)) {
-        for (const [name, cfg] of Object.entries(agents)) {
-          if (name && isPlainObject(cfg)) collectNativeReadRules(cfg, name, sink);
+    const scopes = new Map(); // scope → Map<pattern, action> (высший слой побеждает)
+    for (const files of layers) {
+      // В пределах ОДНОГО слоя deny выживает: allow в том же слое не отменяет
+      // deny того же слоя (⊇-инвариант: under-аппроксимация запрещена).
+      const layerRules = new Map(); // scope → Map<pattern, { last, denied }>
+      const sink = (scope, pattern, action) => {
+        let rules = layerRules.get(scope);
+        if (!rules) { rules = new Map(); layerRules.set(scope, rules); }
+        const cur = rules.get(pattern);
+        rules.set(pattern, { last: action, denied: (cur?.denied ?? false) || action === "deny" });
+      };
+      for (const file of files) {
+        let raw;
+        try { raw = fs.readFileSync(file, "utf8"); } catch { continue; } // файла нет — пропускаем
+        let layer;
+        try { layer = JSON.parse(stripJsonComments(raw)); } catch { continue; } // битый JSON — пропускаем
+        if (!isPlainObject(layer)) continue;
+        collectNativeReadRules(layer, undefined, sink);
+        const agents = layer.agent;
+        if (isPlainObject(agents)) {
+          for (const [name, cfg] of Object.entries(agents)) {
+            if (name && isPlainObject(cfg)) collectNativeReadRules(cfg, name, sink);
+          }
         }
+      }
+      // Эффективный слой: deny, если ЛЮБОЙ файл слоя deny'ит; иначе — action
+      // последнего файла. Между слоями — последовательная перезапись (ближе к
+      // проекту — выше приоритет), как раньше.
+      for (const [scope, rules] of layerRules) {
+        let target = scopes.get(scope);
+        if (!target) { target = new Map(); scopes.set(scope, target); }
+        for (const [pattern, st] of rules) target.set(pattern, st.denied ? "deny" : st.last);
       }
     }
 

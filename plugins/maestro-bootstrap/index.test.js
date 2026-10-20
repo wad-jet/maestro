@@ -4164,6 +4164,20 @@ describe("loadNativeRestrictedSet", () => {
     assert.deepEqual(res.dataPaths, ["x/**"]);
   });
 
+  it("конфликт В ПРЕДЕЛАХ ОДНОГО слоя (root json + jsonc): deny + allow того же pattern → deny выживает (⊇-инвариант)", () => {
+    writeNative("opencode.json", { permission: { read: { "docs/confidential/**": "deny" } } });
+    writeNative("opencode.jsonc", '{ /* stale allow */ "permission": { "read": { "docs/confidential/**": "allow" } } }');
+    const res = loadNativeRestrictedSet(dir, ops());
+    assert.deepEqual(res.dataPaths, ["docs/confidential/**"]);
+  });
+
+  it("конфликт В ПРЕДЕЛАХ ОДНОГО слоя (реверс: jsonc deny + json allow) → deny выживает независимо от порядка", () => {
+    writeNative("opencode.json", { permission: { read: { "docs/confidential/**": "allow" } } });
+    writeNative("opencode.jsonc", '{ "permission": { "read": { "docs/confidential/**": "deny" } } }');
+    const res = loadNativeRestrictedSet(dir, ops());
+    assert.deepEqual(res.dataPaths, ["docs/confidential/**"]);
+  });
+
   it("per-agent allow read → agentAllows (D2/M1)", () => {
     writeNative("opencode.json", {
       permission: { read: { "docs/confidential/**": "deny" } },
@@ -4192,6 +4206,9 @@ describe("loadNativeRestrictedSet", () => {
           ".env": "deny",
           ".env.local": "deny",
           "*.pem": "deny",
+          "*.crt": "deny",
+          "*.p12": "deny",
+          "*.pfx": "deny",
           "secrets/api.key": "deny",
           "docs/confidential/**": "deny",
         },
