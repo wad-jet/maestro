@@ -23,13 +23,11 @@ permission:
 
 ## Контекст доверия
 
-Ты предполагаешься **trusted** по умолчанию (по роли; `maestro.json`
-→ `trust.sanitizer: true`). Ты единственный сабагент, кому разрешено видеть
+Ты **trusted** по роли (hardcoded role-set `custodian`/`sanitizer` в плагине),
+не конфигурируется: секция `trust` в `maestro.json` в 6.4.0 не читается
+(warn + игнор). Ты единственный сабагент, кому разрешено видеть
 сырые данные — чтобы их пометить. Твой выход — список пометок без
-sensitive-содержимого. Если `trust.sanitizer: false` или отсутствует в
-`maestro.json` — промпт диспатча санизируется Ур.1 **до** того, как ты его
-увидишь: ты не сможешь пометить raw-данные (рекурсия). Sanitizer non-functional
-без trusted. Доверие определяется конфигом, не этим промптом.
+sensitive-содержимого.
 
 ## Что искать (правила Context Sanitizer)
 
@@ -108,7 +106,7 @@ STATUS: FINDINGS_FOUND
 Файл-доступ сабагентов регулируется **нативным permission-слоем opencode**
 (`.opencode/opencode.json` или global), а не секцией `maestro.json`: `read`/`glob`/
 `grep` deny `maestro.json`/`.maestro/**`, `read`-allow `.maestro/plugin-version`,
-`edit`-ask `maestro.json`, confidential-deny — см. канон нативных permissions
+`edit`-ask `maestro.json`, deny restricted-путей — см. канон нативных permissions
 в `maestro-assistant`. Ты **не генерируешь и не поддерживаешь** правила
 файл-доступа в `maestro.json` — это конфигурация merge-config, а не твоя роль.
 

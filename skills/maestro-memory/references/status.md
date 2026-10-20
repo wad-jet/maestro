@@ -79,9 +79,7 @@
 ```
 
 Если в отчёте `memory_stats_detail` есть диагностические строки — выведи их как есть:
-- `mainline_unresolved` — mainline не резолвнут (branch-context flat; guidance: `memory.mainline` override);
-- `unmasked_branch_metadata` — централизованный бэкенд + непустые `confidential.paths` (имена веток уходят на сервер);
-- `external_embedder_unmasked_queries` — внешний embedder + непустые `confidential.paths` (запросы/контент уходят внешнему вендору).
+- `mainline_unresolved` — mainline не резолвнут (branch-context flat; guidance: `memory.mainline` override).
 
 **Не индексированные сессии**
 
