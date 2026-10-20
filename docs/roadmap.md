@@ -1,7 +1,7 @@
 # Роадмап maestro-agent
 
-**Текущая версия:** `6.3.0`
-**Дата обновления:** 2026-10-19
+**Текущая версия:** `6.4.0`
+**Дата обновления:** 2026-10-20
 
 > Архив закрытых волн и детализированная история — в `git log` и `manual_docs/overview/changelog.md`.
 
@@ -94,6 +94,19 @@
 
 ~~32. **Feature: глобальная установка maestro (скиллы/команды/агенты + плагин на всю машину, 4-слойный конфиг, wholesale-доставка)**~~
     - ✅ **Выполнено (6.0.0, 2026-10-17):** `maestro-install.sh --global` / `maestro-update.sh --global` (git clone https-only + wholesale copy ВСЕГО skills/commands/agents (+superpowers) + manifest + регистрация плагина в глобальный конфиг; `--project`/`--pin`/`--prune`/`--dry-run`/`--migrate`/`--deinstall`); 4-слойный конфиг (MAESTRO_CONFIG debug > root в git > .maestro/ вне git > global XDG-aware) с hybrid-семантикой (non-memory replace, memory soft-merge); namespace auto-derive в `/maestro-setup` (per-project opt-in памяти, global default `enabled: false`); P6 — активный конфиг (любой слой) в confidential-контуре (маскер); полный отказ от legacy-механизма доставки (breaking); доки — SECURITY.md («Глобальная установка — trust»), AGENTS.md (доставка), how-to/reference, docs-drift D6/D7/D8
+
+~~33. **Feature: retire-confidential — нативные permissions как единственный барьер (6.4.0)**~~
+    - ✅ **Выполнено (6.4.0, 2026-10-20):** нативные OpenCode permissions — единственный барьер доступа к restricted-данным (fail-closed в ядре, не зависит от плагина); **breaking**: секции `confidential` и `trust` удалены из схемы `maestro.json`; trusted = hardcoded role-set `{custodian, sanitizer}` (работает и при отсутствии конфига, старые `trust.*` → warn `trust:deprecated_key` + игнор); dual mode (D5): legacy-режим (плагинный enforcement `[confidential:deny]`) — пока секция `confidential` есть, миграция legacy→new — воркфлоу `maestro-assistant` (I2); плагин — директива `restricted-data paths: …` (D2) + shadow-аудит `confidential.access` (D7, observability, не enforcement) + U1 + merge-guard; memory — только generic-маскирование (D3, SEC-5 каналы a–d, git-backfill I4); benchmark — песочница как эталон мигрированного проекта (D8, deny `secrets/**`); доки — SECURITY.md, SKILL-канон + references, manual_docs (15 файлов), plugin README, how-to «Настройка restricted-путей»; тесты 521/521 + memory 808/806/0/2, тест-гарды (i)–(iv), docs-drift D10
+
+34. **Feature: retire legacy enforcement (dual mode)**
+    - Impact: MEDIUM | Feasibility: HIGH | Sec: HIGH
+    - Задача: после миграции проектов (workflow «Миграция legacy → new») удалить legacy-ветки: плагинный enforcement `[confidential:deny]`, `BUILTIN_CONFIDENTIAL_PATTERNS`, `loadConfidentialConfig` в enforcement-контексте; spec §6 / NG1 фичи 6.4.0.
+    - Status: open
+
+35. **Task: self-миграция авторского репо (M8) + §12-конвенция**
+    - Impact: MEDIUM | Feasibility: HIGH | Sec: HIGH
+    - Задача: committed `maestro.json` авторского репо несёт `trust`+`confidential` → мигрировать воркфлоу 6 (native deny + §12, порядок 0→1→2→3→4); унифицировать §12-значения (`docs/confidential/**` vs `docs/confidential/*` — final-review Minor #1); docs-drift `*.env` vs `.env` (final-review Minor #2).
+    - Status: open
 
 ### Приоритет P3 (отложить)
 

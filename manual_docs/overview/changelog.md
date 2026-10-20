@@ -9,6 +9,27 @@
 
 ## [Unreleased]
 
+## [2026-10-20]
+
+> **Версия 6.4.0** — Major: отказ от секций `confidential` и `trust` в `maestro.json` — нативные OpenCode permissions становятся **единственным барьером** доступа к restricted-данным (fail-closed в ядре, не зависит от плагина); trusted = hardcoded role-set `{custodian, sanitizer}`; dual mode: legacy-режим (плагинный enforcement) работает, пока секция `confidential` есть; плагин — shadow-аудит (observability), директива, U1, merge-guard; memory — только generic-маскирование (SEC-5 — признанный риск).
+
+### Изменено
+
+- **BREAKING — нативный барьер (D1):** new-режим (секции `confidential` в `maestro.json` нет) — плагин file-тулы (`read`/`edit`/`glob`/`grep`) **не гейтит**; барьер = нативные permissions OpenCode в merge-config (deny + per-agent allow `custodian`/`sanitizer`). Файловая защита больше не зависит от плагина (P5)
+- **BREAKING — секция `trust` удалена из схемы (B):** trusted определяется **по роли** — hardcoded role-set `{custodian, sanitizer}` (работает и при отсутствии `maestro.json`); старые ключи `trust.*` → warn `trust:deprecated_key` + игнор; кастомные агенты всегда U1-masked. **N1:** проекты с `trust.<custom>: true` — с обновления до 6.4.0 кастомные агенты немедленно теряют плагинный файловый доступ (в любом режиме, fail-closed); обходной путь — нативный per-agent allow
+- **Dual mode (D5):** legacy-режим — плагинный enforcement как было (`[confidential:deny]`, built-in-набор, P6-контур), warn `confidential:legacy_active` при init; действует, пока секция `confidential` есть в `maestro.json`. Миграция legacy → new — зафиксированный порядок (шаг 0 N1-предпроверка → нативные deny+allow+§12 → restart+live-проверка → только затем удалить секцию → restart+проверка new-режима) — воркфлоу в `maestro-assistant`; how-to «Настройка restricted-путей» (`manual_docs/how-to/manage-confidential-paths.md`, полная переписка)
+- **Плагинная директива (D2):** `restricted-data paths: p1, p2` в system-контекст top-level primary-сессий (task/service-сессии — нет); источник набора — нативные deny-конфиги (legacy: union с `confidential.paths`); строка-зеркало `docs/project-context.md` §12 (`- **Confidential-данные:** p1, p2`); drift → warn `confidential:drift`
+- **Shadow-аудит (D7):** new-режим — событие `confidential.access` (`action: allow|deny|unknown` — unknown: нерезолвимый агент; `target` — только basename, SEC-4b; frontmatter-правил не учитывается) — **best-effort зеркало нативных permission-решений, не enforcement** (не блокирует); residual'ы зеркала задокументированы (SECURITY.md §5)
+- **Memory (D3):** удалена confidential-механика (`maskLines` line-level-фильтр, `skip_confidential` git-backfill, `maskPatterns` backup/CLI, CR-3 confidential-artifact-drop, init-warn'ы по `confidential.paths`); остаётся generic `sanitize()` (Ур.1: key=value, .env, PEM, PII); SEC-5 — каналы признанного риска (a)–(d), включая git-backfill (I4: restricted-пути не добавляются в `memory.history_globs`/`memory.artifact_globs`); у memory нет dual mode
+- **Каноны и доки:** `SECURITY.md` (§2 model, P1, P4a, P5, P6, SEC-5, §4, §5, §6), `skills/maestro/SKILL.md` + references (`trust-and-security.md` переписан), `invariants.md`, `custodian-prompt.md`, `maestro-assistant` (inline-канон без секций, воркфлоу «Настройка restricted-путей»/«Миграция legacy → new»), `maestro-setup` (+`init-context.md`), `agents/custodian.md`/`sanitizer.md`, `maestro-memory`/`maestro-feedback-report` (shadow-аудит «N попыток (M от trusted, K unknown)»), `manual_docs/` (15 файлов), `plugins/maestro-bootstrap/README.md`, `commands/` (assistant/setup/test-agents), sandbox-чеклист
+- **Benchmark (D8, alpha):** песочница `maestro-sandbox.sh` — эталон **мигрированного проекта** (fixture `maestro.json` без `trust`/`confidential`; нативный deny `secrets/**` read/edit/glob/grep + per-agent allow role-set в сгенерированном `.opencode/opencode.json`); `security.confidentialAccess` → `{ attempts, byTrusted, unknown }` (breaking для alpha-модуля, `diff.mjs`); live-инвариант — [Manual] (чеклист D9)
+- **Тесты:** `npm test` 521/521 (было 289 до фичи), `npm run test:memory` 808/806/0/2; тест-гарды инвариантов (i)–(iv) включая B-pin (role-set при любом конфиге, кастомный агент всегда U1-masked, warn на любой ключ `trust.*`); docs-drift D10 (inline-канон `maestro.json` без `confidential`/`trust`); memory-набор: V1→V2 fixture-фиксация (на base ветки набор был RED: 816/714/100 fail — pre-existing деградация, верифицирована оркестратором)
+
+### Не изменено (non-goals фичи)
+
+- Legacy-enforcement **не удалён** (NG1): dual mode осознанно, удаление legacy-кода — после миграции проектов (roadmap #34)
+- U1-sanitize (fail-closed на диспатче), `maestro_config`, bash-parity (R6), merge/commit-guard — без изменений
+
 ## [2026-10-19]
 
 > **Версия 6.3.0** — Minor: упрощение команды `/test-agents` (именование тулзы приведено к канону OpenCode V2: `subagent`/`agent`; удалена колонка `Self-report` — эмпирически ненадёжна; тест-задача «Верни OK»; заметка о Temperature перенесена в `manual_docs/reference/commands.md`); V1→V2 именование диспатч-тулзы в доках (6 файлов).
