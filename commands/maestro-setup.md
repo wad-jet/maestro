@@ -9,7 +9,8 @@ description: Инициализация maestro для нового или уж�
 1. Предусловие: если `AGENTS.md` нет — предложить выполнить встроенный `/init`.
 2. Проверка `docs/project-context.md` + запрос git-решения (без автокоммитов).
 3. Собрать контекст по 14 категориям -> `docs/project-context.md`.
-4. Конфигурация: `maestro.json` (trust/confidential/sanitizer_whitelist) + нативные
+4. Конфигурация: `maestro.json` (секции схемы, напр. `sanitizer_whitelist`;
+   `trust`/`confidential` не генерируются — 6.4.0) + нативные
    permissions (`.opencode/opencode.json`),
    плагин + модели агентов по M1 (`.opencode/opencode.json` или global), `.gitignore`
    (весь `.maestro/` и `.opencode/`),
