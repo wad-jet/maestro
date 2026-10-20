@@ -147,8 +147,13 @@ BUILD_COMMAND: "go build ./..."
 **полный JSON-канон** — в скилле `maestro-assistant` (`skills/maestro-assistant/SKILL.md`).
 Задача 3 загружает `maestro-assistant` и следует его канону. Ниже — краткая сводка:
 
-- **`trust`** — всегда `custodian: true`, `sanitizer: true` (trusted по роли). Остальные — untrusted.
-- **`confidential`** — дефолт `paths: ["docs/confidential/**"]`, `trusted` read allow / write+edit deny.
+- **`trust`** — удалена из схемы в 6.4.0 (B): trusted — по роли (role-set `custodian`/`sanitizer`, hardcoded);
+  старые ключи `trust.*` → warn `trust:deprecated_key` + игнор; файловый доступ кастомных
+  агентов — нативный per-agent allow (не `trust`).
+- **`confidential`** — удалена из схемы в 6.4.0 (D5, dual mode): restricted-пути — нативные
+  permissions (deny `read`/`edit`/`glob`/`grep` + per-agent allow) + строка §12
+  `**Confidential-данные:**`; legacy-режим (секция есть) — плагинный enforcement,
+  пока проект не мигрирован (воркфлоу «Миграция legacy → new» — `maestro-assistant`).
 - **`sanitizer_whitelist`** — `rules` дефолтные, `extra_fields`/`extra_uri_schemes` из §12/§3.
 
 **Нативные permissions** (файл-доступ) генерируются в `.opencode/opencode.json`
