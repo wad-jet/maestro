@@ -177,7 +177,7 @@
   - **Shadow-аудит (D7) — observability, не enforcement:** попытки доступа к
     derived restricted-набору (из нативных конфигов; тулы `read`/`edit`/
     `write`/`glob`/`grep`) логируются как `confidential.access`
-    { tool, sessionID, agent, target (basename), outcome: allow|deny|unknown }
+    { tool, sessionID, agent, target (basename), action: allow|deny|unknown }
     — best-effort зеркало нативных permission-решений (residual'ы зеркала —
     §5); файл/сессию плагин не модифицирует.
   - **Директива (D2):** `restricted-data paths: <p1, p2, …>` — в
