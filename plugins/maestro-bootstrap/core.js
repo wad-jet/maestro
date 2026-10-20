@@ -374,12 +374,21 @@ export function allRulesDisabled(opts) {
 
 // --- Trust & Confidential ---------------------------------------------------
 
-export function loadTrustConfig(config) {
-  const trusted = new Set();
-  for (const [name, value] of Object.entries(config?.trust ?? {})) {
-    if (value === true) trusted.add(name);
-  }
-  return trusted;
+// D6/B (retire-confidential): trusted-агенты — hardcoded role-set.
+// Секция `trust` в maestro.json не читается: доверие — по роли, не по ключу конфига.
+const ROLE_TRUSTED_AGENTS = new Set(["custodian", "sanitizer"]);
+
+export function loadTrustConfig(_config) {
+  // Секция trust не читается (B): всегда role-set {custodian, sanitizer}.
+  return new Set(ROLE_TRUSTED_AGENTS);
+}
+
+// D6/B (retire-confidential): ключи устаревшей секции `trust` — для warn
+// `trust:deprecated_key` при init (секция не читается, значения игнорируются).
+export function deprecatedTrustKeys(config) {
+  const section = config?.trust;
+  if (!section || typeof section !== "object" || Array.isArray(section)) return [];
+  return Object.keys(section);
 }
 
 const CONF_TRUSTED_ACTIONS = new Set(["allow", "deny"]);
@@ -822,6 +831,14 @@ export async function createBootstrapPlugin(ctx) {
   // gate-17 marker (one notice per session).
   const warnedCommitSessions = new Set();
   const trustedAgents = loadTrustConfig(config);
+  // D6/B: секция trust не читается — legacy-ключи → warn + игнор (однократно на init).
+  const trustKeys = deprecatedTrustKeys(config);
+  if (trustKeys.length > 0) {
+    log.warn("trust:deprecated_key", {
+      keys: trustKeys,
+      hint: "секция trust больше не читается: доверие — по роли (custodian/sanitizer); кастомные агенты из trust теряют плагинный файловый доступ — при необходимости добавить нативный per-agent allow (HITL)",
+    });
+  }
   const unsafePatterns = detectUnsafePatterns(whitelist);
   if (unsafePatterns.length > 0) {
     log.warn("sanitizer.unsafe_patterns", { count: unsafePatterns.length });
