@@ -19,6 +19,11 @@ import {
   registerFeedbackReportHooks,
 } from "./feedback-report.js";
 import { clearPipelineStatus } from "./pipeline-status.js";
+import {
+  restrictedDirectiveText,
+  registerRestrictedDataHooks,
+  checkSection12Drift,
+} from "./restricted-data.js";
 import opencodePlugin from "./index.js";
 
 function readLogs(dir, filePrefix = "maestro-bootstrap") {
@@ -4415,5 +4420,393 @@ describe("loadNativeRestrictedSet", () => {
     writeNative("opencode.jsonc", '{ /* layer */ "permission": { "read": { "c/**": "deny" } } }');
     const res = loadNativeRestrictedSet(dir, ops());
     assert.deepEqual(res.dataPaths, ["c/**"]);
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Restricted-data directive (D2/M2/M7, retire-confidential)
+// Директива `restricted-data paths: p1, p2` — в system-контекст top-level
+// primary-сессий (источник restricted-набора для оркестратора, D2). Drift-
+// сверка строки-зеркала §12 docs/project-context.md — warn при расхождении
+// (детектор миграционного окна, I2); warn-имя `confidential:drift` — фиксировано.
+// ─────────────────────────────────────────────────────────────────────────────
+
+describe("restricted-data directive (D2, retire-confidential)", () => {
+  it("restrictedDirectiveText: канон §8 — 'restricted-data paths: p1, p2'", () => {
+    assert.equal(restrictedDirectiveText(["a/b", "c/d"]), "restricted-data paths: a/b, c/d");
+  });
+
+  it("restrictedDirectiveText: один путь", () => {
+    assert.equal(restrictedDirectiveText(["docs/confidential/**"]), "restricted-data paths: docs/confidential/**");
+  });
+});
+
+describe("registerRestrictedDataHooks (модуль, паттерн communication)", () => {
+  const sessions = {
+    root: { id: "root" },
+    task: { id: "task", parentID: "root" },
+    service: { id: "service", title: "[maestro-memory] status" },
+  };
+
+  function makeClient(handlers) {
+    return {
+      session: {
+        get: async ({ sessionID }) => {
+          const rec = sessions[sessionID];
+          if (!rec) throw new Error("session not found");
+          return { data: rec };
+        },
+        hook: async (name, fn) => {
+          assert.equal(name, "context");
+          handlers.push(fn);
+          return { dispose() {} };
+        },
+      },
+    };
+  }
+
+  const directivesIn = (ev) =>
+    (ev.system ?? [])
+      .map((s) => (typeof s === "string" ? s : s?.text ?? ""))
+      .filter((t) => t.includes("restricted-data paths:"));
+
+  it("тест-гард (iii): top-level primary → директива; task-сессия (parentID) → нет; service-сессия → нет", async () => {
+    const handlers = [];
+    await registerRestrictedDataHooks({
+      client: makeClient(handlers), log: null,
+      getDataPaths: () => ["docs/confidential/**", "secrets/**"],
+    });
+    assert.equal(handlers.length, 1, "context hook зарегистрирован");
+    const h = handlers[0];
+
+    const evRoot = { sessionID: "root" };
+    await h(evRoot);
+    assert.equal(directivesIn(evRoot).length, 1, "ровно одна директива");
+    assert.equal(directivesIn(evRoot)[0], "restricted-data paths: docs/confidential/**, secrets/**");
+
+    const evTask = { sessionID: "task" };
+    await h(evTask);
+    assert.equal(directivesIn(evTask).length, 0, "task-сессия (parentID) — директивы нет");
+    assert.equal(evTask.system?.length ?? 0, 0);
+
+    const evService = { sessionID: "service" };
+    await h(evService);
+    assert.equal(directivesIn(evService).length, 0, "service-сессия ([maestro-memory]) — директивы нет");
+  });
+
+  it("пустой набор → директивы нет", async () => {
+    const handlers = [];
+    await registerRestrictedDataHooks({ client: makeClient(handlers), log: null, getDataPaths: () => [] });
+    const ev = { sessionID: "root" };
+    await handlers[0](ev);
+    assert.equal(ev.system?.length ?? 0, 0, "пустой набор — ничего не инжектится");
+  });
+
+  it("дедуп: повторный вызов хука на той же сессии — одна строка", async () => {
+    const handlers = [];
+    await registerRestrictedDataHooks({ client: makeClient(handlers), log: null, getDataPaths: () => ["a/b"] });
+    const ev = { sessionID: "root" };
+    await handlers[0](ev);
+    await handlers[0](ev); // хук может сработать повторно на request
+    assert.equal(directivesIn(ev).length, 1, "одна строка после повторного вызова");
+  });
+
+  it("V1: experimental.chat.system.transform — eligible → инжект; task-сессия → нет", async () => {
+    const handlers = [];
+    const res = await registerRestrictedDataHooks({
+      client: makeClient(handlers), log: null, getDataPaths: () => ["a/b"],
+    });
+    assert.equal(typeof res["experimental.chat.system.transform"], "function");
+    assert.equal(typeof res.dispose, "function");
+    const out = { system: [] };
+    await res["experimental.chat.system.transform"]({ sessionID: "root" }, out);
+    assert.deepEqual(out.system, ["restricted-data paths: a/b"]);
+    const out2 = { system: [] };
+    await res["experimental.chat.system.transform"]({ sessionID: "task" }, out2);
+    assert.equal(out2.system.length, 0, "не-eligible — нет инжекта");
+    res.dispose();
+  });
+
+  it("fail-soft: сбой getDataPaths не роняет хук", async () => {
+    const handlers = [];
+    await registerRestrictedDataHooks({
+      client: makeClient(handlers), log: null,
+      getDataPaths: () => { throw new Error("boom"); },
+    });
+    const ev = { sessionID: "root" };
+    await assert.doesNotReject(() => handlers[0](ev), "сбой в хуке не пробрасывается");
+    assert.equal(ev.system?.length ?? 0, 0);
+  });
+
+  it("fail-soft: session.get недоступен (нет клиента) — eligible=false, без throw", async () => {
+    const handlers = [];
+    const res = await registerRestrictedDataHooks({
+      client: {
+        session: {
+          // get отсутствует — isEligible → false (fail-soft)
+          hook: async (_name, fn) => { handlers.push(fn); return { dispose() {} }; },
+        },
+      },
+      log: null,
+      getDataPaths: () => ["a/b"],
+    });
+    const ev = { sessionID: "ghost" };
+    await assert.doesNotReject(() => handlers[0](ev));
+    assert.equal(ev.system?.length ?? 0, 0);
+    res.dispose();
+  });
+});
+
+describe("checkSection12Drift (M2, mirror-строка §12)", () => {
+  function makeLog() {
+    const entries = [];
+    return { entries, warn: (msg, fields = {}) => entries.push({ msg, ...fields }), debug: () => {} };
+  }
+
+  function makeRoot(withFile, content) {
+    const d = fs.mkdtempSync(path.join(os.tmpdir(), "fab-rd-drift-"));
+    if (withFile) {
+      fs.mkdirSync(path.join(d, "docs"), { recursive: true });
+      fs.writeFileSync(path.join(d, "docs", "project-context.md"), content);
+    }
+    return d;
+  }
+
+  it("(a) §12 = набору → warn'а нет", () => {
+    const d = makeRoot(true, "## 12. Безопасность\n\n- **Confidential-данные:** a/b, c/d\n\n- другое\n");
+    try {
+      const log = makeLog();
+      checkSection12Drift(d, ["a/b", "c/d"], log);
+      assert.equal(log.entries.length, 0, "совпадение — без warn");
+    } finally {
+      fs.rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it("(b) расхождение → warn confidential:drift с directive и section12", () => {
+    const d = makeRoot(true, "- **Confidential-данные:** a/b\n");
+    try {
+      const log = makeLog();
+      checkSection12Drift(d, ["a/b", "c/d"], log);
+      assert.equal(log.entries.length, 1);
+      assert.equal(log.entries[0].msg, "confidential:drift");
+      assert.equal(log.entries[0].directive, "restricted-data paths: a/b, c/d");
+      assert.equal(log.entries[0].section12, "a/b");
+    } finally {
+      fs.rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it("(c) строки нет (набор непуст) → warn, section12=null", () => {
+    const d = makeRoot(true, "## 12. Безопасность\n\n- **Барьер доступа:** нативные permissions\n");
+    try {
+      const log = makeLog();
+      checkSection12Drift(d, ["a/b"], log);
+      assert.equal(log.entries.length, 1);
+      assert.equal(log.entries[0].msg, "confidential:drift");
+      assert.equal(log.entries[0].section12, null);
+    } finally {
+      fs.rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it("(d) project-context.md отсутствует → warn, без throw", () => {
+    const d = makeRoot(false);
+    try {
+      const log = makeLog();
+      assert.doesNotThrow(() => checkSection12Drift(d, ["a/b"], log));
+      assert.equal(log.entries.length, 1);
+      assert.equal(log.entries[0].msg, "confidential:drift");
+    } finally {
+      fs.rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it("пустой набор и строки нет → warn'а нет (совпадение)", () => {
+    const d = makeRoot(false);
+    try {
+      const log = makeLog();
+      checkSection12Drift(d, [], log);
+      assert.equal(log.entries.length, 0);
+    } finally {
+      fs.rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it("битая/пустая строка при непустом наборе → warn", () => {
+    const d = makeRoot(true, "- **Confidential-данные:**\n");
+    try {
+      const log = makeLog();
+      checkSection12Drift(d, ["a/b"], log);
+      assert.equal(log.entries.length, 1);
+      assert.equal(log.entries[0].msg, "confidential:drift");
+    } finally {
+      fs.rmSync(d, { recursive: true, force: true });
+    }
+  });
+
+  it("порядок путей в строке не важен (сравнение как множество)", () => {
+    const d = makeRoot(true, "- **Confidential-данные:** c/d, a/b\n");
+    try {
+      const log = makeLog();
+      checkSection12Drift(d, ["a/b", "c/d"], log);
+      assert.equal(log.entries.length, 0);
+    } finally {
+      fs.rmSync(d, { recursive: true, force: true });
+    }
+  });
+});
+
+describe("restricted-data directive: production path (D2, init-контур core)", () => {
+  let baseDir, savedEnv;
+  const ENV = [
+    "MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL",
+    "MAESTRO_BOOTSTRAP_LOG_DIR", "MAESTRO_CONFIG",
+  ];
+
+  const makeClient = (sessionRecs) => ({
+    session: {
+      get: async ({ sessionID }) => {
+        const rec = sessionRecs[sessionID];
+        if (!rec) throw new Error("session not found");
+        return { data: rec };
+      },
+    },
+  });
+
+  async function runContext(p, sessionID) {
+    const ev = { sessionID };
+    for (const h of p.contextHandlers) await h(ev);
+    return ev;
+  }
+
+  const directivesIn = (ev) =>
+    (ev.system ?? [])
+      .map((s) => (typeof s === "string" ? s : s?.text ?? ""))
+      .filter((t) => t.includes("restricted-data paths:"));
+
+  function writeNativeDeny(d, pattern) {
+    fs.mkdirSync(path.join(d, ".opencode"), { recursive: true });
+    fs.writeFileSync(path.join(d, ".opencode/opencode.json"), JSON.stringify({
+      permission: { read: { [pattern]: "deny" } },
+    }));
+  }
+
+  before(() => {
+    savedEnv = {};
+    for (const k of ENV) { savedEnv[k] = process.env[k]; delete process.env[k]; }
+    baseDir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-rd-prod-"));
+  });
+
+  after(() => {
+    for (const k of ENV) {
+      if (savedEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedEnv[k];
+    }
+    fs.rmSync(baseDir, { recursive: true, force: true });
+  });
+
+  it("production: хуки зарегистрированы — top-level primary получает директиву из нативного конфига", async () => {
+    const d = path.join(baseDir, "prod-new");
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, "maestro.json"), JSON.stringify({}));
+    writeNativeDeny(d, "secrets/**");
+    const p = await MaestroBootstrapPlugin({
+      directory: d,
+      client: makeClient({ root: { id: "root" } }),
+    });
+    try {
+      assert.ok(p.contextHandlers.length >= 1, "context-хуки зарегистрированы");
+      const ev = await runContext(p, "root");
+      assert.equal(directivesIn(ev).length, 1, "ровно одна restricted-data директива");
+      assert.ok(directivesIn(ev)[0].includes("secrets/**"), "набор из нативного конфига");
+    } finally {
+      p.dispose();
+    }
+  });
+
+  it("production: task- и service-сессии — директивы нет (тест-гард iii)", async () => {
+    const d = path.join(baseDir, "prod-guard");
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, "maestro.json"), JSON.stringify({}));
+    writeNativeDeny(d, "secrets/**");
+    const p = await MaestroBootstrapPlugin({
+      directory: d,
+      client: makeClient({
+        root: { id: "root" },
+        task: { id: "task", parentID: "root" },
+        service: { id: "service", title: "[maestro-memory] status" },
+      }),
+    });
+    try {
+      const evTask = await runContext(p, "task");
+      assert.equal(directivesIn(evTask).length, 0, "task-сессия — нет");
+      const evService = await runContext(p, "service");
+      assert.equal(directivesIn(evService).length, 0, "service-сессия — нет");
+    } finally {
+      p.dispose();
+    }
+  });
+
+  it("production: legacy — union(native, confidential.paths) в директиве", async () => {
+    const d = path.join(baseDir, "prod-legacy");
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, "maestro.json"), JSON.stringify({
+      confidential: { paths: ["docs/confidential/**"] },
+    }));
+    writeNativeDeny(d, "secrets/**");
+    const p = await MaestroBootstrapPlugin({
+      directory: d,
+      client: makeClient({ root: { id: "root" } }),
+    });
+    try {
+      const ev = await runContext(p, "root");
+      assert.equal(directivesIn(ev).length, 1, "ровно одна директива");
+      assert.ok(directivesIn(ev)[0].includes("secrets/**"), "native-часть union");
+      assert.ok(directivesIn(ev)[0].includes("docs/confidential/**"), "legacy-часть union (confidential.paths)");
+    } finally {
+      p.dispose();
+    }
+  });
+
+  it("production: drift — §12 расхождение → warn confidential:drift в лог при реальной сбороке", async () => {
+    const d = path.join(baseDir, "prod-drift");
+    fs.mkdirSync(path.join(d, "docs"), { recursive: true });
+    fs.writeFileSync(path.join(d, "maestro.json"), JSON.stringify({}));
+    writeNativeDeny(d, "secrets/**");
+    fs.writeFileSync(path.join(d, "docs/project-context.md"),
+      "## 12. Безопасность\n\n- **Confidential-данные:** other/**\n");
+    const p = await MaestroBootstrapPlugin({
+      directory: d,
+      client: makeClient({ root: { id: "root" } }),
+    });
+    try {
+      const entries = readLogs(d).filter((e) => e.msg === "confidential:drift");
+      assert.equal(entries.length, 1, "ровно один drift-warn при init");
+      assert.equal(entries[0].level, "warn");
+      assert.match(entries[0].section12, /other\/\*\*/);
+      assert.match(entries[0].directive, /secrets\/\*\*/);
+    } finally {
+      p.dispose();
+    }
+  });
+
+  it("production: drift — project-context.md отсутствует → warn, без throw, директива всё равно инжектится", async () => {
+    const d = path.join(baseDir, "prod-drift-missing");
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, "maestro.json"), JSON.stringify({}));
+    writeNativeDeny(d, "secrets/**");
+    const p = await MaestroBootstrapPlugin({
+      directory: d,
+      client: makeClient({ root: { id: "root" } }),
+    });
+    try {
+      const entries = readLogs(d).filter((e) => e.msg === "confidential:drift");
+      assert.equal(entries.length, 1, "warn при отсутствии project-context.md");
+      const ev = await runContext(p, "root");
+      assert.equal(directivesIn(ev).length, 1, "директива всё равно инжектится (source of truth — нативный конфиг)");
+    } finally {
+      p.dispose();
+    }
   });
 });

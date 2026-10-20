@@ -25,6 +25,7 @@ import { fileURLToPath } from "node:url";
 import { classifyMemoryConfig, DEFAULTS } from "./memory/config.js";
 import { SESSIONS as MEMORY_SERVICE_SESSIONS } from "./memory/summarize.js";
 import { registerCommunicationHooks } from "./communication.js";
+import { registerRestrictedDataHooks, checkSection12Drift } from "./restricted-data.js";
 import { registerFeedbackReportHooks } from "./feedback-report.js";
 import { registerPipelineStatusHooks, makePipelineStatusTool } from "./pipeline-status.js";
 import { detectGuardCommand, checkMergeMarker, resolveMergeGuardConf, detectCommitCommand, checkCommitGuard } from "./merge-guard.js";
@@ -1068,6 +1069,29 @@ export async function createBootstrapPlugin(ctx) {
     log.error("communication: init failed", { error: err instanceof Error ? err.message : String(err) });
   }
 
+  // --- Restricted-data directive (D2, retire-confidential) + §12 drift ---
+  // Источник restricted-набора для оркестратора: new-режим — нативный
+  // derived-набор (loadNativeRestrictedSet); legacy (секция `confidential`
+  // есть, D5) — union(native, confidential.paths), чтобы на немигрированном
+  // проекте оркестратор знал пути (в т.ч. если нативных deny ещё нет).
+  // Drift-сверка строки-зеркала §12 docs/project-context.md (M2) — warn при
+  // расхождении (детектор миграционного окна, I2).
+  const nativeSet = loadNativeRestrictedSet(root);
+  const getRestrictedDataPaths = () =>
+    isLegacy
+      ? [...new Set([...nativeSet.dataPaths, ...confidential.paths])]
+      : nativeSet.dataPaths;
+  let restrictedDataDispose = () => {};
+  try {
+    checkSection12Drift(root, getRestrictedDataPaths(), log);
+    const rdResult = await registerRestrictedDataHooks({
+      client: ctx, log, getDataPaths: getRestrictedDataPaths,
+    });
+    restrictedDataDispose = rdResult.dispose || (() => {});
+  } catch (err) {
+    log.error("restricted_data: init failed", { error: err instanceof Error ? err.message : String(err) });
+  }
+
   // --- Feedback report hooks ---
   let fbDispose = () => {};
   try {
@@ -1329,6 +1353,7 @@ export async function createBootstrapPlugin(ctx) {
     toolTransformRegistration?.dispose?.();
     memoryDispose();
     commDispose();
+    restrictedDataDispose();
     fbDispose();
     pipelineStatusDispose();
     commitGuardNoticeDispose();
