@@ -1664,7 +1664,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       }),
       memory_stats_detail: tool({
         description:
-          "Агрегатная статистика памяти активного проекта: число записей, по авторам, по датам, кластеры тем (cosine > similarity_threshold), граф похожести, разбивка по тирам (merged/experience/unknown/dead) и веткам, диагностики (mainline_unresolved, unmasked_branch_metadata, external_embedder_unmasked_queries). Только агрегаты — без summary-текста.",
+          "Агрегатная статистика памяти активного проекта: число записей, по авторам, по датам, кластеры тем (cosine > similarity_threshold), граф похожести, разбивка по тирам (merged/experience/unknown/dead) и веткам, диагностика (mainline_unresolved). Только агрегаты — без summary-текста.",
         args: {},
         execute: async (args, ctx) => {
           try {

@@ -2157,7 +2157,7 @@ test("memory_stats_detail fail-soft: revList null → только merged-счё
   }
 });
 
-test("@maestro-memory duplicates diagnostics: disabled_reason / mainline_unresolved / unmasked_branch_metadata", async () => {
+test("@maestro-memory duplicates diagnostics: disabled_reason / mainline_unresolved", async () => {
   // (a) память off → ядро скилла инструктирует выводить disabled_reason
   // (32b9b95: команды slim — контент в skills/maestro-memory/).
   const skillPath = join(dirname(fileURLToPath(import.meta.url)), "..", "..", "..", "skills", "maestro-memory", "SKILL.md");

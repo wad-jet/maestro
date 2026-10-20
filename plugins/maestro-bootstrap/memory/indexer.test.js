@@ -1277,7 +1277,6 @@ test("entry.artifacts extracted from completed write parts (Task 3)", async (t) 
     git: mkGit(),
     root,
     artifactGlobs: ["docs/**"],
-    artifactConfidentialPatterns: ["secrets/**"],
   });
   await idx._run("s1");
   assert.equal(client.upserts.length, 1);
@@ -1306,7 +1305,6 @@ test("re-summarize unions artifacts with existing (D6, Z1) and caps at 8 (Task 3
     git: mkGit(),
     root,
     artifactGlobs: ["docs/**"],
-    artifactConfidentialPatterns: ["secrets/**"],
   });
   await idx._run("s1");
   assert.deepEqual(
@@ -1348,7 +1346,6 @@ test("invariants: tool parts NOT in summarize transcript; artifacts NOT in embed
     git: mkGit(),
     root,
     artifactGlobs: ["docs/**"],
-    artifactConfidentialPatterns: ["secrets/**"],
   });
   await idx._run("s1");
   assert.equal(client.upserts.length, 1);
@@ -1399,7 +1396,6 @@ test("union dedup is case-insensitive, extracted-first ordering (Task 3 deferred
     git: mkGit(),
     root,
     artifactGlobs: ["docs/**"],
-    artifactConfidentialPatterns: ["secrets/**"],
   });
   await idx._run("s1");
   assert.deepEqual(
