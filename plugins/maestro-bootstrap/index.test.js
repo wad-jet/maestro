@@ -1526,12 +1526,16 @@ describe("maestro-bootstrap filePathOf for confidential tools", () => {
   it("extracts filePath from edit", () => {
     assert.equal(filePathOf("edit", { path: "docs/confidential/y.md", oldString: "a", newString: "b" }), "docs/confidential/y.md");
   });
-  it("returns undefined for non-file tools", () => {
+  it("returns undefined for non-file tools and missing path", () => {
     assert.equal(filePathOf("bash", { command: "ls" }), undefined);
     assert.equal(filePathOf("read", {}), undefined);
     assert.equal(filePathOf("glob", { pattern: "**/*.ts" }), undefined);
-    assert.equal(filePathOf("grep", { pattern: "foo", path: "src" }), undefined);
+    assert.equal(filePathOf("grep", { pattern: "foo" }), undefined);
     assert.equal(filePathOf("subagent", { description: "subagent" }), undefined);
+  });
+  it("extracts path from glob/grep (shadow-аудит, D7: target для матчинга restricted-набора)", () => {
+    assert.equal(filePathOf("glob", { pattern: "**/*.md", path: "docs/data" }), "docs/data");
+    assert.equal(filePathOf("grep", { pattern: "foo", path: "src" }), "src");
   });
 });
 
@@ -2491,6 +2495,196 @@ describe("maestro-bootstrap confidential audit log", () => {
     const out = { args: { filePath: "src/app.ts" } };
     await hooks["tool.execute.before"]({ tool: "read", sessionID: "childTrusted", callID: "c-a3" }, out);
     assert.equal(readLogs(dir, "maestro-audit").length, before, "no audit entry for non-confidential read");
+  });
+});
+
+describe("maestro-bootstrap shadow audit (new mode, D7/M3/M4)", () => {
+  // New-режим (секции `confidential` нет в maestro.json): плагин файлы не
+  // гейтит (нативный барьер — за ядром OpenCode). Shadow-аудит —
+  // observability, MIRROR, не enforcement: tool ∈ {read, write, edit, glob,
+  // grep} + target матчит нативный restricted-набор (deny read из нативных
+  // конфигов) → confidential.access с outcome allow|deny|unknown. Нет throw,
+  // event не модифицируется. Per-agent allow — только из JSON-конфигов (M4),
+  // frontmatter агентов не учитывается. Target = basename (M3/SEC-4b).
+  let dir, hooks, savedLogEnv;
+  const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR", "MAESTRO_AUDIT_LOG_DIR"];
+
+  function makeClient(sessions) {
+    return {
+      session: {
+        get: async ({ sessionID }) => {
+          const rec = sessions[sessionID];
+          if (!rec) throw new Error("not found");
+          return { data: rec.session };
+        },
+        context: async ({ sessionID }) => {
+          const rec = sessions[sessionID];
+          if (!rec) return { data: [] };
+          return { data: rec.messages };
+        },
+      },
+    };
+  }
+
+  const shadowSessions = {
+    root: { session: { id: "root" }, messages: [] }, // primary: нет agent-информации → unknown
+    childCustodian: {
+      session: { id: "childCustodian", parentID: "root", agent: "custodian" },
+      messages: [],
+    },
+    childHaiku: {
+      session: { id: "childHaiku", parentID: "root", agent: "haiku" },
+      messages: [],
+    },
+  };
+
+  before(async () => {
+    savedLogEnv = {};
+    for (const k of LOG_ENV) { savedLogEnv[k] = process.env[k]; delete process.env[k]; }
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-shadow-"));
+    // New-режим: секции `confidential` нет.
+    fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({}));
+    // Нативный конфиг (project-слой): deny read на docs/data/** + per-agent
+    // allow custodian — источник derived-набора и outcome-зеркала.
+    fs.mkdirSync(path.join(dir, ".opencode"), { recursive: true });
+    fs.writeFileSync(path.join(dir, ".opencode", "opencode.json"), JSON.stringify({
+      permission: { read: { "docs/data/**": "deny" } },
+      agent: { custodian: { permission: { read: { "docs/data/**": "allow" } } } },
+    }));
+    hooks = await MaestroBootstrapPlugin({ directory: dir, client: makeClient(shadowSessions) });
+  });
+
+  after(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    for (const k of LOG_ENV) {
+      if (savedLogEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedLogEnv[k];
+    }
+  });
+
+  const auditEntry = (callID) => readLogs(dir, "maestro-audit").find((x) => x.callID === callID);
+
+  it("custodian read of restricted path → confidential.access action=allow, target=basename (M3)", async () => {
+    const out = { args: { filePath: "docs/data/report.md" } };
+    await hooks["tool.execute.before"]({ tool: "read", sessionID: "childCustodian", callID: "s-1" }, out);
+    const e = auditEntry("s-1");
+    assert.ok(e, "audit entry exists");
+    assert.equal(e.msg, "confidential.access");
+    assert.equal(e.action, "allow");
+    assert.equal(e.agent, "custodian");
+    assert.equal(e.tool, "read");
+    assert.equal(e.sessionID, "childCustodian");
+    assert.equal(e.target, "report.md");
+    assert.notEqual(e.target, "docs/data/report.md", "target — basename, не полный путь (M3)");
+  });
+
+  it("agent без allow → action=deny (нет throw)", async () => {
+    const out = { args: { filePath: "docs/data/report.md" } };
+    await assert.doesNotReject(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "childHaiku", callID: "s-2" }, out),
+    );
+    const e = auditEntry("s-2");
+    assert.ok(e, "audit entry exists");
+    assert.equal(e.msg, "confidential.access");
+    assert.equal(e.action, "deny");
+    assert.equal(e.agent, "haiku");
+    assert.equal(e.target, "report.md");
+  });
+
+  it("primary-сессия (нет agent-информации) → action=unknown (нет throw)", async () => {
+    const out = { args: { filePath: "docs/data/report.md" } };
+    await assert.doesNotReject(
+      hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "s-3" }, out),
+    );
+    const e = auditEntry("s-3");
+    assert.ok(e, "audit entry exists");
+    assert.equal(e.action, "unknown");
+    assert.equal(e.agent, undefined, "agent в записи отсутствует");
+    assert.equal(e.target, "report.md");
+  });
+
+  it("glob с path под dataPaths → логируется, target=basename, outcome-зеркало", async () => {
+    const out = { args: { pattern: "**/*.md", path: "docs/data" } };
+    await assert.doesNotReject(
+      hooks["tool.execute.before"]({ tool: "glob", sessionID: "childCustodian", callID: "s-4" }, out),
+    );
+    const e = auditEntry("s-4");
+    assert.ok(e, "audit entry for glob exists");
+    assert.equal(e.tool, "glob");
+    assert.equal(e.action, "allow");
+    assert.equal(e.target, "data");
+  });
+
+  it("grep с path под dataPaths → логируется (deny для агента без allow)", async () => {
+    const out = { args: { pattern: "secret", path: "docs/data" } };
+    await assert.doesNotReject(
+      hooks["tool.execute.before"]({ tool: "grep", sessionID: "childHaiku", callID: "s-5" }, out),
+    );
+    const e = auditEntry("s-5");
+    assert.ok(e, "audit entry for grep exists");
+    assert.equal(e.tool, "grep");
+    assert.equal(e.action, "deny");
+    assert.equal(e.target, "data");
+  });
+
+  it("путь вне dataPaths → записи нет", async () => {
+    const out = { args: { filePath: "src/app.ts" } };
+    await hooks["tool.execute.before"]({ tool: "read", sessionID: "childCustodian", callID: "s-6" }, out);
+    assert.equal(auditEntry("s-6"), undefined, "нет записи для пути вне restricted-набора");
+  });
+
+  it("нет [confidential:deny] ни в одном из случаев (mirror, не enforcement)", async () => {
+    const cases = [
+      ["read", "root", { args: { filePath: "docs/data/report.md" } }, "s-7a"],
+      ["read", "childHaiku", { args: { filePath: "docs/data/report.md" } }, "s-7b"],
+      ["write", "childHaiku", { args: { filePath: "docs/data/report.md", content: "x" } }, "s-7c"],
+      ["glob", "childHaiku", { args: { pattern: "**/*", path: "docs/data" } }, "s-7d"],
+    ];
+    for (const [tool, sessionID, out, callID] of cases) {
+      await assert.doesNotReject(
+        hooks["tool.execute.before"]({ tool, sessionID, callID }, out),
+        undefined,
+        `${tool}/${sessionID} не бросает исключение`,
+      );
+    }
+    // Записи для deny/unknown-случаев созданы (observability работает),
+    // но throw не было — плагин файлы не гейтит.
+    assert.ok(auditEntry("s-7b"), "deny-случай проаудитирован");
+    assert.ok(auditEntry("s-7a"), "unknown-случай проаудитирован");
+  });
+
+  it("production-путь: реальный init-контур (createBootstrapPlugin + нативный конфиг на диске) → запись с ожидаемым outcome", async () => {
+    const d2 = fs.mkdtempSync(path.join(os.tmpdir(), "fab-shadow-prod-"));
+    try {
+      // New-режим: секции `confidential` нет в maestro.json.
+      fs.writeFileSync(path.join(d2, "maestro.json"), JSON.stringify({}));
+      // Нативный конфиг (root-слой): deny read на vault/** + per-agent allow
+      // custodian — читается loadNativeRestrictedSet из файлов, без ops-override.
+      fs.writeFileSync(path.join(d2, "opencode.json"), JSON.stringify({
+        permission: { read: { "vault/**": "deny" } },
+        agent: { custodian: { permission: { read: { "vault/**": "allow" } } } },
+      }));
+      const prodSessions = {
+        root: { session: { id: "root" }, messages: [] },
+        childCustodian: { session: { id: "childCustodian", parentID: "root", agent: "custodian" }, messages: [] },
+      };
+      const h2 = await MaestroBootstrapPlugin({ directory: d2, client: makeClient(prodSessions) });
+      assert.equal(typeof h2["tool.execute.before"], "function", "плагин инициализирован — хук зарегистрирован (реальный init-контур)");
+      const outAllow = { args: { filePath: "vault/q.md" } };
+      await h2["tool.execute.before"]({ tool: "read", sessionID: "childCustodian", callID: "s-p1" }, outAllow);
+      const eAllow = readLogs(d2, "maestro-audit").find((x) => x.callID === "s-p1");
+      assert.ok(eAllow, "audit entry для read custodian'ом");
+      assert.equal(eAllow.msg, "confidential.access");
+      assert.equal(eAllow.action, "allow");
+      assert.equal(eAllow.target, "q.md");
+      const outUnknown = { args: { filePath: "vault/q.md" } };
+      await h2["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "s-p2" }, outUnknown);
+      const eUnknown = readLogs(d2, "maestro-audit").find((x) => x.callID === "s-p2");
+      assert.ok(eUnknown, "audit entry для read primary");
+      assert.equal(eUnknown.action, "unknown");
+    } finally {
+      fs.rmSync(d2, { recursive: true, force: true });
+    }
   });
 });
 

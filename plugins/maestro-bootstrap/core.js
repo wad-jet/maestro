@@ -725,8 +725,9 @@ export function loadNativeRestrictedSet(root, ops = {}) {
 
 export function filePathOf(tool, args) {
   if (!args) return undefined;
-  // V2: read/edit/write принимают path, не filePath
-  if ((tool === "read" || tool === "write" || tool === "edit") && typeof args.path === "string") {
+  // V2: read/edit/write принимают path, не filePath; glob/grep — опциональный
+  // path-аргумент (каталог поиска) — target для shadow-аудита (D7).
+  if (["read", "write", "edit", "glob", "grep"].includes(tool) && typeof args.path === "string") {
     return args.path;
   }
   return undefined;
@@ -1227,10 +1228,11 @@ export async function createBootstrapPlugin(ctx) {
       // `confidential` есть в конфиге — enforcement без изменений (пути секции
       // + built-in + P6; trusted — role-set). New-режим (секции нет): плагин
       // файлы не гейтит — нет enforcement-throw, нет built-in-гейта, нет
-      // P6-гейта (нативный барьер — за ядром OpenCode).
-      // PLACEHOLDER (Task 5): в new-режимной ветке подключается shadow-аудит
-      // (observability без enforcement) — deny-строка здесь не возникает.
+      // P6-гейта (нативный барьер — за ядром OpenCode). Shadow-аудит (D7) —
+      // observability, MIRROR, не enforcement: попытка доступа к нативному
+      // restricted-набору логируется c outcome allow|deny|unknown.
       const CONF_TOOLS = new Set(["read", "write", "edit"]);
+      const SHADOW_TOOLS = new Set(["read", "write", "edit", "glob", "grep"]);
       if (isLegacy && CONF_TOOLS.has(input.tool)) {
         // V2: аргументы тула в event.input, path (не filePath)
         const target = filePathOf(input.tool, event.input);
@@ -1255,6 +1257,33 @@ export async function createBootstrapPlugin(ctx) {
             err.confidential = true;
             throw err;
           }
+        }
+      } else if (!isLegacy && SHADOW_TOOLS.has(input.tool)) {
+        // Shadow-аудит (D7, new-режим): best-effort зеркало нативного
+        // permission-исхода (M4: per-agent allow — только из JSON-конфигов,
+        // frontmatter агентов не учитывается). Только лог — нет throw, event
+        // не модифицируется; барьер — нативные permissions ядра OpenCode.
+        const target = filePathOf(input.tool, event.input);
+        const rel = target ? normalizeTarget(root, target) : "";
+        const lower = rel.toLowerCase();
+        const matched = rel
+          ? nativeSet.dataPaths.filter((p) => typeof p === "string" && p && confGlobMatch(p.toLowerCase(), lower))
+          : [];
+        if (matched.length > 0) {
+          let trustInfo = sessionTrustCache.get(input.sessionID);
+          if (trustInfo === undefined) {
+            trustInfo = await resolveIsTrustedSubagent(ctx, trustedAgents, input.sessionID);
+            sessionTrustCache.set(input.sessionID, trustInfo);
+          }
+          let outcome;
+          if (trustInfo.agent === undefined) {
+            outcome = "unknown"; // agent нерезолвимо (primary-сессия и т.п.)
+          } else {
+            const allows = nativeSet.agentAllows.get(trustInfo.agent);
+            outcome = Array.isArray(allows) && matched.some((p) => allows.includes(p)) ? "allow" : "deny";
+          }
+          const base = { sessionID: input.sessionID, callID: input.callID, tool: input.tool, action: outcome, agent: trustInfo.agent, target: path.basename(target) };
+          auditLog.info("confidential.access", base);
         }
       }
 
