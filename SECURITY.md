@@ -83,7 +83,8 @@
      пайплайна — только оркестратором на шаге 0 (кэш) и при явном
      HITL-запросе.
   2. **Нативный permission-слой OpenCode** (fail-closed, не плагином):
-     `read`/`glob`/`grep` deny + `edit` ask для `maestro.json` и `.maestro/**`
+     `read`/`glob`/`grep` deny для `maestro.json` и `.maestro/**` (read —
+     с исключением `.maestro/plugin-version`) + `edit` ask для `maestro.json`
      в `.opencode/opencode.json` или global — см. канон нативных permissions в
      `maestro-assistant`. Это **канон root-слоя** конфига: действует в
      new-режиме, не зависит от плагина.
@@ -264,8 +265,9 @@
   deny-baseline `read`/`edit`/`glob`/`grep` в ядре — fail-closed), а
   **trusted-агенты (role-set `custodian`/`sanitizer`) сохраняют доступ** через
   нативный per-agent `read`/`glob`/`grep` allow (R2-конфиг). **`maestro.json`/
-  `.maestro` защищены нативно** (deny `read`/`glob`/`grep` + edit-ask в
-  `.opencode/opencode.json`) независимо от плагина. Плагин по-прежнему
+  `.maestro` защищены нативно** (deny `read`/`glob`/`grep` для обоих +
+  edit-ask для `maestro.json` в `.opencode/opencode.json`) независимо от
+  плагина. Плагин по-прежнему
   обязателен для: Ур.1-sanitize (fail-closed на диспатче), merge/commit-guard
   (P9), observability (аудит, shadow-аудит) и memory → P5-гейт сохраняется.
   Residual'ы: P6 (глобальный слой конфига, `MAESTRO_CONFIG`), SEC-5 (каналы
@@ -277,8 +279,9 @@
   воспроизводит решения не точно: (1) bare-string
   `agent.X.permission.read: "allow"` трактуется как `["*"]` → outcome может
   быть `"deny"` при реальном allow; bare top-level deny → `dataPaths: ["*"]`
-  не матчит вложенные пути (segment-семантика `*`) → outcome `"allow"` при
-  реальном deny; (2) production-поведение зависит от реальных нативных
+  не матчит вложенные пути (segment-семантика `*`) → запись
+  `confidential.access` для вложенного пути не создаётся (молчание зеркала)
+  при реальном deny; (2) production-поведение зависит от реальных нативных
   конфигов (в т.ч. home-слоя `~/.config/opencode`) — аудит не
   детерминирован вне изолированного тестового окружения; (3) frontmatter-
   правила агентов OpenCode mirror'ом **не учитываются** (per-agent allow —
