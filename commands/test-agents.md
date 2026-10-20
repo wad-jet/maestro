@@ -70,7 +70,9 @@ trusted-агента (см. `SECURITY.md` → P1/P3).
    - зафиксируй, что trusted-агент прочитал файл (это его право).
 2. Затем **из primary-сессии** попытайся прочитать тот же файл
    (`docs/confidential/<тот-же-файл>.md`).
-3. Зафиксируй результат: read из primary должен вернуть `confidential:deny`.
+3. Зафиксируй результат: read из primary должен быть отклонён — нативный
+   permission error ядра (new-режим) либо `[confidential:deny]` (legacy-режим,
+   секция `confidential` есть).
 
 Добавь строку в сводку:
 
@@ -80,7 +82,8 @@ trusted-агента (см. `SECURITY.md` → P1/P3).
 
 Правила заполнения:
 
-- **PASS** — trusted-агент прочитал confidential, а primary получил deny.
+- **PASS** — trusted-агент прочитал confidential, а primary был отклонён
+  (нативный permission error или `[confidential:deny]` в legacy-режиме).
 - **FAIL** — primary получил доступ к confidential (утечка) → СТОП, сообщи.
 - **skipped** — нет `docs/confidential/**` в текущем проекте.
 
