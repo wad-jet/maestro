@@ -48,7 +48,7 @@ untrusted** (для Ур.1).
 
 В new-режиме плагин логирует **попытки** доступа к derived
 restricted-набору (из нативных конфигов): `confidential.access` с полями
-tool, sessionID, agent, target, `outcome: allow|deny|unknown`. Это
+tool, sessionID, agent, target, `action: allow|deny|unknown`. Это
 **best-effort зеркало, не ground truth**: per-agent allow берётся только
 из JSON-конфигов (frontmatter агентов не учитывается); нерезолвимо —
 `unknown`. Target — `basename` (полный путь в лог не пишется — SEC-4b).

@@ -8,7 +8,7 @@ description: Консультации и настройка maestro-конфиг
 
 ## Что обрабатывает
 
-- `maestro.json` (trust / confidential / sanitizer_whitelist) — чтение
+- `maestro.json` (секции схемы, напр. `sanitizer_whitelist`, `memory`) — чтение
   параметров — плагин-тулом `maestro_config` (native `ask`); `read`/`glob`/`grep`
   нативно denied, bash-чтение запрещено (канон — в скилле `maestro-assistant`)
 - `.opencode/opencode.json` / global (плагин, модели/температура агентов) — как консультация
