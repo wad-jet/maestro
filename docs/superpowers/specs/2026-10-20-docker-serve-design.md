@@ -2,7 +2,7 @@
 
 > **Дата:** 2026-10-20
 > **Автор:** orchestrator (из сессии обсуждения)
-> **Статус:** draft — v17 (warming: not needed for MVP — API models; local models future consideration)
+> **Статус:** draft — v18 (6.4.0 sync: trust→role-set, native permissions barrier, dual mode documented, P1/P5 updated, memory masking generic-only)
 > **Категория:** сложная фича (cross-layer, 3+ файлов, новый модуль)
 
 ---
@@ -288,7 +288,7 @@ git -C /workspace/<repo> clean -fd -e .confidential  # remove untracked leftover
 }
 ```
 
-**Per-project:** committed `opencode.json` в корне репо — `provider`-секции (`{env:VAR}`/`{file:}`), `instructions`, project-специфика. Runtime-инъекция per-project блока — `OPENCODE_CONFIG_CONTENT` из entrypoint (шаблон + env). **Per-project maestro.json:** root (committed) — trust/confidential/sanitizer_whitelist; layer 2 `.maestro/maestro.json` — memory-опции.
+**Per-project:** committed `opencode.json` в корне репо — `provider`-секции (`{env:VAR}`/`{file:}`), `instructions`, project-специфика. Runtime-инъекция per-project блока — `OPENCODE_CONFIG_CONTENT` из entrypoint (шаблон + env). **Per-project maestro.json:** root (committed) — trust/confidential/sanitizer_whitelist; layer 2 `.maestro/maestro.json` — memory-опции. **Dual mode (6.4.0):** если `maestro.json` содержит секцию `confidential` — legacy-режим (plugin enforcement); секции нет — new-режим (native permissions as barrier). Docker skeleton не содержит секции `confidential` → new-режим по умолчанию.
 
 ### 2.9. Git-токен: tmpfs credential-store
 
@@ -366,12 +366,13 @@ git config --global credential.helper "store --file $CRED"
 
 | Requirement | Реализация |
 |---|---|
-| **P1: Confidential deny** | deny-baseline; per-agent allow **только для custodian** (единственный агент, читающий confidential-файлы для Q/A); sanitizer — read-only review промптов (не файлов), не нужен read на confidential. Зафиксированное решение: sanitizer → 3 правила (edit/shell/subagent deny), confidential deny наследуется от global baseline. |
+| **P1: Confidential deny** | **Нативные permissions OpenCode — основной барьер** (6.4.0): deny `read`/`edit`/`glob`/`grep` + per-agent allow для role-set (`custodian`/`sanitizer`). Плагин — shadow-audit (observability), не enforcement (new-режим). Legacy-режим (dual mode D5): пока секция `confidential` есть в `maestro.json` — legacy-enforcement плагином. |
+| **P1: Trust model (6.4.0)** | Trusted = **role-set** `{custodian, sanitizer}` (hardcoded в плагине). Секция `trust` **удалена** из схемы `maestro.json` (6.4.0, B): любой ключ `trust.*` → warn `trust:deprecated_key` + игнор. Доверие по роли, не по конфигу. |
 | **P2: Модели = атрибут имени** | `agent.*.model` в конфиге; runtime-проверка не требуется (P2) |
 | **P3: Fail-closed** | нет подмены subagent_type/модели для trusted-агентов |
 | **P4: Trusted agents** | изолированные модели (`{env:OC_CUSTODIAN_MODEL}`); @test-agents перед пайплайном |
 | **P4-hygiene** | experimental.policies (optional): deny-all + allow-list провайдеров, global-beats-project |
-| **P5: Plugin gate** | plugin по абсолютному пути (не git-спека) |
+| **P5: Plugin gate** | плагин обязателен для: Ур.1-sanitize (fail-closed), merge/commit-guard (P9), observability, memory. Файловая защита restricted-данных — нативные permissions (не зависит от плагина). |
 | **P6: maestro_config sanctioned channel** | native permissions deny read/glob/grep/edit для maestro.json; global `deny` + ask только для primary (build, plan) — fail-closed по умолчанию; плагинный guard (по сессии) |
 | **P9: merge-guard** | маркер в `<root>/.maestro/gates/` |
 | **Token hygiene** | tmpfs 600, не в image, не в .git/config |
@@ -379,9 +380,9 @@ git config --global credential.helper "store --file $CRED"
 | **Confidential two paths** | `docs/confidential/**` — model-boundary, git-ok; `.confidential/**` — machine-boundary, gitignored, ro-bind в mode A |
 | **Confidential gitignore-guard** | entrypoint check + optional bash-guard (по аналогии merge-guard) — задача в план |
 | **Confidential shell-bypass (residual)** | untrusted-агенты с bash-allow (sonnet/haiku/reviewer) могут `cat .confidential/**` — permission-deny покрывает read/glob/grep/edit, но **не shell** (best-effort, как в host-dogfooding SEC-5). Митигация: non-root USER (через root-entrypoint drop) + `--cap-drop=ALL` ограничивают blast radius; полная защита — bash-эвристики. Не устраняется в MVP — принятый residual. |
-| **Container hardening** | `--cap-drop=ALL`, `--security-opt no-new-privileges`, non-root USER, `-p 127.0.0.1:4096:4096` (по умолчанию, не 0.0.0.0), healthcheck-скрипт (пароль не в `docker inspect`) — см. §5.9 |
+| **Container hardening** | `--cap-drop=ALL`, `--security-opt no-new-privileges`, non-root USER (root-entrypoint→drop), `-p 127.0.0.1:4096:4096` (по умолчанию, не 0.0.0.0), healthcheck-скрипт (пароль не в `docker inspect`) — см. §5.9 |
 | **Sensitive data** | opencode.db = raw-транскрипты (конфиденциальный класс); backup осознанно |
-| **Memory masking** | sanitize() до LLM-саммаризации + re-mask перед записью (double-masking, канон memory layer) |
+| **Memory masking** | generic-маскирование (технические секреты) до/после саммаризации; business-confidential НЕ маскируется (SEC-5, принятый риск, 6.4.0 D3) |
 
 ---
 
