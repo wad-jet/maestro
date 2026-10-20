@@ -1,10 +1,10 @@
-import { describe, it, before, after, afterEach } from "node:test";
+import { describe, it, before, after, beforeEach, afterEach } from "node:test";
 import { strict as assert } from "node:assert";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execFileSync } from "node:child_process";
-import { createBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, validateWhitelist, filePathOf, loadTrustConfig, deprecatedTrustKeys, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile, isMaestroConfigPath, loadCommunicationConfig, loadFeedbackReportConfig, makeMaestroConfigTool, resolveConfigFile, resolveGlobalDir } from "./core.js";
+import { createBootstrapPlugin, makeLogger, makeBoundedMap, sanitize, resolveSanitizeOptions, loadWhitelist, validateWhitelist, filePathOf, loadTrustConfig, deprecatedTrustKeys, loadMaestroConfig, detectUnsafePatterns, allRulesDisabled, loadConfidentialConfig, resolveIsTrustedSubagent, normalizeTarget, isConfidentialTarget, confGlobMatch, readPluginVersion, writePluginVersionFile, isPluginMetaFile, isMaestroConfigPath, loadCommunicationConfig, loadFeedbackReportConfig, makeMaestroConfigTool, resolveConfigFile, resolveGlobalDir, loadNativeRestrictedSet } from "./core.js";
 import { DEFAULTS } from "./memory/config.js";
 import {
   detectPlainFlag,
@@ -4101,5 +4101,147 @@ describe("commit-guard integration (R4)", () => {
     } finally {
       p.dispose();
     }
+  });
+});
+
+// ─────────────────────────────────────────────────────────────────────────────
+// loadNativeRestrictedSet (D2/M1, retire-confidential)
+// Derived-набор restricted-путей из нативных конфигов OpenCode. Global-слой —
+// через ops.home (временный home); реальный ~/.config не затрагивается
+// (XDG_CONFIG_HOME в тест-процессе — XDG_TEST_HOME, см. топ уровня).
+// ─────────────────────────────────────────────────────────────────────────────
+describe("loadNativeRestrictedSet", () => {
+  let dir;
+  let home;
+  const ops = () => ({ home });
+
+  beforeEach(() => {
+    dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-native-"));
+    home = fs.mkdtempSync(path.join(os.tmpdir(), "fab-native-home-"));
+  });
+  afterEach(() => {
+    fs.rmSync(dir, { recursive: true, force: true });
+    fs.rmSync(home, { recursive: true, force: true });
+  });
+
+  const writeNative = (rel, content) => {
+    const file = path.join(dir, rel);
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, typeof content === "string" ? content : JSON.stringify(content));
+  };
+  const writeGlobal = (content) => {
+    const d = path.join(home, ".config", "opencode");
+    fs.mkdirSync(d, { recursive: true });
+    fs.writeFileSync(path.join(d, "opencode.json"), typeof content === "string" ? content : JSON.stringify(content));
+  };
+
+  it("deny read в одном слое → паттерн в dataPaths (D2)", () => {
+    writeNative("opencode.json", { permission: { read: { "docs/confidential/**": "deny" } } });
+    const res = loadNativeRestrictedSet(dir, ops());
+    assert.deepEqual(res.dataPaths, ["docs/confidential/**"]);
+    assert.ok(res.agentAllows instanceof Map, "agentAllows — Map");
+    assert.equal(res.agentAllows.size, 0);
+  });
+
+  it("override тем же pattern в более близком слое (root > global) → не в dataPaths (key-level override)", () => {
+    writeGlobal({ permission: { read: { "docs/**": "deny" } } });
+    writeNative("opencode.json", { permission: { read: { "docs/**": "allow" } } });
+    const res = loadNativeRestrictedSet(dir, ops());
+    assert.deepEqual(res.dataPaths, []);
+  });
+
+  it("deny в нижнем слое без override в верхнем → в набор (merge-edge)", () => {
+    writeGlobal({ permission: { read: { "data/**": "deny" } } });
+    writeNative("opencode.json", { permission: { read: { "other/**": "allow" } } });
+    const res = loadNativeRestrictedSet(dir, ops());
+    assert.deepEqual(res.dataPaths, ["data/**"]);
+  });
+
+  it("мерж на уровне «scope → pattern»: allow другого pattern в .opencode не стирает deny из root", () => {
+    writeNative("opencode.json", { permission: { read: { "x/**": "deny" } } });
+    writeNative(".opencode/opencode.json", { permission: { read: { "y/**": "allow" } } });
+    const res = loadNativeRestrictedSet(dir, ops());
+    assert.deepEqual(res.dataPaths, ["x/**"]);
+  });
+
+  it("per-agent allow read → agentAllows (D2/M1)", () => {
+    writeNative("opencode.json", {
+      permission: { read: { "docs/confidential/**": "deny" } },
+      agent: { custodian: { permission: { read: { "docs/confidential/*": "allow" } } } },
+    });
+    const res = loadNativeRestrictedSet(dir, ops());
+    const allows = res.agentAllows.get("custodian");
+    assert.ok(Array.isArray(allows), "agentAllows.get('custodian') — массив");
+    assert.ok(allows.includes("docs/confidential/*"), "allow-паттерн custodian в agentAllows");
+    assert.deepEqual(res.dataPaths, ["docs/confidential/**"]);
+  });
+
+  it("per-agent deny read → dataPaths", () => {
+    writeNative("opencode.json", { agent: { build: { permission: { read: { "vault/**": "deny" } } } } });
+    const res = loadNativeRestrictedSet(dir, ops());
+    assert.deepEqual(res.dataPaths, ["vault/**"]);
+    assert.equal(res.agentAllows.size, 0, "без allow → agentAllows пуст");
+  });
+
+  it("exclusion: точные maestro.json, .maestro/**, built-in → не в dataPaths", () => {
+    writeNative("opencode.json", {
+      permission: {
+        read: {
+          "maestro.json": "deny",
+          ".maestro/**": "deny",
+          ".env": "deny",
+          ".env.local": "deny",
+          "*.pem": "deny",
+          "secrets/api.key": "deny",
+          "docs/confidential/**": "deny",
+        },
+      },
+    });
+    const res = loadNativeRestrictedSet(dir, ops());
+    assert.deepEqual(res.dataPaths, ["docs/confidential/**"]);
+  });
+
+  it("edit-only deny не попадает в dataPaths (M1: только read)", () => {
+    writeNative("opencode.json", { permission: { edit: { "docs/**": "deny" } } });
+    const res = loadNativeRestrictedSet(dir, ops());
+    assert.deepEqual(res.dataPaths, []);
+  });
+
+  it("битый JSON в одном слое → слой пропускается, остальные читаются, без throw", () => {
+    writeNative("opencode.json", "{ this is not json");
+    writeNative(".opencode/opencode.json", { permission: { read: { "deep/**": "deny" } } });
+    const res = loadNativeRestrictedSet(dir, ops());
+    assert.deepEqual(res.dataPaths, ["deep/**"]);
+  });
+
+  it("отсутствуют все конфиги → пустой набор, без throw", () => {
+    const res = loadNativeRestrictedSet(dir, ops());
+    assert.deepEqual(res.dataPaths, []);
+    assert.ok(res.agentAllows instanceof Map, "agentAllows — Map");
+    assert.equal(res.agentAllows.size, 0);
+  });
+
+  it("top-level JSON не объект → слой пропускается, без throw", () => {
+    writeNative("opencode.json", "[1, 2, 3]");
+    const res = loadNativeRestrictedSet(dir, ops());
+    assert.deepEqual(res.dataPaths, []);
+  });
+
+  it("bare string permission.read: \"deny\" (все read) → \"*\" в dataPaths", () => {
+    writeNative("opencode.json", { permission: { read: "deny" } });
+    const res = loadNativeRestrictedSet(dir, ops());
+    assert.deepEqual(res.dataPaths, ["*"]);
+  });
+
+  it("bare string permission: \"deny\" (все tool'ы, вкл. read) → \"*\" в dataPaths", () => {
+    writeNative("opencode.json", { permission: "deny" });
+    const res = loadNativeRestrictedSet(dir, ops());
+    assert.deepEqual(res.dataPaths, ["*"]);
+  });
+
+  it("opencode.jsonc с комментариями читается", () => {
+    writeNative("opencode.jsonc", '{ /* layer */ "permission": { "read": { "c/**": "deny" } } }');
+    const res = loadNativeRestrictedSet(dir, ops());
+    assert.deepEqual(res.dataPaths, ["c/**"]);
   });
 });

@@ -542,6 +542,167 @@ export function isConfidentialTarget(root, patterns, target) {
   return false;
 }
 
+// --- Native restricted set (D2/M1, retire-confidential) ----------------------
+// loadNativeRestrictedSet(root, ops?) — derived-набор restricted-путей из
+// нативных конфигов OpenCode (единственный источник правды файлового доступа).
+// Используется в директиве (D2), shadow-аудите (D7) и mode-данных (Task 3).
+//
+// Слои (precedence, каждый опционален):
+//   1. global:  <XDG_CONFIG_HOME|<home>/.config>/opencode/opencode.json[c]
+//   2. root:    <root>/opencode.json[c]
+//   3. project: <root>/.opencode/opencode.json[c]
+// Извлекает только `read` (M1): deny-паттерны → dataPaths; per-agent
+// `agent.*.permission.read`: deny → dataPaths, allow → agentAllows.
+// Асимметричный конфиг (deny только edit/write) не попадает в набор.
+// Мерж: на уровне «scope → pattern» последний (более близкий) слой побеждает;
+// deny в любом слое без override в более высоком → в набор. Консервативная
+// over-аппроксимация безопасна (больше путей → больше custodian-маршрутизации,
+// утечки нет); under-аппроксимация запрещена.
+// Exclusion из dataPaths — защита-конфиг/ядро, не «данные»: точные
+// maestro.json, .maestro/**, built-in-секреты ядра (BUILTIN_CONFIDENTIAL_PATTERNS).
+// Сломанный/отсутствующий файл — пропускается (fail-soft, без throw).
+// ops: { home?, xdg? } — override глобального слоя для тестов (реальный
+// home/XDG не читаются при передаче).
+
+const NATIVE_CONFIG_NAMES = ["opencode.json", "opencode.jsonc"];
+
+// JSONC: strip `//` и `/* */` комментариев (вне строк) — нативные конфиги
+// OpenCode могут содержать комментарии (opencode.jsonc).
+function stripJsonComments(text) {
+  let out = "";
+  let inStr = false;
+  for (let i = 0; i < text.length; i++) {
+    const ch = text[i];
+    if (inStr) {
+      out += ch;
+      if (ch === "\\" && i + 1 < text.length) { out += text[i + 1]; i++; }
+      else if (ch === "\"") inStr = false;
+      continue;
+    }
+    if (ch === "\"") { inStr = true; out += ch; continue; }
+    if (ch === "/" && text[i + 1] === "/") {
+      while (i < text.length && text[i] !== "\n") i++;
+      continue;
+    }
+    if (ch === "/" && text[i + 1] === "*") {
+      i += 2;
+      while (i < text.length && !(text[i] === "*" && text[i + 1] === "/")) i++;
+      i++;
+      continue;
+    }
+    out += ch;
+  }
+  return out;
+}
+
+// OpenCode permission-паттерн: `*` — любой символ (вкл. `/`), `?` — один
+// символ, остальное — буквально (docs/permissions, Wildcards).
+function nativePatternRegExp(pattern) {
+  let out = "^";
+  for (const ch of pattern) {
+    if (ch === "*") out += ".*";
+    else if (ch === "?") out += ".";
+    else out += ch.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  }
+  return new RegExp(out + "$");
+}
+
+const NATIVE_EXCLUSION_REGEX = [
+  nativePatternRegExp(".maestro/**"),
+  ...BUILTIN_CONFIDENTIAL_PATTERNS.map(nativePatternRegExp),
+];
+
+// Собирает read-правила одного config-объекта: (scope, pattern, action) → sink.
+// scope: "read" (top-level) или "agent.<name>.read". Берёт только allow/deny
+// (ask — ни deny, ни allow — не попадает в набор).
+function collectNativeReadRules(obj, agentName, sink) {
+  const scope = agentName ? `agent.${agentName}.read` : "read";
+  const perm = obj?.permission;
+  if (typeof perm === "string") {
+    // Bare string — action на ВСЕ tool'ы (вкл. read): эквивалент pattern "*"
+    if (perm === "allow" || perm === "deny") sink(scope, "*", perm);
+    return;
+  }
+  if (!isPlainObject(perm)) return;
+  const read = perm.read;
+  if (typeof read === "string") {
+    if (read === "allow" || read === "deny") sink(scope, "*", read);
+    return;
+  }
+  if (!isPlainObject(read)) return;
+  for (const [pattern, action] of Object.entries(read)) {
+    if (typeof pattern === "string" && pattern && (action === "allow" || action === "deny")) {
+      sink(scope, pattern, action);
+    }
+  }
+}
+
+export function loadNativeRestrictedSet(root, ops = {}) {
+  try {
+    const home = typeof ops?.home === "string" && ops.home ? ops.home : os.homedir();
+    const xdgDir = typeof ops?.xdg === "string" && ops.xdg ? ops.xdg : process.env.XDG_CONFIG_HOME;
+
+    // Глобальные каталоги: XDG + <home>/.config (XDG-дефолт). Проверяем оба —
+    // консервативная over-аппроксимация (оба могут существовать).
+    const globalDirs = new Set();
+    if (xdgDir) globalDirs.add(path.join(xdgDir, "opencode"));
+    globalDirs.add(path.join(home, ".config", "opencode"));
+
+    const files = [];
+    for (const d of globalDirs) for (const name of NATIVE_CONFIG_NAMES) files.push(path.join(d, name));
+    files.push(path.join(root, "opencode.json"), path.join(root, "opencode.jsonc"));
+    files.push(path.join(root, ".opencode", "opencode.json"), path.join(root, ".opencode", "opencode.jsonc"));
+
+    const scopes = new Map(); // scope → Map<pattern, action> (последний слой побеждает)
+    const sink = (scope, pattern, action) => {
+      let rules = scopes.get(scope);
+      if (!rules) { rules = new Map(); scopes.set(scope, rules); }
+      rules.set(pattern, action);
+    };
+    for (const file of files) {
+      let raw;
+      try { raw = fs.readFileSync(file, "utf8"); } catch { continue; } // файла нет — пропускаем
+      let layer;
+      try { layer = JSON.parse(stripJsonComments(raw)); } catch { continue; } // битый JSON — пропускаем
+      if (!isPlainObject(layer)) continue;
+      collectNativeReadRules(layer, undefined, sink);
+      const agents = layer.agent;
+      if (isPlainObject(agents)) {
+        for (const [name, cfg] of Object.entries(agents)) {
+          if (name && isPlainObject(cfg)) collectNativeReadRules(cfg, name, sink);
+        }
+      }
+    }
+
+    const isExcluded = (pattern) =>
+      pattern === "maestro.json" || NATIVE_EXCLUSION_REGEX.some((re) => re.test(pattern));
+
+    const dataPaths = [];
+    const seen = new Set();
+    for (const rules of scopes.values()) {
+      for (const [pattern, action] of rules) {
+        if (action !== "deny" || seen.has(pattern) || isExcluded(pattern)) continue;
+        seen.add(pattern);
+        dataPaths.push(pattern);
+      }
+    }
+    const agentAllows = new Map();
+    for (const [scope, rules] of scopes) {
+      if (!scope.startsWith("agent.")) continue;
+      const agent = scope.slice("agent.".length, -".read".length);
+      for (const [pattern, action] of rules) {
+        if (action !== "allow") continue;
+        let arr = agentAllows.get(agent);
+        if (!arr) { arr = []; agentAllows.set(agent, arr); }
+        if (!arr.includes(pattern)) arr.push(pattern);
+      }
+    }
+    return { dataPaths, agentAllows };
+  } catch {
+    return { dataPaths: [], agentAllows: new Map() }; // fail-soft: краш плагина исключён
+  }
+}
+
 export function filePathOf(tool, args) {
   if (!args) return undefined;
   // V2: read/edit/write принимают path, не filePath
