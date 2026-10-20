@@ -101,20 +101,25 @@ read-only, применяет оркестратор.
 диспатчит через `task` tool с `subagent_type` = имени агента. Доступность модели
 обеспечивает провайдер OpenCode — отдельная проверка не требуется.
 
-**Trust check перед диспатчем (два измерения):** оркестратор проверяет
-`maestro.json` (загружен на шаге 0). Trust-статус управляет **двумя**
-измерениями защиты:
+**Trust check перед диспатчем (два измерения):** trust определяется
+**по роли** — hardcoded role-set плагина `{custodian`, `sanitizer}`
+(секция `trust` в `maestro.json` не читается; любой ключ `trust.*` —
+warn + игнор). Trust-статус управляет **двумя** измерениями защиты:
 
 | Trust | Sanitize промпта | Файл-доступ |
 |---|---|---|
-| **trusted** (`true` в `maestro.json`) | **skip** | по нативным permissions opencode (без дополнительных ограничений сверх нативных) |
-| **untrusted** (default) | Уровень 1 + Уровень 2 (`references/trust-and-security.md`) | нативный permission-слой opencode |
+| **trusted** (role-set) | **skip** | по нативным permissions opencode (без дополнительных ограничений сверх нативных) |
+| **untrusted** (все остальные сабагенты, вкл. `opus` и кастомные) | Уровень 1 + Уровень 2 (`references/trust-and-security.md`) | нативный permission-слой opencode |
 
 - **Sanitize промпта:** для untrusted — прогон через Security Review (`references/trust-and-security.md`). Для trusted — промпт уходит как есть.
 - **Файл-доступ:** нативный permission-слой opencode (`.opencode/opencode.json`
-  или global): `read`/`glob`/`grep` deny `maestro.json`/`.maestro/**`,
-  `edit`-ask `maestro.json`, confidential-deny — см. канон нативных permissions
-  в `maestro-assistant`. Плагин `maestro-bootstrap` file-доступ не перехватывает.
+  или global): доступ к restricted-путям (напр. `docs/confidential/**`) —
+  нативный deny `read`/`edit`/`glob`/`grep` + per-agent allow
+  `custodian`/`sanitizer`; `read`/`glob`/`grep` deny
+  `maestro.json`/`.maestro/**`, `edit`-ask `maestro.json` — см. канон
+  нативных permissions в `maestro-assistant`. Плагин `maestro-bootstrap`
+  file-доступ не перехватывает (new-режим; в legacy-режиме — плагинный
+  `[confidential:deny]`).
 - **`sanitizer` сабагент — trusted:** единственный, кому разрешено видеть сырые
   данные (чтобы пометить). Его собственный промпт при диспатче **не** санизируется
   (он доверенный) — рекурсии нет.

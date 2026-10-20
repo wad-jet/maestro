@@ -6,11 +6,53 @@
 
 ## Trust Model
 
-Оркестратор работает в primary-сессии дефолтной модели — **НЕ доверен**:
-доступ к `confidential/**` для него закрыт (плагин deny'ит root/primary,
-инвариант конфига; см. `SECURITY.md` → P1).
-Любой сабагент — отдельный инференс/сессия; данные покидают контекст
-оркестратора. Поэтому **по умолчанию все сабагенты untrusted**.
+Два **независимых** контура защиты, не смешивать:
+
+1. **Файловый доступ** — только **нативные permissions OpenCode**
+   (`.opencode/opencode.json` или global): для restricted-путей
+   (напр. `docs/confidential/**`) deny `read`/`edit`/`glob`/`grep` +
+   per-agent allow `custodian`/`sanitizer` (agent rules имеют приоритет
+   над top-level deny). **Fail-closed в ядре**: барьер не зависит от
+   плагина `maestro-bootstrap` (см. `SECURITY.md` → P1, P5).
+2. **Ур.1 маскирование промптов** (Context Sanitizer) — **по роли**:
+   trusted role-set захардкожен в плагине — `{custodian`, `sanitizer}`;
+   все остальные сабагенты (стандартные и кастомные) — untrusted:
+   промпт санируется перед диспатчем.
+
+Оркестратор работает в primary-сессии дефолтной модели — **НЕ доверен**
+на обоих контурах: файловый доступ к restricted-путям закрывают
+нативные permissions, Ур.1-маскирование применяется ко всем диспатчам
+вне role-set. Любой сабагент — отдельный инференс/сессия; данные
+покидают контекст оркестратора. Поэтому **по умолчанию все сабагенты
+untrusted** (для Ур.1).
+
+### Dual mode (legacy/new)
+
+С 6.4.0 плагин работает в **dual mode** (D5):
+
+- **Legacy-режим** — секция `confidential` **есть** в `maestro.json`
+  (объект): legacy-enforcement плагина активен, как раньше —
+  `[confidential:deny]` на доступ к confidential-путям
+  (`confidential.paths` + built-in-секреты + активный конфиг), trusted —
+  role-set. Init-warn `confidential:legacy_active`.
+- **New-режим** — секции **нет**: плагин файлы не гейтит (нет
+  `[confidential:deny]`, нет built-in-гейта, нет P6-контура) — барьер
+  только нативные permissions. Плагин ведёт shadow-аудит (observability,
+  ниже).
+
+Секция `trust` не читается в обоих режимах (role-set). Legacy-код
+отмирает в будущем релизе («retire legacy enforcement»); миграция —
+`/maestro-assistant` (воркфлоу «Миграция legacy → new»).
+
+### Shadow-аудит (observability)
+
+В new-режиме плагин логирует **попытки** доступа к derived
+restricted-набору (из нативных конфигов): `confidential.access` с полями
+tool, sessionID, agent, target, `outcome: allow|deny|unknown`. Это
+**best-effort зеркало, не ground truth**: per-agent allow берётся только
+из JSON-конфигов (frontmatter агентов не учитывается); нерезолвимо —
+`unknown`. Target — `basename` (полный путь в лог не пишется — SEC-4b).
+Аудит ничего не блокирует — барьер нативный.
 
 ### Недоступность модели trusted-агента (P3, см. `SECURITY.md`)
 
@@ -29,63 +71,93 @@
 
 | Уровень | Описание | Контроль |
 |---|---|---|
-| **trusted** | Указан в `maestro.json` со значением `true` | **Skip** sanitize промпта — данные передаются как есть; файл-доступ — по нативным permissions opencode |
-| **untrusted** | Не указан в `maestro.json` или значение ≠ `true` | Перед диспатчем — Security Review (sanitizer); во время работы — нативный permission-слой opencode |
+| **trusted** | Role-set `{custodian`, `sanitizer}` (hardcoded в плагине; секция `trust` в `maestro.json` не читается) | **Skip** sanitize промпта — данные передаются как есть; файл-доступ — по нативным permissions opencode (per-agent allow) |
+| **untrusted** | Все остальные сабагенты (стандартные и кастомные), по умолчанию | Перед диспатчем — Security Review (sanitizer); во время работы — нативный permission-слой opencode |
+
+«Non-functional mode» P4a (custodian/sanitizer untrusted) **недостижим**
+с 6.4.0: доверие — по роли, не по ключу конфига (D6, вариант B) —
+состояния, в котором `custodian`/`sanitizer` non-functional из-за
+недоверия, не существует.
 
 ### Subagent Trust Matrix
 
-| Сабагент | Trust по умолчанию | Примечание |
+| Сабагент | Trust для Ур.1 | Примечание |
 |---|---|---|
 | `haiku` | untrusted | |
 | `sonnet` | untrusted | |
-| `opus` | untrusted | Spec review + правки на Revise. **Если указан trusted (`trust.opus: true`)** — Слои 2 (маскирование промпта) и 3-5 (confidential-deny / нативный permission-слой / Ур.1) для него НЕ действуют: opus получает промпт как есть и доступ к файлам по конфигу; гарантия «opus не видит confidential» снимается. Это осознанное решение конфигурации (пользователь расширил доверие). Рекомендация — не помечать opus trusted; при необходимости фиксировать с пониманием последствий. |
+| `opus` | untrusted | Spec review + правки на Revise. **Всегда untrusted — исключений нет**: ключи `trust.opus` и др. не читаются (секция удалена), Ур.1-маскирование и гарантия «opus не видит confidential» сохраняются. Файл-доступ — по нативным permissions. |
 | `reviewer` | untrusted | |
 | `fable` | untrusted | |
-| `custodian` | **trusted** | Q/A-брокер по confidential (шаг 8): читает confidential-источники, отвечает primary агрегатами (тип/ограничение/чувствительность/связь) БЕЗ raw-значений. Его промпт при диспатче не санизируется. Если `trust: false`/absent — агент **non-functional** (confidential deny + sanitize промпта); не fallback, а блокировка роли. |
-| `sanitizer` | **trusted** | Security review: единственный, кому разрешено видеть сырые данные (чтобы пометить). Его промпт при диспатче не санизируется — рекурсии нет. Если `trust: false`/absent — агент **non-functional** (рекурсия: промпт санизируется до него); не fallback. |
+| `custodian` | **trusted** (по роли) | Q/A-брокер по confidential (шаг 8): читает confidential-источники, отвечает primary агрегатами (тип/ограничение/чувствительность/связь) БЕЗ raw-значений. Его промпт при диспатче не санизируется. Файл-доступ к confidential-путям — нативный per-agent allow. |
+| `sanitizer` | **trusted** (по роли) | Security review: единственный, кому разрешено видеть сырые данные (чтобы пометить). Его промпт при диспатче не санизируется — рекурсии нет. |
 
-Значение по умолчанию для любого сабагента — **untrusted**, кроме `custodian` и
-`sanitizer` (trusted по своей роли). Меняется только через `maestro.json`
-(см. ниже). От модели в merge-конфиге (`.opencode/opencode.json` или global)
-trust не зависит.
+Значение по умолчанию для любого сабагента — **untrusted** (для Ур.1),
+кроме role-set `custodian`/`sanitizer` (trusted по своей роли). Доверие
+**не меняется через конфиг**: любой ключ `trust.*` в `maestro.json`
+(штатные имена и кастомные — без различия) → warn `trust:deprecated_key`
+(однократно при init, со списком проигнорированных ключей) + игнор
+значения. От модели в merge-конфиге (`.opencode/opencode.json` или
+global) trust не зависит.
 
-### Управление: maestro.json
+**Принятое ограничение (D6):** кастомный агент не может быть освобождён
+от маскирования промпта; обходные пути — `sanitizer_whitelist.by_agent`
+(выключение правил на агента, OP-4 HITL) для ложных срабатываний и
+`allow_values` для известных значений. Файловый доступ кастомного агента
+не привязан к Ур.1 — только нативный per-agent allow.
 
-Файл `maestro.json` в корне проекта — консолидированный
-конфиг: три секции (`trust`, `confidential`, `sanitizer_whitelist`). Секция
-`trust` перечисляет **только trusted** сабагентов. Всё, чего нет в секции —
-untrusted.
+**Legacy-note (N1):** с обновления плагина 6.4.0 секция `trust` не
+читается **в любом режиме** — кастомные trusted-агенты **немедленно**
+теряют плагинный файловый доступ (направление fail-closed — утечки
+нет). При необходимости — нативный per-agent allow (HITL).
+
+### Управление: нативный конфиг (role-set не конфигурируется)
+
+С 6.4.0 секция `trust` **убрана из схемы** `maestro.json` (не читается),
+`confidential` — только legacy-режим (dual mode, D5). Файловый доступ к
+restricted-путям настраивается в **нативном конфиге OpenCode**
+(merge-config `.opencode/opencode.json` или global) — deny
+`read`/`edit`/`glob`/`grep` + per-agent allow `custodian`/`sanitizer`:
 
 ```json
 {
-  "trust": {
-    "custodian": true,
-    "sanitizer": true
+  "permission": {
+    "read": { "*": "allow", "docs/confidential/**": "deny" },
+    "edit": { "*": "allow", "docs/confidential/**": "deny" },
+    "glob": { "*": "allow", "docs/confidential/**": "deny" },
+    "grep": { "*": "allow", "docs/confidential/**": "deny" }
   },
-  "confidential": { ... },
-  "sanitizer_whitelist": { ... }
+  "agent": {
+    "custodian": { "permission": { "read": { "docs/confidential/**": "allow" } } },
+    "sanitizer": { "permission": { "read": { "docs/confidential/**": "allow" } } }
+  }
 }
 ```
 
-- **Ключ в `trust`:** имя сабагента (`custodian`, `sanitizer`, `haiku`, `sonnet`, `opus` и т.д.)
-- **Значение:** только `true` = trusted. Любое другое значение → untrusted
-- Если файла `maestro.json` нет → **все сабагенты untrusted** (безопасное значение по умолчанию)
-- Файл коммитится в git — trust-level + security policy проекта
-- `maestro.json` — единственный источник конфигурации. Старые `trust-config.json`,
-  `.maestro/sanitizer-whitelist.json` больше
-  **не читаются** плагином.
+- **Deny-тулы** на restricted-пути: `read`/`edit`/`glob`/`grep`;
+  **per-agent allow** — `custodian`/`sanitizer` (agent rules имеют
+  приоритет над top-level deny).
+- `maestro.json` сохраняет остальные секции (`sanitizer_whitelist`,
+  `memory`, `review`, `merge_guard`, …) и остаётся единственным
+  источником конфига плагина; секция `trust` — warn + игнор.
+- Изменения нативного конфига вступают в силу со следующего перезапуска
+  opencode.
 
 **Как применять:**
 
-1. Оркестратор читает `maestro.json` **один раз за сессию** — на шаге 0 (Load
-   Project Context) — **плагин-тулом `maestro_config`** (native `ask`;
-   `read`-тул нативно denied, bash-чтение запрещено правилом R6). Кэширует для
-   всех последующих диспатчей. Тул недоступен — конфиг не читается: «перезапустите
-   opencode / обновите плагин (≥ 4.9.0)»; bash-fallback запрещён.
-2. При каждом диспатче сабагента (шаги 8, 9, 13, 16): проверить кэш. Если
-   сабагент есть в секции `trust` с `true` → trusted, иначе → untrusted
-3. Изменения в `maestro.json` вступают в силу со следующей сессии
-4. Файл обязателен к проверке — игнорировать его нельзя
+1. **Ур.1 (маскирование промпта) — по роли:** `custodian`/`sanitizer` →
+   промпт не санируется; любой другой сабагент (вкл. `opus` и
+   кастомные) — sanitize перед диспатчем. Читать `maestro.json` для
+   этого не нужно — role-set захардкожен в плагине.
+2. **Файловый доступ — нативный конфиг:** решение принимает ядро
+   OpenCode по permissions `.opencode/opencode.json`/global; в
+   new-режиме плагин файлы не гейтит (в legacy-режиме —
+   `[confidential:deny]`, как раньше).
+3. Warn `confidential:drift` в логе плагина (строка-зеркало §12
+   `**Confidential-данные:** …` в `docs/project-context.md` расходится с
+   фактическим набором) — сообщить пользователю, исправить через
+   `/maestro-assistant` (детектор миграционного окна).
+4. Warn `confidential:legacy_active` — проект не мигрирован
+   (legacy-режим); миграционный воркфлоу — `/maestro-assistant`.
 
 ---
 
@@ -147,7 +219,7 @@ untrusted.
 ### Когда применяется
 
 На всех шагах, где происходит диспатч untrusted сабагента.
-Trust-уровень определяется по `maestro.json` (см. § Trust Model):
+Trust-уровень определяется **по роли** (см. § Trust Model):
 
 | Шаг | Сабагент | Security Review |
 |---|---|---|
@@ -158,8 +230,8 @@ Trust-уровень определяется по `maestro.json` (см. § Trus
 | Шаг 16 — Artifact Review | `reviewer` | Применяется (untrusted) |
 | (внутри Security Review) | `sanitizer` | **Skip** (trusted — видит сырые данные для пометок) |
 
-Если сабагент отмечен как trusted в `maestro.json` — sanitize промпта
-**не проводится** (риск принят пользователем).
+Если сабагент входит в role-set (`custodian`/`sanitizer`) — sanitize
+промпта **не проводится** (trusted по роли, не конфигурируется).
 
 ### Правила применения
 
@@ -188,7 +260,7 @@ sanitizer.
 
 ```
 Диспатч в сабагента:
-  trust check (maestro.json)
+  trust check (роль: role-set {custodian, sanitizer})
     │
     ├── trusted → SKIP sanitize → диспатч как есть (файл-доступ — по нативным permissions)
     │
@@ -261,11 +333,18 @@ untrusted-сабагентам (модель <модель>) в замаскир
 
 ### Файл-доступ (нативный permission-слой opencode)
 
-Файл-доступ сабагентов и primary-сессии регулируется **нативным permission-слоем
-opencode** (`.opencode/opencode.json` или global), а не плагином: `read`/`glob`/
-`grep` deny `maestro.json`/`.maestro/**`, `read`-allow `.maestro/plugin-version`,
-`edit`-ask `maestro.json`, confidential-deny — см. канон нативных permissions
-в `maestro-assistant`. Плагин `maestro-bootstrap` file-тулы не перехватывает.
+Файл-доступ сабагентов и primary-сессии регулируется **нативным
+permission-слоем opencode** (`.opencode/opencode.json` или global) — в
+new-режиме это **единственный барьер** (fail-closed в ядре, не зависит
+от плагина): доступ к restricted-путям (напр. `docs/confidential/**`) —
+deny `read`/`edit`/`glob`/`grep` + per-agent allow `custodian`/
+`sanitizer`; `read`/`glob`/`grep` deny `maestro.json`/`.maestro/**`,
+`read`-allow `.maestro/plugin-version`, `edit`-ask `maestro.json` — см.
+канон нативных permissions в `maestro-assistant`. В legacy-режиме
+(секция `confidential` есть) плагин дополнительно исполняет
+`[confidential:deny]`, как раньше (dual mode, D5). В new-режиме плагин
+`maestro-bootstrap` file-тулы не перехватывает — только shadow-аудит
+(observability).
 
 ### Этапность
 

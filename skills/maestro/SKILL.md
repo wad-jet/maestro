@@ -20,7 +20,8 @@ description: Use when implementing a feature end-to-end — orchestrates brainst
      гейт проходит; до `/maestro-setup` (создаст `.maestro/maestro.json`) memory
      disabled с причиной `namespace_missing`.
    - **Конфига нет нигде** — проект не под maestro: гейт пропускается, работаем
-     как обычно (fail-closed для confidential). Показать message:
+     как обычно (файловая защита restricted-данных — по нативным permissions,
+     не зависит от плагина). Показать message:
      «`maestro.json` отсутствует; запустите `/maestro-setup` для настройки».
 
 2. **Плагин реально работал.** Открой самый свежий файл
@@ -40,9 +41,11 @@ description: Use when implementing a feature end-to-end — orchestrates brainst
 3. **Жёсткий STOP (без «продолжить»).** Останови работу и покажи HITL:
 
    > **Плагин `maestro-bootstrap` не подключён или не загружен.**
-   > Защита `docs/confidential/**` НЕ действует: confidential-данные могут быть
-   > доступны untrusted-агентам и primary-сессии. sanitizer тоже
-   > не работает (в плагине `maestro-bootstrap`).
+   > Санитайзер Ур.1 не работает (маскирование промптов сабагентов — в плагине
+   > `maestro-bootstrap`), недоступны merge-guard и memory. Файловая защита
+   > restricted-данных — по нативным permissions (ядро opencode), не зависит
+   > от плагина (new-режим); в legacy-режиме (секция `confidential` есть) —
+   > enforcement плагина НЕ действует, пока плагин не подключён.
    >
    > Продолжение работы запрещено. Единственный способ продолжить — подключить
    > плагин и перезапустить opencode:
@@ -274,14 +277,26 @@ skip-path по канону или откат к пропущенному шаг
               ключа; невалидное → soft fallback `auto` + пометка
               `review:config_fallback` в анонсе шага 16 (паттерн
               `communication:config_fallback`).
-            — **Confidential notice (pre-work):** если `maestro.json → confidential.paths`
-              непуст (тул `maestro_config`, кэш как в PROJECT_CONTEXT) — **одна строка**
-              в сессию до начала работы: «В проекте confidential-данные (N путей). Поток
-              данных: primary-модель <модель> (внешний API / локальная); сабагентам —
-              только замаскированные тексты (Ур.1/2). Если защита данных важна —
-              локальная (изолированная) модель снижает утечку на стороне провайдера.»
-              Информационно: не гейт, решение — за человеком. Термины: «локальная
-              (изолированная) модель» ≠ `trust` (роль сабагента) — не смешивать.
+            — **Confidential notice (pre-work):** источник restricted-набора —
+              **плагинная директива** `restricted-data paths: p1, p2` в
+              system-контексте сессии (инжектит плагин при init; одна строка,
+              repo-relative пути). Директива непуст — **одна строка** в сессию
+              до начала работы: «В проекте restricted-данные (N путей: …).
+              Доступ — только через trusted-агентов (custodian Q/A);
+              primary/untrusted — нативный deny (permissions ядра opencode).
+              Поток данных: primary-модель <модель> (внешний API / локальная);
+              сабагентам — только замаскированные тексты (Ур.1/2). Если защита
+              данных важна — локальная (изолированная) модель снижает утечку
+              на стороне провайдера.» Директивы нет — confidential-данных
+              нет, кроме built-in секретов: `.env`/`.env.*` — дефолт ядра
+              OpenCode; `*.pem`/`*.key`/`*.crt`/`*.p12`/`*.pfx` — init-базелин
+              при наличии в нативном конфиге. Legacy-режим (директива +
+              warn `confidential:legacy_active`) — защита как раньше (плагинный
+              enforcement + нативные permissions). Trusted определяется
+              **по роли** (`custodian`/`sanitizer` — role-set; секция
+              `trust` в `maestro.json` не читается). Информационно: не гейт,
+              решение — за человеком. Термины: «локальная (изолированная)
+              модель» ≠ «trusted» (роль сабагента) — не смешивать.
 
       — **Late-entry check (6.2.0, read-only, до шага 1):** триггер — ЛЮБОЙ сигнал:
         (a) `git status --short` не пуст; (b) `git log --oneline <mainline>..HEAD` не
@@ -482,9 +497,12 @@ skip-path по канону или откат к пропущенному шаг
        — **Custodian (trusted) — Q/A-брокер по confidential.** Primary диспатчит
          `custodian` через `task` tool с `subagent_type=custodian` (модель из
          `agent.custodian.model`, opus-tier), когда нужен confidential-контекст.
-       — `custodian` trusted → промпт НЕ санизируется (видит полный контекст).
+       — `custodian` trusted по роли → промпт НЕ санизируется (видит полный
+         контекст).
        — Передать: `{questions}`, `{context}` (project context + паттерны),
-         `{confidential_paths}`.
+         `{confidential_paths}` (из плагинной директивы `restricted-data
+         paths: …`; в legacy-режиме плагин уже передаёт union нативного
+         набора и `confidential.paths`).
        — Промпт: `custodian-prompt.md` из этого скилла (self-contained).
        — `custodian` НЕ пишет spec (`edit: deny`), НЕ ведёт brainstorm; отвечает
          агрегатами (тип/ограничение/чувствительность/связь) БЕЗ raw-значений,
@@ -560,8 +578,9 @@ skip-path по канону или откат к пропущенному шаг
           выполняется** — opus видит только очищенный spec, новые real-значения
           неоткуда; остаётся Ур.1 (Слой 5) при применении правки. Полный
           повторный 8.6 выполняется **только при вовлечении trusted-контура**:
-          особый случай (a) → trusted `custodian` (мог вновь занести confidential)
-          или opus-trusted (B-5, защита untrusted снята). Подписи инвалидируются
+          особый случай (a) → trusted `custodian` (мог вновь занести
+          confidential); opus всегда untrusted — исключений нет (role-set
+          `{custodian`, `sanitizer}`). Подписи инвалидируются
           hash'ем (см. `references/spec-review.md`).
 🟢  9. [HITL] Spec Review на spec:
         — **Spec Review:** читать `references/spec-review.md` из каталога скилла maestro (канон).
@@ -591,7 +610,9 @@ skip-path по канону или откат к пропущенному шаг
           Claude Code — Agent tool с `model=opus` + инструкция ревьюера
         - **Перед диспатчем opus (untrusted) — Точка 2 Security Review:**
           оркестратор прогоняет промпт через sanitize (Ур.1 плагин + Ур.2
-          сабагент sanitizer, см. `references/trust-and-security.md`). Trusted opus (если в maestro.json) → skip.
+          сабагент sanitizer, см. `references/trust-and-security.md`). opus
+          всегда untrusted (role-set — только `custodian`/`sanitizer`) — skip
+          не применяется.
         — **Trust and Security:** читать `references/trust-and-security.md` из каталога скилла maestro (канон).
         - Промпт ревьюера: `spec-review-prompt.md` из этого скилла
         - Передать: spec + контекст + встроенный чеклист + вопросы
@@ -639,7 +660,8 @@ skip-path по канону или откат к пропущенному шаг
             очищенный spec; полный повторный 8.6 нужен только при вовлечении
             trusted-контура (особый случай (a) → правку готовит trusted
             `custodian` по Q/A-агрегатам, без значений, применяет primary;
-            opus-trusted B-5). Затем — повторный Spec Review (шаг 9). Подписи
+            opus всегда untrusted — исключений нет). Затем — повторный
+            Spec Review (шаг 9). Подписи
             становятся stale (hash меняется) → при необходимости 8.6/9
             перезапускаются. Если для правки требуется confidential-контекст
             (opus не видит его) → HITL-эскалация (см. ниже «Особый случай»).
@@ -1253,7 +1275,7 @@ skip-path по канону или откат к пропущенному шаг
 | **Внешний spec невалидный (шаг 7d)** | Пустой / нечитаемый / не содержит требований → HITL: (a) создать заново через шаг 8 (brainstorm primary + custodian Q/A) / (b) указать другой путь / (c) отмена |
 | **Plan gate: revise (12b)** | Вернуться к шагу 11 (writing-plans), доработать план |
 | **Spec review: reject** | Эскалация к пользователю: пересмотр требований или отмена фичи |
-| **`custodian`/`sanitizer`: `confidential:deny`** | Агент untrusted (проверить `maestro.json` → `trust`: absent/`false`) — он non-functional без доверия. Предупредить: "custodian/sanitizer не trusted (проверьте `maestro.json` → `trust`), без доверия агент не может выполнять свою роль" → HITL: (a) обновить конфиг и перезапустить / (b) стоп. Правка `maestro.json` — через нативный `edit`-ask (HITL) или bash (read-тул deny-ится нативным permission-слоем). Не ретраить как обычную ошибку сабагента. |
+| **`confidential:deny`** | **Legacy-режим** (секция `confidential` есть в `maestro.json`): legacy-enforcement плагина отклонил доступ к confidential-пути. Причины: агент вне role-set (`custodian`/`sanitizer` trusted по роли; секция `trust` не читается) либо действие `write`/`edit` (default `deny` в `confidential.trusted`). Предупредить пользователя → HITL: (a) исправить агента/действие / (b) миграция в new-режим (`/maestro-assistant`) / (c) стоп. **New-режим** (секции нет): плагин файлы не гейтит — доступ к restricted-путям отклоняет **нативный permission-слой** (ядро opencode deny'ит `read`/`edit`/`glob`/`grep` по `.opencode/opencode.json`/global) — это permission error ядра, не ошибка плагина: маршрут запроса — через `custodian` (per-agent allow) либо правка нативного конфига (HITL). Не ретраить как обычную ошибку сабагента. |
 | **Gate: отмена (шаги 7c, 10c, 12c, 17c, D7b)** | STOP + cleanup: удалить feature-ветку (`git branch -D <branch>`) и worktree (`git worktree remove <path>`), если создан. Решение оставить в `regression/cancelled-features.md` (в git) для последующей архивации. **Regression cleanup:** если `entries/<YYYY-MM-DD-<feature>>.md` существует → `git mv entries/X.md released/X.md`, `status: cancelled`, `released: <дата>`, дописать решение в `regression/cancelled-features.md` и закоммитить оба файла (`chore(regression): <feature> cancelled`) (только после шага 12a; до 12a entry ещё не создан — no-op). |
 | **Implementer: BLOCKED** | Оркестратор: (1) дать контекст, (2) мощнее модель, (3) разбить задачу, (4) эскалация |
 | **Implementer: NEEDS_CONTEXT** | Оркестратор предоставляет недостающий контекст, re-dispatch |

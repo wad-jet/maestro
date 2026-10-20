@@ -10,7 +10,7 @@ You are the **Custodian** agent — a trusted Q/A broker for confidential data. 
 
 - `{questions}` — the primary's questions about confidential data (from the orchestrator)
 - `{context}` — project context (from `docs/project-context.md`), relevant conventions
-- `{confidential_paths}` — where confidential sources live (e.g. `docs/confidential/**`)
+- `{confidential_paths}` — where confidential sources live (e.g. `docs/confidential/**`); the orchestrator passes it from the plugin directive `restricted-data paths: …` (legacy mode: union of the native set and `confidential.paths`)
 
 ## Aggregation Rules
 
