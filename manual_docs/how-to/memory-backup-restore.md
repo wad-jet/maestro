@@ -31,9 +31,9 @@
 
 4. Tool пишет пару `backup-<key>-<ts>.jsonl` + `backup-<key>-<ts>.manifest.json`
    в каталог `memory.backup.path` (default `.maestro/memory/backup`): все
-   записи активного `key`, повторно замаскированные по **текущему**
-   confidential-набору (double-masking), + манифест (`model_id`, `dim`,
-   `schema_fields`, `sha256` тела и др.). Вывод — число записей.
+   записи активного `key`, повторно generic-замаскированные (double-masking;
+   confidential-набор из бэкапа удалён (6.4.0, D3)), + манифест (`model_id`,
+   `dim`, `schema_fields`, `sha256` тела и др.). Вывод — число записей.
 
 5. После успешной записи работает **retention**: старые пары этого проекта
    сверх `memory.backup.retention` (default `3`) удаляются (строго по
@@ -105,7 +105,7 @@ node <путь-к-плагину>/memory/backup-cli.js restore --file <путь>
 - `--replace` — только из **интерактивного терминала** (TTY): CLI попросит
   ввести namespace; не-tty (скрипт/CI) → отказ.
 - Тот же конфиг (`memory.backup.*`), те же данные (`memory.db` в
-  `<data-dir>`) и те же confidential-наборы, что у плагина. Аудит —
+  `<data-dir>`) и те же generic-наборы маскирования, что у плагина. Аудит —
   bootstrap-лог `.maestro/logs/maestro-bootstrap-<дата>.log`.
 - Restore принимает файл **только из каталога бэкапов** (`memory.backup.path`)
   — файл снаружи будет отклонён.

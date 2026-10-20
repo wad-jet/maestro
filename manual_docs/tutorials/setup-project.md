@@ -38,8 +38,8 @@
    > `project-context.md` может быть создан позже через `/maestro-design` (шаг «Project Context»).
    > Без context pipeline продолжает работу с контекстом из user story.
 3. **Конфигурация** — генерирует (по канону скилла `maestro-assistant`):
-    - `maestro.json` — `trust` (custodian, sanitizer), `confidential`,
-      `sanitizer_whitelist`;
+    - `maestro.json` — `sanitizer_whitelist` (секции `trust` и `confidential`
+      не генерируются (6.4.0: доверие по роли, restricted-данные — нативные permissions));
     - `/maestro-setup` задаёт вопрос режима коммуникации (`plain` — простой язык,
       дефолт; `professional` — технический язык) — результат пишется в ключ
       `communication` в `maestro.json`.
@@ -96,7 +96,8 @@
 1. **`project-context.md`** — если существует, HITL: (a) перечитать и перейти к
    конфигурации / (b) пересоздать с нуля / (c) отмена.
 2. **Конфигурация** — если `maestro.json` есть, покажет diff «желаемое vs
-   текущее» по секциям (`trust`, `sanitizer_whitelist`) и
+   текущее» по секциям (`sanitizer_whitelist` и др.; секция `trust` — warn
+   `trust:deprecated_key` + игнор, не переносится) и
    предложит: обновить / пропустить / отмена. **Пользовательские правки
    сохраняются** (merge).
 3. **Модели агентов** — для каждого из 7 агентов предложение формируется из:
@@ -133,8 +134,10 @@ roadmap, как в Варианте A.
   способности к рассуждению), не единственный критерий: `fable` — модальность
   (примеры/метафоры), `sanitizer` — доверие, не мощность. Контекст задаёт
   конкретная модель, не тир.
-- **Trust** — доверие (`maestro.json → trust`), доступ к секретам. **Trusted — это
-  атрибут безопасности, а не мощность.**
+- **Trust** — доверие **по роли** (role-set `custodian`/`sanitizer`,
+  захардкожен в плагине; секция `trust` в `maestro.json` удалена (6.4.0)),
+  доступ к restricted-данным. **Trusted — это атрибут безопасности, а не
+  мощность.**
 
 ### Агенты: tier и trust
 
@@ -285,7 +288,7 @@ roadmap, как в Варианте A.
 - **Модель (факт)** — из session export child-сессии, НЕ из конфига.
 - **Variant** — `info.model.variant` из экспорта.
 
-4. **Проверка confidential-инварианта** (P1/P3, `SECURITY.md`) — trusted-агент должен прочитать `docs/confidential/**`, primary — получить `confidential:deny`. Статус: `PASS` / `FAIL` / `skipped` (нет конфидициала).
+4. **Проверка confidential-инварианта** (P1/P3, `SECURITY.md`) — trusted-агент (role-set) должен прочитать `docs/confidential/**`, primary — получить **нативный permission error** (new-режим) / `[confidential:deny]` (legacy-режим). Статус: `PASS` / `FAIL` / `skipped` (нет конфидициала).
 
 **Ключевые правила:**
 

@@ -177,8 +177,9 @@ temperature — это параметр сэмплирования, невиди
 Это не баг команды — это ограничение OpenCode, а не задача maestro.
 
 Дополнительно проверяется **confidential-инвариант** (P1/P3, `SECURITY.md`):
-trusted-агенты (`custodian`, `sanitizer`) читают `docs/confidential/**`, а
-primary-сессия при чтении того же файла получает `deny`. Статус инварианта —
+trusted-агенты (role-set `custodian`, `sanitizer`) читают `docs/confidential/**`, а
+primary-сессия при чтении того же файла получает **нативный permission error**
+(new-режим) / `[confidential:deny]` (legacy-режим). Статус инварианта —
 `PASS` / `FAIL` (утечка → СТОП) / `skipped` (нет `docs/confidential/**`).
 
 ### `/maestro-version`
@@ -195,7 +196,8 @@ primary-сессия при чтении того же файла получае
 
 Консультации и настройка maestro-конфигурации/структуры/контекста в течение жизни
 проекта. Загружает скилл `maestro-assistant` (tool: skill) и применяет его к запросу HITL.
-Обрабатывает: `maestro.json` (trust/confidential/sanitizer_whitelist;
+Обрабатывает: `maestro.json` (sanitizer_whitelist и др.; секция `trust` —
+warn + игнор, `confidential` — legacy, миграция;
 чтение параметров — плагин-тулом `maestro_config`),
 `.opencode/opencode.json` / global (плагин, модели), структуру каталогов,
 актуализацию `project-context.md`, консультации по

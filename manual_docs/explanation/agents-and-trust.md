@@ -28,41 +28,77 @@ Spec Review/архитектура) сначала уточняют контек
 
 ## 📖 Модель доверия
 
-Оркестратор работает в primary-сессии дефолтной модели — **НЕ доверен**:
-доступ к `confidential/**` для него закрыт (плагин deny'ит root/primary,
-инвариант конфига; см. [`SECURITY.md`](../../SECURITY.md) → P1).
-Любой субагент — отдельный инференс/сессия; данные покидают контекст
-оркестратора. Поэтому **по умолчанию все субагенты untrusted** (кроме `custodian`
-и `sanitizer`).
+Два **независимых** контура защиты, не смешивать:
 
-> ⚠️ Снятие `custodian`/`sanitizer` из `trust` (или `false`) делает агента
-> **неработоспособным** (non-functional): confidential-deny + sanitize промпта.
-> Это не «понижение доверия» — агент не может выполнять свою роль. Для
-> `custodian`: нет чтения confidential; для `sanitizer`: рекурсия (промпт
-> санизируется Ур.1 до него — он не видит raw для пометки). Не удаляйте их из
-> trust без понимания последствий (см. [`SECURITY.md`](../../SECURITY.md) → P4a).
+1. **Файловый доступ** к restricted-путям (напр. `docs/confidential/**`) —
+   только **нативные permissions OpenCode** (`.opencode/opencode.json` или
+   global): deny `read`/`edit`/`glob`/`grep` + per-agent allow для
+   role-set `custodian`/`sanitizer` (agent rules take precedence над
+   top-level deny). **Fail-closed в ядре**: барьер не зависит от плагина
+   `maestro-bootstrap` (см. [`SECURITY.md`](../../SECURITY.md) → P1, P5).
+2. **Ур.1 маскирование промптов** (Context Sanitizer) — **по роли**:
+   trusted role-set захардкожен в плагине — `{custodian, sanitizer}`;
+   все остальные сабагенты (стандартные и кастомные) — untrusted: промпт
+   санируется перед диспатчем.
+
+Оркестратор работает в primary-сессии дефолтной модели — **НЕ доверен**
+на обоих контурах: файловый доступ к restricted-путям закрывают нативные
+permissions, Ур.1-маскирование применяется ко всем диспатчам вне
+role-set. Любой субагент — отдельный инференс/сессия; данные покидают
+контекст оркестратора.
+
+> **Dual mode (legacy/new, 6.4.0, D5).** Пока секция `confidential`
+> **есть** в `maestro.json` — legacy-режим: плагин исполняет
+> legacy-enforcement как раньше (fail-closed, `[confidential:deny]`; warn
+> `confidential:legacy_active` при init). Секции **нет** — new-режим:
+> плагин file-тулы не гейтит (нет `[confidential:deny]`, нет built-in-
+> гейта, нет P6-гейта) — барьер для primary/untrusted — **нативные
+> permissions OpenCode** (fail-closed в ядре); плагин ведёт shadow-аудит
+> (observability) и инжектит плагинную директиву `restricted-data paths:
+> …` в top-level primary-сессии. Миграция — `/maestro-assistant`
+> (воркфлоу «Миграция legacy → new», см. [Настройка restricted-путей](../how-to/manage-confidential-paths.md)).
+
+**Доверие — по роли, не по ключу конфига (6.4.0, B).** Секция `trust`
+**удалена** из схемы `maestro.json`: любой ключ `trust.*` в старом конфиге
+(штатные имена и кастомные — без различия) → warn `trust:deprecated_key`
+(однократно при init, со списком проигнорированных ключей) + **игнор
+значения** — секция не читается ни в одном режиме. Trusted —
+`custodian`/`sanitizer` **по роли** (hardcoded role-set в плагине;
+fail-closed даже при отсутствии `maestro.json`). Trust не привязан к
+модели: модель — атрибут имени (`agent.*.model` в merge-конфиге).
 
 Trust-статус управляет **двумя** измерениями защиты:
 
 | Уровень | Sanitize промпта | File-доступ |
 |---|---|---|
-| **trusted** (`maestro.json` → `trust` = `true`) | **skip** | **skip sanitize; file-доступ — нативный permission-слой**; доступ к `confidential` — по `confidential.trusted.<tool>`; **нативный per-agent `read`/`glob`/`grep` allow** поверх глобального deny (R2-конфиг, Этап A) |
-| **untrusted** (default) | Security Review (Ур.1 + Ур.2) | нативные permissions OpenCode (deny/ask в `.opencode/opencode.json`); доступ к `confidential` — **всегда deny** (нативный глобальный deny + плагин) |
->
-> **Нативное trusted-исключение (R2-конфиг, Этап A).** Нативный глобальный deny
-> `docs/confidential/*` (R1) применяется ко всем агентам, включая `custodian`/
-> `sanitizer`, а плагин не может override нативный deny. Поэтому trusted-агенты
-> получают **per-agent `read`/`glob`/`grep` allow** для confidential-путей (agent
-> rules take precedence) — в `agents/custodian.md`, `agents/sanitizer.md` и в
-> merge-config. Enforcement плагина (`confidential.trusted[read]`) остаётся как
-> defense-in-depth. Runtime-верификация merge-семантики (agent allow vs global
-> deny) — V1 (pending).
+| **trusted** (role-set `{custodian, sanitizer}` — по роли) | **skip** (по роли) | нативный per-agent `read`/`glob`/`grep` allow для restricted-путей (agent rules take precedence); запись/редактирование остаются закрыты |
+| **untrusted** (все остальные, default) | Security Review (Ур.1 + Ур.2) | нативные permissions OpenCode (deny/ask в `.opencode/opencode.json`); доступ к restricted-путям — **deny** |
 
-### trust-config → maestro.json (4-слойный конфиг)
+> **P4a «non-functional mode» недостижим (6.4.0, B).** Раньше снятие
+> `custodian`/`sanitizer` из `trust` (или `false`) делало агента
+> неработоспособным: confidential-deny + sanitize промпта. С 6.4.0 такого
+> состояния **не существует**: доверие по роли не снимается конфигом.
+> Снятие файлового доступа trusted-агента (напр. `custodian`) — **только
+> правка нативного конфига** (удаление per-agent allow; OP-4 HITL).
 
-Консолидированный конфиг `maestro.json` (секции `trust`, `confidential`,
-`sanitizer_whitelist` + опциональные `communication`, `feedback_report`,
-`memory` и др.) — **4 слоя** (6.0.0), от высшего к низшему приоритету:
+**Кастомные агенты.** Кастомный агент **не может быть освобождён от
+маскирования промпта** (принятое ограничение, D6): кастомные агенты
+**всегда U1-masked** независимо от конфига (в т.ч. если были указаны в
+старой секции `trust`). Обходные пути — `sanitizer_whitelist.by_agent`
+(выключение правил на агента, OP-4 HITL) для ложных срабатываний и
+`allow_values` для известных значений. Файловый доступ кастомного агента
+не привязан к Ур.1 — только нативный per-agent allow (по запросу HITL,
+отдельное решение). **Legacy-note (N1):** с обновления плагина (6.4.0)
+секция `trust` не читается **в любом режиме** — кастомные trusted-агенты
+**немедленно** теряют плагинный файловый доступ (направление fail-closed
+— утечки нет); при необходимости — нативный per-agent allow.
+
+### maestro.json (4-слойный конфиг)
+
+Консолидированный конфиг `maestro.json` (секция `sanitizer_whitelist` +
+опциональные `communication`, `feedback_report`, `review.parallel`,
+`merge_guard`, `memory` и др.) — **4 слоя** (6.0.0), от высшего к низшему
+приоритету:
 
 | # | Слой | Путь | Где живёт |
 |---|---|---|---|
@@ -81,39 +117,35 @@ soft-merge с глобальным слоем (`enabled`/`embedding.model` — �
 `namespace` — только из проектного слоя, глобальный слой его не содержит).
 Справочник — [Конфигурация](../reference/config.md).
 
-Секция `trust` перечисляет **только trusted** сабагентов. Всё, чего нет в
-файле — untrusted. Если файла нет — все untrusted. `trust` — пер-проектное
-решение: из глобального слоя не наследуется.
+- Секция `trust` — **удалена** (6.4.0, B): не читается в любом режиме;
+  любой `trust` в старом конфиге → warn `trust:deprecated_key` + игнор
+  (см. выше).
+- Секция `confidential` — **только legacy-режим** (dual mode, D5): до
+  миграции legacy-enforcement плагина читает её; в new-режиме источник
+  restricted-путей — нативные permissions (см. [Настройка
+  restricted-путей](../how-to/manage-confidential-paths.md)).
 
 `maestro.json` **генерируется `/maestro-setup`** (задача «Конфигурация
 maestro», по канону скилла `maestro-assistant`): проектный режим — root-файл
 (коммитится в git); глобальный режим — `.maestro/maestro.json` (вне git) с
-auto-derive `memory.namespace`. Настройка/консультации по конфигурации в
-течение жизни проекта — через `/maestro-assistant`. `custodian` и `sanitizer`
-— trusted по роли; модели у них **независимые** (trusted — атрибут
-безопасности, не мощность).
+auto-derive `memory.namespace`. Секции `trust`/`confidential` не
+генерируются. Настройка/консультации по конфигурации в течение жизни
+проекта — через `/maestro-assistant`. `custodian` и `sanitizer` — trusted
+по роли; модели у них **независимые** (trusted — атрибут безопасности,
+не мощность).
 
-```json
-{
-  "trust": {
-    "custodian": true,
-    "sanitizer": true
-  }
-}
-```
-
-- Ключ в `trust` — имя сабагента; значение только `true` = trusted.
-- Источник эффективной trust-политики — активный проектный слой:
-  с 6.1.0 (2026-10-18) это `.maestro/maestro.json` (вне git), если существует,
-  иначе root `maestro.json` (в git); коммит в git — больше не фактор
-  приоритета.
-- Оркестратор читает активный конфиг один раз на шаге 0 и кэширует.
+- Источник эффективной политики (sanitizer, memory и др.) — активный
+  проектный слой: с 6.1.0 (2026-10-18) это `.maestro/maestro.json` (вне
+  git), если существует, иначе root `maestro.json` (в git); коммит в git —
+  больше не фактор приоритета.
+- Оркестратор читает активный конфиг один раз на шаге 0 и кэширует
+  (санкционированный канал в сессии — плагин-тул `maestro_config`).
 - `custodian` — trusted по роли (читает confidential-источники, отвечает
   агрегатами без значений; spec пишет primary).
 - `sanitizer` — trusted по роли (видит сырые данные, чтобы пометить).
 - Активный `maestro.json` (любой из 4 слоёв) — единственный источник
-  конфигурации. Старые `trust-config.json` и прочие отдельные файлы в
-  `.maestro/` (кроме `.maestro/maestro.json` — слой 2) больше не читаются
+  конфигурации плагина. Старые `trust-config.json` и прочие отдельные файлы
+  в `.maestro/` (кроме `.maestro/maestro.json` — слой 2) больше не читаются
   плагином.
 
 ## 📖 Security Review (двухуровневая защита)
@@ -135,23 +167,28 @@ untrusted диспатч →
 по пометкам. Выход — structured-блок `SANITIZER FINDINGS` + `STATUS: CLEAN |
 FINDINGS_FOUND`.
 
-**Trusted skip:** если сабагент в `maestro.json` → `trust` = `true` — sanitize промпта
-**не применяется** (данные передаются как есть); file-доступ — нативный
-permission-слой (trusted-исключения — per-agent allow).
+**Trusted skip:** если сабагент в role-set (`custodian`/`sanitizer`) — по
+роли — sanitize промпта **не применяется** (данные передаются как есть);
+file-доступ — нативный permission-слой (per-agent allow для role-set).
 
-**File-доступ — нативные permissions opencode:** untrusted сабагент при попытке
-`read` deny/ask-файла → блокировка/запрос нативным permission-слоем OpenCode
-(deny/ask в `.opencode/opencode.json`); плагин больше не блокирует `read`.
+**File-доступ — нативные permissions opencode:** primary-сессия или
+untrusted сабагент при попытке `read`/`edit` restricted-пути → блокировка
+нативным permission-слоем OpenCode (нативный permission error); в
+new-режиме плагин не блокирует `read` (shadow-аудит — только логирование).
+В legacy-режиме (секция `confidential` есть в `maestro.json`) плагин
+дополнительно исполняет `[confidential:deny]` (dual mode).
 `bash`/`glob`/`grep` — нативные permissions (эвристический deny-слой).
 
-> **Активный `maestro.json` защищается** (P6, 6.0.0) — любой из 4 слоёв
-> резолва (root, `.maestro/`, глобальный, `MAESTRO_CONFIG`), включая
-> глобальный абсолютный путь вне проекта. Защита многоуровневая:
-> **нативно** (deny `read`/`glob`/`grep` + edit-ask в
-> `.opencode/opencode.json`, fail-closed) и **плагином** — путь активного
-> конфига **автоматически** попадает в confidential-контур (`read`/`write`/
-> `edit`, `isMaestroConfigPath`: точное совпадение пути, не glob), а его
-> содержание маскируется в sanitize-цепочке; см.
+> **Активный `maestro.json` защищается** (P6). В new-режиме root-слои
+> (`maestro.json`, `.maestro/**`) защищены **нативно** (deny
+> `read`/`glob`/`grep` + edit-ask в `.opencode/opencode.json`, fail-closed,
+> не зависит от плагина); глобальный слой (конфиг вне проекта) и override
+> `MAESTRO_CONFIG` (debug-only) — документированный residual. В
+> legacy-режиме плагин дополнительно держит активный конфиг-путь (любой из
+> 4 слоёв резолва, включая глобальный абсолютный путь вне проекта) в
+> confidential-контуре (`read`/`write`/`edit`, `isMaestroConfigPath`:
+> точное совпадение пути, не glob), а его содержание маскируется в
+> sanitize-цепочке; в new-режиме этот гейт выключен. См.
 > [`SECURITY.md`](../../SECURITY.md) → P6.
 > Primary и untrusted-агенты **не читают** его нативным `read`;
 > санкционированный канал чтения параметров в сессии — плагин-тул
@@ -177,34 +214,49 @@ Approve, Minor → spec-follow-up (не блокирует).
 
 **Гарантия отсутствия доступа `opus`/оркестратора к confidential** обеспечивается:
 Слой 1 (custodian отвечает агрегатами без значений), Слой 2 (маскирование промпта
-при диспатче), Слой 3 (confidential deny + built-in набор), Слой 5 (Ур.1 при
+при диспатче), Слой 3 (нативный permission-барьер — new-режим / плагинный
+enforcement + built-in-набор — legacy-режим), Слой 5 (Ур.1 при
 применении правки), Слой 6 (HITL-мост для особого случая). Если правка/вопрос
 opus затрагивает помеченную `из confidential` секцию → HITL: (a) trusted `custodian`
 / (b) follow-up / (c) отмена. Единственный мост из confidential-контура — trusted
 `custodian` или HITL-решение.
 
-> **Built-in confidential (OQ-3):** помимо `confidential.paths`, плагин закрывает
-> по умолчанию `.env`, `.env.*`, `*.pem`, `*.key`, `*.crt`, `*.p12`, `*.pfx` для
-> `read`/`write`/`edit` — deny для primary и non-trusted независимо от конфига.
-> `confidential.paths` расширяет built-in, а не заменяет его.
+> **Built-in-набор (OQ-3):** помимо project restricted-путей, по умолчанию
+> закрывается `.env`, `.env.*`, `*.pem`, `*.key`, `*.crt`, `*.p12`, `*.pfx` —
+> deny для primary и untrusted независимо от конфига: в new-режиме — как
+> часть нативного deny-baseline (пишет `/maestro-setup`), в legacy-режиме —
+> плагин. Набор restricted-путей **расширяет** built-in, а не заменяет.
 
 ### Защищённая папка `docs/confidential`
 
-Секция `confidential` в `maestro.json` закрывает конфиденциальные пути
-(по умолчанию `docs/confidential/**`) для чтения и записи всем, кроме trusted-
-субагентов (имена из секции `trust`). Primary-сессия и untrusted-субагенты —
-жёсткий `deny` (не конфигурируется). Trusted-субагент читает по умолчанию
-(`trusted.read: allow`), а запись/редактирование по умолчанию запрещены
-(`trusted.write`/`trusted.edit: deny`) и выдаются явно.
+**New-режим (6.4.0, после миграции):** барьер для restricted-путей (по
+умолчанию `docs/confidential/**`) — **нативные permissions OpenCode**:
+deny `read`/`edit`/`glob`/`grep` + per-agent allow role-set
+`custodian`/`sanitizer` (`read`/`glob`/`grep`; запись/редактирование
+закрыты даже для trusted). Primary-сессия и untrusted-субагенты — жёсткий
+`deny` (не конфигурируется); барьер fail-closed в ядре, не зависит от
+плагина. Документация путей — строка-зеркало §12 в `docs/project-context.md`
+(`- **Confidential-данные:** p1, p2`); изменение набора — [Настройка
+restricted-путей](../how-to/manage-confidential-paths.md).
 
-**Известное ограничение (риск обхода):** плагин перехватывает только
-`read`/`write`/`edit`. Содержимое confidential можно вытащить через
-`bash cat`, `grep -r`, `glob` — эти тулы плагином не покрываются (пути из
-bash-команд ненадёжно извлекаются).
+**Legacy-режим (секция `confidential` есть в `maestro.json`):** плагин
+закрывает пути (`confidential.paths` + built-in-набор) для чтения и записи
+всем, кроме trusted-субагентов (role-set). Primary/untrusted — жёсткий
+`deny` (не конфигурируется); trusted читает по умолчанию
+(`trusted.read: allow`), запись/редактирование — по явному
+`trusted.write`/`trusted.edit: allow`.
 
-**Нативный permission-бастион OpenCode (стандарт init, Этап A).** `/maestro-setup`
-пишет нативный deny-baseline для confidential + 2-й эшелон в merge-config
-(`.opencode/opencode.json`/global) — **обязательная часть init**, а не рекомендация:
+**Известное ограничение (риск обхода):** нативные `glob`/`grep` матчат
+аргумент-паттерн, не пути-результаты — широкие паттерны-обход
+(`glob("docs/**/*.md")`) не блокируются; основной fail-closed-барьер —
+`read`/`edit`. `bash` (напр. `cat prod.env`) нативными deny не покрывается
+— документированный residual (см. [`SECURITY.md`](../../SECURITY.md) → §5).
+
+**Нативный permission-бастион OpenCode (стандарт init, Этап A) — основной
+барьер в new-режиме.** `/maestro-setup` пишет нативный deny-baseline для
+restricted-путей + built-in-секреты в merge-config
+(`.opencode/opencode.json`/global) — **обязательная часть init**, а не
+рекомендация:
 
 ```json
 {
@@ -218,16 +270,17 @@ bash-команд ненадёжно извлекаются).
 }
 ```
 
-Два слоя работают независимо: плагин закрывает `read/write/edit`
-(по имени/trust), нативные permissions OpenCode дают fail-closed baseline
-в ядре для `read`/`edit` (не зависит от плагина).
+В new-режиме нативный бастион — **единственный барьер** файлового доступа
+(fail-closed в ядре, не зависит от плагина); плагин file-тулы не гейтит —
+только shadow-аудит (observability). В legacy-режиме плагин дополнительно
+исполняет `[confidential:deny]` (dual mode, до миграции).
 
 - **`glob`/`grep` — эвристический слой:** матчат аргумент-паттерн,
   не пути-результаты, поэтому закрывают только прямое указание паттерна
   `confidential`, а широкие паттерны-обход (`glob("docs/**/*.md")`) — нет;
   основной барьер — `read`/`edit`.
 - **`bash`-паттерны по слову** (напр. `*cat*confidential*`) **не
-  используются** — они не защищают произвольные `confidential.paths`
+  используются** — они не защищают произвольные restricted-пути
   и блокируют служебные команды; защита `bash` — через `read`/`edit` deny
   по реальным путям + санитайзер промптов.
 - **Канон и семантика** (`*` пересекает `/`, last-match-wins) — в скилле
@@ -240,9 +293,9 @@ bash-команд ненадёжно извлекаются).
 
 - **Смена `maestro.json`** — требует рестарта opencode (конфиг читается при
   старте плагина).
-- **Trust не наследуется** вложенными субагентами: даже если trusted-субагент
-  диспатчит вложенного, вложенный оценивается по своему имени и получает deny,
-  если не в `trust`.
+- **Trust (role-set) не наследуется** вложенными субагентами: вложенный
+  сабагент доверен, только если его собственный агент в role-set
+  (`custodian`/`sanitizer`).
 - **`@`-invocation (R8):** пользователь может вызвать любой сабагент напрямую через
   `@`-меншн, даже при `task: deny` у агентов (включая `@custodian` с доступом к
   `docs/confidential/**`). Приемлемо — **человек = источник доверия**; но вывод
@@ -250,29 +303,31 @@ bash-команд ненадёжно извлекаются).
 - **`doom_loop` guard (R8):** OpenCode переспрашивает при повторении одинакового
   вызова тула 3 раза (`ask` по умолчанию) — не конфликтует с pipeline, служит
   индикатором зацикливания.
-- **Отдельные файлы и маски в `paths`:** `confidential.paths` принимает не
-  только папки, но и отдельные файлы по полному имени и по маске, включая
-  корневую папку проекта (напр. `maestro.json`, `*.env`, `**/*.pem`). Маска без
-  `/` закрывает только корневые файлы; `**` — корень и вложенные; `*`/`?` — в
-пределах одного сегмента. Контроль применяется к `read`/`write`/`edit`;
-   `bash`/`glob`/`grep` плагином **не перехватываются** — для них нативный
-   permission-бастион (стандарт init, см. выше), эвристический слой.
+- **Отдельные файлы и маски:** в legacy-режиме `confidential.paths`
+  принимает не только папки, но и отдельные файлы по полному имени и по
+  маске, включая корневую папку проекта (напр. `maestro.json`, `*.env`,
+  `**/*.pem`); сегментный матчинг, case-insensitive: маска без `/`
+  закрывает только корневые файлы, `**` — корень и вложенные, `*`/`?` — в
+  пределах одного сегмента. В new-режиме restricted-пути задаются
+  нативными deny-паттернами (нативный `*` пересекает `/`; last-match-wins —
+  см. [Настройка restricted-путей](../how-to/manage-confidential-paths.md)).
 - **Пути нормализуются** перед матчингом: absolute / `./` / relative / `..`
   сводятся к каноническому проект-относительному виду, поэтому
   `/abs/.../docs/confidential/x.md`, `./docs/confidential/x.md` и
   `docs/Confidential/...` (case-вариант) блокируются наравне с
   `docs/confidential/...`. Листинг самой директории `docs/confidential` тоже
-блокируется. `bash`/`glob`/`grep` по-прежнему не покрываются плагином — для
-   них нативный permission-бастион OpenCode (стандарт init, эвристический слой).
+  блокируется (`glob` — эвристический слой, см. выше).
 
-> **⚠️ Риск: данные confidential при отключённом плагине — частично смягчён.**
-> Sanitizer и trusted-исключения (enforcement плагина) реализованы в плагине
-> `maestro-bootstrap` и **не являются файловой защитой ОС (не chmod/ACL)**.
-> При отключённом/незагруженном плагине **sanitizer не работает**,
-> однако **файловая защита confidential для `read`/`edit` сохраняется**: нативный
-> deny-baseline (стандарт init) действует в ядре OpenCode независимо от плагина.
-> Эвристические deny `bash`/`glob`/`grep` остаются, но закрывают только прямое
-> указание паттерна (широкие паттерны-обход не блокируются).
+> **⚠️ Риск: плагин отключён (new-режим) — файловая защита сохраняется.**
+> Защита — не файловая защита ОС (не chmod/ACL). При
+> отключённом/незагруженном плагине **файловая защита restricted-данных
+> сохраняется**: нативный deny-baseline (`read`/`edit`/`glob`/`grep`,
+> стандарт init) действует в ядре OpenCode независимо от плагина; trusted
+> role-set сохраняет доступ через нативный per-agent allow. Выключаются
+> плагинные функции: Ур.1-маскирование промптов (fail-closed на
+> диспатче), merge/commit-guard, shadow-аудит, memory layer. В
+> legacy-режиме без плагина плагинный enforcement-слой также не активен
+> (fail-open для этого слоя).
 
 > Тем не менее, если данные в
 > `docs/confidential/` действительно конфиденциальны и их раскрытие недопустимо
@@ -289,9 +344,10 @@ trusted `sanitizer`, но **потребляются untrusted**-субаген�
 review, шаг 9), implementer (`haiku`/`sonnet`, шаг 13), `reviewer` (+ `sonnet`
 в параллельном первом раунде, шаг 16).
 
-Если добавить эти пути в `confidential.paths`, untrusted-субагенты и primary
-получат жёсткий deny на чтение spec/plan, и **процесс планирования/реализации
-остановится** (untrusted не смогут читать исходники для своей работы).
+Если добавить эти пути в restricted-набор (нативные deny), untrusted-
+субагенты и primary получат жёсткий deny на чтение spec/plan, и **процесс
+планирования/реализации остановится** (untrusted не смогут читать
+исходники для своей работы).
 
 Защита confidential-ДАННЫХ обеспечивается иначе:
 - spec/plan **очищаются** sanitizer (шаг 8.6 pipeline, «Подписи spec-файла»)
@@ -309,37 +365,47 @@ Confidential покрывает **исходные данные**, а не оч�
 Опциональный memory layer плагина (векторная память сессий) работает в том же
 контуре доверия, что и confidential. Правила:
 
-- **Маскирование до и после LLM** (LLM — large language model, большая
-  языковая модель). Транскрипт сессии **маскируется до** саммаризации,
-  результат **повторно** маскируется перед записью в любой бэкенд
-  (defense-in-depth):
-  - **До LLM:** `sanitize()` — все правила, без `by_agent`-выключений — плюс
-    confidential path-фильтр: строки под паттернами `confidential.paths` →
-    `[confidential]`; в фоновый саммаризатор уходит только замаскированный
-    текст.
-  - **После LLM:** маскируются все текстовые поля записи (`title`, `summary`,
-    `decisions`).
-- **Confidential-пути не индексируются вовсе.** Содержимое под паттернами
-  `confidential.paths` не попадает в память: фильтрация транскрипта (best-effort)
-  + инструкция саммаризатору не переносить императивные/командные фрагменты.
-- **Жёсткий инвариант (контент записей).** На удалённый сервер НЕ попадают
-  **сырые confidential-данные и секреты** из `title`/`summary`/`decisions`;
-  в контент памяти raw-confidential не попадает в принципе.
-  - **Гарантия — маскирование:** двойное до/после LLM, re-mask на
+- **Маскирование до и после LLM — только generic** (LLM — large language
+  model, большая языковая модель). Транскрипт сессии **маскируется до**
+  саммаризации (generic-правила Ур.1 для технических секретов —
+  `key=value` → `key=<redacted>`, `.env`, PEM, PII; без `by_agent`-
+  выключений), результат **повторно** маскируется перед записью в любой
+  бэкенд (defense-in-depth): все текстовые поля записи (`title`,
+  `summary`, `decisions`). **Бизнес-confidential memory-модуль не
+  маскирует** (line-level confidential-фильтр с плейсхолдером
+  `[confidential]` удалён (6.4.0, D3)) — см. SEC-5 ниже.
+- **Restricted-пути не добавляются в globs (канон I4).**
+  `memory.artifact_globs` / `memory.history_globs` — allowlist артефактов
+  (спеки/планы); restricted-пути в них **не добавляются** — backfill-канал
+  (git-история → LLM-саммаризатор) не попадает в allowlist.
+- **Жёсткий инвариант (контент записей) — про технические секреты.** На
+  удалённый сервер НЕ попадают **сырые технические секреты**
+  (`key=value`, PEM, PII) из `title`/`summary`/`decisions`.
+  - **Гарантия — generic-маскирование:** двойное до/после LLM, re-mask на
     `memory_import`, дисциплина `maestro:sanitize`.
+- **SEC-5 — утечка бизнес-confidential через память: признанный риск
+  (6.4.0, D3).** Memory-модуль бизнес-confidential-данные **не
+  маскирует**. Каналы признанного риска: (a) **ответ custodian с
+  значением** (входит в транскрипт сессии), (b) **реплика пользователя**,
+  (c) **черновик спеки** (артефакт сессии), (d) **git-backfill** — файл из
+  git-истории, прочитанный по allowlist-глобам и отправленный в
+  LLM-саммаризатор. Митигации: локальный embedder + бэкенд `sqlite` **по
+  умолчанию** (данные не покидают машину), allowlist артефактов, канон I4.
+  Централизованные бэкенды (`qdrant`/`pgvector`) — осознанный выбор
+  (данные покидают машину). См. [`SECURITY.md`](../../SECURITY.md) → §5a.
   - **Санизированные данные блокировать НЕ требуется** («санизированное
     может храниться/читаться где угодно»).
   - **`storage.type` — единственное решение локально/удалённо**
     (`sqlite` = локально; `qdrant`/`pgvector` = удалённо); ключ
     `centralized_confidential` **удалён** (v3) — отдельный ключ дублировал
     это решение, его назначение обеспечено маскированием.
-- **Риск unmasked git-метаданных.** `branch`/`head`/`merged` — исключение из
-  маскирования (строго git-структурные поля: имя ветки, sha, 0/1); при
-  централизованном бэкенде имена веток (free-text: коды/ticket-ID) уходят
-  на сервер — теперь дефолт для confidential-проектов.
-  - **Операционное предупреждение:** init-warn `unmasked_branch_metadata`
-    при централизованном бэкенде + непустых `confidential.paths`; warn
-    дублируется в выдаче `@maestro-memory`.
+- **Git-метаданные — документированный класс.** `branch`/`head`/`merged` —
+  исключение из маскирования (строго git-структурные поля: имя ветки, sha,
+  0/1); при централизованном бэкенде имена веток (free-text:
+  коды/ticket-ID) уходят на сервер — документированный класс git-
+  метаданных (init-warn `unmasked_branch_metadata`, привязанный к
+  `confidential.paths`, удалён (6.4.0) — маскирование бизнес-confidential
+  выведено из memory-механики, D3).
   - **`memory.mainline`** — только локальные git-команды, машину не покидает.
 - **Экспозиция читаемых ключей/`origin_remote` на centralized (класс
   git-метаданных, SECURITY §5a).** `key` (namespace) и `origin_remote` —
@@ -386,25 +452,27 @@ Confidential покрывает **исходные данные**, а не оч�
   - allowlist-глобы (`memory.artifact_globs`) ограничивают scope;
   - framing-строка recall-блока уже действует, а summary записи
     и так несёт контент сессии (см. [`SECURITY.md`](../../SECURITY.md) → §5a).
-- **Git-history backfill — summarize спеки (Z3-adjacent, v3.5.0).**
-  `memory_reindex` `source: git` — LLM-вызов по **репозиторному файлу**
-  (спека в git, двухролевая, не confidential; кандидаты — allowlist-глобы
-  `history_globs`, кроме plan-путей).
-  - **Контроли:** спека **маскируется до** summarize (raw-набор); LLM-вывод
-    **re-mask'ится** (`maskEntry`) до embed и upsert; кандидат под
-    `confidential.paths` (resolved-набор) → `skip_confidential`
-    (fail-closed — содержимое не читается, не summarize'ится,
-    не индексируется); provenance-маркер `author: "git-backfill"` виден
-    в recall/search/export.
-  - **Инкрементальный риск низкий — принято** (тот же класс, что
-    artifact-file Z3: файл в git, двухролевой, allowlist-глобы,
-    маскирование до/после LLM). См. [`SECURITY.md`](../../SECURITY.md) → §5a.
+- **Git-history backfill — summarize спеки** (Z3-adjacent, v3.5.0;
+  `skip_confidential` удалён (6.4.0, D3)). `memory_reindex` `source: git` — LLM-вызов
+  по **репозиторному файлу** (спека в git, двухролевая, не confidential;
+  кандидаты — allowlist-глобы `history_globs`, кроме plan-путей).
+  - **Контроли:** (а) файл **generic-маскируется до** summarize
+    (технические секреты); (б) LLM-вывод **re-mask'ится** (`maskEntry`) до
+    embed и upsert; (в) набор кандидатов ограничен allowlist-глобам —
+    **канон: restricted-пути не добавляются в `history_globs`/
+    `artifact_globs`** (I4); (г) provenance-маркер `author:
+    "git-backfill"` виден в recall/search/export.
+  - Файл из git-истории достигает LLM-саммаризатора — **канал SEC-5 (d),
+    принятый риск** (тот же класс, что artifact-file Z3: файл в git,
+    allowlist-глобы, generic-маскирование до/после LLM). См.
+    [`SECURITY.md`](../../SECURITY.md) → §5a.
 - **Экспорт/импорт — локальная граница (v2).**
   - **`memory_export`** пишет JSONL полной схемы v3 (включая embedding).
     Путь по умолчанию — **локальный** (`<data-dir>/maestro/memory/`); путь
-    наружу машины — осознанный выбор пользователя. Для проекта с
-    `confidential.paths` инструмент выводит предупреждение «данные
-    замаскированы, но могут покинуть машину — осознанный выбор».
+    наружу машины — осознанный выбор пользователя: контент записей
+    generic-замаскирован (технические секреты), но бизнес-confidential
+    может присутствовать по каналам SEC-5 (a)–(d) (признанный риск;
+    предупреждение, привязанное к `confidential.paths`, удалено (6.4.0)).
   - **`memory_import` — второй write-path в память:** каждая запись
     **повторно маскируется** перед записью (тот же double-masking, что
     в индексаторе) + **permission `ask`** (защита от poison-JSONL
@@ -412,8 +480,10 @@ Confidential покрывает **исходные данные**, а не оч�
     в system-prompt сокомандников).
 - **Бэкап/restore — третий write-path (4.7.0, v1: только sqlite).**
   `memory_backup`:
-  - **бэкап** — **повторное маскирование** каждой записи (`maskEntry`)
-    до записи JSONL;
+  - **бэкап** — **повторное generic-маскирование** каждой записи
+    (`maskEntry` — тот же double-masking, что в индексаторе/импорте;
+    confidential-набор из маскирования бэкапа удалён (6.4.0, D3)) до
+    записи JSONL;
   - **restore-файл — недоверенный ввод:** fail-closed-валидация
     (sha256, манифест `storage_type`/`key`/`model_id`/`dim`/`schema_fields`,
     все строки) + повторное маскирование до записи;
@@ -447,11 +517,12 @@ Confidential покрывает **исходные данные**, а не оч�
     `error_class`/`http_status_class`).
   - **Никогда** — текст записей/запросов, пути и тела ошибок,
     `base_url`/эндпоинты, raw branch, секреты.
-  - `.maestro/` в `.gitignore` (по умолчанию не покидает машину);
-    при непустых `confidential.paths` — doc-note
-    `memory:log_confidential_note` (warn).
-  - **Hard-disable не вводится** (аудит нужен в confidential-проектах
-    сильнее всего).
+  - `.maestro/` в `.gitignore` (по умолчанию не покидает машину; локальный
+    лог может покинуть машину через шеринг/бэкап — author/branch-
+    корреляция; doc-note `memory:log_confidential_note`, привязанный к
+    `confidential.paths`, удалён (6.4.0)).
+  - **Hard-disable не вводится** (аудит нужен в проектах с
+    restricted-данными сильнее всего).
 - **Кросс-проектный поиск — opt-in (паритет v3a).** `memory_search`
   с `project` ищет по записям других проектов **только когда задан явно**
   (не default); данные маскированы.
@@ -466,12 +537,14 @@ Confidential покрывает **исходные данные**, а не оч�
   с предзагрузкой).
   - **Внешний embedder (opt-in):** опциональный
     `memory.embedding.provider: "openai"` — внешний OpenAI-совместимый
-    API — контент записей маскируется
-    до эмбеддинга (жёсткий инвариант выше), **recall-запросы маскируются
-    всегда** (best-effort, line-level по `confidential.paths`), ключ —
+    API — контент записей generic-маскируется
+    до эмбеддинга (технические секреты), **recall-запросы
+    generic-маскируются всегда** (best-effort), ключ —
     только через `api_key_env`, запросы/контент покидают машину —
-    **осознанный opt-in** (trust-модель не меняется); при непустых
-    `confidential.paths` — init-warn `external_embedder_unmasked_queries`.
+    **осознанный opt-in** (trust-модель не меняется; бизнес-confidential
+    в контенте — SEC-5, признанный риск; init-warn
+    `external_embedder_unmasked_queries`, привязанный к
+    `confidential.paths`, удалён (6.4.0)).
   - **Прочее:** проверка работоспособности модели на старте (probe) не
     влияет на модель доверия; `memory.db` вне git (глобальный каталог);
     секреты не логируются.
@@ -481,12 +554,15 @@ Confidential покрывает **исходные данные**, а не оч�
 
 ### Жёсткий гейт «плагин работает»
 
-Чтобы пользователь не работал с confidential-данными при отключённом плагине,
+Чтобы пользователь не работал с плагинными функциями (Ур.1-маскирование,
+merge/commit-guard, shadow-аудит, memory layer) при отключённом плагине,
 на входе `@maestro-init`, `@maestro-design`, `@maestro-feedback-report` (в maestro-
 проекте с `maestro.json`) выполняется гейт: самый свежий
 `.maestro/logs/maestro-bootstrap-<дата>.log` должен содержать свежую запись
 `plugin initialized` (timestamp не старше 24 часов). При невыполнении — жёсткий
-стоп без «продолжить» (только подключить+перезапуск или отмена).
+стоп без «продолжить» (только подключить+перезапуск или отмена). Файловая
+защита restricted-данных от плагина не зависит (нативный барьер) — гейт
+на плагинные функции.
 
 После подтверждения свежести init-записи гейт дополнительно проверяет
 **рассинхрон версий** (warn, НЕ stop): версия `"version":"X.Y.Z"` из init-строки

@@ -91,7 +91,7 @@ OpenCode:    subagent(agent="haiku", prompt="...")
 }
 ```
 
-**Отношение к trust-модели.** Variant не связан с доверием: `custodian`/`sanitizer` могут использовать `#high` (мощная модель для Q/A по confidential), а `haiku` — `#low` (лёгкая модель для механических задач). Trust определяется в `maestro.json → trust`, variant — в `agent.<name>.model` opencode.json.
+**Отношение к trust-модели.** Variant не связан с доверием: `custodian`/`sanitizer` могут использовать `#high` (мощная модель для Q/A по confidential), а `haiku` — `#low` (лёгкая модель для механических задач). Trust — **по роли** (role-set `{custodian, sanitizer}`, захардкожен в плагине; секция `trust` в `maestro.json` удалена, 6.4.0, B), variant — в `agent.<name>.model` opencode.json.
 
 **Таблица variant в тестировании.** Команда `/test-agents` показывает variant из `info.model.variant` child-сессии. Если поле отсутствует — `—`.
 
@@ -103,8 +103,10 @@ OpenCode:    subagent(agent="haiku", prompt="...")
   безопасности, не мощность.
 - **Tier:** custodian→opus, opus→opus, reviewer→opus, haiku→haiku, sonnet→sonnet,
   fable→fable, **sanitizer→своя**.
-- **Trust:** `custodian` и `sanitizer` — trusted (в `maestro.json`); остальные —
-  untrusted. `custodian` и `sanitizer` — **разные агенты**, оба trusted. Модели могут
+- **Trust:** `custodian` и `sanitizer` — trusted **по роли** (role-set,
+  захардкожен в плагине; секция `trust` в `maestro.json` удалена (6.4.0, B));
+  остальные — untrusted. `custodian` и `sanitizer` — **разные агенты**, оба
+  trusted. Модели могут
   быть разными, но **одна модель тоже допустима** на усмотрение пользователя
   (например, одна локальная/изолированная для обоих).
 
@@ -115,7 +117,8 @@ OpenCode:    subagent(agent="haiku", prompt="...")
 > операции это детерминированная классификация, но модель **не обязана быть
 > лёгкой/дешёвой**. По умолчанию `temperature 0.0` (стабильность вывода), поправимо.
 > Задаётся в `agent.sanitizer.model` (в `.opencode/opencode.json` или global) по
-> общим правилам M1/D2. `sanitizer` trusted (доступ к `docs/confidential/**`) —
+> общим правилам M1/D2. `sanitizer` trusted по роли (файловый доступ к
+> `docs/confidential/**` — нативный per-agent allow) —
 > это **доверие**, не мощность.
 >
 > **Рекомендация (локальная модель).** Для `sanitizer` (и `custodian` — trusted-
@@ -201,12 +204,14 @@ tier-схему агентов** (они не настраиваются чер�
   `[maestro-memory]` (удаляется после ответа) и работает с замаскированным
   транскриптом.
 - Обе модели **не являются tier-классами** (не haiku/sonnet/opus/fable) и не
-  связаны с trust-моделью: саммаризатор работает с **замаскированным**
+  связаны с trust-моделью: саммаризатор работает с **generic-замаскированным**
   транскриптом (см. [Агенты и модель доверия](../explanation/agents-and-trust.md)),
   эмбеддинги — локальные по умолчанию (внешний — opt-in, см. ниже),
-  raw-confidential не покидает машину (санизированные
+  сырые технические секреты не покидают машину (generic-маскирование);
+  бизнес-confidential модуль памяти не маскирует — SEC-5, признанный риск
+  (каналы (a)–(d)); санизированные
   данные могут храниться/читаться на централизованных бэкендах — решение
-  локально/удалённо только через `storage.type`).
+  локально/удалённо только через `storage.type`.
 - **Бэкап/restore (4.7.0):** restore из бэкапа требует совпадения `model_id`/
   `dim` (манифест против активного хранилища, fail-closed) — перенос между
   разными моделями эмбеддингов через бэкап не поддерживается (как и через

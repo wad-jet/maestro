@@ -232,8 +232,9 @@ LLM делает один `read` — полный контекст вместо 
 - **Решение «локально vs удалённо» — только `storage.type`** (`sqlite` =
   локально; `qdrant`/`pgvector` = удалённо). Ключ `centralized_confidential`
   **удалён** (v3): его назначение (страховка от утечки) обеспечено
-  маскированием — raw-confidential не попадает в контент записей в принципе
-  (см. [Агенты и модель доверия](../explanation/agents-and-trust.md));
+  **generic-маскированием** — сырые технические секреты не попадают в
+  контент записей в принципе; **бизнес-confidential** модуль не маскирует
+  (SEC-5 — признанный риск, каналы (a)–(d), см. [Агенты и модель доверия](../explanation/agents-and-trust.md));
   **санизированные** данные могут храниться/читаться где угодно.
 
 ### Паритет-матрица бэкендов (v3a)
@@ -447,7 +448,8 @@ upstream — при работе с форками задайте `memory.mainli
 Ключ `storage.centralized_confidential` **удалён** (v3). Решение «локально vs
 удалённо» — только `storage.type` (`sqlite` = локально; `qdrant`/`pgvector` =
 удалённо). Отдельный ключ дублировал это решение; его назначение (страховка от
-утечки) обеспечено маскированием (см. [Агенты и модель доверия](../explanation/agents-and-trust.md)).
+утечки) обеспечено generic-маскированием (технические секреты); бизнес-
+confidential — признанный риск SEC-5 (см. [Агенты и модель доверия](../explanation/agents-and-trust.md)).
 
 ## 🔎 Инструмент `memory_search`
 
@@ -638,10 +640,11 @@ memory_export({path?}) → «Экспортировано N записей в <p
 - Путь по умолчанию — **локальный**:
   `<data-dir>/maestro/memory/export-<key16hex>-<ts>.jsonl`. Путь наружу машины —
   осознанный выбор пользователя (инструмент выводит путь).
-- Для проекта с `confidential.paths` возвращаемая строка содержит
-  предупреждение: «внимание: данные замаскированы, но могут покинуть машину —
-  осознанный выбор» (предупреждение — в выводе, не в файле: файл остаётся
-  чистым JSONL для round-trip).
+- Путь наружу машины — осознанный выбор пользователя (инструмент выводит
+  путь). Контент записей generic-замаскирован (технические секреты), но
+  бизнес-confidential может присутствовать по каналам SEC-5 (a)–(d)
+  (признанный риск; предупреждение, привязанное к `confidential.paths`,
+  удалено (6.4.0, D3): файл остаётся чистым JSONL для round-trip).
 - Пустая память → «memory_export: нет записей для экспорта» (файл не пишется).
 - **Permission:** `memory_export: "ask"` в merge-config.
 
@@ -658,9 +661,10 @@ memory_import({path, replace?}) → «Импортировано N записе�
   **опциональны** (не входят в `IMPORT_REQUIRED` — валидируются 11 базовых
   полей). Ошибка в любой строке → **ничего не импортируется**, с
   указанием физического номера строки.
-- **Повторное маскирование каждой записи** перед записью (`maskEntry`:
-  `sanitize()` + confidential path-фильтр — тот же double-masking, что в
-  индексаторе) — защита от poison-JSONL в shared-бэкенд.
+- **Повторное generic-маскирование каждой записи** перед записью
+  (`maskEntry`: `sanitize()` — generic-правила Ур.1; confidential
+  path-фильтр удалён (6.4.0, D3) — тот же double-masking, что в индексаторе) —
+  защита от poison-JSONL в shared-бэкенд.
 - `replace: true` — очистить активный `key` перед импортом (выполняется только
   после успешной валидации всех строк).
 - **Permission:** `memory_import: "ask"` в merge-config (обязательное правило).
@@ -692,9 +696,9 @@ memory_backup({action: "backup" | "restore" | "list", file?, replace?}) → бэ
 - **Бэкап/восстановление данных памяти** (v1 — только `storage.type:
   sqlite`; qdrant/pgvector → отказ с понятной ошибкой, без записей).
 - **`action: "backup"`** — все записи активного `key` → **повторное
-  маскирование** каждой по текущему confidential-набору (`maskEntry` — тот же
-  double-masking, что в индексаторе/импорте; расширение `confidential.paths`
-  постфактум отражается в новом бэкапе, в отличие от `memory_export`) →
+  generic-маскирование** каждой (`maskEntry` — тот же double-masking, что в
+  индексаторе/импорте; confidential-набор из маскирования бэкапа удалён
+  (6.4.0, D3)) →
   пара файлов `backup-<key>-<ts>.jsonl` (JSONL полной схемы v3, `embedding` —
   массив чисел) + `backup-<key>-<ts>.manifest.json` (`plugin_version`,
   `schema_fields[]`, `model_id`, `dim`, `key`, `ts`, `count`, `sha256`
@@ -743,7 +747,7 @@ node <путь-к-плагину>/memory/backup-cli.js restore --file <путь>
 - Запуск — из корня (или подкаталога) git-репозитория проекта с
   `maestro.json`, где включена память (`storage.type: sqlite` — v1).
   Тот же конфиг (`memory.backup.*`), те же данные (`memory.db` в
-  `<data-dir>`) и те же confidential-наборы, что у плагина.
+  `<data-dir>`) и те же generic-наборы маскирования, что у плагина.
 - sqlite-драйвер загружается из `module_dir` — там выполнен `npm install`
   (штатный онбординг). Аудит — bootstrap-лог
   `.maestro/logs/maestro-bootstrap-<дата>.log` (события `memory:backup` /
@@ -830,8 +834,7 @@ memory_stats_detail() → агрегаты (без summary-текста)
 **Только агрегаты (SEC-4b)** — без раскрытия содержимого записей. При
 выключенной памяти — дружественное сообщение со ссылкой на
 [Как включить память](../how-to/enable-memory.md). Диагностические строки
-(`mainline_unresolved`, `unmasked_branch_metadata`,
-`external_embedder_unmasked_queries`) дублируются в выдаче —
+(`disabled_reason`, `mainline_unresolved`) дублируются в выдаче —
 диагностика без логов. При отсутствии/FAIL probe-статуса команда вызывает
 `memory_probe` (live-проверка, минуя cooldown) и показывает результат.
 Вывод также включает **`Каталог данных: <path>`** — резолвнутый
@@ -906,8 +909,9 @@ opencode показывает инструкцию ручного запуска
 1. Хук `chat.message` — только для **top-level primary сессий** (проверка
    `parentID`; субагентские task-сессии и `[maestro-memory]` исключаются).
    Счётчик user-сообщений по sessionID (bounded). Если сообщение **первое**:
-   эмбеддинг masked-текста + FTS-нога (masked-запрос без строк-плейсхолдеров
-   `[confidential]`) → KNN/FTS-гибрид → RRF → единый пост-фильтр `min_score` →
+   эмбеддинг masked-текста + FTS-нога (masked-запрос — generic-маскирование,
+   без строк-плейсхолдеров `[confidential]`, которых в new-режиме нет) →
+   KNN/FTS-гибрид → RRF → единый пост-фильтр `min_score` →
    буфер `Map<sessionID, hits[]>`.
 2. Хук `experimental.chat.system.transform` — если для sessionID есть буфер,
    добавляет в `output.system` блок:
@@ -932,10 +936,12 @@ opencode показывает инструкцию ручного запуска
 1. `session.idle` → debounce-таймер `idle_debounce_min` по sessionID (unref'd).
 2. Проверки: не skip (state), не `[maestro-memory]`, top-level (нет `parentID`),
    новых сообщений с последнего саммари ≥ `min_new_messages`.
-3. **Маскирование транскрипта (до LLM):** `sanitize()` (все правила, без
-   `by_agent`-выключений) + confidential path-фильтр (best-effort, строки под
-   паттернами `confidential.paths` → `[confidential]`). В саммаризатор уходит
-   **замаскированный** текст.
+3. **Маскирование транскрипта (до LLM):** `sanitize()` (generic-правила
+   Ур.1 для технических секретов, без `by_agent`-выключений). В саммаризатор
+   уходит **замаскированный** текст. **Бизнес-confidential не маскируется
+   (6.4.0, D3):** line-level confidential-фильтр удалён — SEC-5, признанный
+   риск: ответ custodian с значением, реплика пользователя, черновик спеки,
+   git-backfill).
 4. Фоновая сессия саммаризации: `client.session.create` (title
    `[maestro-memory] <sessionID>`) + `client.session.prompt` со структурированным
    промптом (замаскированный транскрипт → JSON `{title, summary, decisions[]}`).
@@ -985,10 +991,13 @@ git-истории без записи** (спеки, написанные до 
 
 **Git-история (`source: "git"`, LLM):** кандидаты — файлы в текущем дереве,
 матчащие `history_globs` (inherit `artifact_globs` при `null`), **кроме
-plan-путей** (spec+plan = одна фича, 1 LLM-вызов). Спека маскируется **до**
-summarize (raw-набор); LLM-вывод **re-mask'ится** (`maskEntry`) до embed и
-upsert (SECURITY.md §5a); кандидат под `confidential.paths` (resolved-набор) →
-`skip_confidential` (fail-closed). Синтетическая запись: `author:
+plan-путей** (spec+plan = одна фича, 1 LLM-вызов). Спека generic-маскируется
+**до** summarize (технические секреты); LLM-вывод **re-mask'ится**
+(`maskEntry`) до embed и upsert (SECURITY.md §5a). **`skip_confidential`
+удалён (6.4.0, D3):** файл из git-истории достигает LLM-саммаризатора —
+канал SEC-5 (d), **принятый риск**; канон: restricted-пути не добавляются
+в `history_globs`/`artifact_globs` (I4 — backfill-канал не попадает в
+allowlist). Синтетическая запись: `author:
 "git-backfill"` (маркер provenance, виден в recall/search/export),
 `session_id = "git-" + sha256(key + "|" + commitSha + "|" + specPath).slice(0,12)`
 (детерминированный, RI-1), `head` = добавляющий коммит, `merged` — по
@@ -1115,9 +1124,10 @@ sessions → возможна пара (реальная + синтетичес�
   пути и тела ошибок (только `error_class` enum), `base_url`/эндпоинты, raw
   branch. `len` — **биннинг** (бакеты `<100`, `100-500`, `500-2000`, `>2000`,
   не точное значение). `branch` — **нормализуется** (`normalizeBranch`:
-  ticket-коды `[A-Z]{1,4}-\d+` → `*`) во всех событиях. При непустых
-  `confidential.paths` — warn `memory:log_confidential_note` (лог может покинуть
-  машину через шеринг/бэкап).
+  ticket-коды `[A-Z]{1,4}-\d+` → `*`) во всех событиях. Локальный лог может
+  покинуть машину через шеринг/бэкап (author/branch-корреляция); doc-note
+  `memory:log_confidential_note`, привязанный к `confidential.paths`, удалён
+  (6.4.0, D3).
 
 ### События (фактические имена)
 
@@ -1150,7 +1160,6 @@ sessions → возможна пара (реальная + синтетичес�
 | `memory:mainline_resolved` / `memory:mainline_unresolved` (warn) | branch (нормализованный) |
 | `memory:storage_init` | type |
 | `memory:storage_mismatch` (error) | type, model (имя без `@base_url`), dim_expected, dim_actual |
-| `memory:log_confidential_note` (warn) | — |
 | `memory:storage.stats` | entries, merged, experience |
 | `memory: embedder probe (cached)` (info) | ok, detail (нечувствительный «OK (dim N)») |
 | `memory: embedder probe (cached soft fail)` (warn) | error_class (enum-only; detail не логируется) |

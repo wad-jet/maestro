@@ -27,7 +27,7 @@ primary-сессии.
 - [Запуск багфикса](how-to/run-a-bugfix.md) — debug sub-pipeline
 - [Первая установка maestro](how-to/install-maestro.md) — глобальная (рекомендуется) и проектная установка: скиллы/команды/агенты + плагин
 - [Работа с реестром регрессии](how-to/use-regression-registry.md) — `/regression`
-- [Управление конфиденциальными путями](how-to/manage-confidential-paths.md) — добавление пути к confidential (I3, адресный diff, OP-1)
+- [Настройка restricted-путей](how-to/manage-confidential-paths.md) — добавление/изменение/снятие restricted-путя (одна операция: нативные deny + per-agent allow + строка §12, адресный diff, OP-1)
 - [Кастомизация скилла](how-to/customize-maestro.md) — правка и синхронизация
 - [Обновление maestro](how-to/update-maestro.md) — доставка новой версии скиллов и плагина, контроль версии
 - [Поддержание документации в актуальном состоянии](how-to/keep-docs-up-to-date.md)
