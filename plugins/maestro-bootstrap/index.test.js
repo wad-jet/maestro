@@ -3374,14 +3374,14 @@ describe("config resolve (4-layer, 6.0.0)", () => {
     }
   });
 
-  it("trust keys from .maestro/ win (replace из активного файла)", () => {
-    const d = makeDirs("swap-trust");
+  it("communication from .maestro/ wins (replace из активного файла)", () => {
+    const d = makeDirs("swap-comm");
     try {
-      writeJson(path.join(d.root, "maestro.json"), { trust: { sanitizer: false } });
-      writeJson(path.join(d.root, ".maestro", "maestro.json"), { trust: { sanitizer: true } });
+      writeJson(path.join(d.root, "maestro.json"), { communication: "professional" });
+      writeJson(path.join(d.root, ".maestro", "maestro.json"), { communication: "plain" });
       return withEnv(() => {
         const config = loadMaestroConfig(undefined, d.root);
-        assert.equal(config.trust.sanitizer, true);
+        assert.equal(config.communication, "plain");
       });
     } finally {
       clearGlobalConfig();

@@ -15,11 +15,11 @@
 |---|---|---|---|---|
 | A1 | Рефейм: custodian существует, design отсутствует | ✅ | `agents/custodian.md` есть; `rg "design"` в субагент-контекстах = 0 | |
 | A2 | Юнит-тесты плагина | ✅ | `npm test` зелёные (после рефейма) | |
-| A3 | Built-in confidential: `.env` deny | ✅ | primary/non-trusted не читают `.env`/ключей (юнит-тест Task 2b) | |
-| A4 | Built-in: `confidential.paths` расширяет built-in | ✅ | пользовательский путь не заменяет built-in | |
+| A3 | Built-in-секреты (new-режим): нативные | ✅ | `.env`/`*.env.*` — deny дефолта ядра OpenCode; `*.pem`/`*.key`/`*.crt`/`*.p12`/`*.pfx` — init-базелин в нативном конфиге (primary/non-trusted не читают); legacy — плагинный built-in-набор `BUILTIN_CONFIDENTIAL_PATTERNS` (юнит-тесты плагина) | |
+| A4 | Legacy (dual mode): `confidential.paths` расширяет built-in | ✅ | пользовательский путь добавляется к built-in-набору, не заменяет его — только когда секция `confidential` есть (юнит-тесты плагина) | |
 | A5 | Маркер `из confidential` не маскируется sanitizer | ✅ | тест в index.test.js (S10) | |
 | A6 | Маркер не ломает sanitize (не ложное срабатывание) | ❌ | маркер не вызывает false-positive маскирование | |
-| A7 | Un-trusted custodian/sanitizer — юнит-тесты плагина | ✅ | `npm test` покрывает `trust.custodian: false` / `trust.sanitizer: false` (confidential deny + prompt sanitize). Парный с D7/D8 | |
+| A7 | Role-set pin (6.4.0, B): trusted — hardcoded | ✅ | `npm test` покрывает B-pin role-set: `custodian`/`sanitizer` trusted по роли (hardcoded), `trust.*` → warn `trust:deprecated_key` + игнор; кастомные агенты всегда U1-masked (не `trust.custodian: false`). Парный с D7/D8 | |
 | A8 | `maestro_config`: primary — ok (возвращает конфиг); сабагент — deny + `maestro_config:access_denied` в логе; ветка «тул недоступен» не читает конфиг (bash-fallback отсутствует) | ✅/❌ | primary-вызов возвращает конфиг; сабагент — deny-сообщение + `maestro_config:access_denied` в логе; диагностические ветки — без bash-чтения и вызова тула | |
 
 ## B. Подготовка спецификации / brainstorm
@@ -58,10 +58,10 @@
 | D2 | primary не читает `.env`/`secrets/` | ✅ | нативный deny (ядро + сгенерированное правило `secrets/**`) | |
 | D3 | custodian агрегаты без значений/токенов/номеров | ✅ | assert/audit | |
 | D4 | Утечка через bash/glob/grep | ❌ | гейт-0, bash-permissions (плагин не покрывает — ручная проверка) | |
-| D5 | trusted-opus (B-5): гарантии сняты → предупреждение | ❌ | при `trust.opus=true` — предупреждение | |
+| D5 | opus — всегда U1-masked (вне role-set) | ❌ | режима «trusted-opus» в 6.4.0 нет: `trust.opus` → warn `trust:deprecated_key` + игнор; `opus` маскируется Ур.1 безусловно, гарантия «opus не видит confidential» сохраняется | |
 | D6 | **Маркер-driven (негатив):** правка по `из confidential`-секции НЕ применяется молча | ❌ | обязателен HITL (не silent). Парный с C6. Маркер-детект формален, не эвристика, не обходится «синтаксической согласованностью» | |
-| D7 | Un-trusted custodian: `trust.custodian: false` → confidential deny | ❌ | custodian не читает `docs/confidential/**` и `.env`; промпт санизируется; агент **non-functional** (не fallback). Проверить audit-лог `confidential:deny`. Юнит-тест: Task 1, Step 2-4 | |
-| D8 | Un-trusted sanitizer: `trust.sanitizer: false` → промпт санизируется (рекурсия) | ❌ | промпт sanitizer маскируется Ур.1 до него → не видит raw для пометки; агент **non-functional**. Проверить `sanitizer.redacted` в логе. Юнит-тест: Task 1, Step 5 | |
+| D7 | «Un-trusted custodian» — недостижим | ❌ | role-set hardcoded (6.4.0, B/N1): доверие — по роли, не снимается конфигом; legacy-«non-functional mode» недостижим. Legacy-режим (секция `confidential` есть) — прежние семантики legacy-enforcement (юнит-тесты плагина) | |
+| D8 | «Un-trusted sanitizer» — недостижим | ❌ | role-set hardcoded (6.4.0, B/N1): `sanitizer` trusted по роли — его промпт не санируется (рекурсии нет); legacy-«non-functional mode» недостижим. Legacy-режим — прежние семантики (юнит-тесты плагина) | |
 | D9 | **Live-инвариант (нативный слой):** trusted читает / primary — нативный deny | ✅ | [Manual] В sandbox-сессии: `read` primary на `docs/confidential/pricing-schema.md` / `secrets/other.conf` → нативный permission error (не `[confidential:deny]` — последний только legacy-режим); `read` custodian → OK (per-agent allow). В smoke-тесте проверяется статически (sandbox-smoke) | |
 
 ## E. Интеграция команд/скилов
@@ -69,7 +69,7 @@
 |---|---|---|---|---|
 | E1 | `/maestro-design`: шаг (a) → primary brainstorm + custodian + primary пишет spec | ✅ | переработанный флоу | |
 | E2 | **S6:** User Review Gate = шаг 10 (не двойное одобрение) | ✅ | **проверка документации/порядка шагов** (структурная, не поведенческий smoke) | |
-| E3 | Доставка в app-репо (S2) | ✅ | custodian/trust/model в целевом приложении | |
+| E3 | Доставка в app-репо (S2) | ✅ | `agents/`/`skills/`/`commands/` доставлены в целевое приложение (вкл. `custodian`/`sanitizer`); секция `trust` в `maestro.json` не доставляется (удалена в 6.4.0) | |
 | E4 | superpowers-скиллы не изменены | ✅ | `git status` на `.opencode/skills/` чист | |
 | E5 | Memory layer smoke | ✅ | `- [ ] Memory layer smoke: unit-тесты памяти зелёные (sqlite backend, memory_search tool, session.idle → storage; интеграция registerMemoryHooks).` | |
 

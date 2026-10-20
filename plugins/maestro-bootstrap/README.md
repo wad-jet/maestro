@@ -9,8 +9,11 @@
 
 - **Санитайзинг промптов `task`** (Уровень 1 Security Review): маскирует
   чувствительные данные (env-secrets, поля данных, `.env`, DB/SFTP credentials,
-  ledger) ДО отправки промпта в сабагента. Авто, без HITL. **Trusted сабагенты
-  (maestro.json → `trust`) — skip** (получают промпт как есть).
+  ledger) ДО отправки промпта в сабагента. Авто, без HITL. **Trusted —
+  role-set `{custodian, sanitizer}` (hardcoded в плагине) — skip** (получают
+  промпт как есть). Секция `trust` в `maestro.json` не читается (удалена из
+  схемы в 6.4.0, B: старые ключи → warn `trust:deprecated_key` + игнор
+  значения); все агенты вне role-set (вкл. `opus` и кастомные) — маскируются.
 - Логирует вызовы `task`-тула (диспатч субагентов) — observability.
 - Логирует ошибки/повторы сессий (`session.error`, `session.status.retry`).
 - Детектит пустой результат субагента (`tool.execute.after.empty_result`).
@@ -91,50 +94,79 @@ regex (ранее `["bad("]` вызывал SyntaxError на каждом дис
 ошибка проглатывалась, промпт уходил в сабагента несанитизированным).
 Title-ветка: сбой → `<unavailable>`, сессия не ломается.
 
-### Секция `confidential`
+### Секция `confidential` (dual mode, D5)
 
-Закрывает конфиденциальные пути (дефолт `docs/confidential/**`) для `read`/
-`write`/`edit` от всех, кроме trusted-субагентов. Primary и untrusted — жёсткий
-deny; trusted читает по умолчанию (`trusted.read: allow`), пишет по явному
-`trusted.write`/`trusted.edit: allow`.
-Идентичность отправителя определяется через `client.session.get` +
-`session.messages` (детект по `parentID` и имени агента). Подробнее —
-`manual_docs/reference/config.md`.
+Два режима — по наличию секции `confidential` (объект) в активном
+`maestro.json`:
 
-`confidential.paths` принимает папки, отдельные файлы по полному имени и по
-маске, включая корневую папку. Сегментная семантика: `**` = 0+ сегментов
-(покрывает корень), `*`/`?` — в пределах одного сегмента (не через `/`), маска
-без `/` (напр. `*.env`) закрывает только корневые файлы. В отличие от общего
-glob-матчинга (где `*` пересекает `/`), в `confidential` маска сегментная.
+- **New-режим (секции нет — дефолт с 6.4.0):** плагин файлы **не гейтит**
+  (нет `[confidential:deny]`, нет built-in-гейта, нет P6-контура). Барьер —
+  **нативные permissions OpenCode** (fail-closed в ядре, не зависит от
+  плагина): для restricted-путей (напр. `docs/confidential/**`) — deny
+  `read`/`edit`/`glob`/`grep` + per-agent allow role-set `custodian`/
+  `sanitizer` в merge-config (`.opencode/opencode.json` или global — канон
+  нативных permissions в `skills/maestro-assistant`). Плагин: инжектит
+  директиву `restricted-data paths: …` (из нативного конфига) в top-level
+  primary-сессии и ведёт shadow-аудит (см. «Аудит-лог»).
+- **Legacy-режим (секция есть):** legacy-enforcement плагина работает как
+  раньше: закрывает конфиденциальные пути (дефолт `docs/confidential/**`) для
+  `read`/`write`/`edit` от всех, кроме trusted-субагентов. Primary и untrusted
+  — жёсткий deny (`[confidential:deny]`); trusted читает по умолчанию
+  (`trusted.read: allow`), пишет по явному `trusted.write`/`trusted.edit:
+  allow`. Trusted — role-set (секция `trust` не читается). Идентичность
+  отправителя определяется через `client.session.get` + `session.messages`
+  (детект по `parentID` и имени агента). Init-warn `confidential:legacy_active`;
+  миграция — воркфлоу «Миграция legacy → new» (`skills/maestro-assistant`).
+  Подробнее — `manual_docs/reference/config.md`.
+
+`confidential.paths` (legacy-режим) принимает папки, отдельные файлы по
+полному имени и по маске, включая корневую папку. Сегментная семантика:
+`**` = 0+ сегментов (покрывает корень), `*`/`?` — в пределах одного сегмента
+(не через `/`), маска без `/` (напр. `*.env`) закрывает только корневые файлы.
+В отличие от общего glob-матчинга (где `*` пересекает `/`), в `confidential`
+маска сегментная.
 
 ### Built-in confidential (OQ-3, `BUILTIN_CONFIDENTIAL_PATTERNS`)
 
-Помимо `confidential.paths`, плагин применяет **built-in набор** по умолчанию,
-независимо от наличия/содержимого секции `confidential` в `maestro.json`:
-`.env`, `.env.*`, `*.pem`, `*.key`, `*.crt`, `*.p12`, `*.pfx`. Это служебные
-файлы секретов (`.env`) и приватные ключи — для `read`/`write`/`edit` они
-**всегда deny** для primary и non-trusted (тот же confidential-контур). Маски
-без `/` закрывают только корневые файлы.
+- **New-режим:** built-in-секреты закрыты **нативными permissions OpenCode**
+  (плагин built-in-гейт не исполняет): `.env`/`*.env.*` — дефолт ядра;
+  `*.pem`/`*.key`/`*.crt`/`*.p12`/`*.pfx` — init-базелин (пишется в нативный
+  конфиг при init, при наличии).
+- **Legacy-режим:** помимо `confidential.paths`, плагин применяет **built-in
+  набор** `BUILTIN_CONFIDENTIAL_PATTERNS` по умолчанию, независимо от
+  наличия/содержимого секции `confidential` в `maestro.json`: `.env`,
+  `.env.*`, `*.pem`, `*.key`, `*.crt`, `*.p12`, `*.pfx`. Это служебные файлы
+  секретов (`.env`) и приватные ключи — для `read`/`write`/`edit` они
+  **всегда deny** для primary и non-trusted (тот же confidential-контур).
+  Маски без `/` закрывают только корневые файлы.
 
-`confidential.paths` **расширяет**, а не заменяет built-in набор: пользовательские
-пути добавляются к `.env`/ключам, не отменяя их.
+В legacy-режиме `confidential.paths` **расширяет**, а не заменяет built-in
+набор: пользовательские пути добавляются к `.env`/ключам, не отменяя их.
 
 ## Аудит-лог
 
 Security-фактура по доступу пишется в **отдельный аудит-лог**
 `.maestro/logs/maestro-audit-<date>.log` (JSONL, один файл на день):
 
-- `confidential.access` — доступ к confidential-путям: `action: "allow"` (trusted-
-  субагент читал/писал, уровень `info`) или `action: "deny"` (блокировка для
-  untrusted/primary, уровень `warn`). Включает `agent` (имя trusted-агента) и
-  `target` (только `basename`, SEC-5).
+- `confidential.access` — доступ к restricted-набору:
+  - **New-режим — shadow-аудит (D7):** best-effort зеркало нативных
+    permission-решений OpenCode — плагин **не блокирует** (барьер нативный).
+    `action` = `allow` | `deny` | `unknown` (`unknown` — нерезолвимый агент:
+    primary-сессия и т.п.; per-agent allow берётся только из JSON-конфигов —
+    frontmatter агентов не учитывается), уровень `info`, `tool` —
+    `read`/`write`/`edit`/`glob`/`grep`.
+  - **Legacy-режим (enforcement):** `action: "allow"` (trusted-субагент
+    читал/писал, уровень `info`) или `action: "deny"` (блокировка для
+    untrusted/primary, уровень `warn`).
+  Включает `agent` (имя агента, `null` при нерезолвимом) и `target` (только
+  `basename` — полный путь в лог не пишется, SEC-4b).
 - `sanitizer.failed` — сбой маскирования при task-диспатче (4.21.0,
   fail-closed): диспатч untrusted сабагента блокируется; поля `tool`, `agent`
   (без содержимого промпта).
 Структура записи (JSON):
 
 ```json
-{"ts":"<ISO>","level":"info|warn","msg":"confidential.access","sessionID":"...","callID":"...","tool":"read|write|edit","action":"allow|deny","agent":"<trusted-агент>|null","target":"<basename>"}
+{"ts":"<ISO>","level":"info|warn","msg":"confidential.access","sessionID":"...","callID":"...","tool":"read|write|edit|glob|grep","action":"allow|deny|unknown","agent":"<агент>|null","target":"<basename>"}
 ```
 
 **Security-события живут ТОЛЬКО в аудит-логе** — bootstrap-лог их не дублирует
@@ -152,14 +184,11 @@ Security-фактура по доступу пишется в **отдельны
 
 Файл конфигурации `maestro.json`, резолвится по 4 слоям (6.0.0); активный
 файл — первый парсируемый слой. Слой `<project>/maestro.json` коммитится в git
-(project policy). Содержит три секции:
+(project policy). Секции: `sanitizer_whitelist`, `communication`,
+`feedback_report`, `memory` (опционально) и др.:
 
 ```json
 {
-  "trust": {
-    "custodian": true,
-    "sanitizer": true
-  },
   "sanitizer_whitelist": {
     "rules": { "env_secret": true, "data_field": true, ... },
     "by_agent": { "reviewer": [] },
@@ -170,7 +199,10 @@ Security-фактура по доступу пишется в **отдельны
 }
 ```
 
-- **`trust`** — trusted-агенты (`true` = trusted). Остальные — untrusted.
+- **`trust`** — удалена из схемы в 6.4.0 (B): доверие — по роли (hardcoded
+  role-set `custodian`/`sanitizer`); старые ключи в `maestro.json` → warn
+  `trust:deprecated_key` (однократно при init, со списком проигнорированных
+  ключей) + игнор значения.
 - **`sanitizer_whitelist`** — правила sanitizer (см. раздел выше).
 - **`communication`** — режим «простой язык» для HITL-диалога: `"plain"`
   (дефолт, ключ можно не указывать) | `"professional"` (упрощение выключено).
@@ -183,9 +215,11 @@ Security-фактура по доступу пишется в **отдельны
 
 ### Разрешение конфигов (resolution order, 4 слоя — 6.0.0)
 
-`maestro.json` — **единственный** источник конфигурации. Все секции
-(`trust`, `confidential`, `sanitizer_whitelist`) читаются из активного файла
-одним загрузчиком `loadMaestroConfig()`.
+`maestro.json` — **единственный** источник конфигурации. Секции
+(`sanitizer_whitelist`, `communication`, `feedback_report`, `memory`) читаются
+из активного файла одним загрузчиком `loadMaestroConfig()`. Секция `trust` не
+читается (удалена в 6.4.0, B — warn `trust:deprecated_key` + игнор);
+`confidential` — только legacy-режим (dual mode, D5).
 
 Порядок разрешения пути к файлу (4 слоя):
 
@@ -210,15 +244,23 @@ Security-фактура по доступу пишется в **отдельны
 
 Старые файлы `trust-config.json`, `.maestro/sanitizer-whitelist.json` **не поддерживаются** (не читаются).
 
-Если все слои отсутствуют — плагин работает (fail-open): все агенты
-untrusted, дефолтные sanitizer-правила.
+Если все слои отсутствуют — плагин работает (fail-open): role-set
+`custodian`/`sanitizer` trusted по роли (hardcoded, не зависит от конфига),
+все остальные агенты — untrusted; дефолтные sanitizer-правила.
 
-**Активный конфиг — confidential (P6, 6.0.0):** активный файл (любой из 4
-слоёв, включая глобальный вне проекта) автоматически попадает в
-confidential-контур: `read`/`write`/`edit` через нативные тулы — deny для
-primary и untrusted-субагентов (trusted субагенты — `read` allow по
-умолчанию, `trusted.read`). Чтение параметров в сессии — только через
-санкционированный канал: плагин-тул `maestro_config`.
+**Активный конфиг — защищён (P6, 6.0.0):** в new-режиме `maestro.json` и
+`.maestro/**` защищены **нативно** (не зависит от плагина): `read`/`glob`/
+`grep` deny для `maestro.json` и `.maestro/**` (read — с исключением
+`.maestro/plugin-version`) + `edit` ask для `maestro.json` (нативные
+permissions, merge-config/global — канон нативных permissions в
+`skills/maestro-assistant`). Чтение параметров в сессии — только через
+санкционированный канал: плагин-тул `maestro_config` (read-only; native
+`ask`; доступен только в top-level primary-сессии — сабагенты: per-agent
+`deny` + плагинный fail-closed guard). **Legacy-режим** (секция
+`confidential` есть): дополнительно активный файл (любой из 4 слоёв, включая
+глобальный вне проекта) попадает в плагинный confidential-контур:
+`read`/`write`/`edit` — deny для primary и untrusted-субагентов (trusted
+субагенты — `read` allow по умолчанию, `trusted.read`).
 
 ## Memory layer (опционально)
 
@@ -432,8 +474,9 @@ aggregates-only field whitelist, SEC-4b+). Уровень/маска/катал�
 `MAESTRO_MEMORY_LOG_LEVEL` (default `info`)/`MAESTRO_MEMORY_LOG_MASK`/
 `MAESTRO_MEMORY_LOG_DIR`. Полный список событий — `manual_docs/reference/memory.md`.
 
-Security-события доступа (`confidential.access`) в
-bootstrap-лог **не пишутся** — они только в аудит-логе (см. раздел «Аудит-лог»).
+Security-события доступа (`confidential.access` — legacy-enforcement и
+shadow-аудит new-режима) в bootstrap-лог **не пишутся** — они только в
+аудит-логе (см. раздел «Аудит-лог»).
 
 Детальное логирование `bash`/`skill`/`read` убрано (сокращение observability).
 
