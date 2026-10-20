@@ -46,7 +46,12 @@ description: Initialize maestro for a new or existing project — quick setup (A
 Перед завершением — проверить `docs/project-context.md`:
 - Существует → пропустить
 - Отсутствует → HITL: (a) опросить context (14 категорий из `init-context.md`) — (b) пропустить (завершить без context)
-- При (a): загрузить `init-context.md`, опросить обязательные секции (1,2,3,4,9,14), создать файл
+- При (a): загрузить `init-context.md`, опросить обязательные секции (1,2,3,4,9,14), создать файл;
+  секция 12 (Безопасность) — включать строку `- **Confidential-данные:** <restricted-пути>`
+  (канонический формат M2: одна строка, repo-relative пути, через запятую). Для нового
+  проекта — `docs/confidential/*` (deny-baseline, Задача 3); source of truth —
+  нативные permissions, §12 — строка-зеркало; дальше строку ведёт воркфлоу
+  `maestro-assistant` «Настройка restricted-путей» (одной операцией с нативными deny)
 - При (b): записать статус `context: deferred` в `.maestro/last-run.md`
 - **ВАЖНО:** НЕ создавать placeholder-файл. Существование файла — единственный маркер готовности контекста.
 
@@ -82,16 +87,18 @@ description: Initialize maestro for a new or existing project — quick setup (A
 **Дефолты (не требуют project-context):**
 ```json
 {
-  "trust": { "custodian": true, "sanitizer": true },
-  "confidential": { "paths": ["docs/confidential/**"] },
   "sanitizer_whitelist": {},
   "communication": "plain"
 }
 ```
 
+- (6.4.0: секции `trust`/`confidential` в схеме нет: trusted — по role-set
+  `{custodian, sanitizer}`; restricted-пути — нативные permissions (ниже) +
+  строка §12 в project-context (Задача 2))
 - `sanitizer_whitelist: {}` = плагин применяет `DEFAULT_RULES` (все 7 правил маскирования ON, fail-closed по построению)
 - Существующий файл → diff-merge (сохраняет пользовательские правки)
-- **Warn (6.1.0):** перед записью root конфига проверить существование `<root>/.maestro/maestro.json`; если существует — вывести предупреждение (не блокирует, далее по setup как есть): «⚠ .maestro/maestro.json существует — имеет приоритет над root (с 6.1.0): non-memory ключи (включая trust/confidential/sanitizer_whitelist) и memory.namespace берутся из него. Если в .maestro/ нет memory.namespace, а в root есть — память будет выключена (reason: namespace_missing).»
+- **Warn (6.1.0):** перед записью root конфига проверить существование `<root>/.maestro/maestro.json`; если существует — вывести предупреждение (не блокирует, далее по setup как есть): «⚠ .maestro/maestro.json существует — имеет приоритет над root (с 6.1.0): non-memory ключи (включая sanitizer_whitelist) и memory.namespace берутся из него. Если в .maestro/ нет memory.namespace, а в root есть — память будет выключена (reason: namespace_missing).»
+- **Legacy (6.4.0):** старая секция `trust` в любом слое → warn `trust:deprecated_key` + игнор (доверие — по role-set); старая секция `confidential` → legacy-режим (dual mode) до миграции (`/maestro-assistant`, «Миграция legacy → new»).
 - Вопрос `communication`: (a) plain — (b) professional
 
 #### Нативные permissions (`agent.<name>.permission` в `.opencode/opencode.json`)
@@ -104,9 +111,10 @@ description: Initialize maestro for a new or existing project — quick setup (A
 - **M1 — 7 HITL-вопросов по моделям** (radio): для каждого из haiku/sonnet/opus/reviewer/fable/custodian/sanitizer предложить tier-кандидата + оставить текущую/свой вариант
 - **Temperature** по дефолту: haiku 0.0, sonnet 0.1, opus 0.1, reviewer 0.2, fable 0.7, custodian 0.1, sanitizer 0.0
 
-- **P4-check (гигиена моделей):** по канону maestro-assistant — если
-  `trust.custodian`/`trust.sanitizer` включены и модель trusted-агента
-  совпадает с моделью untrusted-агента → неблокирующее предупреждение в
+- **P4-check (гигиена моделей, безусловный role-based):** по канону
+  maestro-assistant — если модель trusted-агента role-set (`custodian`/
+  `sanitizer` — trusted **по роли**, всегда, без условия на конфиг) совпадает
+  с моделью untrusted-агента → неблокирующее предупреждение в
   сводке (SECURITY.md P4: trusted → изолированная/локальная модель)
 
 #### .gitignore

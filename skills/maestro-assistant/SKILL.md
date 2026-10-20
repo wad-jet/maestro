@@ -1,6 +1,6 @@
 ---
 name: maestro-assistant
-description: Use when the user asks for help configuring maestro, organizing project structure/context, or wants to consult the rules of maestro (trust, confidential, sanitizer_whitelist, opencode.json models, project-context, pipeline structure). Also loaded by maestro-setup (tasks 2/3/3a) and maestro-init (pipeline config questions). Not for feature implementation.
+description: Use when the user asks for help configuring maestro, organizing project structure/context, or wants to consult the rules of maestro (restricted-data/native permissions, role-based trust, sanitizer_whitelist, opencode.json models, project-context, pipeline structure). Also loaded by maestro-setup (tasks 2/3/3a) and maestro-init (pipeline config questions). Not for feature implementation.
 ---
 
 # Maestro Assistant — конфигурация, структура и консультации по maestro
@@ -28,10 +28,13 @@ description: Use when the user asks for help configuring maestro, organizing pro
   структуру каталогов по запросу HITL. Идемпотентно, с HITL-гейтом на approve/правки/отмена
   и показом diff-merge перед записью.
 - **НЕ реализует фичи** — не запускает pipeline, не пишет spec/plan/код.
-- **Trust/security — только через HITL**, сам вопросы безопасности не решает.
-- **Доступ к `docs/confidential/**` — закрыт** (primary-сессия, всегда deny). Не читать/не
-  править содержимое confidential; запросы на работу с confidential — только через допустимый
-  канал (trusted-агент), не в обход.
+- **Security — только через HITL**, сам вопросы безопасности не решает (trust — по роли,
+  не конфигурируется).
+- **Доступ к restricted-путям — закрыт** для primary (new-режим: нативный deny ядра;
+  legacy-режим: плагинный deny). Не читать/не править содержимое restricted-путей
+  (плагинная директива `restricted-data paths: …`, строка §12); запросы на работу с
+  confidential-данными — только через допустимый канал (trusted-агент `custodian`/
+  `sanitizer` по роли), не в обход.
 - **Плагин-гейт НЕ требуется** для консультаций (правит конфиг, не гоняет confidential
   через pipeline).
 - **Редирект (MIN-4):** если запрос требует изменения кода/spec/плана или запуска pipeline →
@@ -41,15 +44,12 @@ description: Use when the user asks for help configuring maestro, organizing pro
 ## Канон `maestro.json` (источник истины)
 
 Полный JSON-канон (эталон формата, который правит/генерирует assistant) — **inline здесь**.
-Держать синхронно с правилами парсинга плагина (`loadMaestroConfig`/`loadWhitelist`/`loadConfidentialConfig`). Контроль дрейфа — конвенцией.
+Держать синхронно с правилами парсинга плагина (`loadMaestroConfig`/`loadWhitelist`/
+`loadConfidentialConfig` — legacy-режим). Контроль дрейфа: docs-drift D-проверка
+(inline-канон **не содержит** секций `confidential`/`trust` — 6.4.0, B) + конвенция с
+кодом.
 ```json
 {
-  "trust": { "custodian": true, "sanitizer": true },
-  "confidential": {
-    "version": 1,
-    "paths": ["docs/confidential/**"],
-    "trusted": { "read": "allow", "write": "deny", "edit": "deny" }
-  },
   "sanitizer_whitelist": {
     "rules": { "env_secret": true, "data_field": true, "env_file": true, "db_credential": true, "ledger_entry": true, "private_key": true, "auth_header": true },
     "by_agent": { "reviewer": [] },
@@ -98,26 +98,34 @@ description: Use when the user asks for help configuring maestro, organizing pro
 
 ### Секции (семантика)
 
-- **`trust`** — только trusted сабагенты (`true`). `custodian` и `sanitizer` — trusted по роли.
-  Остальные — untrusted (default). Файл коммитится в git.
-- **`confidential`** — защита конфиденциальных путей (жёстче плагин-контроля). Дефолт
-  `paths: ["docs/confidential/**"]`; trusted читает по умолчанию, запись/редактирование deny
-  (выдаются явно). Primary/untrusted — всегда deny.
-- **`confidential.paths`** — принимает папки, отдельные файлы по полному имени
-  и по маске, включая корневую папку. Сегментная семантика: `**` = 0+ сегментов
-  (покрывает корень), `*`/`?` — в пределах сегмента (не через `/`), маска без `/`
-  (напр. `*.env`) закрывает только корневые файлы. Контроль — `read`/`write`/`edit`;
-  `bash`/`glob`/`grep` не перехватываются (fail-open).
 - **`sanitizer_whitelist`** — правила маскирования чувствительных данных перед untrusted-диспатчем.
+- **`memory`**, **`communication`**, **`feedback_report`** — см. ниже. Файл коммитится в git
+  (project-режим).
+
+### Удалённые секции (6.4.0, B/D5)
+
+- **`trust` (удалена)** — любая `trust` в старых конфигах → warn `trust:deprecated_key`
+  (однократно при init, со списком проигнорированных ключей) + **игнор значения**.
+  Trusted — `custodian`/`sanitizer` **по роли** (hardcoded role-set в плагине, не
+  конфигурируется); остальные агенты (стандартная пятёрка и кастомные) — untrusted
+  (U1-маскирование task-промпта). Файловый доступ кастомных агентов — **нативный
+  per-agent allow** (опционально, HITL), не trust.
+- **`confidential` (legacy → удалена)** — dual mode (D5): пока секция есть в
+  `maestro.json` — плагин исполняет legacy-enforcement как раньше (fail-closed, warn
+  `confidential:legacy_active` при init). В new-режиме (секции нет) источник
+  restricted-путей — **нативные permissions** (merge-config/global) + строка-зеркало
+  §12; плагин — директива `restricted-data paths: …` + shadow-аудит. Миграция —
+  воркфлоу «Миграция legacy → new».
 
 ### Правила вывода (из контекста §3/§5/§12)
 
-- **`trust`:** всегда `custodian: true`, `sanitizer: true`. Другие — не добавлять, если HITL не просит.
-  > ⚠️ Снятие `custodian`/`sanitizer` из `trust` (или `false`) делает агента
-  > **неработоспособным** (non-functional): confidential-deny + sanitize промпта.
-  > Это не «понижение доверия» — агент не может выполнять свою роль. Для
-  > custodian: нет чтения confidential; для sanitizer: рекурсия (промпт
-  > санизируется до него). Не удаляйте их из trust без понимания последствий.
+- **`trust` (секция выводится никогда):** ключ не добавляется; при правке старого
+  конфига с `trust` — секция **не переносится** (warn `trust:deprecated_key` + игнор,
+  см. «Удалённые секции»). Trusted — по роли (role-set `{custodian, sanitizer}`).
+  > ⚠️ (P4a, legacy) «non-functional mode» (снятие `custodian`/`sanitizer` из
+  > `trust` делает агента неработоспособным) — **недостижим с 6.4.0**: role-set
+  > не конфигурируется, доверие не снимается. Снятие файлового доступа
+  > trusted-агента — только правка нативного per-agent allow (OP-4).
 - **`sanitizer_whitelist`:** по §12; `extra_uri_schemes` из §3.
 
 ### Секция `memory` (опциональный memory layer)
@@ -264,6 +272,10 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
   `branch_context: false`.
 - `identity_env` — имя env-переменной (напр. `MAESTRO_MEMORY_IDENTITY`), не
   значение; `identity` — только для сервисных аккаунтов.
+- **I4 (restricted-пути и memory):** restricted-пути не добавляются в
+  `memory.history_globs`/`memory.artifact_globs` — git-backfill-канал (файлы из
+  git-истории → LLM-саммаризатор) не должен покрывать confidential-данные
+  (SEC-5, принятый риск; митигация — allowlist).
 - **Write/boundary-tools → permission `ask` (обязательное правило).** При
   включении памяти в merge-config (`.opencode/opencode.json` или global)
   добавляется нативное правило `permission: { memory_forget: "ask",
@@ -331,8 +343,8 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
   `docs/confidential/*` покрывает вложенные пути.
 - **Last-match-wins:** порядок правил критичен — catch-all (`"*"`) **первым**,
   специфичные правила **после** (иначе catch-all перекроет deny).
-- Нативный `edit` gates `write`/`edit`/`apply_patch`; `read` gates `read` — покрытие
-  `read`/`write`/`edit` плагина паритетно.
+- Нативный `edit` gates `write`/`edit`/`apply_patch`; `read` gates `read` — основной
+  fail-closed барьер (не зависит от плагина).
 - Нативный `ask` промптит пользователя напрямую (настоящий per-call HITL) — в
   отличие от плагинового паттерна «error → оркестратор решает».
 - **`glob`/`grep` матчат аргумент-паттерн, не пути-результаты.** `glob` — по
@@ -343,7 +355,7 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
 - **Не вводить глобальный `"*": "ask"` для `bash`** — эскалирует каждый bash-вызов
   в per-call HITL (противоречит не-форсированию плагина). Только точечные deny.
 - **Bash-паттерны по слову — запрещены** (напр. `*cat*confidential*`): они не
-  защищают реальные `confidential.paths` (произвольные пути) и блокируют служебные
+  защищают реальные restricted-пути (произвольные пути) и блокируют служебные
   команды (агрегация аудит-лога). Защита bash от секретов — через `read`/`edit`
   deny по реальным путям + санитайзер промптов; bash — best-effort слой.
 
@@ -377,18 +389,17 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
 - **Механика тулов** — нативные per-agent permissions (`agent.<name>.permission` или
   frontmatter `permission:`): `edit`/`bash`/`task`/`webfetch` per роль (канон в
   `manual_docs/reference/config.md`, «Агенты: модели»).
-- **Trusted-исключения по данным** (allow-внутри-deny для `custodian`/`sanitizer` к
-  `docs/confidential/*`) — **конфигурационная половина R2 в Этапе A**: per-agent
-  `read`/`glob`/`grep` allow поверх глобального deny (agent rules take precedence).
-  Двухканально:
+- **Trusted-исключения по данным** (allow-внутри-deny для role-set `custodian`/
+  `sanitizer` к restricted-путям, напр. `docs/confidential/*`): per-agent
+  `read`/`glob`/`grep` allow поверх глобального deny (agent rules take precedence —
+  V1, верифицирован 2026-09-20). Двухканально:
   - **frontmatter** агентов `agents/custodian.md`, `agents/sanitizer.md` (доставляются
     как часть скилла) — `permission.read/glob/grep: {"docs/confidential/*": "allow"}`;
   - **merge-config** — init пишет эквивалент в `agent.<name>.permission`.
-  Enforcement плагина (`confidential.trusted[read]`) остаётся как defense-in-depth,
-  НЕ удаляется. Оставшаяся половина R2 (удаление enforcement из плагина) — Этап B,
-  после V1. Ограничение: если runtime-V1 покажет, что agent allow не перекрывает
-  global deny → fallback: скоупить нативный confidential-deny из Этапа A
-  (оставить built-in секреты).
+  **Файловый доступ = нативный конфиг** (source of truth); плагинный enforcement
+  поверх — только legacy-режим (dual mode, пока секция `confidential` есть в
+  `maestro.json`). Файловый доступ кастомных агентов (вне role-set) — нативный
+  per-agent allow по запросу HITL, не trust.
 
 - **`maestro_config`:** per-agent `deny` для **всех** сабагентов (untrusted и
   trusted) — тул доступен только в top-level primary-сессиях (native ask +
@@ -396,13 +407,16 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
 
 ### Правила вывода
 
-- **Sync-правило двойного источника (I3):** `maestro.json → confidential.paths` —
-  **единственный ручной источник** путей; нативные `permission.read`/`edit`/`glob`/
-  `grep` deny (merge-config) — **производные**, генерируются из paths (см. воркфлоу
-  «Настройка конфигурации», шаг 6). **Любое изменение `confidential.paths` →
-  перегенерация нативных deny** (+ per-agent allow `custodian`/`sanitizer`). Дрейф
-  недопустим; детектируется при консультации (шаг 2 воркфлоу). Пути вручную в
-  `.opencode/opencode.json` не дублируются.
+- **Единый источник restricted-путей (new-режим, 6.4.0):** нативные
+  `permission.read`/`edit`/`glob`/`grep` deny (merge-config/global) — **source of
+  truth**; плагинная директива `restricted-data paths: …` (из нативного конфига при
+  init) и строка-зеркало §12 (`docs/project-context.md`, формат M2) — **производные**:
+  строку §12 пишет ассистент **одной операцией** с нативными deny (воркфлоу «Настройка
+  restricted-путей»). Дрейф недопустим; детектируется warn'ом плагина
+  `confidential:drift` при init и при консультации (шаг 2 воркфлоу «Настройка
+  конфигурации»). Legacy (dual mode): до миграции `maestro.json → confidential.paths`
+  остаётся процессным источником плагинного enforcement; нативные deny + строка §12
+  пишутся наравне в шаге 1 миграции.
 - **Не добавлять** `docs/superpowers/{specs,plans}/*` в deny (двухролевые).
 - **Policies (P4, R5):** `experimental.policies` (`provider.use`) — глобальный
   deny/allow провайдеров; global приоритетнее project; не перезаписывать.
@@ -410,13 +424,15 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
   выбранных `agent.*.model` (иначе deny ломает агента); policies глобальны — не
   выражают «trusted — локальные, untrusted — внешние».
 
-- **P4-check (гигиена моделей):** после выбора/актуализации моделей
-  (`agent.*.model`) — если `trust.custodian` и/или `trust.sanitizer` = true и
-  модель trusted-агента совпадает с моделью любого untrusted-агента
-  (`haiku`/`sonnet`/`opus`/`fable`/`reviewer`) → **неблокирующее
-  предупреждение** в сводке: «P4: trusted-агент <имя> на той же модели, что
-  untrusted <имя(а)>; рекомендуется изолированная/локальная модель
-  (SECURITY.md P4)». Предупреждение не останавливает поток.
+- **P4-check (гигиена моделей, безусловный role-based):** после выбора/
+  актуализации моделей (`agent.*.model`) — если модель trusted-агента role-set
+  (`custodian`/`sanitizer` — trusted **по роли**, всегда, без условия на конфиг)
+  совпадает с моделью любого untrusted-агента (`haiku`/`sonnet`/`opus`/`fable`/
+  `reviewer`, кастомные) → **неблокирующее предупреждение** в сводке: «P4:
+  trusted-агент <имя> на той же модели, что untrusted <имя(а)>; рекомендуется
+  изолированная/локальная модель (SECURITY.md P4)». Предупреждение не останавливает
+  поток. (6.4.0: условие «если `trust.custodian` включены» убрано — role-set не
+  конфигурируется, P4-предупреждения не теряются.)
 - **OP-1:** после правки native-permission конфига — рестарт opencode.
 - **OP-4:** ослабление security-слоя (deny→allow в нативном конфиге) — адресный
   diff + явное HITL-подтверждение.
@@ -426,31 +442,24 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
 - **OP-1 — перезапуск после правки `maestro.json`:** после записи любых изменений
   `maestro.json` сообщить HITL: «изменения вступят в силу после перезапуска opencode»
   (плагин читает конфиг один раз при старте). Предложить рестарт/отложить. Критично для
-  `trust`/`confidential`/`sanitizer_whitelist`.
+  `sanitizer_whitelist`/`communication`/`feedback_report`/`memory`; в legacy-режиме
+  (секция `confidential` есть) — также для `confidential`.
 - **OP-4 — адресный diff + HITL для ослабления security-слоёв:** при правке
   `sanitizer_whitelist.rules→false` (отключение защиты) — показать адресный diff (стало vs было) и получить явное HITL-подтверждение,
-  как для `confidential.paths`.
+  как для снятия restricted-пути с защиты (воркфлоу «Настройка restricted-путей»).
 - **OP-7 — граница «схема vs наполнение» project-context:** схема 14 категорий — канон в
   `init-context.md` (не менять); assistant правит только **наполнение** (актуализацию §3/§5/§12/§14).
 - **OP-3 — канон inline:** канон `maestro.json` хранится inline в этом SKILL.md; держать
-  синхронно с правилами парсинга плагина (конвенцией, без авто-теста).
-
-## Правка `confidential.paths` (жёсткий контроль, IMP-3)
-
-- **Снятие с защиты (удаление пути) — ЖЁСТКИЙ БЛОК по умолчанию.** Не инициировать/не
-  выполнять удаление/ослабление сам. Снятие — только по явному запросу HITL и при этом:
-  (а) адресный diff «папка X будет исключена из `confidential.paths`, данные станут доступны
-  untrusted/primary (с учётом fail-open плагина)»; (б) явный отдельный approve HITL.
-- **Merge — только консервативное дополнение.** При повторном прогоне только добавлять пути,
-  не удалять/изменять существующие без явного HITL-гейта с дифф-показом.
-- **Адресный показ:** при любом изменении `confidential.paths` — отдельный diff (стало vs было).
+  синхронно с правилами парсинга плагина (конвенцией + docs-drift D-проверка: inline-канон
+  не несёт `confidential`/`trust`).
 
 ## Консультационные воркфлоу
 
 ### 1. Объяснение правил (read-only)
 
-Пользователь спрашивает «как работает X» (trust, confidential, sanitizer,
-14 категорий, структура). Ответить на основе канона выше + краткая сводка. Не менять файлы.
+Пользователь спрашивает «как работает X» (restricted-данные/нативные permissions,
+role-trust, sanitizer, 14 категорий, структура). Ответить на основе канона выше +
+краткая сводка. Не менять файлы.
 
 ### 2. Настройка конфигурации (правка)
 
@@ -458,25 +467,27 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
    (native ask; `read` нативно denied, bash-чтение запрещено правилом R6);
    `.opencode/opencode.json` / `project-context.md`). Тул недоступен — конфиг
    не читать: «перезапустите opencode / обновите плагин».
-2. **Детектор дрейфа:** сверить `confidential.paths` из `maestro.json` с нативными
-   deny в `.opencode/opencode.json` (read/edit/glob/grep). При расхождении —
-   предупредить «paths и нативные deny расходятся — перегенерирую» (включается в
-   HITL-гейт шага 3).
+2. **Детектор дрейфа:** сверить нативные deny (read/edit/glob/grep) в
+   `.opencode/opencode.json` со строкой-зеркалом §12 (`**Confidential-данные:** …`)
+   в `docs/project-context.md` (источник — нативный конфиг; §12 — документация).
+   При расхождении — предупредить «нативные deny и §12 расходятся — перегенерирую»
+   (включается в HITL-гейт шага 4). Плагин дублирует сверку warn'ом
+   `confidential:drift` при init.
 3. Сформировать diff-merge (идемпотентно, сохраняя пользовательские правки).
 4. **HITL-гейт:** «(a) approve — (b) правки — (c) отмена» + показ diff-merge.
-5. Для `confidential.paths` / `sanitizer_whitelist.rules→false` —
-   адресный diff + явное HITL-подтверждение (IMP-3, OP-4).
-6. **При правке `confidential.paths` — перегенерировать нативные deny**
-   (производные от paths): для каждого пути из `confidential.paths` — deny в
-   `read`/`edit`/`glob`/`grep` + per-agent allow `custodian`/`sanitizer` на те же
-   пути. Показать diff-merge до записи. `maestro.json` — единственный ручной
-   источник путей; `.opencode/opencode.json` — производный.
+5. Для снятия restricted-пути с защиты / `sanitizer_whitelist.rules→false` —
+   адресный diff + явное HITL-подтверждение (OP-4; снятие — только по явному
+   запросу, см. «Настройка restricted-путей»).
+6. **Изменение restricted-путей — воркфлоу «Настройка restricted-путей»**
+   (одна операция: нативные deny + per-agent allow + строка §12).
 7. Записать. **OP-1:** сообщить о необходимости перезапуска opencode.
 
 ### 3. Актуализация project-context (наполнение)
 
 Править **наполнение** секций (не схему). Секция 14 Commands — как в каноне `init-context.md`
-(явная команда / `auto` / `none`). После правки — HITL-гейт approve/правки/отмена.
+(явная команда / `auto` / `none`). Строка §12 `**Confidential-данные:** …` (формат M2)
+ведётся **только** воркфлоу «Настройка restricted-путей» (одной операцией с нативными
+deny), свободной правкой не менять. После правки — HITL-гейт approve/правки/отмена.
 
 ### 4. Организация структуры каталогов
 
@@ -485,11 +496,73 @@ LLM-вызовов нет). Канон JSON — inline выше (поле `memor
 и `.opencode/` целиком (эфемерное/доставляемое); конфиг проекта — только
 `maestro.json` в корне, не в `.maestro/`.
 
+### 5. Настройка restricted-путей (6.4.0)
+
+Изменение набора restricted-путей (добавление/расширение/снятие) — **одна
+операция** пишет обе части (source of truth + зеркало):
+
+1. Прочитать нативный конфиг (`.opencode/opencode.json` / global) и строку §12.
+2. **Одним diff-merge** (идемпотентно) записать:
+   - **(a)** нативные deny `read`/`edit`/`glob`/`grep` в merge-config
+     (`.opencode/opencode.json`) по каждому пути + per-agent allow `custodian`/
+     `sanitizer` (read/glob/grep) на те же пути (agent rules take precedence);
+   - **(b)** строку §12 в `docs/project-context.md` (канонический формат M2:
+     `- **Confidential-данные:** p1, p2` — одна строка, repo-relative пути, через
+     запятую; пути — зеркалируют нативные deny-паттерны read).
+   - Канон-строка I4: restricted-пути не добавляются в
+     `memory.history_globs`/`memory.artifact_globs`.
+3. **HITL-гейт** с diff: «(a) approve — (b) правки — (c) отмена».
+4. Записать. **OP-1:** рестарт opencode (плагин перечитывает нативный конфиг при
+   init и сверяет §12 warn'ом `confidential:drift`).
+5. **Сверка нативных deny ↔ §12** (детектор дрейфа): после записи и при каждой
+   консультации (шаг 2 воркфлоу «Настройка конфигурации») — расхождение
+   недопустимо, перегенерация одной операцией.
+
+**Снятие с защиты (удаление/ослабление пути) — жёсткий блок по умолчанию**
+(аналог IMP-3, для нативных правил):
+
+- Не инициировать/не выполнять снятие сам — только по явному запросу HITL.
+- (а) адресный diff «путь X исключается из нативных deny: данные станут
+  доступны primary/untrusted» (+ удаление пути из строки §12); (б) явное
+  **отдельное** approve HITL (OP-4).
+- **Merge — только консервативное дополнение:** при повторном прогоне только
+  добавлять пути, не удалять/изменять существующие без явного HITL-гейта.
+- **Адресный показ:** при любом изменении — отдельный diff (стало vs было).
+
+### 6. Миграция legacy → new (6.4.0, I2 — зафиксированный порядок)
+
+Проект в legacy-режиме (секция `confidential` есть в `maestro.json`, warn
+`confidential:legacy_active`) мигрируется в new-режим **только в этом порядке**
+(нарушение порядка = окно без файловой защиты; warn `confidential:drift` —
+детектор нарушенного порядка):
+
+- **Шаг 0 — предпроверка trust (ДО обновления плагина, N1):** если в
+  `maestro.json` есть `trust.<custom>` (кастомные агенты) — уведомить: с
+  6.4.0 секция `trust` не читается **в любом режиме** — кастомные агенты
+  **немедленно** теряют плагинный файловый доступ (fail-closed). При
+  необходимости — сначала добавить нативный per-agent allow (отдельное
+  HITL-решение, воркфлоу «Настройка restricted-путей»).
+- **(1)** Одна операция (HITL-гейт с diff): нативные deny `read`/`edit`/
+  `glob`/`grep` + per-agent allow `custodian`/`sanitizer` на **все** пути из
+  legacy `confidential.paths` + строка §12 (формат M2) — по воркфлоу «Настройка
+  restricted-путей».
+- **(2)** Restart + **live-проверка нативного deny:** primary — нативный
+  permission error при чтении restricted-пути; `custodian`/`sanitizer` — чтение
+  работает (per-agent allow).
+- **(3) Только затем** — удалить секцию `confidential` из `maestro.json`
+  (адресный diff + **отдельное** HITL-подтверждение). **Предпроверка удаления:
+  нативные deny на все пути §12** (иначе — окно без файловой защиты, fail-open).
+- **(4)** Restart + проверка new-режима: в system-контексте top-level
+  primary-сессии — директива `restricted-data paths: …`; warn'ов
+  `confidential:legacy_active` нет; плагин не бросает `[confidential:deny]`
+  (deny приходят нативно).
+
 ## Обработка сбоев
 
 | Ситуация | Действие |
 |---|---|
 | Запрос требует реализации кода/spec/плана | Редирект: `@maestro-init` / `/maestro-design` / `@regression` (MIN-4) |
-| Запрос на работу с содержимым `docs/confidential/**` | Отказ: доступ закрыт для primary; через trusted-агент |
-| Плагин не загружен | Работаем (гейт не требуется); при правке security-секций — напоминание о fail-open (см. OP-1/IMP-3) |
+| Запрос на работу с restricted-путями | Отказ: доступ закрыт для primary (new-режим: нативный deny; legacy: плагинный deny); через trusted-агент (role-set `custodian`/`sanitizer`) |
+| Плагин не загружен | Работаем: файловый барьер — нативный (не зависит от плагина); U1-маскирование/директива/shadow-аудит — выключены до перезапуска (OP-1) |
 | `maestro.json` правился | Сообщить о перезапуске (OP-1) |
+| Нативные deny ↔ строка §12 расходятся | Warn + перегенерация одной операцией (воркфлоу «Настройка restricted-путей»; плагин дублирует warn'ом `confidential:drift`) |

@@ -701,6 +701,55 @@ function checkD9(repoRoot) {
   return violations;
 }
 
+// ============================================================
+// D10 — inline-канон maestro.json в skills/maestro-assistant/SKILL.md
+// (6.4.0, B): секции "confidential" и "trust" удалены из схемы — канон
+// их не несёт (предотвращение канон-дрейфа; старые ключи — warn + игнор)
+// ============================================================
+
+// Первый json-блок файла — inline-канон maestro.json (эталон формата).
+function parseAssistantCanon(content) {
+  const m = content.match(/```json\n([\s\S]*?)```/);
+  if (!m) return null;
+  try {
+    return JSON.parse(m[1]);
+  } catch {
+    return null;
+  }
+}
+
+function checkD10(repoRoot) {
+  const violations = [];
+  const rel = "skills/maestro-assistant/SKILL.md";
+  const fp = join(repoRoot, rel);
+  if (!existsSync(fp)) {
+    violations.push(`${rel} не найден`);
+    return violations;
+  }
+  const canon = parseAssistantCanon(read(rel, repoRoot));
+  if (!canon || typeof canon !== "object") {
+    violations.push(
+      `${rel} — inline-канон maestro.json не распарсился (первый JSON-блок должен быть валидным)`
+    );
+    return violations;
+  }
+  // Опознание канона: эталон формата несёт `sanitizer_whitelist`.
+  if (!("sanitizer_whitelist" in canon)) {
+    violations.push(
+      `${rel} — первый JSON-блок не похож на канон maestro.json (нет ключа sanitizer_whitelist)`
+    );
+    return violations;
+  }
+  for (const key of ["confidential", "trust"]) {
+    if (key in canon) {
+      violations.push(
+        `${rel} — inline-канон maestro.json несёт удалённую секцию "${key}" (6.4.0, B: секции вне схемы; старые ключи — warn + игнор)`
+      );
+    }
+  }
+  return violations;
+}
+
 // Fixtures
 // ============================================================
 
@@ -1055,6 +1104,56 @@ test("docs-drift fixtures: каждый check возвращает наруше�
       d9tables
     )}`
   );
+  // D10 — inline-канон с удалёнными секциями (trust/confidential) → violation
+  const assistantFixDir = join(TMP_DIR, "skills", "maestro-assistant");
+  if (!existsSync(assistantFixDir)) mkdirSync(assistantFixDir, { recursive: true });
+  writeFileSync(
+    join(assistantFixDir, "SKILL.md"),
+    [
+      "# Maestro Assistant",
+      "",
+      "## Канон `maestro.json`",
+      "",
+      "```json",
+      "{",
+      '  "trust": { "custodian": true, "sanitizer": true },',
+      '  "confidential": { "paths": ["docs/confidential/**"] },',
+      '  "sanitizer_whitelist": {}',
+      "}",
+      "```",
+      "",
+    ].join("\n")
+  );
+  const d10 = checkD10(TMP_DIR);
+  assert.ok(
+    d10.some((v) => v.includes('"confidential"')),
+    `D10 fixture violation (confidential): ${JSON.stringify(d10)}`
+  );
+  assert.ok(
+    d10.some((v) => v.includes('"trust"')),
+    `D10 fixture violation (trust): ${JSON.stringify(d10)}`
+  );
+  // D10 — канон без удалённых секций → 0 нарушений
+  writeFileSync(
+    join(assistantFixDir, "SKILL.md"),
+    [
+      "# Maestro Assistant",
+      "",
+      "## Канон `maestro.json`",
+      "",
+      "```json",
+      "{",
+      '  "sanitizer_whitelist": {}',
+      "}",
+      "```",
+      "",
+    ].join("\n")
+  );
+  assert.deepEqual(
+    checkD10(TMP_DIR),
+    [],
+    `D10 fixture: clean canon should pass: ${JSON.stringify(checkD10(TMP_DIR))}`
+  );
   // D5 — pipeline compliance: все маркеры отсутствуют в fixture → violation
   const d5 = checkD5(TMP_DIR);
   assert.ok(
@@ -1135,6 +1234,11 @@ test("docs-drift real repo: 0 нарушений", () => {
   if (d9.length) {
     totalViolations += d9.length;
     all = all.concat(d9);
+  }
+  const d10 = checkD10(ROOT);
+  if (d10.length) {
+    totalViolations += d10.length;
+    all = all.concat(d10);
   }
 
   assert.deepEqual(
