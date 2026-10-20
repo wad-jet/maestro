@@ -967,7 +967,7 @@ describe("maestro-bootstrap sanitizer hook (Level 1 in tool.execute.before)", ()
   });
 });
 
-describe("maestro-bootstrap trusted skip (D2/D3)", () => {
+describe("maestro-bootstrap role-trusted skip (B)", () => {
   let dir, hooks, savedLogEnv;
 
   const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR", "MAESTRO_CONFIG"];
@@ -1085,8 +1085,8 @@ describe("maestro-bootstrap trust role-set (B)", () => {
       assert.equal(entries.length, 1, "ровно один warn при init");
       assert.equal(entries[0].level, "warn");
       assert.deepEqual(entries[0].keys, ["custom"]);
-      assert.equal(typeof entries[0].hint, "string");
-      assert.ok(entries[0].hint.length > 0, "подсказка присутствует");
+      assert.match(entries[0].hint, /теряют плагинный файловый доступ/, "N1-формулировка в hint");
+      assert.match(entries[0].hint, /нативный per-agent allow/, "обходной путь в hint");
       // N диспатчей → warn не повторяется (однократно на init).
       for (let i = 0; i < 3; i++) {
         const out = { args: { subagent_type: "haiku", prompt: `hello ${i}` } };
@@ -1109,7 +1109,6 @@ describe("maestro-bootstrap trust role-set (B)", () => {
     }
   });
 });
-
 
 
 describe("maestro-bootstrap log mask (MAESTRO_BOOTSTRAP_LOG_MASK)", () => {
