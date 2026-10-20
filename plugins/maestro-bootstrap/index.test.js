@@ -1693,9 +1693,11 @@ describe("maestro-bootstrap confidential enforcement", () => {
   });
 });
 
-describe("maestro-bootstrap built-in confidential (OQ-3, Task 2b)", () => {
-  // Built-in набор применяется независимо от секции `confidential` в maestro.json
-  // (в т.ч. при её отсутствии): .env, .env.*, *.pem, *.key, *.crt, *.p12, *.pfx.
+describe("maestro-bootstrap built-in confidential (OQ-3, Task 2b; D5: legacy)", () => {
+  // D5: built-in набор (.env, .env.*, *.pem, *.key, *.crt, *.p12, *.pfx)
+  // гейтится плагином только в legacy-режиме (секция `confidential` есть).
+  // В new-режиме (секции нет) built-in — за ядром OpenCode и нативным каноном
+  // (тест-гард — блок dual mode).
   let dir, hooks, savedLogEnv;
   const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR"];
 
@@ -1732,9 +1734,11 @@ describe("maestro-bootstrap built-in confidential (OQ-3, Task 2b)", () => {
     savedLogEnv = {};
     for (const k of LOG_ENV) { savedLogEnv[k] = process.env[k]; delete process.env[k]; }
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-builtin-"));
-    // НЕТ секции `confidential` — built-in всё равно должен срабатывать.
+    // Legacy-режим (D5): секция `confidential` есть — built-in-гейт активен
+    // (в new-режиме без секции built-in — за ядром, см. блок dual mode).
     fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({
       trust: { custodian: true },
+      confidential: { paths: ["docs/confidential/**"] },
     }));
     hooks = await MaestroBootstrapPlugin({ directory: dir, client: makeClient(rootSessions) });
   });
@@ -1747,7 +1751,7 @@ describe("maestro-bootstrap built-in confidential (OQ-3, Task 2b)", () => {
     }
   });
 
-  it("denies primary/root read of .env (built-in, no confidential section)", async () => {
+  it("denies primary/root read of .env (built-in, legacy-режим)", async () => {
     const out = { args: { filePath: ".env" } };
     await assert.rejects(
       hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "bi-root-env" }, out),
@@ -1841,12 +1845,14 @@ describe("maestro-bootstrap built-in confidential (OQ-3, Task 2b)", () => {
   });
 });
 
-describe("maestro-bootstrap active config masking (6.0.0, P6)", () => {
-  // Активный конфиг (любой из 4 слоёв резолва) — автоматически в confidential-
-  // контуре: primary/untrusted — deny read/write/edit; trusted субагенты —
-  // read allow по умолчанию (trusted.read). Санкционированный канал чтения в
-  // сессии — тул maestro_config. Глобальный слой (вне проекта) — по абсолютному
-  // пути, не через repo-relative glob.
+describe("maestro-bootstrap active config masking (6.0.0, P6; D5: legacy)", () => {
+  // D5: активный конфиг (любой из 4 слоёв резолва) — в плагинном confidential-
+  // контуре только в legacy-режиме (секция `confidential` есть):
+  // primary/untrusted — deny read/write/edit; trusted субагенты — read allow
+  // по умолчанию (trusted.read). Санкционированный канал чтения в сессии —
+  // тул maestro_config. Глобальный слой (вне проекта) — по абсолютному пути,
+  // не через repo-relative glob. В new-режиме (секции нет) — residual по D4:
+  // защита root-слоёв — за нативным каноном (тест-гард — блок dual mode).
   let dir, hooks, savedLogEnv;
   const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR", "MAESTRO_CONFIG"];
 
@@ -1883,9 +1889,11 @@ describe("maestro-bootstrap active config masking (6.0.0, P6)", () => {
     savedLogEnv = {};
     for (const k of LOG_ENV) { savedLogEnv[k] = process.env[k]; delete process.env[k]; }
     dir = fs.mkdtempSync(path.join(os.tmpdir(), "fab-cfgmask-"));
-    // НЕТ секции confidential — защита активного конфига работает без неё.
+    // Legacy-режим (D5): секция `confidential` есть — защита активного конфига
+    // (P6) плагинная. В new-режиме (секции нет) — residual по D4.
     fs.writeFileSync(path.join(dir, "maestro.json"), JSON.stringify({
       trust: { custodian: true },
+      confidential: { paths: ["docs/confidential/**"] },
     }));
     hooks = await MaestroBootstrapPlugin({ directory: dir, client: makeClient(rootSessions) });
   });
@@ -1953,6 +1961,153 @@ describe("maestro-bootstrap active config masking (6.0.0, P6)", () => {
     const out = { args: { filePath: "src/app.ts" } };
     await hooks["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "cm-neg" }, out);
     assert.ok(true);
+  });
+});
+
+describe("maestro-bootstrap confidential dual mode (D5, retire-confidential)", () => {
+  // D5: dual mode — legacy-enforcement (enforcement-throw, built-in, P6)
+  // работает, пока секция `confidential` ЕСТЬ в конфиге (объект).
+  // New-режим (секции нет): плагин файлы не гейтит — нет throw, нет
+  // built-in-гейта, нет P6-гейта (нативный барьер — за ядром OpenCode).
+  // Shadow-аудит (observability без enforcement) — Task 5.
+  let dirLegacy, dirNew, hooksLegacy, hooksNew, savedLogEnv;
+  const LOG_ENV = ["MAESTRO_BOOTSTRAP_LOG_MASK", "MAESTRO_BOOTSTRAP_LOG_LEVEL", "MAESTRO_BOOTSTRAP_LOG_DIR"];
+
+  function makeClient(sessions) {
+    return {
+      session: {
+        get: async ({ sessionID }) => {
+          const rec = sessions[sessionID];
+          if (!rec) throw new Error("not found");
+          return { data: rec.session };
+        },
+        context: async ({ sessionID }) => {
+          const rec = sessions[sessionID];
+          if (!rec) return { data: [] };
+          return { data: rec.messages };
+        },
+      },
+    };
+  }
+
+  // Legacy + N1: кастомный агент из `trust` — V2-шейп (session.agent top-level).
+  const legacySessions = {
+    root: { session: { id: "root" }, messages: [] },
+    childTrusted: {
+      session: { id: "childTrusted", parentID: "root" },
+      messages: [{ info: { role: "assistant", mode: "custodian" }, parts: [] }],
+    },
+    childCustom: {
+      session: { id: "childCustom", parentID: "root", agent: "custom" },
+      messages: [],
+    },
+  };
+
+  const newSessions = {
+    root: { session: { id: "root" }, messages: [] },
+    childUntrusted: {
+      session: { id: "childUntrusted", parentID: "root" },
+      messages: [{ info: { role: "assistant", mode: "haiku" }, parts: [] }],
+    },
+  };
+
+  before(async () => {
+    savedLogEnv = {};
+    for (const k of LOG_ENV) { savedLogEnv[k] = process.env[k]; delete process.env[k]; }
+    // Legacy-режим: секция `confidential` есть (+ N1: trust.custom).
+    dirLegacy = fs.mkdtempSync(path.join(os.tmpdir(), "fab-dual-legacy-"));
+    fs.writeFileSync(path.join(dirLegacy, "maestro.json"), JSON.stringify({
+      trust: { custom: true },
+      confidential: { paths: ["docs/confidential/**"], trusted: { read: "allow", write: "deny", edit: "deny" } },
+    }));
+    hooksLegacy = await MaestroBootstrapPlugin({ directory: dirLegacy, client: makeClient(legacySessions) });
+    // New-режим: секции `confidential` нет.
+    dirNew = fs.mkdtempSync(path.join(os.tmpdir(), "fab-dual-new-"));
+    fs.writeFileSync(path.join(dirNew, "maestro.json"), JSON.stringify({}));
+    hooksNew = await MaestroBootstrapPlugin({ directory: dirNew, client: makeClient(newSessions) });
+  });
+
+  after(() => {
+    for (const d of [dirLegacy, dirNew]) fs.rmSync(d, { recursive: true, force: true });
+    for (const k of LOG_ENV) {
+      if (savedLogEnv[k] === undefined) delete process.env[k];
+      else process.env[k] = savedLogEnv[k];
+    }
+  });
+
+  // (ii) Legacy-режим — enforcement как раньше (под условием «секция есть»).
+  it("legacy: primary read of confidential path → [confidential:deny]", async () => {
+    const out = { args: { filePath: "docs/confidential/x.md" } };
+    await assert.rejects(
+      hooksLegacy["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "d-lg-p" }, out),
+      /confidential:deny/,
+    );
+  });
+
+  it("legacy: trusted (custodian) read of confidential path → allow", async () => {
+    const out = { args: { filePath: "docs/confidential/x.md" } };
+    await hooksLegacy["tool.execute.before"]({ tool: "read", sessionID: "childTrusted", callID: "d-lg-t" }, out);
+    assert.ok(true);
+  });
+
+  // N1: legacy + trust.custom — кастомный агент вне role-set → deny.
+  it("N1: legacy + trust.custom — кастомный агент read confidential path → deny", async () => {
+    const out = { args: { filePath: "docs/confidential/x.md" } };
+    await assert.rejects(
+      hooksLegacy["tool.execute.before"]({ tool: "read", sessionID: "childCustom", callID: "d-n1" }, out),
+      /confidential:deny/,
+    );
+  });
+
+  // Warn (D5): legacy → ровно 1 при init, с hint; не повторяется.
+  it("legacy: warn confidential:legacy_active — ровно 1 при init, с hint", async () => {
+    let entries = readLogs(dirLegacy).filter((e) => e.msg === "confidential:legacy_active");
+    assert.equal(entries.length, 1, "ровно один warn при init");
+    assert.equal(entries[0].level, "warn");
+    assert.match(entries[0].hint, /legacy-enforcement активен/);
+    assert.match(entries[0].hint, /\/maestro-assistant/);
+    // Тул-вызовы не повторяют warn.
+    const out1 = { args: { filePath: "docs/confidential/x.md" } };
+    await hooksLegacy["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "d-lgw-1" }, out1).catch(() => {});
+    const out2 = { args: { filePath: ".env" } };
+    await hooksLegacy["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "d-lgw-2" }, out2).catch(() => {});
+    entries = readLogs(dirLegacy).filter((e) => e.msg === "confidential:legacy_active");
+    assert.equal(entries.length, 1, "warn не повторяется после тул-вызовов");
+  });
+
+  // (i) New-режим — нет плагинного file-access enforcement.
+  it("no plugin file-access enforcement in new mode: primary read confidential path — нет [confidential:deny]", async () => {
+    const out = { args: { filePath: "docs/confidential/x.md" } };
+    await assert.doesNotReject(
+      hooksNew["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "d-new-1" }, out),
+    );
+  });
+
+  it("new mode: untrusted subagent read of confidential path — не гейтится плагином", async () => {
+    const out = { args: { filePath: "docs/confidential/x.md" } };
+    await assert.doesNotReject(
+      hooksNew["tool.execute.before"]({ tool: "read", sessionID: "childUntrusted", callID: "d-new-2" }, out),
+    );
+  });
+
+  it("new mode: built-in (.env) — не гейтится плагином (нативно — за ядром)", async () => {
+    const out = { args: { filePath: ".env" } };
+    await assert.doesNotReject(
+      hooksNew["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "d-new-3" }, out),
+    );
+  });
+
+  it("new mode: maestro.json (P6) — не гейтится плагином", async () => {
+    const out = { args: { filePath: "maestro.json" } };
+    await assert.doesNotReject(
+      hooksNew["tool.execute.before"]({ tool: "read", sessionID: "root", callID: "d-new-4" }, out),
+    );
+  });
+
+  // New-режим: legacy-warn'а нет.
+  it("new mode: нет warn confidential:legacy_active", async () => {
+    const entries = readLogs(dirNew).filter((e) => e.msg === "confidential:legacy_active");
+    assert.equal(entries.length, 0);
   });
 });
 

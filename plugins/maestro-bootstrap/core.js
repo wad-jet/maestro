@@ -10,7 +10,9 @@
  *  - Санитайзинг промптов `task` (Уровень 1 Security Review, Этап 2):
  *    маскирование чувствительных данных по правилам Context Sanitizer.
  *  - Merge guard: блокировка git merge/push в mainline без HITL-аппрува.
- *  - Confidential control: доступ к docs/confidential/** только trusted-сабагентам.
+ *  - Confidential control (dual mode, D5): пока секция `confidential` есть в
+ *    конфиге — legacy-enforcement (confidential-пути — только trusted-сабагентам);
+ *    секции нет — плагин файлы не гейтит (нативный барьер — за ядром).
  *
  * Логирование: JSONL to `<project>/.maestro/logs/maestro-bootstrap-<date>.log`
  */
@@ -1001,6 +1003,11 @@ export async function createBootstrapPlugin(ctx) {
     log.warn("sanitizer.invalid_config", { fields: validatedWhitelist.warnings.map((w) => w.field), count: validatedWhitelist.warnings.length });
   }
   const confidential = loadConfidentialConfig(config);
+  // D5 (retire-confidential): dual mode — legacy-enforcement (enforcement-throw,
+  // built-in-гейт, P6-контур) работает, пока секция `confidential` ЕСТЬ в конфиге
+  // (объект). Секции нет → new-режим: плагин файлы не гейтит (нативный барьер —
+  // за ядром OpenCode; shadow-аудит — Task 5).
+  const isLegacy = Boolean(config?.confidential && typeof config.confidential === "object");
   const mergeGuardConf = resolveMergeGuardConf(config);
   if (!mergeGuardConf.enabled) {
     log.warn("merge_guard.disabled", { sessionID: undefined });
@@ -1015,6 +1022,12 @@ export async function createBootstrapPlugin(ctx) {
     log.warn("trust:deprecated_key", {
       keys: trustKeys,
       hint: "секция trust больше не читается: доверие — по роли (custodian/sanitizer); кастомные агенты из trust теряют плагинный файловый доступ — при необходимости добавить нативный per-agent allow (HITL)",
+    });
+  }
+  // D5: legacy-enforcement активен — секция `confidential` найдена (однократно на init).
+  if (isLegacy) {
+    log.warn("confidential:legacy_active", {
+      hint: "legacy-enforcement активен; секция игнорируется в будущем релизе; миграция — /maestro-assistant",
     });
   }
   const unsafePatterns = detectUnsafePatterns(whitelist);
@@ -1186,9 +1199,15 @@ export async function createBootstrapPlugin(ctx) {
         }
       }
 
-      // Confidential control
+      // Confidential control (dual mode, D5): legacy-режим — секция
+      // `confidential` есть в конфиге — enforcement без изменений (пути секции
+      // + built-in + P6; trusted — role-set). New-режим (секции нет): плагин
+      // файлы не гейтит — нет enforcement-throw, нет built-in-гейта, нет
+      // P6-гейта (нативный барьер — за ядром OpenCode).
+      // PLACEHOLDER (Task 5): в new-режимной ветке подключается shadow-аудит
+      // (observability без enforcement) — deny-строка здесь не возникает.
       const CONF_TOOLS = new Set(["read", "write", "edit"]);
-      if (CONF_TOOLS.has(input.tool)) {
+      if (isLegacy && CONF_TOOLS.has(input.tool)) {
         // V2: аргументы тула в event.input, path (не filePath)
         const target = filePathOf(input.tool, event.input);
         const isConfTarget = target && !isPluginMetaFile(root, target) &&
