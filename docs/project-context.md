@@ -219,26 +219,32 @@
 
 ## 12. Безопасность
 
-- **Trust-модель:** `maestro.json → trust` — `custodian`/`sanitizer` trusted по роли;
-  остальные субагенты untrusted. Снятие trust делает агентов неработоспособными.
-- **Confidential-контур:** `docs/confidential/**` закрыт для primary/untrusted; trusted
-  читает, запись/редактирование deny.
-- **Секреты:** `.env`, `*.env.*`, `*.{pem,key,cert,secret}` — deny (built-in + config).
-- **File-доступ — нативный:** deny/ask в `.opencode/opencode.json` (read/glob/grep);
-  `maestro.json`/`.maestro` защищены нативно (deny + edit-ask).
+- **Барьер доступа:** единственный барьер — нативные permissions OpenCode
+  (deny `read`/`edit`/`glob`/`grep` + per-agent allow `custodian`/`sanitizer`
+  в `.opencode/opencode.json`); плагин — shadow-аудит (observability), не
+  enforcement (кроме legacy-режима: пока секция `confidential` есть в
+  `maestro.json` — dual mode, 6.4.0).
+- **Trust:** по роли — `custodian`/`sanitizer` trusted (hardcoded role-set,
+  не конфигурируется; секция `trust` удалена из схемы в 6.4.0, старые ключи →
+  warn + игнор). U1-маскирование task-промптов — для всех агентов вне
+  role-set (вкл. кастомные).
+- **Confidential-данные:** docs/confidential/**
+- **Секреты:** `.env`, `*.env.*` — дефолт ядра OpenCode; `*.pem`/`*.key`/
+  `*.crt`/`*.p12`/`*.pfx` — init-базелин (при наличии в нативном конфиге).
+- **File-доступ — нативный:** deny/ask в `.opencode/opencode.json`
+  (read/glob/grep); `maestro.json`/`.maestro` защищены нативно
+  (deny + edit-ask).
 - **`maestro_config`** — read-only плагин-тул для параметров `maestro.json`
   (global `ask`; только top-level primary — сабагенты per-agent `deny` +
   плагинный fail-closed guard; bash-чтение запрещено процессным каноном;
   4.9.0).
 - **Санитайзинг:** маскировка чувствительных данных перед untrusted-диспатчем
-  (`sanitizer_whitelist`).
-- **Память (memory layer):** маскирование `sanitize()` до и после саммаризации —
-  жёсткий инвариант: raw-confidential и секреты не уходят на сервер
-  (санизированное не блокируется); решение локально/удалённо — только
-  `storage.type` (`centralized_confidential` удалён); риск unmasked git-метаданных
-  (`branch`/`head`/`merged`) на централизованном бэкенде (правила — `SECURITY.md`
-  §5a и `manual_docs/explanation/agents-and-trust.md`).
-- Источник истины — `SECURITY.md` (требования P1–P5).
+  (`sanitizer_whitelist`); role-trusted агенты — raw-промпт.
+- **Память (memory layer):** generic-маскирование `sanitize()` (технические
+  секреты) до и после саммаризации; бизнес-confidential НЕ маскируется
+  (SEC-5, принятый риск: каналы a–d); git-backfill — только allowlist-глобы
+  (restricted-пути не добавляются в `history_globs`/`artifact_globs`).
+- Источник истины — `SECURITY.md`.
 
 ## 13. Мониторинг и observability
 
