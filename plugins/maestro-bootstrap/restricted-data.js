@@ -26,12 +26,13 @@ const SERVICE_TITLE_PREFIX = "[maestro-memory]";
 
 // Строка-зеркало §12 docs/project-context.md (канонический формат M2).
 // Строка — буллет внутри §12; незаанкорированная (может стоять в любом месте).
-const SECTION12_LINE_RE = /\*\*Confidential-данные:\*\*\s*(.+)/;
+const SECTION12_LINE_RE = /\*\*Confidential-данные:\*\*[ \t]*(.+)/;
 
 export function restrictedDirectiveText(paths) {
   const list = (Array.isArray(paths) ? paths : [])
     .filter((p) => typeof p === "string" && p.trim() !== "")
     .map((p) => p.trim());
+  if (list.length === 0) return null;
   return `${RESTRICTED_DIRECTIVE_PREFIX} ${list.join(", ")}`;
 }
 

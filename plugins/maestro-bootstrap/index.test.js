@@ -4438,6 +4438,8 @@ describe("restricted-data directive (D2, retire-confidential)", () => {
 
   it("restrictedDirectiveText: один путь", () => {
     assert.equal(restrictedDirectiveText(["docs/confidential/**"]), "restricted-data paths: docs/confidential/**");
+    assert.equal(restrictedDirectiveText([]), null, "пустой набор → null (нет хвостовой строки)");
+    assert.equal(restrictedDirectiveText(["  "]), null, "только пробелы → null");
   });
 });
 
