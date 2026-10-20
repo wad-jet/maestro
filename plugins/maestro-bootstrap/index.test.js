@@ -3359,7 +3359,7 @@ describe("config resolve (4-layer, 6.0.0)", () => {
   it("both project files → .maestro/ wins (non-memory replace)", () => {
     const d = makeDirs("swap-nm");
     try {
-      writeJson(path.join(d.root, "maestro.json"), { trust: { by_agent: {} }, feedback_report: "auto" });
+      writeJson(path.join(d.root, "maestro.json"), { communication: "plain", feedback_report: "auto" });
       writeJson(path.join(d.root, ".maestro", "maestro.json"), { feedback_report: "manual" });
       return withEnv(() => {
         // активный путь = .maestro/maestro.json

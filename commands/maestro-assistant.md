@@ -20,9 +20,12 @@ description: Консультации и настройка maestro-конфиг
 
 - Все HITL-вопросы, варианты и сообщения пользователю — только на русском.
 - Идемпотентно, с HITL-гейтом (approve/правки/отмена) и показом diff-merge перед записью.
-- Правка `confidential.paths` — жёсткий контроль (снятие с защиты — блок по умолчанию;
-  merge — консервативное дополнение; адресный diff).
+- Restricted-пути (нативные deny + строка §12) — жёсткий контроль: снятие с
+  защиты — адресный diff + отдельное HITL; merge — консервативное дополнение
+  (воркфлоу «Настройка restricted-путей» — `maestro-assistant`).
 - После правки `maestro.json` — сообщить, что изменения вступят в силу после перезапуска opencode.
-- Доступ к `docs/confidential/**` — закрыт (primary deny).
+- Доступ к restricted-путям (напр. `docs/confidential/**`, §12) — закрыт:
+  нативный deny для primary; role-set (`custodian`/`sanitizer`) — per-agent allow
+  (legacy-режим — плагинный enforcement, пока секция `confidential` есть).
 - Если запрос требует изменения кода/spec/плана или запуска pipeline — редирект:
   `@maestro-init` (фича/багфикс/SDD), `/maestro-design` (дизайн/scaffold/roadmap), `@regression` (регрессия).
