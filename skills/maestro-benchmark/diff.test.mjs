@@ -25,7 +25,8 @@ const base = (over = {}) => ({
              tests: "green", docsSynced: true, regressionEntry: true,
              merged: true, invariantsOk: true, deviations: [] },
   security: { leaks: 0, leakStatus: "pass", markerInSpec: true,
-              sanitizerRedacted: 2, confidentialAccess: { allow: 1, deny: 0 } },
+              sanitizerRedacted: 2,
+               confidentialAccess: { attempts: 1, byTrusted: 1, unknown: 0 } },
   analysis: { good: [], bad: [], summary: "" },
   ...over,
 });
@@ -113,9 +114,42 @@ test("5. --md: таблица + пометка models_changed", () => {
   assert.equal(code, 0);
   assert.match(out, /Сверка|дельф|Δ/i);
   assert.match(out, /модел/i);
+  // Флаги security-контура: leakStatus + confidentialUnknown (вложенное поле).
+  assert.match(out, /leakStatus \| "pass" \| "pass" \| same/);
+  assert.match(out, /confidentialUnknown \| 0 \| 0 \| same/);
+  assert.match(out, /confidentialAccess\.attempts \| 1 \| 1 \| 0 \| 0\.0%/);
 });
 
-test("6. отсутствие файла → exit 1; usage → exit 2", () => {
+test("7. confidentialAccess (attempts/byTrusted/unknown): дельты + флаг unknown", () => {
+  const n = write("n8.json", base({
+    security: { ...base().security,
+                confidentialAccess: { attempts: 3, byTrusted: 2, unknown: 1 } },
+  }));
+  const r = JSON.parse(diff(n, OLD).out);
+  assert.equal(r.metrics.confidentialAccess.attempts.abs, 2);
+  assert.equal(r.metrics.confidentialAccess.byTrusted.abs, 1);
+  assert.equal(r.metrics.confidentialAccess.unknown.abs, 1);
+  assert.equal(r.flags.confidentialUnknown, "regress"); // unknown: 0 → 1
+  const n2 = write("n9.json", base({
+    security: { ...base().security,
+                confidentialAccess: { attempts: 5, byTrusted: 4, unknown: 0 } },
+  }));
+  const o2 = write("o3.json", base({
+    security: { ...base().security,
+                confidentialAccess: { attempts: 4, byTrusted: 3, unknown: 1 } },
+  }));
+  const r2 = JSON.parse(diff(n2, o2).out);
+  assert.equal(r2.flags.confidentialUnknown, "fix"); // unknown: 1 → 0
+  assert.equal(r2.metrics.confidentialAccess.byTrusted.abs, 1);
+  // Схема-миграция (старый отчёт без поля unknown) — консервативно regress.
+  const legacy = write("o4.json", base({ security: { ...base().security,
+                                                     confidentialAccess: { allow: 1, deny: 0 } } }));
+  const r3 = JSON.parse(diff(n, legacy).out);
+  assert.equal(r3.flags.confidentialUnknown, "regress");
+  assert.equal(r3.metrics.confidentialAccess.attempts.abs, null);
+});
+
+test("8. отсутствие файла → exit 1; usage → exit 2", () => {
   const a = diff(join(dir, "nope.json"), OLD);
   assert.notEqual(a.code, 0);
   const b = { code: 0 };

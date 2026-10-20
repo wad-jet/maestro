@@ -67,6 +67,25 @@ test("2. opencode.json: $schema + baseline + agent + plugin", () => {
   assert.equal(cfg.permission.edit["maestro.json"], "ask");
   assert.equal(cfg.permission.glob["docs/confidential/*"], "deny");
   assert.equal(cfg.permission.grep["docs/confidential/*"], "deny");
+  // Restricted-путь фикстуры secrets/** (I1/N5): нативные deny — read/edit/
+  // glob/grep (тот же набор, что и в воркфлоу «Настройка restricted-путей»),
+  // per-agent allow role-set custodian/sanitizer (read/glob/grep) поверх deny.
+  assert.equal(cfg.permission.read["secrets/**"], "deny");
+  assert.equal(cfg.permission.edit["secrets/**"], "deny");
+  assert.equal(cfg.permission.glob["secrets/**"], "deny");
+  assert.equal(cfg.permission.grep["secrets/**"], "deny");
+  for (const a of ["custodian", "sanitizer"]) {
+    for (const t of ["read", "glob", "grep"]) {
+      assert.equal(cfg.agent[a].permission[t]["secrets/**"], "allow");
+    }
+  }
+});
+
+test("2b. fixture maestro.json: секций confidential/trust нет (new-режим, N2)", () => {
+  const mj = JSON.parse(readFileSync(join(sandbox(), "maestro.json"), "utf8"));
+  assert.ok(!("confidential" in mj), "секция confidential — удалена из схемы");
+  assert.ok(!("trust" in mj), "секция trust — удалена из схемы (доверие по роли)");
+  assert.ok("sanitizer_whitelist" in mj, "sanitizer_whitelist на месте");
 });
 
 test("3. plugin-цель существует (резолв от .sandbox/.opencode/)", () => {

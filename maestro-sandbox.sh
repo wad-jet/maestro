@@ -7,9 +7,12 @@
 # каталог, имитирующий целевое приложение:
 #   docs/project-context.md        14 категорий, фиктивный проект
 #   docs/confidential/             фиктивные конфиденциальные данные
-#   maestro.json                   trust/confidential
-#   .env                           фиктивные секреты (закрыты built-in confidential)
-#   secrets/other.conf             фиктивный секрет вне built-in (закрыт конфигом)
+#   maestro.json                   sanitizer_whitelist (без секций
+#                                  confidential/trust — new-режим)
+#   .env                           фиктивные секреты (закрыты нативным deny
+#                                  ядра OpenCode: baseline .env/.env.*)
+#   secrets/other.conf             фиктивный секрет (закрыт нативным deny
+#                                  secrets/** в генерируемом конфиге)
 #   src/, tests/                   минимальный код-скелет (TS) для debug/bugfix
 #   docs/superpowers/{specs,plans} каталоги для spec/plan
 #
@@ -94,14 +97,15 @@ gen_project_context() {
 - моно-репо нет; единый пакет `sandbox-app`.
 
 ## 6. Конфигурация и окружение
-- `.env` — секреты (фиктивные), защищён built-in confidential.
-- `secrets/other.conf` — секрет вне built-in, закрыт `confidential.paths`.
+- `.env` — секреты (фиктивные), закрыт нативным deny (ядро OpenCode:
+  baseline `.env`/`.env.*`).
+- `secrets/other.conf` — секрет, закрыт нативным deny `secrets/**`.
 
 ## 7. Качество кода
 - Lint — отсутствует; тесты — vitest.
 
 ## 8. Безопасность и риски
-- Конфиденциальные данные — в `docs/confidential/**` (см. `maestro.json`).
+- Конфиденциальные данные — в `docs/confidential/**` (закрыты нативным deny).
 - Секреты не должны попадать в spec/план/код.
 
 ## 9. Развёртывание
@@ -158,24 +162,12 @@ EOF
 }
 
 gen_maestro_json() {
+  # New-режим (6.4.0): секций confidential/trust НЕТ (N2) — песочница
+  # представляет корректно мигрированный проект. Барьер — нативные
+  # permissions ядра OpenCode (см. deliver_bench_opencode); доверие — по роли
+  # (role-set custodian/sanitizer, hardcoded, не конфигурируется).
   cat >"$SANDBOX/maestro.json" <<'EOF'
 {
-  "trust": {
-    "custodian": true,
-    "sanitizer": true
-  },
-  "confidential": {
-    "version": 1,
-    "paths": [
-      "docs/confidential/**",
-      "secrets/**"
-    ],
-    "trusted": {
-      "read": "allow",
-      "write": "deny",
-      "edit": "deny"
-    }
-  },
   "sanitizer_whitelist": {
     "patterns": [
       "sandbox_dummy_placeholder"
@@ -207,8 +199,9 @@ EOF
 }
 
 gen_env() {
-  # Фиктивные секреты. Закрыты BUILT-IN confidential (Фаза 2): .env deny для
-  # primary/non-trusted по умолчанию, конфиг для этого не нужен.
+  # Фиктивные секреты. Закрыты нативным deny ядра OpenCode (baseline
+  # `.env`/`.env.*`): new-режим — плагин файлы не гейтит, барьер — нативные
+  # permissions, конфиг maestro.json для этого не нужен.
   cat >"$SANDBOX/.env" <<'EOF'
 SANDBOX_DUMMY_PASSWORD=sandbox-dummy-password
 SANDBOX_FAKE_API_KEY=sandbox-fake-api-key-value
@@ -249,10 +242,13 @@ EOF
 }
 
 gen_secrets() {
-  # Секрет вне built-in набора. Закрывается через confidential.paths
-  # в maestro.json (не входит в built-in).
+  # Секрет не покрывается baseline ядра OpenCode (.env/*.pem/...): закрыт
+  # нативным deny secrets/** в генерируемом .opencode/opencode.json
+  # (deliver_bench_opencode, benchmark-режим) + per-agent allow custodian/
+  # sanitizer (role-set) — канон воркфлоу «Настройка restricted-путей».
   cat >"$SANDBOX/secrets/other.conf" <<'EOF'
-# Фиктивный секрет вне built-in confidential набора.
+# Фиктивный секрет не покрывается baseline ядра OpenCode.
+# Закрыт нативным deny secrets/** (см. .opencode/opencode.json).
 SANDBOX_OTHER_SECRET=sandbox-other-secret-value
 EOF
 }
@@ -375,14 +371,15 @@ gen_bench_project_context() {
 - моно-репо нет; единый пакет `sandbox-app`.
 
 ## 6. Конфигурация и окружение
-- env-файл — фиктивные секреты, защищён built-in confidential.
-- `secrets/other.conf` — секрет вне built-in, закрыт `confidential.paths`.
+- env-файл — фиктивные секреты, закрыт нативным deny (ядро OpenCode:
+  baseline `.env`/`.env.*`).
+- `secrets/other.conf` — секрет, закрыт нативным deny `secrets/**`.
 
 ## 7. Качество кода
 - Lint — отсутствует; тесты — встроенный `node --test`.
 
 ## 8. Безопасность и риски
-- Конфиденциальные данные — в `docs/confidential/**` (см. `maestro.json`).
+- Конфиденциальные данные — в `docs/confidential/**` (закрыты нативным deny).
 - Секреты не должны попадать в spec/план/код.
 
 ## 9. Развёртывание
@@ -445,6 +442,10 @@ EOF
 
 # Доставка maestro (локальная версия) в .sandbox/.opencode/.
 # permission-baseline — канон «Глобальные deny (R1+R4)» (maestro-assistant);
+# restricted-путь фикстуры secrets/** — нативные deny read/edit/glob/grep +
+# per-agent allow custodian/sanitizer (read/glob/grep, role-set) — эталон
+# мигрированного проекта (new-режим; канон — воркфлоу «Настройка
+# restricted-путей», maestro-assistant);
 # agent-секция — из authoring .opencode/opencode.json (если есть);
 # plugins — ../../plugins/maestro-bootstrap/index.js (резолв от .sandbox/.opencode/, V2-ключ).
 deliver_bench_opencode() {
@@ -474,6 +475,8 @@ try {
 const cfg = {
   $schema: "https://opencode.ai/config.json",
   permission: {
+    // Семантика: last-match-wins — catch-all "*" первым, специфичные правила
+    // после (канон нативных permissions, maestro-assistant).
     read: {
       "*": "allow",
       "docs/confidential/*": "deny",
@@ -487,7 +490,8 @@ const cfg = {
       "*.key": "deny",
       "*.crt": "deny",
       "*.p12": "deny",
-      "*.pfx": "deny"
+      "*.pfx": "deny",
+      "secrets/**": "deny"
     },
     edit: {
       "*": "allow",
@@ -500,25 +504,46 @@ const cfg = {
       "*.key": "deny",
       "*.crt": "deny",
       "*.p12": "deny",
-      "*.pfx": "deny"
+      "*.pfx": "deny",
+      "secrets/**": "deny"
     },
     glob: {
       "*": "allow",
       "docs/confidential/*": "deny",
       "maestro.json": "deny",
-      ".maestro/**": "deny"
+      ".maestro/**": "deny",
+      "secrets/**": "deny"
     },
     grep: {
       "*": "allow",
       "docs/confidential/*": "deny",
       "maestro.json": "deny",
-      ".maestro/**": "deny"
+      ".maestro/**": "deny",
+      "secrets/**": "deny"
     },
     maestro_config: "ask"
   },
   plugins: ["../../plugins/maestro-bootstrap/index.js"]
 };
 if (agent && typeof agent === "object" && !Array.isArray(agent)) cfg.agent = agent;
+// Restricted-путь фикстуры secrets/** (I1/N5): per-agent allow role-set
+// custodian/sanitizer (read/glob/grep) поверх глобального deny — канон
+// «Настройка restricted-путей» (agent rules take precedence). Без него
+// фикстура в new-режиме не защищена никем: плагин не гейтит, baseline ядра
+// secrets/** не покрывает.
+for (const name of ["custodian", "sanitizer"]) {
+  cfg.agent = cfg.agent || {};
+  const ag = cfg.agent[name] && typeof cfg.agent[name] === "object" && !Array.isArray(cfg.agent[name])
+    ? cfg.agent[name] : {};
+  const p = ag.permission && typeof ag.permission === "object" && !Array.isArray(ag.permission)
+    ? ag.permission : {};
+  for (const tool of ["read", "glob", "grep"]) {
+    const rules = p[tool] && typeof p[tool] === "object" && !Array.isArray(p[tool]) ? p[tool] : {};
+    p[tool] = { ...rules, "secrets/**": "allow" };
+  }
+  ag.permission = p;
+  cfg.agent[name] = ag;
+}
 writeFileSync(outPath, JSON.stringify(cfg, null, 2) + "\n");
 NODE
   if ! node "$tmp" "$dest/opencode.json" "$REPO_ROOT/.opencode/opencode.json"; then

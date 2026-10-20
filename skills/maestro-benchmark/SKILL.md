@@ -20,9 +20,11 @@ description: Benchmark maestro: фиксированное задание в п�
 3. **Жёсткий STOP (без «продолжить»).** Останови работу и покажи HITL:
 
    > **Плагин `maestro-bootstrap` не подключён или не загружен.**
-   > Защита `docs/confidential/**` НЕ действует: confidential-данные могут быть
-   > доступны untrusted-агентам и primary-сессии. sanitizer тоже
-   > не работает (в плагине `maestro-bootstrap`).
+   > Санитайзер Ур.1 не работает (маскирование промптов сабагентов — в плагине
+   > `maestro-bootstrap`), недоступны merge-guard и memory. Файловая защита
+   > restricted-данных — по нативным permissions (ядро opencode), не зависит
+   > от плагина (new-режим); в legacy-режиме (секция `confidential` есть) —
+   > enforcement плагина НЕ действует, пока плагин не подключён.
    >
    > Продолжение работы запрещено. Единственный способ продолжить — подключить
    > плагин и перезапустить opencode:
@@ -210,8 +212,11 @@ opencode-сессию — non-goal). Фаза завершается после 
    (task-диспатчи: количество, длительности), `sanitizer.redacted`,
    `session.error` (`aborted: true` — прерывания пользователем, в счётчик
    ошибок не включаются), `session.status.retry`; audit-лог
-   `confidential.access` — количество `allow` и `deny` отдельно + имена
-   trusted-агентов (**только имена**, без путей/данных).
+   `confidential.access` (shadow-аудит, new-режим — mirror, **ничего не
+   блокирует**; барьер — нативные permissions ядра): `attempts` — всего
+   записей, `byTrusted` — записи, где `agent` из role-set (`custodian`/
+   `sanitizer`), `unknown` — записи с `action: unknown` (агент нерезолвимо;
+   best-effort-зеркало); **только имена агентов**, без путей/данных.
 3. **Артефакты `.sandbox/`:** spec/plan (пути), `regression/entries/*`
    (запись создана), наличие изменений `manual_docs/`, git-состояние
    (ветка, мерж в main выполнен?), наличие `src/discounts.js` (модуль из
@@ -276,7 +281,8 @@ pipeline, категория фичи, вердикты spec-review и фина�
                  "merged": true, "invariantsOk": true, "deviations": [] },
     "security": { "leaks": 0, "leakStatus": "pass|fail",
                   "markerInSpec": true, "sanitizerRedacted": 0,
-                  "confidentialAccess": { "allow": 0, "deny": 0 } },
+                  "confidentialAccess": { "attempts": 0, "byTrusted": 0,
+                                          "unknown": 0 } },
     "analysis": { "good": [], "bad": [], "summary": "" },
     "diff": { "against": "benchmark-<...>.json", "metrics": {}, "flags": {} }
   }
@@ -291,6 +297,11 @@ pipeline, категория фичи, вердикты spec-review и фина�
   - `finalReview: "skipped"` — прогон не дошёл до финального ревью
     (сбой/прерван; бенчмарк измеряет и незавершённые прогоны — регрессии
     процесса).
+  - `security.confidentialAccess` — агрегат shadow-аудита
+    `confidential.access` (шаг 2, new-режим): `attempts` — всего попыток
+    доступа к restricted-набору; `byTrusted` — от role-set
+    `custodian`/`sanitizer`; `unknown` — нерезолвимый исход (best-effort-
+    зеркало: барьер — нативные permissions, аудит — observability).
 
 ### Шаг 5. Сброс песочницы
 

@@ -55,13 +55,14 @@
 | # | Сценарий | Тип | Проверка | Результат |
 |---|---|---|---|---|
 | D1 | opus не получает raw-confidential в запросе | ✅ | Слой 2 маскирование + audit-лог | |
-| D2 | primary не читает `.env`/`secrets/` | ✅ | confidential deny (built-in + конфиг) | |
+| D2 | primary не читает `.env`/`secrets/` | ✅ | нативный deny (ядро + сгенерированное правило `secrets/**`) | |
 | D3 | custodian агрегаты без значений/токенов/номеров | ✅ | assert/audit | |
 | D4 | Утечка через bash/glob/grep | ❌ | гейт-0, bash-permissions (плагин не покрывает — ручная проверка) | |
 | D5 | trusted-opus (B-5): гарантии сняты → предупреждение | ❌ | при `trust.opus=true` — предупреждение | |
 | D6 | **Маркер-driven (негатив):** правка по `из confidential`-секции НЕ применяется молча | ❌ | обязателен HITL (не silent). Парный с C6. Маркер-детект формален, не эвристика, не обходится «синтаксической согласованностью» | |
 | D7 | Un-trusted custodian: `trust.custodian: false` → confidential deny | ❌ | custodian не читает `docs/confidential/**` и `.env`; промпт санизируется; агент **non-functional** (не fallback). Проверить audit-лог `confidential:deny`. Юнит-тест: Task 1, Step 2-4 | |
 | D8 | Un-trusted sanitizer: `trust.sanitizer: false` → промпт санизируется (рекурсия) | ❌ | промпт sanitizer маскируется Ур.1 до него → не видит raw для пометки; агент **non-functional**. Проверить `sanitizer.redacted` в логе. Юнит-тест: Task 1, Step 5 | |
+| D9 | **Live-инвариант (нативный слой):** trusted читает / primary — нативный deny | ✅ | [Manual] В sandbox-сессии: `read` primary на `docs/confidential/pricing-schema.md` / `secrets/other.conf` → нативный permission error (не `[confidential:deny]` — последний только legacy-режим); `read` custodian → OK (per-agent allow). В smoke-тесте проверяется статически (sandbox-smoke) | |
 
 ## E. Интеграция команд/скилов
 | # | Сценарий | Тип | Проверка | Результат |

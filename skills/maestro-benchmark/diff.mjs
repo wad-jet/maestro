@@ -7,6 +7,10 @@ const TOKEN_KEYS = ["input", "output", "reasoning", "cacheRead", "cacheWrite"];
 const RESOURCE_KEYS = ["activeMs", "hitl", "reviewCycles", "durationMs"];
 const PROCESS_KEYS = ["spec", "plan", "specReview", "finalReview", "tests",
   "docsSynced", "regressionEntry", "merged", "invariantsOk"];
+// security.confidentialAccess (shadow-аудит, new-режим):
+// { attempts: N — всего записей confidential.access, byTrusted: M — записи от
+// role-set custodian/sanitizer, unknown: K — нерезолвимый исход (mirror, M4) }.
+const CONF_ACCESS_KEYS = ["attempts", "byTrusted", "unknown"];
 // Ранги: выше = лучше (для ранжированных значений).
 const RANK = {
   approve: 2, "revise-approve": 1, skipped: 0,
@@ -53,6 +57,17 @@ function flagDelta(oldV, newV) {
   return rn > ro ? "fix" : "regress";
 }
 
+// Счётчик «меньше = лучше» (confidentialAccess.unknown: рост = mirror не
+// резолвит больше попыток → regress; отсутствие поля в отчёте старой схемы —
+// консервативно regress, как null в flagDelta).
+function countDelta(oldV, newV) {
+  if (oldV === newV) return "same";
+  const o = Number(oldV);
+  const n = Number(newV);
+  if (Number.isNaN(o) || Number.isNaN(n)) return "regress";
+  return n < o ? "fix" : "regress";
+}
+
 function renderMd(out, neu, old) {
   const lines = [];
   lines.push(`## Сверка с прошлым прогоном (v${old.run?.version ?? "?"} → v${neu.run?.version ?? "?"})`);
@@ -65,11 +80,16 @@ function renderMd(out, neu, old) {
   };
   for (const k of TOKEN_KEYS) row(`tokens.${k}`, out.metrics.tokens[k]);
   for (const k of RESOURCE_KEYS) row(k, out.metrics[k]);
+  for (const k of CONF_ACCESS_KEYS) row(`confidentialAccess.${k}`, out.metrics.confidentialAccess[k]);
   lines.push("");
   lines.push("| Флаг | old | new | Статус |");
   lines.push("|---|---|---|---|");
+  const flagValue = (rep, k) =>
+    k === "confidentialUnknown"
+      ? rep.security?.confidentialAccess?.unknown
+      : rep.process?.[k] ?? rep.security?.[k];
   for (const [k, st] of Object.entries(out.flags)) {
-    lines.push(`| ${k} | ${JSON.stringify(old.process?.[k] ?? old.security?.[k])} | ${JSON.stringify(neu.process?.[k] ?? neu.security?.[k])} | ${st} |`);
+    lines.push(`| ${k} | ${JSON.stringify(flagValue(old, k))} | ${JSON.stringify(flagValue(neu, k))} | ${st} |`);
   }
   if (out.models_changed) {
     lines.push("");
@@ -98,12 +118,18 @@ const out = {
     ...Object.fromEntries(
       RESOURCE_KEYS.map((k) => [k, numDelta(old.resources?.[k], neu.resources?.[k])]),
     ),
+    confidentialAccess: Object.fromEntries(
+      CONF_ACCESS_KEYS.map((k) =>
+        [k, numDelta(old.security?.confidentialAccess?.[k], neu.security?.confidentialAccess?.[k])]),
+    ),
   },
   flags: Object.fromEntries(
     PROCESS_KEYS.map((k) => [k, flagDelta(old.process?.[k], neu.process?.[k])]),
   ),
 };
 out.flags.leakStatus = flagDelta(old.security?.leakStatus, neu.security?.leakStatus);
+out.flags.confidentialUnknown = countDelta(
+  old.security?.confidentialAccess?.unknown, neu.security?.confidentialAccess?.unknown);
 
 if (md) {
   process.stdout.write(renderMd(out, neu, old));
