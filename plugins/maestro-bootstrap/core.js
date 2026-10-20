@@ -1279,8 +1279,12 @@ export async function createBootstrapPlugin(ctx) {
           if (trustInfo.agent === undefined) {
             outcome = "unknown"; // agent нерезолвимо (primary-сессия и т.п.)
           } else {
+            // Mirror-совместимость с case-insensitive матчингом: сравнение
+            // allow-паттернов — без учёта регистра (как в нативном ядре).
             const allows = nativeSet.agentAllows.get(trustInfo.agent);
-            outcome = Array.isArray(allows) && matched.some((p) => allows.includes(p)) ? "allow" : "deny";
+            outcome = Array.isArray(allows) &&
+              matched.some((p) => allows.some((a) => String(a).toLowerCase() === p.toLowerCase()))
+              ? "allow" : "deny";
           }
           const base = { sessionID: input.sessionID, callID: input.callID, tool: input.tool, action: outcome, agent: trustInfo.agent, target: path.basename(target) };
           auditLog.info("confidential.access", base);

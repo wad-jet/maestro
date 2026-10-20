@@ -2653,6 +2653,59 @@ describe("maestro-bootstrap shadow audit (new mode, D7/M3/M4)", () => {
     assert.ok(auditEntry("s-7a"), "unknown-случай проаудитирован");
   });
 
+  it("agent имеет per-agent allows, но матч-паттерн не покрыт → deny (ветка allows && !some)", async () => {
+    const d2 = fs.mkdtempSync(path.join(os.tmpdir(), "fab-shadow-nomatch-"));
+    try {
+      fs.writeFileSync(path.join(d2, "maestro.json"), JSON.stringify({}));
+      // deny на docs/data/**; allow санитайзера — на другой путь (other/**).
+      fs.writeFileSync(path.join(d2, "opencode.json"), JSON.stringify({
+        permission: { read: { "docs/data/**": "deny" } },
+        agent: { sanitizer: { permission: { read: { "other/**": "allow" } } } },
+      }));
+      const sessions = {
+        root: { session: { id: "root" }, messages: [] },
+        childSanitizer: { session: { id: "childSanitizer", parentID: "root", agent: "sanitizer" }, messages: [] },
+      };
+      const h2 = await MaestroBootstrapPlugin({ directory: d2, client: makeClient(sessions) });
+      const out = { args: { filePath: "docs/data/x.md" } };
+      await assert.doesNotReject(
+        h2["tool.execute.before"]({ tool: "read", sessionID: "childSanitizer", callID: "s-8" }, out),
+      );
+      const e = readLogs(d2, "maestro-audit").find((x) => x.callID === "s-8");
+      assert.ok(e, "audit entry exists");
+      assert.equal(e.action, "deny", "allows есть, но не покрывают матч-паттерн → deny");
+      assert.equal(e.agent, "sanitizer");
+    } finally {
+      fs.rmSync(d2, { recursive: true, force: true });
+    }
+  });
+
+  it("outcome-сравнение allow-паттернов — без учёта регистра (mirror-совместимость)", async () => {
+    const d2 = fs.mkdtempSync(path.join(os.tmpdir(), "fab-shadow-case-"));
+    try {
+      fs.writeFileSync(path.join(d2, "maestro.json"), JSON.stringify({}));
+      // deny записан с верхним регистром, allow custodian'а — с нижним.
+      fs.writeFileSync(path.join(d2, "opencode.json"), JSON.stringify({
+        permission: { read: { "DOCS/DATA/**": "deny" } },
+        agent: { custodian: { permission: { read: { "docs/data/**": "allow" } } } },
+      }));
+      const sessions = {
+        root: { session: { id: "root" }, messages: [] },
+        childCustodian: { session: { id: "childCustodian", parentID: "root", agent: "custodian" }, messages: [] },
+      };
+      const h2 = await MaestroBootstrapPlugin({ directory: d2, client: makeClient(sessions) });
+      const out = { args: { filePath: "docs/data/x.md" } };
+      await assert.doesNotReject(
+        h2["tool.execute.before"]({ tool: "read", sessionID: "childCustodian", callID: "s-9" }, out),
+      );
+      const e = readLogs(d2, "maestro-audit").find((x) => x.callID === "s-9");
+      assert.ok(e, "audit entry exists (матчинг case-insensitive — запись есть)");
+      assert.equal(e.action, "allow", "allow-паттерн матчит без учёта регистра");
+    } finally {
+      fs.rmSync(d2, { recursive: true, force: true });
+    }
+  });
+
   it("production-путь: реальный init-контур (createBootstrapPlugin + нативный конфиг на диске) → запись с ожидаемым outcome", async () => {
     const d2 = fs.mkdtempSync(path.join(os.tmpdir(), "fab-shadow-prod-"));
     try {
