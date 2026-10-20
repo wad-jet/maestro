@@ -40,7 +40,7 @@ function mkClient(overrides = {}) {
   return {
     session: {
       get: async () => ({ data: { id: "s", parentID: null } }),
-      messages: async () => ({ data: [] }),
+      context: async () => ({ data: [] }),
       list: async () => ({ data: [] }),
       hook: async () => ({ dispose: () => {} }),
       ...sessionOverrides,
@@ -414,9 +414,9 @@ test("#77 T5-5: auto_recall false → no chat.message; transform-хук живё
   }
 });
 
-// ── I5 removed: centralized forbid + confidential → NO sqlite fallback ──
+// ── I5 removed: centralized backend без sqlite-failover ───────────────────
 
-test("I5 removed: confidential project on qdrant config stays qdrant (no failover)", async () => {
+test("I5 removed: qdrant config stays qdrant (no failover to sqlite)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mem-hooks-"));
   const saved = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = dir;
@@ -430,7 +430,6 @@ test("I5 removed: confidential project on qdrant config stays qdrant (no failove
       },
       identity: "x",
     });
-    config.confidential = { paths: ["docs/confidential/**"] };
     const hooks = await registerMemoryHooks({ client: mkClient(), config, log, root: dir });
     assert.ok(
       !logged.some(([m]) => m === "memory: centralized backend forbidden for confidential project — fallback to sqlite"),
@@ -444,18 +443,21 @@ test("I5 removed: confidential project on qdrant config stays qdrant (no failove
   }
 });
 
-// ── I6: onStartup called ───────────────────────────────────────────────
+// ── I6: onStartup called (V2: без session.list) ──────────────────────────
 
-test("I6: onStartup is called (session.list invoked)", async () => {
+test("I6: onStartup вызывается (V2: session.list не вызывается, warn session_list_not_available)", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mem-hooks-"));
   const saved = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = dir;
   try {
     let listed = 0;
+    const warned = [];
+    const log = { debug() {}, info() {}, warn: (m) => warned.push(m), error() {} };
     const client = mkClient({ session: { list: async () => { listed++; return { data: [] }; } } });
-    const hooks = await registerMemoryHooks({ client, config: mkConfig(dir), log: silentLog, root: dir, deps: { embeddings: mkMockEmbeddings() } });
+    const hooks = await registerMemoryHooks({ client, config: mkConfig(dir), log, root: dir, deps: { embeddings: mkMockEmbeddings() } });
     await new Promise((r) => setTimeout(r, 20));
-    assert.ok(listed >= 1, "onStartup must call session.list");
+    assert.equal(listed, 0, "V2: session.list не вызывается (backfill по списку отключён)");
+    assert.ok(warned.some((m) => String(m).includes("session_list_not_available")), "warn о недоступности session.list");
     await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
@@ -1331,15 +1333,14 @@ test("export/import blocked for [maestro-memory] sessions", async () => {
 
 // ── Task 7 review findings ─────────────────────────────────────────────
 
-test("I-3: confidential export warning in return string; file stays pure JSONL (round-trip)", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "mem-conf-"));
+test("I-3: export file stays pure JSONL (round-trip)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-exp-"));
   const saved = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = dir;
   try {
     const storage = await mkSqliteStorage(dir);
     await storage.upsert([mkFullEntry()]);
     const config = mkConfig(dir, { namespace: "k" });
-    config.confidential = { paths: ["docs/confidential/**"] };
     const hooks = await registerMemoryHooks({
       client: mkClient(),
       config,
@@ -1351,7 +1352,6 @@ test("I-3: confidential export warning in return string; file stays pure JSONL (
     const exportPath = join(dir, "export.jsonl");
     const expRes = await hooks.tool.memory_export.execute({ path: exportPath }, { sessionID: "s1" });
     assert.match(expRes, /Экспортировано 1 запис/);
-    assert.match(expRes, /внимание: данные замаскированы, но могут покинуть машину/);
 
     // File must be pure JSONL — every non-empty line parses as JSON.
     const { readFileSync } = await import("node:fs");
@@ -1372,7 +1372,7 @@ test("I-3: confidential export warning in return string; file stays pure JSONL (
     const impRes = await hooks2.tool.memory_import.execute({ path: exportPath }, { sessionID: "s1" });
     assert.match(impRes, /Импортировано 1 запис/);
     const hits = await storage2.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 5, min_score: 0, key: "k" });
-    assert.equal(hits.length, 1, "confidential export must round-trip");
+    assert.equal(hits.length, 1, "export must round-trip");
 
     await hooks.dispose?.();
     await hooks2.dispose?.();
@@ -2188,69 +2188,7 @@ test("@maestro-memory duplicates diagnostics: disabled_reason / mainline_unresol
     const res = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "s1" });
     assert.match(res, /mainline_unresolved/, "mainline unresolved → diagnostic in output");
     await hooks.dispose?.();
-
-    // (c) centralized + confidential.paths → unmasked_branch_metadata.
-    const storage2 = mkMockStorage();
-    storage2.stats = async () => ({ entries: 1 });
-    storage2.scan = async () => [
-      { session_id: "s1", title: "T1", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]), merged: 1, head: "", branch: "" },
-    ];
-    const config = mkConfig(dir, {
-      storage: { type: "qdrant", qdrant: { url: "http://localhost:6333", api_key_env: "Q_KEY" } },
-      identity: "x",
-    });
-    config.confidential = { paths: ["docs/confidential/**"] };
-    const hooks2 = await registerMemoryHooks({
-      client: mkClient(),
-      config,
-      log: silentLog,
-      root: dir,
-      deps: {
-        storage: storage2,
-        embeddings: mkMockEmbeddings(),
-        git: { detectMainline: () => ({ name: "main" }), revList: () => new Set(), isAncestor: () => "no" },
-      },
-    });
-    const res2 = await hooks2.tool.memory_stats_detail.execute({}, { sessionID: "s1" });
-    assert.match(res2, /unmasked_branch_metadata/, "centralized + confidential.paths → diagnostic in output");
-    await hooks2.dispose?.();
   } finally {
-    if (saved === undefined) delete process.env.XDG_DATA_HOME;
-    else process.env.XDG_DATA_HOME = saved;
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("memory_stats_detail duplicates external_embedder_unmasked_queries (openai + confidential.paths)", async () => {
-  // Spec §5.2: init-warn дублируется в выдаче memory_stats_detail / @maestro-memory.
-  process.env.MM_KEY_SET = "k";
-  const dir = mkdtempSync(join(tmpdir(), "mem-openai-diag-"));
-  const saved = process.env.XDG_DATA_HOME;
-  process.env.XDG_DATA_HOME = dir;
-  try {
-    const storage = mkMockStorage();
-    storage.stats = async () => ({ entries: 1 });
-    storage.scan = async () => [
-      { session_id: "s1", title: "T1", author: "a", time_last: 1700000000000, origin_project_hash: "h", embedding: new Float32Array([1, 0, 0]), merged: 1, head: "", branch: "" },
-    ];
-    const cfg = { memory: { enabled: true, namespace: "test.ns", storage: { type: "sqlite" }, embedding: { provider: "openai", model: "m", api_key_env: "MM_KEY_SET", dim: 3 } } };
-    cfg.confidential = { paths: ["docs/confidential/**"] };
-    const hooks = await registerMemoryHooks({
-      client: mkClient(),
-      config: cfg,
-      log: silentLog,
-      root: dir,
-      deps: {
-        storage,
-        embeddings: { probe: async () => ({ ok: true, hard: false, detail: "ok" }), dim: 3, modelId: "openai:m@https://api.openai.com/v1" },
-        git: { detectMainline: () => ({ name: "main" }), revList: () => new Set(), isAncestor: () => "no" },
-      },
-    });
-    const res = await hooks.tool.memory_stats_detail.execute({}, { sessionID: "s1" });
-    assert.match(res, /external_embedder_unmasked_queries/, "openai + confidential.paths → diagnostic in output");
-    await hooks.dispose?.();
-  } finally {
-    delete process.env.MM_KEY_SET;
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = saved;
     rmSync(dir, { recursive: true, force: true });
@@ -2281,35 +2219,6 @@ test("M-1: stats tiers from full scan — real unattributed row (merged=0 head='
     assert.match(res, /unknown: 1/, "unattributed row must be counted in unknown tier (full scan)");
     await hooks.dispose?.();
     await storage.dispose?.();
-  } finally {
-    if (saved === undefined) delete process.env.XDG_DATA_HOME;
-    else process.env.XDG_DATA_HOME = saved;
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-test("M-2: init-warn unmasked_branch_metadata at init (centralized + confidential.paths)", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "mem-m2-warn-"));
-  const saved = process.env.XDG_DATA_HOME;
-  process.env.XDG_DATA_HOME = dir;
-  try {
-    const warned = [];
-    const log = { debug() {}, info() {}, warn: (m) => warned.push(m), error() {} };
-    const storage = mkMockStorage();
-    const config = mkConfig(dir, {
-      storage: { type: "qdrant", qdrant: { url: "http://localhost:6333", api_key_env: "Q_KEY" } },
-      identity: "x",
-    });
-    config.confidential = { paths: ["docs/confidential/**"] };
-    const hooks = await registerMemoryHooks({
-      client: mkClient(),
-      config,
-      log,
-      root: dir,
-      deps: { storage, embeddings: mkMockEmbeddings(), git: mkScopeGit() },
-    });
-    assert.ok(warned.some((m) => m.includes("unmasked_branch_metadata")), "init must warn unmasked_branch_metadata");
-    await hooks.dispose?.();
   } finally {
     if (saved === undefined) delete process.env.XDG_DATA_HOME;
     else process.env.XDG_DATA_HOME = saved;
@@ -3460,40 +3369,17 @@ test("memory_probe registered even when probe hard-fail (off-state)", async () =
   }
 });
 
-test("init-warn external_embedder_unmasked_queries when openai + confidential paths", async () => {
-  process.env.MM_KEY_SET = "k";
-  const dir = mkdtempSync(join(tmpdir(), "mem-openai-warn-"));
-  const saved = process.env.XDG_DATA_HOME;
-  process.env.XDG_DATA_HOME = dir;
-  try {
-    const logs = [];
-    const cfg = { memory: { enabled: true, namespace: "test.ns", storage: { type: "sqlite" }, embedding: { provider: "openai", model: "m", api_key_env: "MM_KEY_SET", dim: 3 } } };
-    cfg.confidential = { paths: ["docs/confidential/**"] };
-    const hooks = await registerMemoryHooks({
-      client: mkClient(), config: cfg, log: { warn: (m) => logs.push(m) }, root: dir,
-      deps: { storage: mkStorage(), embeddings: { probe: async () => ({ ok: true, hard: false, detail: "ok" }), dim: 3, modelId: "openai:m@https://api.openai.com/v1" } },
-    });
-    assert.ok(logs.some((l) => String(l).includes("external_embedder_unmasked_queries")));
-    await hooks.dispose?.();
-  } finally {
-    delete process.env.MM_KEY_SET;
-    if (saved === undefined) delete process.env.XDG_DATA_HOME;
-    else process.env.XDG_DATA_HOME = saved;
-    rmSync(dir, { recursive: true, force: true });
-  }
-});
-
-// ── Task 6 (external embedder): маскирование запроса в memory_search ────
-
-test("memory_search masks confidential query before embed", async () => {
+test("memory_search: запрос маскируется только generic sanitize (key=value)", async () => {
   const seen = [];
-  const cfg = { memory: { enabled: true, namespace: "test.ns", storage: { type: "sqlite" } }, confidential: { paths: ["docs/confidential/**"] } };
+  const cfg = { memory: { enabled: true, namespace: "test.ns", storage: { type: "sqlite" } } };
   const hooks = await registerMemoryHooks({
     client: mkClient(), config: cfg, log: mkLog(), root: tmpdir(),
     deps: { storage: mkStorage(), embeddings: { embed: async (t) => { seen.push(t); return new Float32Array([0.1, 0.2, 0.3]); }, probe: async () => ({ ok: true, hard: false, detail: "ok" }), dim: 3, modelId: "m" } },
   });
-  await hooks.tool.memory_search.execute({ query: "docs/confidential/roadmap.md сроки\nкакие сроки?" }, { sessionID: "s1" });
-  assert.ok(!seen[0].includes("roadmap"));
+  await hooks.tool.memory_search.execute({ query: "какой хост у POSTGRES_PASSWORD=secret123\nкакие сроки?" }, { sessionID: "s1" });
+  assert.equal(seen.length, 1, "embed выполнен (short-circuit на [confidential] отсутствует)");
+  assert.ok(seen[0].includes("POSTGRES_PASSWORD=<redacted>"), "generic sanitize применён к embed-входу");
+  assert.ok(!seen[0].includes("secret123"), "secret-value не ушёл в embed");
   await hooks.dispose?.();
 });
 
@@ -3809,29 +3695,29 @@ test("SEC-4b: memory log contains no record text, paths, base_url, raw branch", 
     // memory:promoted с нормализованными branch-полями.
     await storage.upsert([mkFullEntry({
       session_id: "seed", key: "k", head: "h1", branch: "feature/PROJ-123-fix", merged: 0,
-      title: "Fix PROJ-123 auth flow", summary: "Refactored docs/confidential/roadmap.md handling",
+      title: "Fix PROJ-123 auth flow", summary: "Refactored docs/roadmap.md handling",
     })]);
 
-    // Реалистичные замаскированные фикстуры: транскрипт с confidential-путём
-    // и ticket-кодом; summarize возвращает title/summary с теми же фрагментами.
+    // Реалистичные фикстуры: транскрипт с путём и ticket-кодом;
+    // summarize возвращает title/summary с теми же фрагментами.
     const client = {
       session: {
         list: async () => ({ data: [{ id: "s1", parentID: null, title: "Fix PROJ-123 auth flow", time: { created: 1, updated: Date.now() - 1000 } }] }),
         get: async () => ({ data: { id: "s1", parentID: null, title: "Fix PROJ-123 auth flow", time: { created: 1, updated: Date.now() - 1000 } } }),
-        messages: async () => ({ data: [
-          { info: { role: "user" }, parts: [{ type: "text", text: "docs/confidential/roadmap.md сроки\nкакие сроки по PROJ-123?" }] },
-          { info: { role: "assistant", providerID: "openai", modelID: "gpt-4o" }, parts: [{ type: "text", text: "обновил docs/confidential/roadmap.md" }] },
+        context: async () => ({ data: [
+          { info: { role: "user" }, parts: [{ type: "text", text: "docs/roadmap.md сроки\nкакие сроки по PROJ-123?" }] },
+          { info: { role: "assistant", providerID: "openai", modelID: "gpt-4o" }, parts: [{ type: "text", text: "обновил docs/roadmap.md" }] },
         ] }),
         create: async () => ({ data: { id: "summ-1" } }),
-        prompt: async () => ({ data: { parts: [{ type: "text", text: '{"title":"Fix PROJ-123 auth flow","summary":"Refactored docs/confidential/roadmap.md handling","decisions":["PROJ-123 done"]}' }] } }),
-        delete: async () => ({ data: {} }),
+        switchModel: async () => {},
+        prompt: async () => ({ data: { parts: [{ type: "text", text: '{"title":"Fix PROJ-123 auth flow","summary":"Refactored docs/roadmap.md handling","decisions":["PROJ-123 done"]}' }] } }),
+        remove: async () => ({ data: {} }),
       },
     };
 
     const memoryLog = makeLogger(dir, { filePrefix: "maestro-memory", filterEnv: "MAESTRO_MEMORY" });
     const log = makeLogger(dir, { filePrefix: "maestro-bootstrap", filterEnv: "MAESTRO_BOOTSTRAP" });
     const cfg = mkConfig(dir, { namespace: "k", idle_debounce_min: 0, backfill_max_per_start: 5 });
-    cfg.confidential = { paths: ["docs/confidential/**"] };
     const git = {
       detectMainline: () => ({ name: "main" }),
       isAncestor: () => "yes",
@@ -3853,8 +3739,8 @@ test("SEC-4b: memory log contains no record text, paths, base_url, raw branch", 
     assert.ok(lines.length > 0, "memory log must have entries");
     const raw = lines.map((e) => JSON.stringify(e)).join("\n");
     assert.ok(!raw.includes("Fix PROJ-123 auth flow"), "title must not leak");
-    assert.ok(!raw.includes("Refactored docs/confidential"), "summary must not leak");
-    assert.ok(!raw.includes("docs/confidential"), "confidential path must not leak");
+    assert.ok(!raw.includes("Refactored docs/roadmap"), "summary must not leak");
+    assert.ok(!raw.includes("docs/roadmap.md"), "path must not leak");
     assert.ok(!raw.includes("how to fix PROJ-123 auth"), "query must not leak");
     assert.ok(!raw.includes("https://"), "base_url must not leak");
     assert.ok(!raw.includes("PROJ-123"), "raw branch ticket code must not leak");
@@ -4243,13 +4129,14 @@ test("C1: indexing pass stamps origin_remote (from git remote) + prefixes (from 
       session: {
         list: async () => ({ data: [{ id: "s1", parentID: null, title: "T", time: { created: 1, updated: Date.now() - 1000 } }] }),
         get: async () => ({ data: { id: "s1", parentID: null, title: "T", time: { created: 1, updated: Date.now() - 1000 } } }),
-        messages: async () => ({ data: [
+        context: async () => ({ data: [
           { info: { role: "user" }, parts: [{ type: "text", text: "hello" }] },
           { info: { role: "assistant", providerID: "openai", modelID: "gpt-4o" }, parts: [{ type: "text", text: "hi" }] },
         ] }),
         create: async () => ({ data: { id: "summ-1" } }),
+        switchModel: async () => {},
         prompt: async () => ({ data: { parts: [{ type: "text", text: '{"title":"T","summary":"S","decisions":["d"]}' }] } }),
-        delete: async () => ({ data: {} }),
+        remove: async () => ({ data: {} }),
       },
     };
 
@@ -4267,7 +4154,9 @@ test("C1: indexing pass stamps origin_remote (from git remote) + prefixes (from 
       },
     });
 
-    // Ждём backfill (debounce 0) → summarize → upsert.
+    // V2: backfill по session.list отсутствует — indexing pass триггерится
+    // событием session.idle (debounce 0) → summarize → upsert.
+    await hooks.event({ event: { type: "session.idle", properties: { sessionID: "s1" } } });
     await new Promise((r) => setTimeout(r, 300));
 
     const rows = await storage.scan({ key: "a.b.c", fields: ["session_id", "key", "origin_remote", "prefixes"] });
@@ -4614,8 +4503,8 @@ test("import rejects invalid artifacts (non-array, >512, control chars, >8, non-
   }
 });
 
-test("CR-3: import drops artifacts matching resolved confidential set (own-origin entry)", async () => {
-  const dir = mkdtempSync(join(tmpdir(), "mem-art-cr3-"));
+test("import: artifacts сохраняются как есть (CR-3 confidential-дроп удалён)", async () => {
+  const dir = mkdtempSync(join(tmpdir(), "mem-art-imp-"));
   const saved = process.env.XDG_DATA_HOME;
   process.env.XDG_DATA_HOME = dir;
   try {
@@ -4624,13 +4513,12 @@ test("CR-3: import drops artifacts matching resolved confidential set (own-origi
     const entry = mkFullEntry({
       key: "k",
       origin_project_hash: ownHash,
-      artifacts: ["docs/confidential/roadmap.md", "docs/spec.md"],
+      artifacts: ["docs/internal/roadmap.md", "docs/spec.md"],
     });
     writeFileSync(exportPath, JSON.stringify({ ...entry, embedding: Array.from(entry.embedding) }) + "\n");
 
     const storage = await mkSqliteStorage(dir);
     const config = mkConfig(dir, { namespace: "k" });
-    config.confidential = { paths: ["docs/confidential/**"] };
     const hooks = await registerMemoryHooks({
       client: mkClient(),
       config,
@@ -4639,9 +4527,9 @@ test("CR-3: import drops artifacts matching resolved confidential set (own-origi
       deps: { storage, embeddings: mkMockEmbeddings() },
     });
     const impRes = await hooks.tool.memory_import.execute({ path: exportPath }, { sessionID: "s1" });
-    assert.match(impRes, /Импортировано 1 запис/, "entry must import (drop, not reject)");
+    assert.match(impRes, /Импортировано 1 запис/, "entry must import");
     const hits = await storage.search(new Float32Array([0.1, 0.2, 0.3]), { top_k: 5, min_score: 0, key: "k" });
-    assert.deepEqual(hits[0].entry.artifacts, ["docs/spec.md"], "confidential artifact dropped, non-confidential kept");
+    assert.deepEqual(hits[0].entry.artifacts, ["docs/internal/roadmap.md", "docs/spec.md"], "все артефакты сохранены (без дропа)");
     await hooks.dispose?.();
     await storage.dispose?.();
   } finally {
@@ -4669,7 +4557,7 @@ function mkReindexGit(overrides = {}) {
   };
 }
 
-// Client с summarize-путем (create/prompt/delete) + messages для превью.
+// Client с summarize-путем (V2: create/switchModel/prompt/remove) + context для превью.
 // Топ-левел overrides (config и т.п.) — как у mkClient; session-оверрайды
 // вкладываются под `session`.
 function mkSummarizeClient(overrides = {}) {
@@ -4677,11 +4565,12 @@ function mkSummarizeClient(overrides = {}) {
   return {
     session: {
       get: async () => ({ data: { id: "s", parentID: null } }),
-      messages: async () => ({ data: [] }),
+      context: async () => ({ data: [] }),
       list: async () => ({ data: [] }),
       create: async () => ({ data: { id: "sm-reindex" } }),
+      switchModel: async () => {},
       prompt: async () => ({ data: { info: {}, parts: [{ type: "text", text: '{"title":"","summary":"sum","decisions":["d1"]}' }] } }),
-      delete: async () => ({ data: {} }),
+      remove: async () => ({ data: {} }),
       ...sessionOverrides,
     },
     ...rest,
@@ -4730,9 +4619,9 @@ test("memory_reindex list: секция A — кандидаты с пустым
     let createCalls = 0;
     const client = mkClient({
       session: {
-        messages: async ({ path }) => {
-          if (path.id === "s2") throw new Error("gone");
-          return { data: [{ parts: [{ type: "tool", tool: "write", state: { status: "completed", input: { filePath: "docs/superpowers/specs/x-design.md" } } }] }] };
+        context: async ({ sessionID }) => {
+          if (sessionID === "s2") throw new Error("gone");
+          return { data: [{ parts: [{ type: "tool", tool: "write", state: { status: "completed", input: { path: "docs/superpowers/specs/x-design.md" } } }] }] };
         },
         create: async () => { createCalls++; return { data: { id: "sm" } }; },
       },
@@ -4828,7 +4717,7 @@ test("memory_reindex run sessions: явные session_ids (снапшот не �
     storage.upsert = async (entries) => { upserts.push(entries); };
     const client = mkClient({
       session: {
-        messages: async () => ({ data: [{ parts: [{ type: "tool", tool: "write", state: { status: "completed", input: { filePath: "docs/superpowers/specs/x-design.md" } } }] }] }),
+        context: async () => ({ data: [{ parts: [{ type: "tool", tool: "write", state: { status: "completed", input: { path: "docs/superpowers/specs/x-design.md" } } }] }] }),
       },
     });
     const hooks = await registerMemoryHooks({
@@ -4892,7 +4781,7 @@ test("memory_reindex run sessions: cap max — первые max, пометка 
     storage.upsert = async (entries) => { upserts.push(entries); };
     const client = mkClient({
       session: {
-        messages: async () => ({ data: [{ parts: [{ type: "tool", tool: "write", state: { status: "completed", input: { filePath: "docs/superpowers/specs/x-design.md" } } }] }] }),
+        context: async () => ({ data: [{ parts: [{ type: "tool", tool: "write", state: { status: "completed", input: { path: "docs/superpowers/specs/x-design.md" } } }] }] }),
       },
     });
     const hooks = await registerMemoryHooks({
@@ -4994,11 +4883,12 @@ test("memory_reindex run git: hard guard при нерезолве — 0 summari
     const baseClient = (configGet) => ({
       session: {
         get: async () => ({ data: { id: "s", parentID: null } }),
-        messages: async () => ({ data: [] }),
+        context: async () => ({ data: [] }),
         list: async () => ({ data: [] }),
         create: async () => ({ data: { id: "svc" } }),
+        switchModel: async () => {},
         prompt: async (args) => { prompts.push(args); return { data: { parts: [{ type: "text", text: '{"title":"t","summary":"s","decisions":[]}' }] } }; },
-        delete: async () => {},
+        remove: async () => {},
       },
       config: { get: configGet },
     });
@@ -5067,8 +4957,8 @@ test("memory_reindex run git: summarize-fail на одной фиче → skip �
     storage.upsert = async (entries) => { upserts.push(entries); };
     const client = mkSummarizeClient({
       session: {
-        prompt: async ({ body }) => {
-          if (body.parts[0].text.includes("FAIL")) throw new Error("llm down");
+        prompt: async ({ text }) => {
+          if (text.includes("FAIL")) throw new Error("llm down");
           return { data: { info: {}, parts: [{ type: "text", text: '{"title":"","summary":"sum","decisions":["d1"]}' }] } };
         },
       },
@@ -5313,18 +5203,19 @@ function noticeFixture(overrides = {}) {
   };
   const client = {
     session: {
-      get: async ({ path }) => ({ data: { id: path.id, parentID: null, title: "st", time: { created: 1, updated: 100 } } }),
+      get: async ({ sessionID }) => ({ data: { id: sessionID, parentID: null, title: "st", time: { created: 1, updated: 100 } } }),
       // Свежие таймстемпы на каждое чтение: после успешного re-index
       // (setSummarized) повторный run проходит min_new_messages (T5-8
       // re-entry) — статичные 1970-е даты дали бы no_new_messages.
-      messages: async () => ({ data: [
+      context: async () => ({ data: [
         { info: { role: "user", time: { created: Date.now() } }, parts: [{ type: "text", text: "hello" }] },
         { info: { role: "assistant", providerID: "prov", modelID: "mod", time: { created: Date.now() } }, parts: [{ type: "text", text: "world" }] },
       ] }),
       list: async () => ({ data: [] }),
       create: async () => ({ data: { id: "summ-mock" } }),
+      switchModel: async () => {},
       prompt: async () => ({ data: { parts: [{ type: "text", text: '{"title":"t","summary":"s","decisions":[]}' }] } }),
-      delete: async () => ({ data: {} }),
+      remove: async () => ({ data: {} }),
     },
   };
   const events = [];
@@ -5383,7 +5274,7 @@ test("#77 T5-2: guard — task-сессия (parentID) без инъекции (
   process.env.XDG_DATA_HOME = f.dir;
   try {
     const hooks = await f.init();
-    f.client.session.get = async ({ path }) => ({ data: { id: path.id, parentID: "p1", title: "st" } });
+    f.client.session.get = async ({ sessionID }) => ({ data: { id: sessionID, parentID: "p1", title: "st" } });
     const out = { system: [] };
     await hooks["experimental.chat.system.transform"]({ sessionID: "s1" }, out);
     assert.equal(out.system.filter((s) => s.includes("НЕ сохранены")).length, 0, "task-сессия — без notice");
@@ -5604,15 +5495,16 @@ function reindexFixture(overrides = {}) {
   };
   const client = {
     session: {
-      get: async ({ path }) => (overrides.missing ? null : { data: { id: path.id, parentID: overrides.parentIDs?.has(path.id) ? "p1" : null, title: "st", time: { created: 1, updated: 100 } } }),
-      messages: async () => ({ data: overrides.emptyMessages ? [] : [
+      get: async ({ sessionID }) => (overrides.missing ? null : { data: { id: sessionID, parentID: overrides.parentIDs?.has(sessionID) ? "p1" : null, title: "st", time: { created: 1, updated: 100 } } }),
+      context: async () => ({ data: overrides.emptyMessages ? [] : [
         { info: { role: "user", time: { created: Date.now() } }, parts: [{ type: "text", text: "hello world" }] },
         { info: { role: "assistant", providerID: "prov", modelID: "mod", time: { created: Date.now() } }, parts: [{ type: "text", text: "world" }] },
       ] }),
       list: async () => ({ data: [] }),
       create: async () => ({ data: { id: "summ-t6" } }),
+      switchModel: async () => {},
       prompt: async () => ({ data: { parts: [{ type: "text", text: JSON.stringify({ title: "t", summary: "s", decisions: [] }) }] } }),
-      delete: async () => ({ data: {} }),
+      remove: async () => ({ data: {} }),
     },
   };
   const statePath = join(dir, "maestro", "memory", "state.json");
@@ -5879,7 +5771,7 @@ test("#77 E2E: full re-index restores lost sqlite record and resets permanent-sk
     const client = {
       session: {
         get: async () => ({ data: { id: "s1", parentID: null, title: "st", time: { created: 1, updated: 100 } } }),
-        messages: async () => ({ data: [{ info: { role: "user", time: { created: 50 } }, parts: [{ type: "text", text: "hello e2e" }] }] }),
+        context: async () => ({ data: [{ info: { role: "user", time: { created: 50 } }, parts: [{ type: "text", text: "hello e2e" }] }] }),
         list: async () => ({ data: [] }),
       },
     };
@@ -5897,7 +5789,7 @@ test("#77 E2E: full re-index restores lost sqlite record and resets permanent-sk
     assert.equal(key, "khash", "namespace:null → ключ = projectHash");
     const mkIdx = () => new Indexer({
       client, config: cfg, embeddings, storage, state, summarize,
-      projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+      projectKey: { hash: "khash", source: "remote" },
       git: { resolveBranch: async () => "main", resolveHead: async () => head },
       logInfo: () => {}, logDebug: () => {}, logWarn: () => {}, logError: () => {},
     });

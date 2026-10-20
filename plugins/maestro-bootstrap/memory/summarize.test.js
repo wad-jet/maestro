@@ -22,25 +22,29 @@ test("parseSummary rejects non-string decisions", () => {
 test("parseSummary rejects invalid", () => {
   assert.throws(() => parseSummary("not json"), /invalid/i);
 });
-test("summarizeSession creates+prompts+deletes, session lifecycle in SESSIONS", async () => {
+test("summarizeSession creates+prompts+removes, session lifecycle in SESSIONS", async () => {
   assert.ok(!SESSIONS.has("sm1"));
+  const removed = [];
   const client = {
     session: {
-      create: async () => ({ data: { id: "sm1" } }),
-      prompt: async ({ path, body }) => {
-        assert.equal(path.id, "sm1");
-        assert.ok(!("noReply" in body), "noReply must not be set");
-        assert.deepEqual(body.model, { providerID: "prov", modelID: "m1" });
-        assert.equal(body.parts[0].type, "text");
+      create: async ({ title }) => { assert.equal(title, "[maestro-memory] orig"); return { data: { id: "sm1" } }; },
+      switchModel: async ({ sessionID, model }) => {
+        assert.equal(sessionID, "sm1");
+        assert.deepEqual(model, { providerID: "prov", modelID: "m1" });
+      },
+      prompt: async ({ sessionID, text }) => {
+        assert.equal(sessionID, "sm1");
+        assert.ok(typeof text === "string" && text.length > 0);
         // I1: assert membership inside prompt (before finally runs)
         assert.ok(SESSIONS.has("sm1"));
         return { data: { info: {}, parts: [{ type: "text", text: '{"title":"t","summary":"s","decisions":["d"]}' }] } };
       },
-      delete: async () => ({ data: {} }),
+      remove: async ({ sessionID }) => { removed.push(sessionID); return { data: {} }; },
     },
   };
   const out = await summarizeSession({ client, sessionID: "orig", transcript: "x", model: "prov/m1", summarizerModel: null });
   assert.equal(out.title, "t");
+  assert.deepEqual(removed, ["sm1"], "session.remove вызван для служебной сессии");
   // I1: assert absence after call completes (finally removed it)
   assert.ok(!SESSIONS.has("sm1"));
 });
@@ -48,8 +52,9 @@ test("summarizerModel overrides model", async () => {
   const client = {
     session: {
       create: async () => ({ data: { id: "sm2" } }),
-      prompt: async ({ body }) => { assert.deepEqual(body.model, { providerID: "other", modelID: "m2" }); return { data: { info: {}, parts: [{ type: "text", text: '{"title":"t","summary":"s","decisions":[]}' }] } }; },
-      delete: async () => ({ data: {} }),
+      switchModel: async ({ model }) => { assert.deepEqual(model, { providerID: "other", modelID: "m2" }); },
+      prompt: async () => ({ data: { info: {}, parts: [{ type: "text", text: '{"title":"t","summary":"s","decisions":[]}' }] } }),
+      remove: async () => ({ data: {} }),
     },
   };
   const out = await summarizeSession({ client, sessionID: "orig", transcript: "x", model: "prov/m1", summarizerModel: "other/m2" });
@@ -61,7 +66,7 @@ test("summarizeSession throws when create returns no id", async () => {
     session: {
       create: async () => ({}),
       prompt: async () => {},
-      delete: async () => {},
+      remove: async () => {},
     },
   };
   await assert.rejects(
@@ -74,7 +79,7 @@ test("summarizeSession throws when neither model parses", async () => {
     session: {
       create: async () => ({ data: { id: "sm3" } }),
       prompt: async () => {},
-      delete: async () => {},
+      remove: async () => {},
     },
   };
   await assert.rejects(
@@ -86,8 +91,9 @@ test("summarizeSession throws on empty text response", async () => {
   const client = {
     session: {
       create: async () => ({ data: { id: "sm4" } }),
+      switchModel: async () => {},
       prompt: async () => ({ data: { info: {}, parts: [] } }),
-      delete: async () => ({ data: {} }),
+      remove: async () => ({ data: {} }),
     },
   };
   await assert.rejects(
@@ -116,11 +122,13 @@ function capturePromptClient() {
   const client = {
     session: {
       create: async () => ({ data: { id: "sm-cap" } }),
-      prompt: async ({ body }) => {
-        captured = body.parts[0].text;
+      switchModel: async () => {},
+      prompt: async ({ sessionID, text }) => {
+        assert.equal(sessionID, "sm-cap");
+        captured = text;
         return { data: { info: {}, parts: [{ type: "text", text: '{"title":"t","summary":"s","decisions":[]}' }] } };
       },
-      delete: async () => ({ data: {} }),
+      remove: async () => ({ data: {} }),
     },
   };
   return { client, captured: () => captured };

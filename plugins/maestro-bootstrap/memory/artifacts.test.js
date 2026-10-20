@@ -15,7 +15,7 @@ function makeRoot(t) {
 
 function writeMsg(filePath, { tool = "write", status = "completed" } = {}) {
   return {
-    parts: [{ type: "tool", tool, state: { status, input: { filePath } } }],
+    parts: [{ type: "tool", tool, state: { status, input: { path: filePath } } }],
   };
 }
 
@@ -24,17 +24,13 @@ function touch(filePath) {
   fs.writeFileSync(filePath, "x");
 }
 
-// Непустой confidential-набор для не-confidential кейсов (F1: fail-closed —
-// пустой/отсутствующий набор запрещён; этот набор не матчит тестируемые пути).
-const NO_CONF = ["secrets/**"];
-
 // ── extraction: write/edit completed ───────────────────────────────────────
 
 test("extracts completed write path as repo-relative", (t) => {
   const root = makeRoot(t);
   const file = path.join(root, "docs", "spec.md");
   touch(file);
-  const out = extractArtifacts([writeMsg(file)], { root, globs: ["docs/**"], confidentialPatterns: NO_CONF });
+  const out = extractArtifacts([writeMsg(file)], { root, globs: ["docs/**"] });
   assert.deepEqual(out, ["docs/spec.md"]);
 });
 
@@ -42,7 +38,7 @@ test("extracts completed edit path", (t) => {
   const root = makeRoot(t);
   const file = path.join(root, "docs", "spec.md");
   touch(file);
-  const out = extractArtifacts([writeMsg(file, { tool: "edit" })], { root, globs: ["docs/**"], confidentialPatterns: NO_CONF });
+  const out = extractArtifacts([writeMsg(file, { tool: "edit" })], { root, globs: ["docs/**"] });
   assert.deepEqual(out, ["docs/spec.md"]);
 });
 
@@ -50,7 +46,7 @@ test("relative input path resolves against root", (t) => {
   const root = makeRoot(t);
   const file = path.join(root, "docs", "spec.md");
   touch(file);
-  const out = extractArtifacts([writeMsg("docs/spec.md")], { root, globs: ["docs/**"], confidentialPatterns: NO_CONF });
+  const out = extractArtifacts([writeMsg("docs/spec.md")], { root, globs: ["docs/**"] });
   assert.deepEqual(out, ["docs/spec.md"]);
 });
 
@@ -60,7 +56,7 @@ test("write with status error → no artifact (M2)", (t) => {
   const root = makeRoot(t);
   const file = path.join(root, "docs", "spec.md");
   touch(file);
-  const out = extractArtifacts([writeMsg(file, { status: "error" })], { root, globs: ["docs/**"], confidentialPatterns: NO_CONF });
+  const out = extractArtifacts([writeMsg(file, { status: "error" })], { root, globs: ["docs/**"] });
   assert.deepEqual(out, []);
 });
 
@@ -68,7 +64,7 @@ test("write with status pending → no artifact (M2)", (t) => {
   const root = makeRoot(t);
   const file = path.join(root, "docs", "spec.md");
   touch(file);
-  const out = extractArtifacts([writeMsg(file, { status: "pending" })], { root, globs: ["docs/**"], confidentialPatterns: NO_CONF });
+  const out = extractArtifacts([writeMsg(file, { status: "pending" })], { root, globs: ["docs/**"] });
   assert.deepEqual(out, []);
 });
 
@@ -78,7 +74,7 @@ test("read part → no artifact (D3)", (t) => {
   const root = makeRoot(t);
   const file = path.join(root, "docs", "spec.md");
   touch(file);
-  const out = extractArtifacts([writeMsg(file, { tool: "read" })], { root, globs: ["docs/**"], confidentialPatterns: NO_CONF });
+  const out = extractArtifacts([writeMsg(file, { tool: "read" })], { root, globs: ["docs/**"] });
   assert.deepEqual(out, []);
 });
 
@@ -91,7 +87,7 @@ test("realpath: symlinked root still yields repo-relative paths", (t) => {
   t.after(() => fs.rmSync(link, { force: true }));
   const file = path.join(link, "docs", "spec.md");
   touch(file);
-  const out = extractArtifacts([writeMsg(file)], { root: link, globs: ["docs/**"], confidentialPatterns: NO_CONF });
+  const out = extractArtifacts([writeMsg(file)], { root: link, globs: ["docs/**"] });
   assert.deepEqual(out, ["docs/spec.md"]);
 });
 
@@ -102,7 +98,7 @@ test("ENOENT path skipped, others extracted (I1)", (t) => {
   const a = path.join(root, "docs", "a.md");
   const b = path.join(root, "docs", "b.md");
   touch(a); // b intentionally missing
-  const out = extractArtifacts([writeMsg(a), writeMsg(b)], { root, globs: ["docs/**"], confidentialPatterns: NO_CONF });
+  const out = extractArtifacts([writeMsg(a), writeMsg(b)], { root, globs: ["docs/**"] });
   assert.deepEqual(out, ["docs/a.md"]);
 });
 
@@ -114,7 +110,7 @@ test("path outside root skipped", (t) => {
   t.after(() => fs.rmSync(outside, { recursive: true, force: true }));
   const file = path.join(outside, "x.md");
   touch(file);
-  const out = extractArtifacts([writeMsg(file)], { root, globs: ["**"], confidentialPatterns: NO_CONF });
+  const out = extractArtifacts([writeMsg(file)], { root, globs: ["**"] });
   assert.deepEqual(out, []);
 });
 
@@ -123,7 +119,7 @@ test("path with .. segment skipped", (t) => {
   const file = path.join(root, "docs", "a.md");
   touch(file);
   const sneaky = path.join(root, "docs", "sub") + path.sep + ".." + path.sep + "a.md";
-  const out = extractArtifacts([writeMsg(sneaky)], { root, globs: ["docs/**"], confidentialPatterns: NO_CONF });
+  const out = extractArtifacts([writeMsg(sneaky)], { root, globs: ["docs/**"] });
   assert.deepEqual(out, []);
 });
 
@@ -133,7 +129,7 @@ test("glob-miss skipped", (t) => {
   const root = makeRoot(t);
   const file = path.join(root, "src", "a.js");
   touch(file);
-  const out = extractArtifacts([writeMsg(file)], { root, globs: ["docs/**"], confidentialPatterns: NO_CONF });
+  const out = extractArtifacts([writeMsg(file)], { root, globs: ["docs/**"] });
   assert.deepEqual(out, []);
 });
 
@@ -141,54 +137,18 @@ test("case-insensitive glob match (confGlobMatch)", (t) => {
   const root = makeRoot(t);
   const file = path.join(root, "DOCS", "spec.md");
   touch(file);
-  const out = extractArtifacts([writeMsg(file)], { root, globs: ["docs/**"], confidentialPatterns: NO_CONF });
+  const out = extractArtifacts([writeMsg(file)], { root, globs: ["docs/**"] });
   assert.deepEqual(out, ["DOCS/spec.md"]);
 });
 
-// ── Z4: confidential ───────────────────────────────────────────────────────
+// ── F1/Z4 удалены: без confidential-набора извлечение работает ─────────────
 
-test("confidential path skipped even when artifact glob matches (Z4)", (t) => {
-  const root = makeRoot(t);
-  const file = path.join(root, "docs", "confidential", "x.md");
-  touch(file);
-  const out = extractArtifacts([writeMsg(file)], {
-    root,
-    globs: ["docs/**"],
-    confidentialPatterns: ["docs/confidential/**"],
-  });
-  assert.deepEqual(out, []);
-});
-
-test("default docs/confidential/** and built-in *.env patterns skip (I2)", (t) => {
-  const root = makeRoot(t);
-  const conf = path.join(root, "docs", "confidential", "x.md");
-  const env = path.join(root, ".env");
-  touch(conf);
-  touch(env);
-  const out = extractArtifacts([writeMsg(conf), writeMsg(env)], {
-    root,
-    globs: ["**"],
-    confidentialPatterns: ["docs/confidential/**", "*.env"],
-  });
-  assert.deepEqual(out, []);
-});
-
-// ── F1: fail-closed confidentialPatterns ───────────────────────────────────
-
-test("empty confidentialPatterns → [] (fail-closed, F1)", (t) => {
-  const root = makeRoot(t);
-  const file = path.join(root, "docs", "a.md");
-  touch(file);
-  const out = extractArtifacts([writeMsg(file)], { root, globs: ["docs/**"], confidentialPatterns: [] });
-  assert.deepEqual(out, []);
-});
-
-test("undefined confidentialPatterns → [] (fail-closed, F1)", (t) => {
+test("extract работает БЕЗ confidentialPatterns (F1 fail-closed удалён)", (t) => {
   const root = makeRoot(t);
   const file = path.join(root, "docs", "a.md");
   touch(file);
   const out = extractArtifacts([writeMsg(file)], { root, globs: ["docs/**"] });
-  assert.deepEqual(out, []);
+  assert.deepEqual(out, ["docs/a.md"], "артефакт извлекается без confidential-набора");
 });
 
 // ── CR-2: pathological paths ───────────────────────────────────────────────
@@ -198,7 +158,7 @@ test("relative path longer than 512 chars skipped (CR-2)", (t) => {
   const deep = path.join(root, ...Array(60).fill("dir-name"), "a.md");
   touch(deep);
   assert.ok(path.relative(root, deep).length > 512);
-  const out = extractArtifacts([writeMsg(deep)], { root, globs: ["**"], confidentialPatterns: NO_CONF });
+  const out = extractArtifacts([writeMsg(deep)], { root, globs: ["**"] });
   assert.deepEqual(out, []);
 });
 
@@ -206,7 +166,7 @@ test("path with control chars skipped (CR-2)", (t) => {
   const root = makeRoot(t);
   const file = path.join(root, "docs", "a\u0001b.md");
   touch(file);
-  const out = extractArtifacts([writeMsg(file)], { root, globs: ["docs/**"], confidentialPatterns: NO_CONF });
+  const out = extractArtifacts([writeMsg(file)], { root, globs: ["docs/**"] });
   assert.deepEqual(out, []);
 });
 
@@ -216,7 +176,7 @@ test("dedup first-seen", (t) => {
   const root = makeRoot(t);
   const file = path.join(root, "docs", "a.md");
   touch(file);
-  const out = extractArtifacts([writeMsg(file), writeMsg(file)], { root, globs: ["docs/**"], confidentialPatterns: NO_CONF });
+  const out = extractArtifacts([writeMsg(file), writeMsg(file)], { root, globs: ["docs/**"] });
   assert.deepEqual(out, ["docs/a.md"]);
 });
 
@@ -229,7 +189,6 @@ test("dedup is case-insensitive (F2): case variants of same file → 1 slot", (t
   const out = extractArtifacts([writeMsg(upper), writeMsg(lower)], {
     root,
     globs: ["docs/**"],
-    confidentialPatterns: NO_CONF,
   });
   assert.deepEqual(out, ["docs/A.md"]);
 });
@@ -242,7 +201,7 @@ test("cap 8 artifacts", (t) => {
     touch(file);
     msgs.push(writeMsg(file));
   }
-  const out = extractArtifacts(msgs, { root, globs: ["docs/**"], confidentialPatterns: NO_CONF });
+  const out = extractArtifacts(msgs, { root, globs: ["docs/**"] });
   assert.equal(out.length, 8);
   assert.deepEqual(out, Array.from({ length: 8 }, (_, i) => `docs/f${i}.md`));
 });
@@ -251,13 +210,13 @@ test("empty globs → []", (t) => {
   const root = makeRoot(t);
   const file = path.join(root, "docs", "a.md");
   touch(file);
-  const out = extractArtifacts([writeMsg(file)], { root, globs: [], confidentialPatterns: NO_CONF });
+  const out = extractArtifacts([writeMsg(file)], { root, globs: [] });
   assert.deepEqual(out, []);
 });
 
 test("unavailable root → [] without throw", (t) => {
   const root = path.join(os.tmpdir(), `no-such-root-${process.pid}-${Date.now()}`);
-  const out = extractArtifacts([writeMsg(path.join(root, "a.md"))], { root, globs: ["**"], confidentialPatterns: NO_CONF });
+  const out = extractArtifacts([writeMsg(path.join(root, "a.md"))], { root, globs: ["**"] });
   assert.deepEqual(out, []);
 });
 
@@ -269,7 +228,7 @@ test("messages without parts / state → [] without throw", (t) => {
   touch(file);
   const out = extractArtifacts(
     [{}, { parts: [] }, { parts: [{ type: "tool", tool: "write" }] }, writeMsg(file)],
-    { root, globs: ["docs/**"], confidentialPatterns: NO_CONF },
+    { root, globs: ["docs/**"] },
   );
   assert.deepEqual(out, ["docs/a.md"]);
 });

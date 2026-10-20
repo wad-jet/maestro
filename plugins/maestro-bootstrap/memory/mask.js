@@ -1,45 +1,36 @@
-import { sanitize, confGlobMatch } from "../core.js";
+import { sanitize } from "../core.js";
 
-function extractPathToken(line) {
-  const m = line.match(/^([^:\s]+)/);
-  return m ? m[1] : null;
+/**
+ * Маскирование текстов памяти: ТОЛЬКО generic sanitize (Ур.1:
+ * key=value, .env-ссылки, DB-URI, PEM, auth-заголовки, JWT, PII-поля).
+ *
+ * Business-confidential маскирование (line-level confidential-фильтр,
+ * placeholder "[confidential]") удалено (retire-confidential, spec §4.2,
+ * D3/M5/SEC-5): риск признан осознанным; memory не фильтрует содержимое
+ * по confidential.paths.
+ *
+ * @param {string} text  Исходный текст (транскрипт / запрос / spec).
+ * @returns {string}  Замаскированный текст; пустой/белый вход → "".
+ */
+export function maskTranscript(text) {
+  const t = String(text ?? "");
+  if (!t.trim()) return "";
+  return sanitize(t, {}).text;
 }
 
-function isConfidentialLine(line, patterns) {
-  const token = extractPathToken(line);
-  if (!token) return false;
-  return patterns.some((p) => confGlobMatch(p.toLowerCase(), token.toLowerCase()));
-}
-
-function maskLines(text, { confidentialPatterns = [] } = {}) {
-  return String(text)
-    .split("\n")
-    .map((l) => (isConfidentialLine(l, confidentialPatterns) ? "[confidential]" : l))
-    .join("\n");
-}
-
-export function maskTranscript(text, { confidentialPatterns = [] } = {}) {
-  const filtered = maskLines(text, { confidentialPatterns });
-  return filtered.trim() ? sanitize(filtered, {}).text : "";
-}
-
-export function maskEntry(entry, { confidentialPatterns = [], artifactConfidentialPatterns = null } = {}) {
+/**
+ * Маскирование текстовых полей записи (title/summary/decisions) через
+ * generic sanitize. Artifacts — pass-through как есть (паттерн-дропа нет).
+ *
+ * @param {object} entry  Запись памяти.
+ * @returns {object}  Копия записи с замаскированными текстовыми полями.
+ */
+export function maskEntry(entry) {
   const maskField = (s) => {
     if (typeof s !== "string") return s;
-    const filtered = maskLines(s, { confidentialPatterns });
-    return sanitize(filtered, {}).text;
+    return sanitize(s, {}).text;
   };
-  // Task 7 (v5.2, F2): artifacts фильтруются через confidential-паттерны тем же
-  // матчером (confGlobMatch) — матчащие элементы DROP (замаскированный путь
-  // бесполезен как указатель). Отдельный artifactConfidentialPatterns (resolved
-  // набор: paths + builtin) — маскирование текста остаётся на raw-паттернах (I2).
-  const artifactPatterns = artifactConfidentialPatterns ?? confidentialPatterns;
-  const lowerConf = artifactPatterns
-    .filter((p) => typeof p === "string" && p)
-    .map((p) => p.toLowerCase());
-  const artifacts = Array.isArray(entry.artifacts)
-    ? entry.artifacts.filter((p) => typeof p === "string" && !lowerConf.some((pat) => confGlobMatch(pat, p.toLowerCase())))
-    : (entry.artifacts ?? []);
+  const artifacts = Array.isArray(entry.artifacts) ? entry.artifacts : (entry.artifacts ?? []);
   return {
     ...entry,
     title: maskField(entry.title),

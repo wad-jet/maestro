@@ -3,8 +3,8 @@
  * Аварийный CLI memory backup/restore (spec §3): ручной запуск пользователем
  * вне opencode. Тонкая обёртка над backup.js.
  *
- * Резолвы (effectiveKey / storage-пути / confidential-наборы / modelId / dim)
- * зеркалят registerMemoryHooks (memory/index.js) — переиспользуются существующие
+ * Резолвы (effectiveKey / storage-пути / modelId / dim) зеркалят
+ * registerMemoryHooks (memory/index.js) — переиспользуются существующие
  * экспорты (config.js, project.js, core.js, storage.js, index.js/defaultDataDir);
  * логика не дублируется.
  *
@@ -31,7 +31,7 @@ import {
   sanitizeDirName,
 } from "./config.js";
 import { deriveProjectKey } from "./project.js";
-import { getGitConfig, loadConfidentialConfig, readPluginVersion, resolveConfigFile, resolveGlobalDir } from "../core.js";
+import { getGitConfig, readPluginVersion, resolveConfigFile, resolveGlobalDir } from "../core.js";
 // defaultDataDir — существующий экспорт memory/index.js (data-dir-резолв parity
 // с registerMemoryHooks); топ-уровень модуля без side-effects (dynamic import
 // @opencode-ai/plugin обёрнут в try/catch с shim).
@@ -329,15 +329,6 @@ export async function main() {
     return 1;
   }
 
-  // maskPatterns — ТО ЖЕ confidential-наборы, что в registerMemoryHooks:
-  // confidential = raw confidential.paths; artifacts = conf.paths + conf.builtin.
-  const confidentialPaths = maestroJson?.confidential?.paths ?? [];
-  const conf = loadConfidentialConfig(maestroJson);
-  const maskPatterns = {
-    confidential: confidentialPaths,
-    artifacts: [...conf.paths, ...conf.builtin],
-  };
-
   if (action === "backup") {
     const r = await runBackup({
       storage,
@@ -347,7 +338,6 @@ export async function main() {
       modelId: storage.modelId,
       dim: storage.dim,
       pluginVersion: readPluginVersion(),
-      maskPatterns,
       log,
       gitRoot: root,
     });
@@ -377,7 +367,6 @@ export async function main() {
     channel: "cli",
     isTty: Boolean(process.stdin.isTTY),
     confirmNamespace,
-    maskPatterns,
     pluginVersion: readPluginVersion(),
     log,
     gitRoot: root,

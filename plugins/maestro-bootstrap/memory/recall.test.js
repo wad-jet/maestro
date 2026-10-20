@@ -142,43 +142,34 @@ test("recall auto-recall: branch scope without git → debug log (not silent) (M
   assert.ok(block.includes("t"), "flat search still runs");
 });
 
-// ── Task 6 (external embedder): маскирование запроса перед embed ───────
+// ── Запрос маскируется только generic sanitize (confidential line-маски нет) ──
 
-test("recall masks confidential query before embed", async () => {
+test("recall: confidentialPatterns в конструкторе игнорируется — строка с confidential-путём не маскируется", async () => {
   let embedded = null;
-  const embedder = { embed: async (t) => { embedded = t; return new Float32Array([0.1, 0.2, 0.3]); }, dim: 3, modelId: "m" };
+  let embeds = 0;
+  const embedder = { embed: async (t) => { embeds++; embedded = t; return new Float32Array([0.1, 0.2, 0.3]); }, dim: 3, modelId: "m" };
   const storage = { search: async () => [] };
   const r = new Recall({
     embeddings: embedder, storage, topK: 3, minScore: 0.35, key: "p",
     getUserMessageCount: async () => 1, confidentialPatterns: ["docs/confidential/**"],
   });
-  await r.onChatMessage({ sessionID: "s1", text: "docs/confidential/roadmap.md какие сроки?\nкакие сроки по фиче?" });
-  assert.ok(!embedded.includes("roadmap"));
+  await r.onChatMessage({ sessionID: "s1", text: "docs/confidential/a.md что там?" });
+  assert.equal(embeds, 1, "embed выполняется (short-circuit на [confidential] отсутствует)");
+  assert.ok(embedded.includes("docs/confidential/a.md"), "строка с confidential-путём не маскируется");
+  assert.ok(!embedded.includes("[confidential]"), "плейсхолдер [confidential] не используется");
 });
 
-test("recall leaves non-confidential query unmasked", async () => {
+test("recall: запрос с secret key=value маскируется generic sanitize", async () => {
   let embedded = null;
   const embedder = { embed: async (t) => { embedded = t; return new Float32Array([0.1, 0.2, 0.3]); }, dim: 3, modelId: "m" };
   const storage = { search: async () => [] };
   const r = new Recall({
     embeddings: embedder, storage, topK: 3, minScore: 0.35, key: "p",
-    getUserMessageCount: async () => 1, confidentialPatterns: ["docs/confidential/**"],
+    getUserMessageCount: async () => 1,
   });
-  await r.onChatMessage({ sessionID: "s1", text: "какие сроки по roadmap?" });
-  assert.ok(embedded.includes("roadmap"));
-});
-
-test("fully masked query → no embed, no search (short-circuit)", async () => {
-  let embeds = 0; let searches = 0;
-  const embedder = { embed: async (t) => { embeds++; return new Float32Array([0.1, 0.2, 0.3]); }, dim: 3, modelId: "m" };
-  const storage = { search: async () => { searches++; return []; } };
-  const r = new Recall({
-    embeddings: embedder, storage, topK: 3, minScore: 0.35, key: "p",
-    getUserMessageCount: async () => 1, confidentialPatterns: ["docs/confidential/**"],
-  });
-  await r.onChatMessage({ sessionID: "s1", text: "docs/confidential/a.md" });
-  assert.equal(embeds, 0);
-  assert.equal(searches, 0);
+  await r.onChatMessage({ sessionID: "s1", text: "какой хост у POSTGRES_PASSWORD=secret123" });
+  assert.ok(embedded.includes("POSTGRES_PASSWORD=<redacted>"), "generic sanitize: key=value замаскирован");
+  assert.ok(!embedded.includes("secret123"), "secret-value не ушёл в embed");
 });
 
 test("recall auto-recall: mainline unresolved → flat (no membership filter) (I-2)", async () => {
@@ -318,7 +309,7 @@ test("recall hybrid: passes masked query as FTS leg (query capture)", async () =
   assert.equal(seen[0].query, "hello feature", "FTS-нога получает masked query");
 });
 
-test("recall hybrid: placeholder lines stripped from FTS query; embed keeps full masked (I1)", async () => {
+test("recall hybrid: FTS-нога получает запрос без <redacted>-плейсхолдеров; embed — полный masked (I1)", async () => {
   const embedCalls = [];
   const embedder = { embed: async (t) => { embedCalls.push(t); return new Float32Array([0.1, 0.2, 0.3]); }, dim: 3, modelId: "m" };
   const seen = [];
@@ -326,13 +317,14 @@ test("recall hybrid: placeholder lines stripped from FTS query; embed keeps full
   const r = new Recall({
     embeddings: embedder, storage, topK: 3, minScore: 0.35, key: "project-key",
     getUserMessageCount: async () => 1, branchContext: false,
-    confidentialPatterns: ["docs/confidential/**"],
   });
-  await r.onChatMessage({ sessionID: "s1", text: "docs/confidential/roadmap.md\nwhat is the date" });
+  await r.onChatMessage({ sessionID: "s1", text: "какой хост у POSTGRES_PASSWORD=secret123\nwhat is the date" });
   assert.equal(embedCalls.length, 1);
-  assert.ok(!embedCalls[0].includes("docs/confidential/roadmap.md"), "embed: raw-путь замаскирован");
-  assert.ok(embedCalls[0].includes("[confidential]"), "embed: полный masked (плейсхолдер сохранён)");
-  assert.equal(seen[0].query, "what is the date", "FTS-нога: плейсхолдер-строки вырезаны");
+  assert.ok(embedCalls[0].includes("POSTGRES_PASSWORD=<redacted>"), "embed: полный masked (инлайн-плейсхолдер сохранён)");
+  assert.ok(embedCalls[0].includes("what is the date"), "embed: строки без секретов сохранены");
+  assert.ok(seen[0].query.includes("what is the date"), "FTS-нога: обычный текст сохранён");
+  assert.ok(!seen[0].query.includes("<redacted>"), "FTS-нога: <redacted>-токен вырезан");
+  assert.ok(seen[0].query.includes("POSTGRES_PASSWORD"), "ключ остаётся в FTS-тексте");
 });
 
 test("recall hybrid: inline <redacted> placeholder stripped from FTS query (final-review follow-up)", async () => {
@@ -352,19 +344,16 @@ test("recall hybrid: inline <redacted> placeholder stripped from FTS query (fina
   assert.ok(seen[0].query.includes("POSTGRES_PASSWORD"), "ключ остаётся в FTS-тексте");
 });
 
-test("recall hybrid: all-masked multi-line query → vector-only (ftsQuery empty)", async () => {
-  const embedCalls = [];
-  const embedder = { embed: async (t) => { embedCalls.push(t); return new Float32Array([0.1, 0.2, 0.3]); }, dim: 3, modelId: "m" };
+test("recall hybrid: multi-line query — FTS-нога получает полный текст (без line-плейсхолдеров)", async () => {
   const seen = [];
   const storage = { search: async (emb, o) => { seen.push(o); return []; } };
   const r = new Recall({
-    embeddings: embedder, storage, topK: 3, minScore: 0.35, key: "project-key",
+    embeddings: mkDeps().embedder, storage, topK: 3, minScore: 0.35, key: "project-key",
     getUserMessageCount: async () => 1, branchContext: false,
-    confidentialPatterns: ["docs/confidential/**"],
   });
   await r.onChatMessage({ sessionID: "s1", text: "docs/confidential/a.md\ndocs/confidential/b.md" });
-  assert.equal(seen.length, 1, "поиск выполняется (векторный fallback)");
-  assert.equal(seen[0].query, "", "FTS-текст пуст → FTS-нога не выполняется");
+  assert.equal(seen.length, 1, "поиск выполняется");
+  assert.equal(seen[0].query, "docs/confidential/a.md\ndocs/confidential/b.md", "FTS-текст = полный запрос (line-маскирования нет)");
 });
 
 test("recall hybrid: branch scope × FTS — out-of-context FTS-only hit dropped, merged kept (spec §4)", async () => {

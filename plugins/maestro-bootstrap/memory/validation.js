@@ -1,5 +1,3 @@
-import { confGlobMatch } from "../core.js";
-
 /**
  * Поля, обязательные для импорта (отражает `memory` table schema v3).
  * git-метаданные branch/head/merged — опциональны при импорте.
@@ -18,19 +16,16 @@ export const IMPORT_REQUIRED = [
  * @param {{ modelId: string, dim: number }} storage  Storage model identity
  *   (set in constructors on all backends; what upsert enforces).
  * @param {string} effectiveKey  Active project key (I-4 fail-closed on mismatch).
- * @param {string[]} [artifactConfidentialPatterns=[]]  Resolved confidential set for
- *   artifacts (paths + builtin). CR-3: matching artifact elements are DROPPED
- *   (запись импортируется, элемент отбрасывается).
  * @returns {string|null}
  */
-export function validateImportEntry(e, storage, effectiveKey, artifactConfidentialPatterns = []) {
+export function validateImportEntry(e, storage, effectiveKey) {
   if (!e || typeof e !== "object") return "не объект";
   for (const f of IMPORT_REQUIRED) {
     if (e[f] === undefined || e[f] === null) return `отсутствует поле ${f}`;
   }
   if (!Array.isArray(e.decisions)) return "decisions не массив";
   if (!Array.isArray(e.embedding)) return "embedding не массив";
-  // Task 7 (v5.2): опциональное `artifacts` — массив repo-relative строк.
+  // v5.2: опциональное `artifacts` — массив repo-relative строк.
   // Отсутствует → [] (старые записи). Не-массив/нарушения → reject записи.
   if (e.artifacts === undefined) {
     e.artifacts = [];
@@ -48,13 +43,6 @@ export function validateImportEntry(e, storage, effectiveKey, artifactConfidenti
       if (a.split(/[\\/]+/).includes("..")) return "artifacts: ..-сегмент";
       if (a.includes("\\")) return "artifacts: backslash";
       if (/^[a-zA-Z]:/.test(a)) return "artifacts: drive-letter";
-    }
-    // CR-3: после валидации — drop элементов, матчащих resolved confidential-набор.
-    const lowerConf = artifactConfidentialPatterns
-      .filter((p) => typeof p === "string" && p)
-      .map((p) => p.toLowerCase());
-    if (lowerConf.length) {
-      e.artifacts = e.artifacts.filter((a) => !lowerConf.some((pat) => confGlobMatch(pat, a.toLowerCase())));
     }
   }
   // M-10: numeric time/version fields + finite embedding values.

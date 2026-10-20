@@ -40,11 +40,10 @@ const MAX_ARTIFACTS = 8;
  * Инварианты: 0 LLM (RI-5); меняет только artifacts + version (RI-3); не пишет
  * в state (RI-4 — state не входит в deps); no-op guard — case-insensitive
  * set-равенство union и existing → без upsert (RI-7); maskEntry перед upsert
- * (G2-parity: artifacts — resolved-набор, текст — raw-набор).
+ * (generic sanitize текстовых полей).
  *
  * @param {{ client: object, storage: object, root: string, key: string,
- *   artifactGlobs: string[], artifactConfidentialPatterns: string[],
- *   confidentialPatterns: string[], embedModelId: string }} deps
+ *   artifactGlobs: string[], embedModelId: string }} deps
  * @param {string} sessionID
  * @returns {Promise<{ status: string, artifacts: string[] }>}
  *   status: updated | no_change | skip_no_record | skip_model_mismatch |
@@ -52,8 +51,7 @@ const MAX_ARTIFACTS = 8;
  */
 export async function reindexSessionArtifacts(deps, sessionID) {
   const {
-    client, storage, root, key, artifactGlobs,
-    artifactConfidentialPatterns, confidentialPatterns, embedModelId,
+    client, storage, root, key, artifactGlobs, embedModelId,
   } = deps;
 
   // 1. Служебные сессии (саммаризатор) — вне индексации.
@@ -88,11 +86,10 @@ export async function reindexSessionArtifacts(deps, sessionID) {
     return { status: "skip_messages_unavailable", artifacts: existing.artifacts ?? [] };
   }
 
-  // 6. Извлечение артефактов (resolved-набор, как в indexer).
+  // 6. Извлечение артефактов (globs-allowlist, как в indexer).
   const extracted = extractArtifacts(messages, {
     root,
     globs: artifactGlobs,
-    confidentialPatterns: artifactConfidentialPatterns,
   });
 
   // 7. Union D6: extracted-first, dedup case-insensitive, cap 8.
@@ -106,21 +103,10 @@ export async function reindexSessionArtifacts(deps, sessionID) {
   }
   const artifacts = union.slice(0, MAX_ARTIFACTS);
 
-  // 8. No-op guard (RI-7): case-insensitive set-равенство **post-mask union**
-  // (union, отфильтрованной resolved-набором — тем же фильтром, что maskEntry
-  // применяет к artifacts) и сохранённых existing.artifacts → без upsert.
-  // Guard по pre-mask union запрещён (spec §4.2.1 п.8): при no-delta (extracted
-  // пусто) и stale-пути в записи, матчащем ужесточенный resolved-набор,
-  // pre-mask union == existing → no_change, и stale-путь никогда не чистится.
-  const artifactPatterns = artifactConfidentialPatterns ?? confidentialPatterns;
-  const lowerConf = artifactPatterns
-    .filter((p) => typeof p === "string" && p)
-    .map((p) => p.toLowerCase());
-  const maskedUnion = artifacts.filter(
-    (p) => typeof p === "string" && !lowerConf.some((pat) => confGlobMatch(pat, p.toLowerCase()))
-  );
+  // 8. No-op guard (RI-7): case-insensitive set-равенство union и
+  // сохранённых existing.artifacts → без upsert.
   const existingLower = new Set((existing.artifacts ?? []).map((p) => String(p).toLowerCase()));
-  if (maskedUnion.length === existingLower.size && maskedUnion.every((p) => existingLower.has(String(p).toLowerCase()))) {
+  if (artifacts.length === existingLower.size && artifacts.every((p) => existingLower.has(String(p).toLowerCase()))) {
     return { status: "no_change", artifacts };
   }
 
@@ -131,12 +117,8 @@ export async function reindexSessionArtifacts(deps, sessionID) {
     version: (existing.version ?? 0) + 1,
     embedding: toF32(existing.embedding),
   };
-  // G2-parity: maskEntry перед upsert (artifacts — resolved-набор drop,
-  // текст — raw-набор) — чистит stale-пути из existing под текущим конфигом.
-  const masked = maskEntry(entry, {
-    confidentialPatterns,
-    artifactConfidentialPatterns,
-  });
+  // maskEntry перед upsert (generic sanitize текстовых полей).
+  const masked = maskEntry(entry);
   await storage.upsert([masked]);
   return { status: "updated", artifacts: masked.artifacts };
 }
@@ -224,8 +206,8 @@ function walkFiles(dir, root, out) {
 
 /**
  * Перепись git-истории (spec §4.2.2): кандидаты — файлы текущего дерева,
- * матчащие historyGlobs (confGlobMatch), кроме plan-путей и confidential
- * (resolved-набор, fail-closed). Для каждого — старейший добавивший коммит
+ * матчащие historyGlobs (confGlobMatch), кроме plan-путей. Для каждого —
+ * старейший добавивший коммит
  * (`git log --diff-filter=A --format="%H %ct" --reverse -- <path>`, первая
  * строка), coverage-guard по ⋃ record.artifacts (RI-2, C2: предковость по
  * head НЕ используется), план-ассоциация (конвенция → same-commit plan-подобные),
@@ -239,25 +221,19 @@ function walkFiles(dir, root, out) {
  *   filesOfCommit(root, sha) → repo-relative пути коммита (same-commit план).
  *
  * @param {{ root: string, historyGlobs: string[], git: object,
- *   mainline: string|null, records: Array<{artifacts: string[]}>,
- *   artifactConfidentialPatterns: string[] }} deps
+ *   mainline: string|null, records: Array<{artifacts: string[]}> }} deps
  * @returns {Promise<{ features: Array, considered: number,
  *   covered: { by_artifacts: number, not_in_git: number,
- *   skip_confidential: number, plan_excluded: number }, gitErrors: Array }>}
+ *   plan_excluded: number }, gitErrors: Array }>}
  */
-export async function scanHistory({ root, historyGlobs, git, mainline, records, artifactConfidentialPatterns }) {
+export async function scanHistory({ root, historyGlobs, git, mainline, records }) {
   const features = [];
-  const covered = { by_artifacts: 0, not_in_git: 0, skip_confidential: 0, plan_excluded: 0 };
+  const covered = { by_artifacts: 0, not_in_git: 0, plan_excluded: 0 };
   const gitErrors = [];
   let considered = 0;
 
   // Off-поведение: пустые globs → ничего не сканируем.
   if (!Array.isArray(historyGlobs) || historyGlobs.length === 0) {
-    return { features, considered, covered, gitErrors };
-  }
-  // F1 fail-closed (Z4): resolved-набор обязателен и непуст (по построению
-  // loadConfidentialConfig всегда непуст — builtin применяется всегда).
-  if (!Array.isArray(artifactConfidentialPatterns) || artifactConfidentialPatterns.length === 0) {
     return { features, considered, covered, gitErrors };
   }
   // Git-адаптер fail-closed (RI-9): отсутствующий метод log (неполный T4-адаптер)
@@ -272,10 +248,6 @@ export async function scanHistory({ root, historyGlobs, git, mainline, records, 
     .filter((g) => typeof g === "string" && g)
     .map((g) => g.toLowerCase());
   if (lowerGlobs.length === 0) return { features, considered, covered, gitErrors };
-  const lowerConf = artifactConfidentialPatterns
-    .filter((p) => typeof p === "string" && p)
-    .map((p) => p.toLowerCase());
-  if (lowerConf.length === 0) return { features, considered, covered, gitErrors };
 
   // Coverage-множество (RI-2): ⋃ record.artifacts, lowercase.
   const coveredArtifacts = new Set();
@@ -293,8 +265,6 @@ export async function scanHistory({ root, historyGlobs, git, mainline, records, 
 
     // 1. Plan-исключение (план — спутник спеки, не фича).
     if (isPlanPath(rel)) { covered.plan_excluded++; continue; }
-    // 1. Confidential-исключение (fail-closed, resolved-набор).
-    if (lowerConf.some((p) => confGlobMatch(p, lowerRel))) { covered.skip_confidential++; continue; }
 
     // 2. Старейший добавивший коммит: первая строка `git log --diff-filter=A
     //    --format="%H %ct" --reverse -- <path>`.
@@ -380,16 +350,14 @@ export async function scanHistory({ root, historyGlobs, git, mainline, records, 
  * 2. Запись: author "git-backfill" (RI-6), version 1, prefixes = prefixesOf(key),
  *    head = commitSha, merged из feature, time из feature.
  * 3. artifacts: из feature.artifacts (scanHistory: [specPath, planPath?]) →
- *    existsSync (повторная проверка на момент run) + resolved confidential-фильтр
- *    (confGlobMatch, drop) + dedup lowercase + cap 8.
- * 4. Re-mask ДО записи (SECURITY.md §5a, G2): maskEntry — текст на raw-наборе,
- *    artifacts на resolved-наборе. LLM-вывод ВСЕГДА re-mask'ится.
+ *    existsSync (повторная проверка на момент run) + dedup lowercase + cap 8.
+ * 4. Re-mask ДО записи (SECURITY.md §5a, G2): maskEntry — generic sanitize
+ *    текстовых полей. LLM-вывод ВСЕГДА re-mask'ится.
  * 5. Embed только ПОСЛЕ маски (I1): embeddings(maskedTitle + "\n" + maskedSummary
  *    + "\n" + maskedDecisions.join("\n")); embeddings — embed-функция.
  *
  * @param {{ storage: object, root: string, key: string, projectHash: string,
- *   originRemote: string, embedModelId: string, embeddings: Function,
- *   confidentialPatterns: string[], artifactConfidentialPatterns: string[] }} deps
+ *   originRemote: string, embedModelId: string, embeddings: Function }} deps
  * @param {{ specPath: string, planPath: string|null, commitSha: string,
  *   branch: string, merged: number, title: string, timeFirst: number,
  *   timeLast: number, artifacts: string[] }} feature
@@ -398,19 +366,14 @@ export async function scanHistory({ root, historyGlobs, git, mainline, records, 
  */
 export async function synthesizeGitEntry(deps, feature, llm) {
   const {
-    storage, root, key, projectHash, originRemote, embedModelId,
-    embeddings, confidentialPatterns, artifactConfidentialPatterns,
+    storage, root, key, projectHash, originRemote, embedModelId, embeddings,
   } = deps;
 
   const session_id = gitFeatureSessionId(key, feature.commitSha, feature.specPath);
   const existing = await storage.get(session_id);
   if (existing) return { status: "already_indexed", session_id };
 
-  // 3. artifacts-фильтр: dedup lowercase → existsSync → resolved-матч → cap 8.
-  const artifactPatterns = artifactConfidentialPatterns ?? confidentialPatterns;
-  const lowerConf = (artifactPatterns ?? [])
-    .filter((p) => typeof p === "string" && p)
-    .map((p) => p.toLowerCase());
+  // 3. artifacts-фильтр: dedup lowercase → existsSync → cap 8.
   const source = Array.isArray(feature.artifacts) && feature.artifacts.length > 0
     ? feature.artifacts
     : [feature.specPath, feature.planPath].filter(Boolean);
@@ -424,7 +387,6 @@ export async function synthesizeGitEntry(deps, feature, llm) {
     if (seen.has(k)) continue;
     seen.add(k);
     if (!fs.existsSync(path.join(root, s))) continue;
-    if (lowerConf.some((pat) => confGlobMatch(pat, k))) continue;
     artifacts.push(s);
   }
 
@@ -451,8 +413,8 @@ export async function synthesizeGitEntry(deps, feature, llm) {
     prefixes: prefixesOf(key ?? ""),
   };
 
-  // 4. Re-mask ДО записи (G2-parity: текст — raw-набор, artifacts — resolved).
-  const masked = maskEntry(entry, { confidentialPatterns, artifactConfidentialPatterns });
+  // 4. Re-mask ДО записи (generic sanitize текстовых полей).
+  const masked = maskEntry(entry);
 
   // 5. Embed только ПОСЛЕ маски (I1).
   masked.embedding = await embeddings(

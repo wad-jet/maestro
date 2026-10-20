@@ -39,13 +39,11 @@ function _capTranscript(text, maxChars) {
 export class Indexer {
   constructor({
     client, config, embeddings, storage, state, summarize,
-    projectKey, key, originRemote = "", confidentialPatterns = [], log = console, author = null,
+    projectKey, key, originRemote = "", log = console, author = null,
     git = null, mainline = null, root = null, branchContextCap = 1000,
     // Task 3: artifact-links (spec §4.2) — извлечение путей записанных файлов.
     // artifactGlobs: default [] → off-поведение (без извлечения).
-    // artifactConfidentialPatterns: resolved-набор для artifact-фильтра (Z4);
-    // НЕ переиспользуем confidentialPatterns маскирования (I2) — отдельный набор.
-    artifactGlobs = [], artifactConfidentialPatterns = [],
+    artifactGlobs = [],
     // #77 (spec §4.2, M1): unsaved-реестр владет index.js; indexer получает
     // колбэки (default no-op — backward compat). setUnsaved — при hard-fail
     // (non-retryable), clearUnsaved — при успешном setSummarized.
@@ -63,7 +61,6 @@ export class Indexer {
     this.projectKey = projectKey;
     this.key = key;
     this.originRemote = originRemote;
-    this.confidentialPatterns = confidentialPatterns;
     this.log = log;
     this.logInfo = logInfo;
     this.logDebug = logDebug;
@@ -74,7 +71,6 @@ export class Indexer {
     this.mainline = mainline;
     this.root = root;
     this.artifactGlobs = artifactGlobs;
-    this.artifactConfidentialPatterns = artifactConfidentialPatterns;
     this.setUnsaved = setUnsaved;
     this.clearUnsaved = clearUnsaved;
     // Task 4: sticky branch/head per session (resolved once, reused on version++).
@@ -145,7 +141,7 @@ export class Indexer {
       try { await this.state.prune?.((this.config.backfill_window_days ?? 30) * 86400_000); } catch {}
       // V2: session.list не существует в SessionContext — backfill по списку не выполняется
       // (сохраняем fail-soft: onStartup завершается без ошибки, backfill-окно не обрабатывается)
-      this.log?.warn?.("memory:indexer:session_list_not_available", {});
+      this.logWarn?.("memory:indexer:session_list_not_available", {});
       return;
     } catch {
       // fail-soft: если prune упал, всё равно продолжаем
@@ -293,8 +289,8 @@ export class Indexer {
 
       if (!transcript.trim()) return { status: "no_new_messages" };
 
-      // Mask confidential content BEFORE summarize
-      const masked = maskTranscript(transcript, { confidentialPatterns: this.confidentialPatterns });
+      // Mask generic secrets (sanitize) BEFORE summarize
+      const masked = maskTranscript(transcript);
 
       const key = resolveEffectiveKey({ projectHash: this.projectKey.hash, namespace: this.config.namespace ?? null });
 
@@ -380,7 +376,6 @@ export class Indexer {
         const extracted = extractArtifacts(messages, {
           root: this.root,
           globs: this.artifactGlobs,
-          confidentialPatterns: this.artifactConfidentialPatterns,
         });
         const unionSeen = new Set();
         const union = [];
@@ -392,11 +387,8 @@ export class Indexer {
         }
         entry.artifacts = union.slice(0, 8);
 
-        // G2: re-mask entry before write (defense-in-depth)
-        const maskedEntry = maskEntry(entry, {
-          confidentialPatterns: this.confidentialPatterns,
-          artifactConfidentialPatterns: this.artifactConfidentialPatterns,
-        });
+        // G2: re-mask entry before write (defense-in-depth, sanitize)
+        const maskedEntry = maskEntry(entry);
 
         // I1: embed AFTER mask
         let vec;

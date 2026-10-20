@@ -388,7 +388,6 @@ test("runRestore merge: upsert; счёт overwritten/added", async () => {
       storage, backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
       storageType: "sqlite", modelId: "mm", dim: 8, file,
       replace: false, channel: "tool",
-      maskPatterns: { confidential: [], artifacts: [] },
     });
     assert.equal(r.mode, "merge");
     assert.equal(r.count, 2);
@@ -411,7 +410,6 @@ test("runRestore: embedding → Float32Array перед upsert (parity memory_im
       storage, backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
       storageType: "sqlite", modelId: "mm", dim: 8, file,
       replace: false, channel: "tool",
-      maskPatterns: { confidential: [], artifacts: [] },
     });
     const up = storage.upserts[0][0];
     assert.ok(up.embedding instanceof Float32Array, "embedding перед upsert — Float32Array");
@@ -421,26 +419,24 @@ test("runRestore: embedding → Float32Array перед upsert (parity memory_im
   }
 });
 
-test("runRestore merge: maskEntry — confidential маскирует summary", async () => {
+test("runRestore merge: maskEntry — generic sanitize маскирует summary", async () => {
   const dir = mkdtempSync(join(tmpdir(), "mr-mask-"));
   try {
     const storage = mkMockStorage([]);
-    // maskLines матчит token (до :) — паттерн должен совпадать с токеном строки
     const file = writeBackupPair(dir, { entries: [mkEntry(1, {
-      summary: "confidential/value:raw secret value here\nother line",
+      summary: "API_KEY=secret123\nother line",
     })] });
     const r = await runRestore({
       storage, backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
       storageType: "sqlite", modelId: "mm", dim: 8, file,
       replace: false, channel: "tool",
-      maskPatterns: { confidential: ["confidential/**"], artifacts: [] },
     });
     assert.equal(r.mode, "merge");
     const upserted = storage.upserts[0];
     assert.equal(upserted.length, 1);
-    // maskEntry маскирует title/summary — строка с confidential-токеном → "[confidential]"
-    assert.ok(!String(upserted[0].summary).includes("confidential/value"), "confidential token не в upserted");
-    assert.ok(String(upserted[0].summary).includes("[confidential]"), "маска на месте");
+    // maskEntry применяет generic sanitize: key=value → <redacted>.
+    assert.ok(!String(upserted[0].summary).includes("secret123"), "secret-value не в upserted");
+    assert.ok(String(upserted[0].summary).includes("API_KEY=<redacted>"), "generic sanitize на месте");
   } finally {
     rmSync(dir, { recursive: true, force: true });
   }
@@ -455,7 +451,6 @@ test("runRestore: plugin_version warn (совпадение) → null", async ()
       storage, backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
       storageType: "sqlite", modelId: "mm", dim: 8, file,
       pluginVersion: "4.7.0",
-      maskPatterns: { confidential: [], artifacts: [] },
     });
     assert.equal(r.warn, null);
   } finally {
@@ -472,7 +467,6 @@ test("runRestore: plugin_version warn (несовпадение) → содер�
       storage, backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
       storageType: "sqlite", modelId: "mm", dim: 8, file,
       pluginVersion: "4.7.0",
-      maskPatterns: { confidential: [], artifacts: [] },
     });
     assert.ok(r.warn && r.warn.includes("4.0.0"), `warn содержит 4.0.0: ${r.warn}`);
   } finally {
@@ -488,7 +482,6 @@ test("runRestore: plugin_version без pluginVersion → warn null", async () =
     const r = await runRestore({
       storage, backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
       storageType: "sqlite", modelId: "mm", dim: 8, file,
-      maskPatterns: { confidential: [], artifacts: [] },
     });
     assert.equal(r.warn, null);
   } finally {
@@ -511,7 +504,6 @@ test("runRestore replace:true + fail валидации → deleteByFilter НЕ 
         storage, backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
         storageType: "sqlite", modelId: "mm", dim: 8, file,
         replace: true, channel: "tool",
-        maskPatterns: { confidential: [], artifacts: [] },
       }),
       /model_id/
     );
@@ -531,7 +523,6 @@ test("runRestore: model_id в манифесте не совпадает → fai
         storage, backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
         storageType: "sqlite", modelId: "mm", dim: 8, file,
         replace: false, channel: "tool",
-        maskPatterns: { confidential: [], artifacts: [] },
       }),
       /model_id/
     );
@@ -550,7 +541,6 @@ test("runRestore: key в манифесте не совпадает → fail-clo
         storage: mkMockStorage([]), backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
         storageType: "sqlite", modelId: "mm", dim: 8, file,
         replace: false, channel: "tool",
-        maskPatterns: { confidential: [], artifacts: [] },
       }),
       /key/
     );
@@ -569,7 +559,6 @@ test("runRestore: sha256 не совпадает (подмена/порча) →
         storage: mkMockStorage([]), backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
         storageType: "sqlite", modelId: "mm", dim: 8, file,
         replace: false, channel: "tool",
-        maskPatterns: { confidential: [], artifacts: [] },
       }),
       /sha256/
     );
@@ -592,7 +581,6 @@ test("runRestore replace (tool): delete ПОСЛЕ валидации, до upse
       storage, backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
       storageType: "sqlite", modelId: "mm", dim: 8, file,
       replace: true, channel: "tool",
-      maskPatterns: { confidential: [], artifacts: [] },
     });
     assert.deepEqual(calls, ["delete", "upsert"]);
     assert.equal(r.mode, "replace");
@@ -610,7 +598,6 @@ test("runRestore replace (cli, не-tty) → отказ", async () => {
         storage: mkMockStorage([]), backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
         storageType: "sqlite", modelId: "mm", dim: 8, file,
         replace: true, channel: "cli", isTty: false,
-        maskPatterns: { confidential: [], artifacts: [] },
       }),
       /не-интерактив/
     );
@@ -629,7 +616,6 @@ test("runRestore replace (cli, tty + confirm = key) → ok", async () => {
       storageType: "sqlite", modelId: "mm", dim: 8, file,
       replace: true, channel: "cli", isTty: true,
       confirmNamespace: RESTORE_KEY,
-      maskPatterns: { confidential: [], artifacts: [] },
     });
     assert.equal(storage.upserts.length, 1);
   } finally {
@@ -647,7 +633,6 @@ test("runRestore replace (cli, confirm != key) → отказ", async () => {
         storageType: "sqlite", modelId: "mm", dim: 8, file,
         replace: true, channel: "cli", isTty: true,
         confirmNamespace: "other-ns",
-        maskPatterns: { confidential: [], artifacts: [] },
       }),
       /подтверждени/
     );
@@ -667,7 +652,6 @@ test("runRestore: файл вне каталога бэкапов → отказ
         storage: mkMockStorage([]), backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
         storageType: "sqlite", modelId: "mm", dim: 8, file: outside,
         replace: false, channel: "tool",
-        maskPatterns: { confidential: [], artifacts: [] },
       }),
       /каталог/
     );
@@ -688,7 +672,6 @@ test("runRestore: ..-обход за пределами каталога → о�
         storage: mkMockStorage([]), backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
         storageType: "sqlite", modelId: "mm", dim: 8, file: outside,
         replace: false, channel: "tool",
-        maskPatterns: { confidential: [], artifacts: [] },
       }),
       /каталог/
     );
@@ -706,7 +689,6 @@ test("runRestore: count в манифесте не совпадает с чис�
         storage: mkMockStorage([]), backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
         storageType: "sqlite", modelId: "mm", dim: 8, file,
         replace: false, channel: "tool",
-        maskPatterns: { confidential: [], artifacts: [] },
       }),
       /count/
     );
@@ -727,7 +709,6 @@ test("runRestore: schema_fields в манифесте ≠ SCAN_FIELDS → отк
         storage: mkMockStorage([]), backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
         storageType: "sqlite", modelId: "mm", dim: 8, file,
         replace: false, channel: "tool",
-        maskPatterns: { confidential: [], artifacts: [] },
       }),
       /schema_fields/
     );
@@ -761,7 +742,6 @@ test("runRestore: manifest не содержит format → fail-closed", async 
         storage: mkMockStorage([]), backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
         storageType: "sqlite", modelId: "mm", dim: 8, file,
         replace: false, channel: "tool",
-        maskPatterns: { confidential: [], artifacts: [] },
       }),
       /формат/
     );
@@ -795,7 +775,6 @@ test("runRestore: manifest format != BACKUP_FORMAT → fail-closed", async () =>
         storage: mkMockStorage([]), backupCfg: { path: dir }, effectiveKey: RESTORE_KEY,
         storageType: "sqlite", modelId: "mm", dim: 8, file,
         replace: false, channel: "tool",
-        maskPatterns: { confidential: [], artifacts: [] },
       }),
       /формат/
     );
@@ -817,7 +796,6 @@ test("runBackup: scan вызывается с fields = SCAN_FIELDS (полнот
     await runBackup({
       storage, backupCfg: { path: dir, retention: 0 },
       effectiveKey: "k1", storageType: "sqlite", modelId: "mm", dim: 8,
-      pluginVersion: "4.7.0", maskPatterns: { confidential: [], artifacts: [] },
       gitRoot: null, now: () => 1,
     });
     assert.deepEqual(seen.fields, SCAN_FIELDS);
@@ -838,7 +816,7 @@ test("runBackup: scan → maskEntry → JSONL+манифест → warn → rete
     const r = await runBackup({
       storage: mkMockStorage([{
         ...ROW,
-        summary: "prefix\nexact-secret-value\nsuffix",
+        summary: "prefix\nAPI_KEY=secret123\nsuffix",
       }]),
       backupCfg: { path: relBackup, retention: 0 },
       effectiveKey: "k1",
@@ -846,7 +824,6 @@ test("runBackup: scan → maskEntry → JSONL+манифест → warn → rete
       modelId: "mm",
       dim: 8,
       pluginVersion: "4.7.0",
-      maskPatterns: { confidential: ["exact-secret-value"], artifacts: [] },
       log: (msg, extra) => logs.push({ msg, extra }),
       gitRoot: process.cwd(),
       now: () => 123,
@@ -855,9 +832,9 @@ test("runBackup: scan → maskEntry → JSONL+манифест → warn → rete
     assert.ok(existsSync(join(backupDir, "backup-k1-123.jsonl")));
     assert.ok(existsSync(join(backupDir, "backup-k1-123.manifest.json")));
     const body = JSON.parse(readFileSync(join(backupDir, "backup-k1-123.jsonl"), "utf8"));
-    // maskEntry заменяет confidential line на "[confidential]"
-    assert.ok(!String(body.summary).includes("exact-secret-value"), "maskEntry обязателен");
-    assert.ok(String(body.summary).includes("[confidential]"), "формат маски — [confidential]");
+    // maskEntry обязан: generic sanitize key=value → <redacted>.
+    assert.ok(!String(body.summary).includes("secret123"), "maskEntry обязателен");
+    assert.ok(String(body.summary).includes("API_KEY=<redacted>"), "generic sanitize на месте");
     const meta = JSON.parse(readFileSync(join(backupDir, "backup-k1-123.manifest.json"), "utf8"));
     assert.equal(meta.count, 1);
     // path "mb-run-audit" не в .gitignore → not_ignored
@@ -880,7 +857,6 @@ test("runBackup: 0 записей → отказ, файлы не создают
         modelId: "mm",
         dim: 8,
         pluginVersion: "4.7.0",
-        maskPatterns: { confidential: [], artifacts: [] },
         gitRoot: null,
       }),
       /нет записей/
@@ -901,7 +877,6 @@ test("runBackup: storage.type != sqlite → отказ (sqlite-only guard)", asy
       modelId: "mm",
       dim: 8,
       pluginVersion: "4.7.0",
-      maskPatterns: { confidential: [], artifacts: [] },
     }),
     /sqlite/
   );
@@ -944,7 +919,6 @@ test("runBackup: sqlite-Buffer embedding → JSONL number[] + roundtrip runResto
       modelId: "mm",
       dim: 8,
       pluginVersion: "4.7.0",
-      maskPatterns: { confidential: [], artifacts: [] },
       gitRoot: null,
       now: () => 123,
     });
@@ -965,7 +939,6 @@ test("runBackup: sqlite-Buffer embedding → JSONL number[] + roundtrip runResto
       replace: false,
       channel: "cli",
       isTty: true,
-      maskPatterns: { confidential: [], artifacts: [] },
     });
     assert.equal(rr.count, 1);
     assert.equal(rr.added, 1);
@@ -990,7 +963,6 @@ test("runBackup: Uint8Array embedding (bun-шим) → JSONL number[]", async ()
       modelId: "mm",
       dim: 8,
       pluginVersion: "4.7.0",
-      maskPatterns: { confidential: [], artifacts: [] },
       gitRoot: null,
       now: () => 1,
     });

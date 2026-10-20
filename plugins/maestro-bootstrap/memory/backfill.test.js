@@ -4,7 +4,6 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { hostname } from "node:os";
-import { loadConfidentialConfig } from "../core.js";
 import { prefixesOf } from "./project.js";
 import { reindexSessionArtifacts, gitFeatureSessionId, isPlanPath, scanHistory, synthesizeGitEntry } from "./backfill.js";
 import { SESSIONS } from "./summarize.js";
@@ -23,12 +22,8 @@ function touch(filePath) {
 }
 
 function writeMsg(filePath) {
-  return { parts: [{ type: "tool", tool: "write", state: { status: "completed", input: { filePath } } }] };
+  return { parts: [{ type: "tool", tool: "write", state: { status: "completed", input: { path: filePath } } }] };
 }
-
-// Непустой resolved-набор для не-confidential кейсов (F1: fail-closed —
-// extractArtifacts возвращает [] при пустом наборе).
-const NO_CONF = ["secrets/**"];
 
 // Fake storage: scan проектирует колонки как реальный sqlite (fields-opt-in,
 // embedding — opt-in поле, C1); upsert — spy.
@@ -53,7 +48,8 @@ function makeStorage(rows) {
 function makeClient({ messages = null, throws = false } = {}) {
   return {
     session: {
-      messages: async () => {
+      // V2: session.context({ sessionID }) вместо session.messages
+      context: async () => {
         if (throws) throw new Error("messages unavailable");
         return { data: messages ?? [] };
       },
@@ -82,8 +78,6 @@ function makeDeps(overrides = {}) {
     root: "/tmp",
     key: "k",
     artifactGlobs: ["docs/**"],
-    artifactConfidentialPatterns: NO_CONF,
-    confidentialPatterns: [],
     embedModelId: "m1",
     ...overrides,
   };
@@ -156,54 +150,35 @@ test("updated: cap 8 — union обрезается, extracted-first", async (t)
   assert.equal(entry.artifacts.length, 8);
 });
 
-test("updated: maskEntry перед upsert дропает stale-путь из existing, матчащий resolved-набор", async (t) => {
+test("updated: artifacts passthrough — пути из existing сохраняются (confidential-дропа нет)", async (t) => {
   const root = makeRoot(t);
   touch(path.join(root, "docs", "spec.md"));
-  const existing = baseRow({ artifacts: ["docs/old.md", "secrets/key.md"] });
+  const existing = baseRow({ artifacts: ["docs/old.md", "docs/confidential/key.md"] });
   const storage = makeStorage([existing]);
   const client = makeClient({ messages: [writeMsg(path.join(root, "docs", "spec.md"))] });
-  const deps = makeDeps({ root, storage, client, artifactConfidentialPatterns: ["secrets/**"] });
+  const deps = makeDeps({ root, storage, client });
 
   const out = await reindexSessionArtifacts(deps, "s1");
 
   assert.equal(out.status, "updated");
-  // union = [spec.md, old.md, secrets/key.md] ≠ existing → upsert; maskEntry
-  // (resolved-набор) дропает secrets/key.md.
-  assert.deepEqual(out.artifacts, ["docs/spec.md", "docs/old.md"]);
+  // union = [spec.md, old.md, confidential/key.md]; дропа нет — passthrough.
+  assert.deepEqual(out.artifacts, ["docs/spec.md", "docs/old.md", "docs/confidential/key.md"]);
   const [entry] = storage.calls.upsert[0];
-  assert.deepEqual(entry.artifacts, ["docs/spec.md", "docs/old.md"]);
+  assert.deepEqual(entry.artifacts, ["docs/spec.md", "docs/old.md", "docs/confidential/key.md"]);
 });
 
-test("updated: stale-purge no-delta — extracted пусто, existing содержит путь из resolved-набора → upsert чистит (post-mask guard)", async (t) => {
+test("no-delta: extracted пусто, union == existing → no_change (upsert не вызван)", async (t) => {
   const root = makeRoot(t);
-  const existing = baseRow({ artifacts: ["docs/old.md", "secrets/key.md"] });
+  const existing = baseRow({ artifacts: ["docs/old.md"] });
   const storage = makeStorage([existing]);
   // Сообщения непустые, но без write/edit-частей → extracted = [] (no-delta).
   const client = makeClient({ messages: [{ parts: [{ type: "text", text: "hello" }] }] });
-  const deps = makeDeps({ root, storage, client, artifactConfidentialPatterns: ["secrets/**"] });
+  const deps = makeDeps({ root, storage, client });
 
   const out = await reindexSessionArtifacts(deps, "s1");
 
-  // Pre-mask union == existing → старый guard вернул бы no_change; post-mask
-  // union (secrets/key.md отфильтрован resolved-набором) ≠ existing → upsert.
-  assert.equal(out.status, "updated");
-  assert.equal(storage.calls.upsert.length, 1, "upsert вызван ровно 1 раз");
-  const [entry] = storage.calls.upsert[0];
-  assert.deepEqual(entry.artifacts, ["docs/old.md"], "stale-путь из resolved-набора удалён");
-  assert.equal(entry.version, 3, "version = existing.version + 1");
-  // RI-3: остальные поля сохранены из existing.
-  assert.equal(entry.title, "Title");
-  assert.equal(entry.summary, "Summary");
-  assert.deepEqual(entry.decisions, ["D1"]);
-  assert.equal(entry.model_id, "m1");
-  assert.equal(entry.head, "abc");
-  assert.equal(entry.branch, "main");
-  assert.equal(entry.merged, 1);
-  assert.equal(entry.time_first, 100);
-  assert.equal(entry.time_last, 200);
-  assert.equal(entry.author, "me");
-  assert.equal(entry.key, "k");
-  assert.equal(entry.origin_project_hash, "h");
+  assert.equal(out.status, "no_change");
+  assert.equal(storage.calls.upsert.length, 0, "upsert не вызван (RI-7)");
 });
 
 test("embedding passthrough: Float32Array из scan остаётся Float32Array", async (t) => {
@@ -321,16 +296,6 @@ const CT = 1700000000;
 const SPEC = "docs/superpowers/specs/x-design.md";
 const KEY = "a.b.c"; // совпадает с key в synthDeps()
 
-// Непустой resolved-набор для не-confidential кейсов (F1: fail-closed).
-const NO_CONF_RESOLVED = ["secrets/**"];
-
-// Resolved-набор при ПУСТОМ user-confidential.paths: default docs/confidential/**
-// + builtin (как строит index.js: [...conf.paths, ...conf.builtin]).
-function resolvedConfidential() {
-  const conf = loadConfidentialConfig({});
-  return [...conf.paths, ...conf.builtin];
-}
-
 function makeTree(t, files) {
   const root = makeRoot(t);
   for (const f of files) touch(path.join(root, f));
@@ -357,7 +322,6 @@ function scanDeps(root, overrides = {}) {
     git: makeGit(),
     mainline: "main",
     records: [],
-    artifactConfidentialPatterns: NO_CONF_RESOLVED,
     ...overrides,
   };
 }
@@ -396,8 +360,6 @@ function synthDeps(overrides = {}) {
     originRemote: "gh/x",
     embedModelId: "m1",
     embeddings: async () => new Float32Array([0.1, 0.2]),
-    confidentialPatterns: [],
-    artifactConfidentialPatterns: NO_CONF_RESOLVED,
     ...overrides,
   };
 }
@@ -431,7 +393,7 @@ test("isPlanPath: basename -plan.md ИЛИ parent-каталог plans", () => {
 
 // ── scanHistory ─────────────────────────────────────────────────────────────
 
-test("scanHistory: glob-матчинг + plan-исключение + skip_confidential (default + builtin) + feature", async (t) => {
+test("scanHistory: glob-матчинг + plan-исключение + feature (confidential-фильтра нет)", async (t) => {
   const root = makeTree(t, [
     "docs/superpowers/specs/x-design.md",
     "docs/superpowers/plans/x-plan.md",
@@ -442,15 +404,14 @@ test("scanHistory: glob-матчинг + plan-исключение + skip_confid
   ]);
   const out = await scanHistory(scanDeps(root, {
     historyGlobs: ["docs/**", ".env", "README.md"],
-    artifactConfidentialPatterns: resolvedConfidential(),
   }));
 
   assert.equal(out.considered, 5, "только файлы, матчащие globs");
   assert.equal(out.covered.plan_excluded, 1, "plan-путь исключён из кандидатов");
-  assert.equal(out.covered.skip_confidential, 2, "docs/confidential/** (default) + .env (builtin)");
+  assert.equal(out.covered.skip_confidential, undefined, "skip_confidential-категория удалена");
   assert.equal(out.covered.not_in_git, 0);
   assert.equal(out.covered.by_artifacts, 0);
-  assert.equal(out.features.length, 2, "x-design.md + README.md");
+  assert.equal(out.features.length, 4, "x-design.md + confidential/secret.md + .env + README.md");
   assert.deepEqual(out.gitErrors, []);
   const f = out.features.find((x) => x.specPath === SPEC);
   assert.ok(f, "spec в features");
@@ -590,21 +551,6 @@ test("scanHistory: gitLog non-zero status (throw) → gitErrors, не not_in_git
   assert.equal(out.features.length, 0);
 });
 
-test("scanHistory: F1 early-return — пустой resolved-набор → 0 кандидатов, git не дёргается", async (t) => {
-  const root = makeTree(t, [SPEC]);
-  let logCalls = 0;
-  const out = await scanHistory(scanDeps(root, {
-    artifactConfidentialPatterns: [],
-    git: makeGit({ log: async () => { logCalls++; return `${SHA} ${CT}`; } }),
-  }));
-
-  assert.equal(out.considered, 0, "ни один кандидат не рассмотрен");
-  assert.equal(out.features.length, 0);
-  assert.deepEqual(out.covered, { by_artifacts: 0, not_in_git: 0, skip_confidential: 0, plan_excluded: 0 });
-  assert.deepEqual(out.gitErrors, []);
-  assert.equal(logCalls, 0, "git.log не вызван (guard до цикла)");
-});
-
 test("scanHistory: malformed git-log line → gitErrors, batch продолжается", async (t) => {
   const root = makeTree(t, [SPEC, "docs/superpowers/specs/y-design.md"]);
   const out = await scanHistory(scanDeps(root, {
@@ -628,7 +574,7 @@ test("scanHistory: git-адаптер без log → gitErrors с явной з�
   assert.equal(out.considered, 0, "ни один кандидат не рассмотрен");
   assert.equal(out.gitErrors.length, 1);
   assert.equal(out.gitErrors[0].error, "git adapter incomplete: log method missing");
-  assert.deepEqual(out.covered, { by_artifacts: 0, not_in_git: 0, skip_confidential: 0, plan_excluded: 0 });
+  assert.deepEqual(out.covered, { by_artifacts: 0, not_in_git: 0, plan_excluded: 0 });
 });
 
 test("scanHistory: filesOfCommit/commitMessage throw → gitErrors (non-fatal), фича остаётся", async (t) => {
@@ -705,7 +651,7 @@ test("synthesizeGitEntry: форма записи — все поля, author gi
   assert.ok(entry.embedding instanceof Float32Array);
 });
 
-test("synthesizeGitEntry: artifacts-фильтр — existsSync=false дроп, resolved-матч дроп, dedup lowercase, cap 8", async (t) => {
+test("synthesizeGitEntry: artifacts-фильтр — existsSync=false дроп, dedup lowercase, cap 8 (confidential-дропа нет)", async (t) => {
   const root = makeTree(t, [
     SPEC,
     "docs/superpowers/plans/x-plan.md",
@@ -713,7 +659,7 @@ test("synthesizeGitEntry: artifacts-фильтр — existsSync=false дроп, 
     "docs/a.md", "docs/b.md", "docs/c.md", "docs/d.md", "docs/e.md", "docs/f.md",
   ]);
   const storage = makeGitStorage();
-  const deps = synthDeps({ storage, root, artifactConfidentialPatterns: ["docs/confidential/**"] });
+  const deps = synthDeps({ storage, root });
   const feature = gitFeature({
     planPath: "docs/superpowers/plans/x-plan.md",
     artifacts: [
@@ -721,7 +667,7 @@ test("synthesizeGitEntry: artifacts-фильтр — existsSync=false дроп, 
       "docs/superpowers/SPECS/x-design.md", // lowercase-дубль
       "docs/superpowers/plans/x-plan.md",
       "docs/superpowers/plans/missing-plan.md", // не существует → дроп
-      "docs/confidential/secret.md", // resolved-матч → дроп
+      "docs/confidential/secret.md", // сохраняется (confidential-дропа нет)
       "docs/a.md", "docs/b.md", "docs/c.md", "docs/d.md", "docs/e.md", "docs/f.md",
     ],
   });
@@ -733,12 +679,12 @@ test("synthesizeGitEntry: artifacts-фильтр — existsSync=false дроп, 
   assert.equal(entry.artifacts.length, 8, "cap 8");
   assert.ok(entry.artifacts.includes(SPEC));
   assert.ok(entry.artifacts.includes("docs/superpowers/plans/x-plan.md"));
+  assert.ok(entry.artifacts.includes("docs/confidential/secret.md"), "конфиденциальный (по старому паттерну) путь сохранён");
   assert.ok(!entry.artifacts.includes("docs/superpowers/SPECS/x-design.md"), "dedup lowercase");
   assert.ok(!entry.artifacts.includes("docs/superpowers/plans/missing-plan.md"), "existsSync=false дроп");
-  assert.ok(!entry.artifacts.includes("docs/confidential/secret.md"), "resolved-матч дроп");
 });
 
-test("synthesizeGitEntry: re-mask LLM-вывода до embed — embed-вход от маскированного контента", async (t) => {
+test("synthesizeGitEntry: re-mask — generic sanitize (key=value маскируется; confidential-line маскирования нет)", async (t) => {
   const root = makeTree(t, [SPEC]);
   const storage = makeGitStorage();
   const embedInputs = [];
@@ -746,21 +692,20 @@ test("synthesizeGitEntry: re-mask LLM-вывода до embed — embed-вход
   const deps = synthDeps({
     storage, root,
     embeddings,
-    confidentialPatterns: ["docs/confidential/**"],
-    artifactConfidentialPatterns: ["docs/confidential/**"],
   });
-  const llm = { summary: "line one\ndocs/confidential/secret.md\nline three", decisions: ["keep this"] };
+  const llm = { summary: "line one\nAPI_KEY=abc123\ndocs/confidential/secret.md\nline three", decisions: ["keep this"] };
 
   const out = await synthesizeGitEntry(deps, gitFeature(), llm);
 
   assert.equal(out.status, "indexed");
   assert.equal(embedInputs.length, 1, "embed вызван ровно 1 раз");
   const input = embedInputs[0];
-  assert.equal(input, "My Feature\nline one\n[confidential]\nline three\nkeep this",
-    "embed-вход = title + \\n + summary + \\n + decisions.join(\\n) от МАСКИРОВАННЫХ значений");
-  assert.ok(!input.includes("docs/confidential/secret.md"), "raw confidential-строка не ушла в embed");
+  assert.equal(input, "My Feature\nline one\nAPI_KEY=<redacted>\ndocs/confidential/secret.md\nline three\nkeep this",
+    "embed-вход: generic sanitize (key=value → <redacted>), строки без секретов не трогаются");
+  assert.ok(!input.includes("abc123"), "secret-value не ушёл в embed");
+  assert.ok(input.includes("docs/confidential/secret.md"), "confidential-строка НЕ маскируется line-фильтром");
+  assert.ok(!input.includes("[confidential]"), "плейсхолдер [confidential] не используется");
   const [entry] = storage.calls.upsert[0];
-  assert.ok(!entry.summary.includes("docs/confidential/secret.md"), "upsert-запись тоже замаскирована");
-  assert.ok(entry.summary.includes("[confidential]"));
+  assert.ok(entry.summary.includes("API_KEY=<redacted>"), "upsert-запись: generic sanitize применён");
   assert.ok(entry.embedding instanceof Float32Array, "embedding записан");
 });

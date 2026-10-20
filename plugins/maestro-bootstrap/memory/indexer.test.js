@@ -11,15 +11,15 @@ function mkClient(msgs = null) {
   return {
     upserts,
     session: {
-      get: async ({ path }) => ({
+      get: async ({ sessionID }) => ({
         data: {
-          id: path.id,
+          id: sessionID,
           parentID: null,
           title: "st",
           time: { created: 1, updated: 100 },
         },
       }),
-      messages: async () => ({
+      context: async () => ({
         data: msgs ?? [
           { info: {}, parts: [{ type: "text", text: "API_KEY=secret123 hello" }] },
         ],
@@ -93,7 +93,7 @@ test("indexer summarizes and upserts on _run, masking secrets", async () => {
     client, config: mkConfig(), embeddings, storage,
     state: mkState(),
     summarize: async ({ transcript }) => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "khash", source: "remote" },
     git: mkGit(),
   });
   await idx._run("s1");
@@ -118,7 +118,7 @@ test("indexer skips subagent sessions (parentID present)", async () => {
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "khash", source: "remote" },
   });
   await idx._run("s1");
   assert.equal(client.upserts.length, 0);
@@ -136,7 +136,7 @@ test("indexer deletes on session deleted when delete_on_session_delete flag ON",
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(),
     summarize: async () => ({}),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
   });
   await idx.onSessionDeleted({ sessionID: "s1" });
   assert.equal(deletedId, "s1");
@@ -151,7 +151,7 @@ test("indexer keeps record on session deleted by default (flag OFF)", async () =
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
   });
   await idx._run("s1");
@@ -173,7 +173,7 @@ test("indexer _run calls recordFail on error", async () => {
     storage,
     state: { ...mkState(), recordFail: async (sid) => { failCalled = true; failSessionId = sid; } },
     summarize: async () => ({}),
-    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "khash", source: "remote" },
   });
   await idx._run("s1");
   assert.ok(failCalled);
@@ -194,7 +194,7 @@ test("indexer retryable embed error does not recordFail", async () => {
     storage,
     state: { ...mkState(), recordFail: async () => { failCalled = true; } },
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "khash", source: "remote" },
     git: mkGit(),
   });
   await idx._run("s1");
@@ -212,7 +212,7 @@ test("indexer records summarized state after success", async () => {
     storage,
     state: { ...mkState(), setSummarized: async (sid) => { summarizedId = sid; } },
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "khash", source: "remote" },
     git: mkGit(),
   });
   await idx._run("s1");
@@ -227,7 +227,7 @@ test("indexer onSessionIdle guards null sessionID", async () => {
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage: mkStorage(null), state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
   });
   await idx.onSessionIdle({ sessionID: null });
   // Should not throw
@@ -248,7 +248,7 @@ test("indexer extracts model from last assistant message (C-1)", async () => {
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(),
     summarize: async ({ model }) => { capturedModel = model; return { title: "t", summary: "s", decisions: [] }; },
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
   });
   await idx._run("s1");
@@ -267,13 +267,13 @@ test("indexer skips _run when messages < min_new_messages (G1)", async () => {
   let callCount = 0;
   const state = { ...mkState(), getLastSummarized: async () => 99 };
   const summarize = async () => { callCount++; return { title: "t", summary: "s", decisions: [] }; };
-  client.session.messages = async () => ({
+  client.session.context = async () => ({
     data: [{ info: { time: { created: 100 } }, parts: [{ type: "text", text: "hi" }] }],
   });
   const idx = new Indexer({ client, config,
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state, summarize,
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
   });
   await idx._run("s1");
   assert.equal(callCount, 0);
@@ -288,7 +288,7 @@ test("indexer proceeds when messages >= min_new_messages (G1)", async () => {
   let callCount = 0;
   const state = { ...mkState(), getLastSummarized: async () => 99 };
   const summarize = async () => { callCount++; return { title: "t", summary: "s", decisions: [] }; };
-  client.session.messages = async () => ({
+  client.session.context = async () => ({
     data: [
       { info: { time: { created: 100 } }, parts: [{ type: "text", text: "a" }] },
       { info: { time: { created: 101 } }, parts: [{ type: "text", text: "b" }] },
@@ -298,7 +298,7 @@ test("indexer proceeds when messages >= min_new_messages (G1)", async () => {
   const idx = new Indexer({ client, config,
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state, summarize,
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
   });
   await idx._run("s1");
@@ -316,7 +316,7 @@ test("indexer first summary proceeds with no lastSummarized (G1)", async () => {
   const idx = new Indexer({ client, config,
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(), summarize,
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
   });
   await idx._run("s1");
@@ -336,7 +336,7 @@ test("indexer re-masks entry before upsert (G2)", async () => {
   const idx = new Indexer({ client, config: mkConfig(),
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(), summarize,
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
   });
   await idx._run("s1");
@@ -363,7 +363,7 @@ test("indexer serializes concurrent _run calls (G3)", async () => {
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage: mkStorage(null),
     state: mkState(), summarize,
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
   });
 
@@ -390,7 +390,7 @@ test("indexer dedups queued sessions (M3)", async () => {
     client: mkClient(), config: mkConfig(),
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage: mkStorage(null), state: mkState(), summarize,
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
   });
   // First call acquires lock
@@ -411,7 +411,7 @@ test("indexer increments version on re-summarize (G5)", async () => {
   const idx = new Indexer({ client, config: mkConfig(),
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(), summarize,
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
   });
   await idx._run("s1");
@@ -431,7 +431,7 @@ test("indexer skips maestro-memory sessions from SESSIONS set (I2)", async () =>
   const idx = new Indexer({ client, config: mkConfig(),
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(), summarize,
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
   });
   await idx._run("mem-session-1");
@@ -440,32 +440,26 @@ test("indexer skips maestro-memory sessions from SESSIONS set (I2)", async () =>
   idx.dispose();
 });
 
-test("indexer deletes [maestro-memory] sessions during backfill (I2)", async () => {
-  let deletedIds = [];
+test("indexer onStartup (V2): backfill по session.list отключён — без индексации, warn session_list_not_available", async () => {
+  const warns = [];
   const client = {
     upserts: [],
     session: {
-      get: async () => ({ data: { id: "user-1", parentID: null, title: "User session", time: { created: 1, updated: Date.now() - 1000 } } }),
-      messages: async () => ({ data: [{ info: {}, parts: [{ type: "text", text: "hi" }] }] }),
-      list: async () => ({ data: [
-        { id: "mem-1", parentID: null, title: "[maestro-memory] old-session" },
-        { id: "user-1", parentID: null, title: "User session", time: { created: 1, updated: Date.now() - 1000 } },
-      ]}),
-      delete: async ({ path: { id } }) => { deletedIds.push(id); },
+      list: async () => { throw new Error("session.list не должен вызываться (V2)"); },
     },
   };
-  const storage = mkStorage(client);
-  const summarize = async () => ({ title: "t", summary: "s", decisions: [] });
   const idx = new Indexer({ client, config: { ...mkConfig({ idle_debounce_min: 0.001 }), backfill_max_per_start: 5 },
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
-    storage, state: { ...mkState(), isSkipped: async () => false },
-    summarize, projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    storage: mkStorage(client), state: { ...mkState(), isSkipped: async () => false },
+    summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
+    projectKey: { hash: "k", source: "remote" },
+    logWarn: (m) => warns.push(m),
     git: mkGit(),
   });
   await idx.onStartup();
-  await new Promise((r) => setTimeout(r, 100));
-  assert.ok(deletedIds.includes("mem-1"), "maestro-memory session deleted");
-  assert.equal(client.upserts.length, 1, "only user-1 was backfilled");
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(client.upserts.length, 0, "backfill не выполняется (V2: session.list отсутствует)");
+  assert.ok(warns.some((m) => String(m).includes("session_list_not_available")), "warn о недоступности session.list");
   idx.dispose();
 });
 
@@ -479,7 +473,7 @@ test("indexer throttles retry based on lastAttempt (I3)", async () => {
   const idx = new Indexer({ client, config: { ...mkConfig(), retry_interval_min: 10 },
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: { ...mkState(), getLastAttempt: async () => Date.now() },
-    summarize, projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    summarize, projectKey: { hash: "k", source: "remote" },
   });
   await idx._run("s1");
   assert.equal(callCount, 0, "retry throttled — lastAttempt too recent");
@@ -494,7 +488,7 @@ test("indexer debounce sets timer (I5)", async () => {
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage: mkStorage(null), state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
   });
   await idx.onSessionIdle({ sessionID: "s1" });
   assert.equal(idx.timers.size, 1, "one timer set");
@@ -502,17 +496,14 @@ test("indexer debounce sets timer (I5)", async () => {
   idx.dispose();
 });
 
-test("indexer onStartup caps backfill at backfill_max_per_start (I5)", async () => {
+test("indexer onStartup (V2): session.list отсутствует — backfill не запускается (cap неприменим)", async () => {
   const now = Date.now();
-  const sessions = Array.from({ length: 20 }, (_, i) => ({
-    id: `s${i}`, parentID: null, time: { created: 1, updated: now - 1000 },
-  }));
   const client = {
     upserts: [],
     session: {
-      get: async ({ path }) => ({ data: { id: path.id, parentID: null, title: "st", time: { created: 1, updated: now - 1000 } } }),
-      messages: async () => ({ data: [{ info: {}, parts: [{ type: "text", text: "hi" }] }] }),
-      list: async () => ({ data: sessions }),
+      get: async ({ sessionID }) => ({ data: { id: sessionID, parentID: null, title: "st", time: { created: 1, updated: now - 1000 } } }),
+      context: async () => ({ data: [{ info: {}, parts: [{ type: "text", text: "hi" }] }] }),
+      list: async () => { throw new Error("session.list не должен вызываться (V2)"); },
     },
   };
   const storage = mkStorage(client);
@@ -520,12 +511,13 @@ test("indexer onStartup caps backfill at backfill_max_per_start (I5)", async () 
   const idx = new Indexer({ client, config: { ...mkConfig({ idle_debounce_min: 0.001 }), backfill_max_per_start: 3 },
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: { ...mkState(), isSkipped: async () => false },
-    summarize, projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    summarize, projectKey: { hash: "k", source: "remote" },
+    log: { warn: () => {} },
     git: mkGit(),
   });
   await idx.onStartup();
-  await new Promise((r) => setTimeout(r, 100));
-  assert.equal(client.upserts.length, 3, "only 3 sessions backfilled (cap)");
+  await new Promise((r) => setTimeout(r, 50));
+  assert.equal(client.upserts.length, 0, "backfill не выполняется (V2)");
   idx.dispose();
 });
 
@@ -544,7 +536,7 @@ test("indexer queued session runs after first _run throws (queue-after-error)", 
     client: mkClient(), config: mkConfig(),
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage: mkStorage(null), state: mkState(), summarize,
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
   });
 
@@ -586,7 +578,7 @@ test("indexer timeout bounds hanging summarize (I1)", async () => {
       recordFail: async (sid) => { failCalled = true; failSessionId = sid; },
     },
     summarize,
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
   });
 
@@ -607,7 +599,7 @@ test("indexer timeout bounds hanging summarize (I1)", async () => {
 test("F-1 transcript capped to summarize_transcript_max_chars", async () => {
   const largeText = "x".repeat(500000); // 500K chars — well over 200K default
   const client = mkClient();
-  client.session.messages = async () => [{
+  client.session.context = async () => [{
     role: "user",
     parts: [{ type: "text", text: largeText }],
     info: { role: "user" },
@@ -623,7 +615,7 @@ test("F-1 transcript capped to summarize_transcript_max_chars", async () => {
     storage: mkStorage(client),
     state: mkState(),
     summarize,
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
   });
 
@@ -637,7 +629,7 @@ test("F-1 transcript capped to summarize_transcript_max_chars", async () => {
 
 test("F-1 short transcript passes through unchanged", async () => {
   const client = mkClient();
-  client.session.messages = async () => [{
+  client.session.context = async () => [{
     role: "user",
     parts: [{ type: "text", text: "hello" }],
     info: { role: "user" },
@@ -653,7 +645,7 @@ test("F-1 short transcript passes through unchanged", async () => {
     storage: mkStorage(client),
     state: mkState(),
     summarize,
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
   });
 
@@ -672,7 +664,7 @@ test("indexer uses explicit author param (M7)", async () => {
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     author: "custom-author",
     git: mkGit(),
   });
@@ -696,7 +688,7 @@ test("summarize attaches branch/head (sticky) and merged fast-path", async () =>
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git, mainline: "main",
   });
   await idx._run("s1");
@@ -731,7 +723,7 @@ test("onSessionDeleted clears sticky branch/head → re-summarize re-resolves", 
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git, mainline: "main",
   });
   await idx._run("s1");
@@ -759,7 +751,7 @@ test("branch==mainline → merged=1 fast-path; mainline unresolved → merged=0"
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: { resolveBranch: async () => "main", resolveHead: async () => "sha1" },
     mainline: "main",
   });
@@ -774,7 +766,7 @@ test("branch==mainline → merged=1 fast-path; mainline unresolved → merged=0"
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage: storage2, state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: { resolveBranch: async () => "main", resolveHead: async () => "sha1" },
     mainline: null,
   });
@@ -796,7 +788,7 @@ test("merged recomputed by head ancestry — existing merged=1 with head NOT in 
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: {
       resolveBranch: async () => "feature/x",
       resolveHead: async () => "feat-head",
@@ -816,7 +808,7 @@ test("merged=1 when head is ancestor of mainline (isAncestor yes)", async () => 
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage: mkStorage(client), state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: {
       resolveBranch: async () => "feature/x",
       resolveHead: async () => "main-head",
@@ -836,7 +828,7 @@ test("merged fast-path fallback when isAncestor errors", async () => {
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage: mkStorage(client), state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: {
       resolveBranch: async () => "main",
       resolveHead: async () => "sha1",
@@ -857,7 +849,7 @@ test("detached → branch='' but head recorded", async () => {
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: { resolveBranch: async () => "", resolveHead: async () => "sha1" },
     mainline: "main",
   });
@@ -880,7 +872,7 @@ test("write-gate: no head → no record, summarize NOT called (spec §3.3)", asy
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(),
     summarize: async () => { summarizeCalls++; return { title: "t", summary: "s", decisions: [] }; },
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: { resolveBranch: async () => "", resolveHead: async () => "" },
   });
   await idx._run("s1");
@@ -903,7 +895,7 @@ test("sticky-фикс: empty head resolution is NOT cached — re-resolves on ne
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git,
   });
   await idx._run("s1");
@@ -928,7 +920,7 @@ test("head-preserve: re-summarize with empty head resolve keeps existing head (s
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git,
   });
   await idx._run("s1");
@@ -968,7 +960,7 @@ test("indexer logs indexed + summarize.duration on success", async () => {
     client, config: mkConfig(), embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage: mkStorage(client), state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "khash", source: "remote" },
     logInfo: cap.log.info, logDebug: cap.log.debug, logWarn: cap.log.warn, logError: cap.log.error,
     git: mkGit(),
   });
@@ -984,7 +976,7 @@ test("indexer logs index_error with error_class (not message)", async () => {
   const idx = new Indexer({
     client, config: mkConfig(), embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage: mkStorage(client), state: { ...mkState(), recordFail: async () => {} },
-    summarize: async () => ({}), projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    summarize: async () => ({}), projectKey: { hash: "k", source: "remote" },
     logInfo: cap.log.info, logDebug: cap.log.debug, logWarn: cap.log.warn, logError: cap.log.error,
   });
   await idx._run("s1");
@@ -1001,7 +993,7 @@ test("indexer logs reindexed on re-summarize (version > 1)", async () => {
     client, config: mkConfig(), embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage: mkStorage(client), state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     logInfo: cap.log.info, logDebug: cap.log.debug, logWarn: cap.log.warn, logError: cap.log.error,
     git: mkGit(),
   });
@@ -1019,7 +1011,7 @@ test("indexer logs index_skipped after 3 fails (recordFail path)", async () => {
   const idx = new Indexer({
     client, config: mkConfig(), embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage: mkStorage(client), state: mkState(),
-    summarize: async () => ({}), projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    summarize: async () => ({}), projectKey: { hash: "k", source: "remote" },
     logInfo: cap.log.info, logDebug: cap.log.debug, logWarn: cap.log.warn, logError: cap.log.error,
   });
   await idx._run("s1");
@@ -1042,7 +1034,7 @@ test("indexer logs index_retryable on retryable error (error_class enum)", async
     },
     storage: mkStorage(client), state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     logInfo: cap.log.info, logDebug: cap.log.debug, logWarn: cap.log.warn, logError: cap.log.error,
     git: mkGit(),
   });
@@ -1061,7 +1053,7 @@ test("indexer logs session_closed on onSessionDeleted by default (flag OFF)", as
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage: mkStorage(null), state: mkState(),
     summarize: async () => ({}),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     logInfo: cap.log.info, logDebug: cap.log.debug, logWarn: cap.log.warn, logError: cap.log.error,
   });
   await idx.onSessionDeleted({ sessionID: "s1" });
@@ -1077,7 +1069,7 @@ test("indexer logs session_deleted on onSessionDeleted when flag ON (success pat
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage: mkStorage(null), state: mkState(),
     summarize: async () => ({}),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     logInfo: cap.log.info, logDebug: cap.log.debug, logWarn: cap.log.warn, logError: cap.log.error,
   });
   await idx.onSessionDeleted({ sessionID: "s1" });
@@ -1096,7 +1088,7 @@ test("indexer logs session_delete_failed (not session_deleted) when storage.dele
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(),
     summarize: async () => ({}),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     logInfo: cap.log.info, logDebug: cap.log.debug, logWarn: cap.log.warn, logError: cap.log.error,
   });
   await idx.onSessionDeleted({ sessionID: "s1" });
@@ -1115,7 +1107,7 @@ test("tombstone pre-check: tombstoned session does not write a record (spec §5)
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
   });
   idx._tombstones.add("s1");
@@ -1146,7 +1138,7 @@ test("tombstone post-upsert recheck deletes resurrected record (spec §5)", asyn
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
   });
   await idx._run("s1");
@@ -1155,39 +1147,26 @@ test("tombstone post-upsert recheck deletes resurrected record (spec §5)", asyn
   idx.dispose();
 });
 
-test("indexer logs backfill + backfill.done on onStartup (considered/indexed/skipped)", async () => {
+test("indexer onStartup (V2): warn session_list_not_available (audit-событий backfill больше нет)", async () => {
   const cap = captureLog();
-  const now = Date.now();
   const client = {
     upserts: [],
-    session: {
-      get: async ({ path }) => ({ data: { id: path.id, parentID: null, title: "st", time: { created: 1, updated: now - 1000 } } }),
-      messages: async () => ({ data: [{ info: {}, parts: [{ type: "text", text: "hi" }] }] }),
-      list: async () => ({ data: [
-        { id: "s1", parentID: null, time: { created: 1, updated: now - 1000 } },
-        { id: "s2", parentID: "p1", time: { created: 1, updated: now - 1000 } },
-        { id: "s3", parentID: null, time: { created: 1, updated: now - 1000 } },
-      ]}),
-    },
+    session: {},
   };
   const idx = new Indexer({
     client, config: { ...mkConfig({ idle_debounce_min: 0.001 }), backfill_max_per_start: 5 },
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
-    storage: mkStorage(client), state: { ...mkState(), isSkipped: async () => false },
+    storage: mkStorage(client), state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     logInfo: cap.log.info, logDebug: cap.log.debug, logWarn: cap.log.warn, logError: cap.log.error,
     git: mkGit(),
   });
   await idx.onStartup();
-  const bf = cap.calls.find(([lvl, m]) => m === "memory:backfill");
-  assert.ok(bf, "backfill logged");
-  assert.equal(bf[2].considered, 3);
-  assert.equal(bf[2].indexed, 2);
-  assert.equal(bf[2].skipped, 1);
-  const done = cap.calls.find(([lvl, m]) => m === "memory:backfill.done");
-  assert.ok(done, "backfill.done logged");
-  assert.ok(typeof done[2].duration_ms === "number");
+  assert.ok(cap.calls.some(([lvl, m]) => lvl === "warn" && String(m).includes("session_list_not_available")), "warn о недоступности session.list");
+  assert.ok(!cap.calls.some(([lvl, m]) => m === "memory:backfill"), "memory:backfill-событий нет (V2)");
+  assert.ok(!cap.calls.some(([lvl, m]) => m === "memory:backfill.done"), "memory:backfill.done-событий нет (V2)");
+  assert.equal(client.upserts.length, 0);
   idx.dispose();
 });
 
@@ -1204,7 +1183,7 @@ test("M-7: _branchContext bounded — oldest evicted on overflow (re-resolves)",
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git, mainline: "main",
     branchContextCap: 3,
   });
@@ -1236,7 +1215,6 @@ test("entry carries origin_remote and prefixes", async () => {
     storage, state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
     projectKey: { hash: "k", source: "remote" }, key: "microservices.sales", originRemote: "github.com/org/api",
-    confidentialPatterns: [],
     git: mkGit(),
   });
   await idx._run("s1");
@@ -1255,7 +1233,6 @@ test("single-segment namespace → prefixes empty; no originRemote → ''", asyn
     storage, state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
     projectKey: { hash: "k", source: "remote" }, key: "k",
-    confidentialPatterns: [],
     git: mkGit(),
   });
   await idx._run("s1");
@@ -1279,7 +1256,7 @@ function touchFile(filePath) {
 }
 
 function writePart(filePath) {
-  return { type: "tool", tool: "write", state: { status: "completed", input: { filePath } } };
+  return { type: "tool", tool: "write", state: { status: "completed", input: { path: filePath } } };
 }
 
 test("entry.artifacts extracted from completed write parts (Task 3)", async (t) => {
@@ -1296,7 +1273,7 @@ test("entry.artifacts extracted from completed write parts (Task 3)", async (t) 
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
     root,
     artifactGlobs: ["docs/**"],
@@ -1314,7 +1291,7 @@ test("re-summarize unions artifacts with existing (D6, Z1) and caps at 8 (Task 3
   for (const f of files) touchFile(f);
   let run = 0;
   const client = mkClient();
-  client.session.messages = async () => {
+  client.session.context = async () => {
     run++;
     const batch = run === 1 ? files.slice(0, 6) : files.slice(6);
     return { data: batch.map((f) => ({ info: {}, parts: [{ type: "text", text: "work" }, writePart(f)] })) };
@@ -1325,7 +1302,7 @@ test("re-summarize unions artifacts with existing (D6, Z1) and caps at 8 (Task 3
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
     root,
     artifactGlobs: ["docs/**"],
@@ -1367,7 +1344,7 @@ test("invariants: tool parts NOT in summarize transcript; artifacts NOT in embed
     },
     storage: mkStorage(client), state: mkState(),
     summarize: async ({ transcript }) => { capturedTranscript = transcript; return { title: "t", summary: "s", decisions: [] }; },
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
     root,
     artifactGlobs: ["docs/**"],
@@ -1396,7 +1373,7 @@ test("artifactGlobs default [] → no extraction (off by default, Task 3)", asyn
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
     root,
   });
@@ -1410,7 +1387,7 @@ test("union dedup is case-insensitive, extracted-first ordering (Task 3 deferred
   const file = path.join(root, "docs", "Spec.md");
   touchFile(file);
   const client = mkClient();
-  client.session.messages = async () => ({ data: [{ info: {}, parts: [{ type: "text", text: "work" }, writePart(file)] }] });
+  client.session.context = async () => ({ data: [{ info: {}, parts: [{ type: "text", text: "work" }, writePart(file)] }] });
   // existing.artifacts carries the case-variant of the extracted path.
   const storage = mkStorage(client, async () => ({ artifacts: ["docs/spec.md"] }));
   const idx = new Indexer({
@@ -1418,7 +1395,7 @@ test("union dedup is case-insensitive, extracted-first ordering (Task 3 deferred
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
     root,
     artifactGlobs: ["docs/**"],
@@ -1438,8 +1415,8 @@ test("union dedup is case-insensitive, extracted-first ordering (Task 3 deferred
 test("4.0.0 sessions: small_model из opencode-конфига → summarizerModel (mock summarize)", async () => {
   const client = {
     session: {
-      get: async ({ path }) => ({ data: { id: path.id, parentID: null, title: "st", time: { created: 1, updated: 100 } } }),
-      messages: async () => ({ data: [{ info: {}, parts: [{ type: "text", text: "hello" }] }] }),
+      get: async ({ sessionID }) => ({ data: { id: sessionID, parentID: null, title: "st", time: { created: 1, updated: 100 } } }),
+      context: async () => ({ data: [{ info: {}, parts: [{ type: "text", text: "hello" }] }] }),
       list: async () => ({ data: [] }),
     },
     config: { get: async () => ({ data: { small_model: "a/s" } }) },
@@ -1455,7 +1432,7 @@ test("4.0.0 sessions: small_model из opencode-конфига → summarizerMod
     client, config: mkConfig(), embeddings: mkMockEmbeddings(), storage,
     state: mkState(),
     summarize: async (args) => { captured = args; return { title: "t", summary: "s", decisions: [] }; },
-    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "khash", source: "remote" },
     git: mkGit(), root: "/tmp/root",
     logDebug: (ev, fields) => { if (ev === "memory:summarize.duration") durations.push(fields); },
     logWarn: () => {},
@@ -1470,7 +1447,7 @@ test("4.0.0 sessions: small_model из opencode-конфига → summarizerMod
 test("4.0.0 sessions: пустой резолв (нет client.config) → summarizerModel null + модель сессии в duration", async () => {
   // mkClient() без config — резолв → config_get_failed → fail-soft на модель сессии
   const client = mkClient();
-  client.session.messages = async () => ({ data: [{ info: { role: "assistant", providerID: "prov", modelID: "sess-m" }, parts: [{ type: "text", text: "hello" }] }] });
+  client.session.context = async () => ({ data: [{ info: { role: "assistant", providerID: "prov", modelID: "sess-m" }, parts: [{ type: "text", text: "hello" }] }] });
   const storage = { upserts: [], upsert: async () => {}, get: async () => null, search: async () => [], delete: async () => {}, stats: async () => ({ entries: 0 }) };
   let captured = null;
   const durations = [];
@@ -1479,7 +1456,7 @@ test("4.0.0 sessions: пустой резолв (нет client.config) → summa
     client, config: mkConfig(), embeddings: mkMockEmbeddings(), storage,
     state: mkState(),
     summarize: async (args) => { captured = args; return { title: "t", summary: "s", decisions: [] }; },
-    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "khash", source: "remote" },
     git: mkGit(), root: "/tmp/root",
     logDebug: (ev, fields) => { if (ev === "memory:summarize.duration") durations.push(fields); },
     logWarn: (ev, fields) => warns.push([ev, fields]),
@@ -1495,8 +1472,8 @@ test("4.0.0 sessions: пустой резолв (нет client.config) → summa
 test("4.0.0 sessions: invalid_model_ref → warn (симметрично, SF из Minor-1) + fail-soft", async () => {
   const client = {
     session: {
-      get: async ({ path }) => ({ data: { id: path.id, parentID: null, title: "st", time: { created: 1, updated: 100 } } }),
-      messages: async () => ({ data: [{ info: {}, parts: [{ type: "text", text: "hello" }] }] }),
+      get: async ({ sessionID }) => ({ data: { id: sessionID, parentID: null, title: "st", time: { created: 1, updated: 100 } } }),
+      context: async () => ({ data: [{ info: {}, parts: [{ type: "text", text: "hello" }] }] }),
       list: async () => ({ data: [] }),
     },
     config: { get: async () => ({ data: { model: "noslash" } }) },
@@ -1508,7 +1485,7 @@ test("4.0.0 sessions: invalid_model_ref → warn (симметрично, SF и�
     client, config: mkConfig(), embeddings: mkMockEmbeddings(), storage,
     state: mkState(),
     summarize: async (args) => { captured = args; return { title: "t", summary: "s", decisions: [] }; },
-    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "khash", source: "remote" },
     git: mkGit(), root: "/tmp/root",
     logWarn: (ev, fields) => warns.push([ev, fields]),
   });
@@ -1521,8 +1498,8 @@ test("4.0.0 sessions: invalid_model_ref → warn (симметрично, SF и�
 test("4.0.0 sessions: только agent.maestro.model → core-цепочка игнорирует → fallback модель сессии (D-4)", async () => {
   const client = {
     session: {
-      get: async ({ path }) => ({ data: { id: path.id, parentID: null, title: "st", time: { created: 1, updated: 100 } } }),
-      messages: async () => ({ data: [{ info: { role: "assistant", providerID: "prov", modelID: "sess-m" }, parts: [{ type: "text", text: "hello" }] }] }),
+      get: async ({ sessionID }) => ({ data: { id: sessionID, parentID: null, title: "st", time: { created: 1, updated: 100 } } }),
+      context: async () => ({ data: [{ info: { role: "assistant", providerID: "prov", modelID: "sess-m" }, parts: [{ type: "text", text: "hello" }] }] }),
       list: async () => ({ data: [] }),
     },
     config: { get: async () => ({ data: { agent: { maestro: { model: "c/m" } } } }) },
@@ -1534,7 +1511,7 @@ test("4.0.0 sessions: только agent.maestro.model → core-цепочка �
     client, config: mkConfig(), embeddings: mkMockEmbeddings(), storage,
     state: mkState(),
     summarize: async (args) => { captured = args; return { title: "t", summary: "s", decisions: [] }; },
-    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "khash", source: "remote" },
     git: mkGit(), root: "/tmp/root",
     logDebug: (ev, fields) => { if (ev === "memory:summarize.duration") durations.push(fields); },
   });
@@ -1548,8 +1525,8 @@ test("4.0.0 sessions: только agent.maestro.model → core-цепочка �
 test("4.0.0 sessions: model (не small_model) → source: model", async () => {
   const client = {
     session: {
-      get: async ({ path }) => ({ data: { id: path.id, parentID: null, title: "st", time: { created: 1, updated: 100 } } }),
-      messages: async () => ({ data: [{ info: {}, parts: [{ type: "text", text: "hello" }] }] }),
+      get: async ({ sessionID }) => ({ data: { id: sessionID, parentID: null, title: "st", time: { created: 1, updated: 100 } } }),
+      context: async () => ({ data: [{ info: {}, parts: [{ type: "text", text: "hello" }] }] }),
       list: async () => ({ data: [] }),
     },
     config: { get: async () => ({ data: { model: "main/m1" } }) },
@@ -1561,7 +1538,7 @@ test("4.0.0 sessions: model (не small_model) → source: model", async () => {
     client, config: mkConfig(), embeddings: mkMockEmbeddings(), storage,
     state: mkState(),
     summarize: async (args) => { captured = args; return { title: "t", summary: "s", decisions: [] }; },
-    projectKey: { hash: "khash", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "khash", source: "remote" },
     git: mkGit(), root: "/tmp/root",
     logDebug: (ev, fields) => { if (ev === "memory:summarize.duration") durations.push(fields); },
   });
@@ -1582,7 +1559,7 @@ test("#77: _pipeline returns outcome statuses (refactor contract)", async () => 
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
   });
   const ok = await idx._pipeline("s1");
@@ -1599,7 +1576,7 @@ test("#77: _pipeline → unattributed (write-gate, head '')", async () => {
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: { resolveBranch: async () => "", resolveHead: async () => "" },
   });
   const r = await idx._pipeline("s1");
@@ -1617,7 +1594,7 @@ test("#77: _pipeline → no_new_messages (пустой транскрипт)", a
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
   });
   const r = await idx._pipeline("s1");
@@ -1635,7 +1612,7 @@ test("#77: _pipeline → skip_service (parentID)", async () => {
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage: mkStorage(client), state: mkState(),
     summarize: async () => ({}),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
   });
   const r = await idx._pipeline("s1");
   assert.equal(r.status, "skip_service");
@@ -1655,7 +1632,7 @@ test("#77: _run delegates to _pipeline (regression: guards intact)", async () =>
       getLastAttempt: async () => Date.now(), // свежий attempt
     },
     summarize: async () => ({}),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
   });
   const origPipeline = idx._pipeline.bind(idx);
   idx._pipeline = async (...a) => { pipelineCalls++; return origPipeline(...a); };
@@ -1686,7 +1663,7 @@ test("#77 T3-1: upsert-ошибка → failed:storage_error + recordFail(class)
     storage,
     state: { ...mkState(), recordFail: async (sid, cls) => { fails.push([sid, cls]); } },
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
     setUnsaved: u.setUnsaved, clearUnsaved: u.clearUnsaved,
   });
@@ -1708,7 +1685,7 @@ test("#77 T3-2: non-retryable embed → failed:embedder_error", async () => {
     storage: mkStorage(client),
     state: { ...mkState(), recordFail: async (sid, cls) => { fails.push([sid, cls]); } },
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
     setUnsaved: u.setUnsaved, clearUnsaved: u.clearUnsaved,
   });
@@ -1732,7 +1709,7 @@ test("#77 T3-3: retryable embed → failed:retryable, БЕЗ recordFail и БЕ�
     storage: mkStorage(client),
     state: { ...mkState(), recordFail: async () => { failCalled = true; } },
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
     setUnsaved: u.setUnsaved, clearUnsaved: u.clearUnsaved,
   });
@@ -1752,7 +1729,7 @@ test("#77 T3-4: summarize-ошибка → failed:index_error", async () => {
     storage: mkStorage(client),
     state: { ...mkState(), recordFail: async (sid, cls) => { fails.push([sid, cls]); } },
     summarize: async () => { throw new Error("llm down"); },
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
   });
   const r = await idx._pipeline("s1");
@@ -1772,7 +1749,7 @@ test("#77 T3-5: session.get-ошибка (default-класс, F4) → failed:ind
     storage: mkStorage(client),
     state: { ...mkState(), recordFail: async (sid, cls) => { fails.push([sid, cls]); } },
     summarize: async () => ({}),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     setUnsaved: u.setUnsaved, clearUnsaved: u.clearUnsaved,
   });
   const r = await idx._pipeline("s1");
@@ -1790,7 +1767,7 @@ test("#77 T3-6: успешный индекс → clearUnsaved (G4)", async () =
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage: mkStorage(client), state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
     setUnsaved: u.setUnsaved, clearUnsaved: u.clearUnsaved,
   });
@@ -1810,7 +1787,7 @@ test("#77 T3-7: log memory:index_error несёт стадииный класс 
     embeddings: { embed: async () => new Float32Array([0.1]), dim: 1, modelId: "m" },
     storage, state: mkState(),
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
     logInfo: mk("info"), logDebug: mk("debug"), logWarn: mk("warn"), logError: mk("error"),
   });
@@ -1836,7 +1813,7 @@ test("#77 T3-8: upsert-retryable → failed:retryable без страйка (M-4
     storage,
     state: { ...mkState(), recordFail: async () => { failCalled = true; } },
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
     setUnsaved: u.setUnsaved, clearUnsaved: u.clearUnsaved,
   });
@@ -1857,7 +1834,7 @@ test("#77 T3-9: чужой errorClass вне allowlist → index_error (M-2)", a
     storage: mkStorage(client),
     state: { ...mkState(), recordFail: async (sid, cls) => { fails.push([sid, cls]); } },
     summarize: async () => ({}),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
   });
   const r = await idx._pipeline("s1");
   assert.equal(r.status, "failed:index_error");
@@ -1875,7 +1852,7 @@ test("#77 T3-10: non-object throw (throw \"str\") — не маскируетс�
     storage: mkStorage(client),
     state: { ...mkState(), recordFail: async (sid, cls) => { fails.push([sid, cls]); } },
     summarize: async () => ({}),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
   });
   const r = await idx._pipeline("s1");
   assert.equal(r.status, "failed:index_error");
@@ -1897,7 +1874,7 @@ test("#77 T3-11: guard-ошибка (isSkipped throw) → index_error + setUnsav
       recordFail: async (sid, cls) => { fails.push([sid, cls]); },
     },
     summarize: async () => ({}),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     setUnsaved: u.setUnsaved, clearUnsaved: u.clearUnsaved,
   });
   await idx._run("s1");
@@ -1922,7 +1899,7 @@ test("#77 T4-1: reindexSession bypasses retry-throttle (C1, свежий lastAtt
       clearSkip: async () => { calls.clearSkip++; },
     },
     summarize: async () => { calls.summarize++; return { title: "t", summary: "s", decisions: [] }; },
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
   });
   const r = await idx.reindexSession("s1");
@@ -1946,7 +1923,7 @@ test("#77 T4-2: reindexSession сбрасывает skip (isSkipped=true до в
       clearSkip: async (id) => { stateCalls.clearSkip.push(id); },
     },
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
   });
   const r = await idx.reindexSession("s1");
@@ -1965,7 +1942,7 @@ test("#77 T4-3: write-gate head '' → unattributed, запись НЕ созд�
     storage,
     state: { ...mkState(), clearSkip: async () => {} },
     summarize: async () => { summarizeCalls++; return { title: "t", summary: "s", decisions: [] }; },
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: { resolveBranch: async () => "", resolveHead: async () => "" },
   });
   const r = await idx.reindexSession("s1");
@@ -1983,7 +1960,7 @@ test("#77 T4-4: пустой транскрипт → no_new_messages (edge: з�
     storage: mkStorage(client),
     state: { ...mkState(), clearSkip: async () => {} },
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
   });
   const r = await idx.reindexSession("s1");
@@ -2007,7 +1984,7 @@ test("#77 T4-5: хранилище лежит → failed:storage_error + recordF
       recordFail: async (sid, cls) => { fails.push([sid, cls]); },
     },
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
     logInfo: mk("info"), logDebug: mk("debug"), logWarn: mk("warn"), logError: mk("error"),
   });
@@ -2028,7 +2005,7 @@ test("#77 T4-6: reindexSession не трогает this.running/queue (синх�
     storage: mkStorage(client),
     state: { ...mkState(), clearSkip: async () => {} },
     summarize: async () => ({ title: "t", summary: "s", decisions: [] }),
-    projectKey: { hash: "k", source: "remote" }, confidentialPatterns: [],
+    projectKey: { hash: "k", source: "remote" },
     git: mkGit(),
   });
   idx.running = true; // штатный _run в работе

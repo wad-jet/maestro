@@ -3,7 +3,7 @@ import { join, dirname, resolve } from "node:path";
 import { fileURLToPath, pathToFileURL } from "node:url";
 import { createRequire } from "node:module";
 import { mkdirSync, writeFileSync, readFileSync } from "node:fs";
-import { makeBoundedMap, readPluginVersion, getGitConfig, loadConfidentialConfig } from "../core.js";
+import { makeBoundedMap, readPluginVersion, getGitConfig } from "../core.js";
 import { loadMemoryConfig, resolveEffectiveKey, resolveIdentity, resolveEffectiveTextConfig, sanitizeDirName, resolveHistoryGlobs, resolveBackupConfig } from "./config.js";
 import { maskEntry, maskTranscript } from "./mask.js";
 import { ensureModule } from "./provision.js";
@@ -735,13 +735,6 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       logWarn("memory:git_anchor_unavailable", {});
     }
 
-    const confidentialPaths = maestroConfig?.confidential?.paths ?? [];
-    // Task 7 (v5.2, I2): resolved confidential-набор ДЛЯ АРТЕФАКТОВ —
-    // paths (с дефолтом docs/confidential/**) + builtin (применяется всегда).
-    // НЕ переиспользуем raw confidentialPaths — он для маскирования текста
-    // (title/summary/decisions); артефакты фильтруются полным набором.
-    const conf = loadConfidentialConfig(maestroConfig);
-    const artifactConfidentialPatterns = [...conf.paths, ...conf.builtin];
     // Task 4: deps-сборка для memory_reindex — historyGlobs (Task 1) с
     // inherit-семантикой; warn memory:config_fallback при soft-fallback
     // (RI-8: память не отключается) — однократно при регистрации.
@@ -751,29 +744,11 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
     // (spec §6: память не отключается, warn → memory:config_fallback при старте).
     const backupRes = resolveBackupConfig(config);
     if (backupRes.warn) logWarn("memory:config_fallback", {});
-    // M-2: init-warn — централизованный бэкенд + непустые confidential.paths
-    // (имена веток, минующие sanitize, уходят на сервер). Дублируется в выдаче
-    // memory_stats_detail / @maestro-memory (диагностика без логов).
-    const centralized = config.storage.type === "qdrant" || config.storage.type === "pgvector";
-    if (centralized && confidentialPaths.length > 0) {
-      logWarn("memory: unmasked_branch_metadata — имена веток (минуя sanitize) уходят на сервер");
-    }
     // Task 7: init-warn — delete_on_session_delete на централизованном бэкенде:
     // удаление записей по session.deleted уходит на сервер (необратимо, вне
     // локальной границы). Spec §3.6/§5.
     if (config.delete_on_session_delete && (config.storage?.type === "qdrant" || config.storage?.type === "pgvector")) {
       logWarn("memory:delete_on_session_delete_centralized", {});
-    }
-    // Task 5: init-warn — внешний (openai) embedder + непустые confidential.paths:
-    // запросы и контент (замаскированные best-effort) уходят генерическому вендору.
-    if (isOpenai && confidentialPaths.length > 0) {
-      logWarn("memory: external_embedder_unmasked_queries — запросы и контент (замаскированные best-effort) уходят генерическому внешнему вендору");
-    }
-    // Spec §3: doc-note при любом непустом confidential.paths (не только openai) —
-    // локальный аудит-лог может покинуть машину через шеринг/бэкап; author/branch-
-    // корреляция. Если paths пусты — note не пишется.
-    if (maestroConfig?.confidential?.paths?.length > 0) {
-      logWarn("memory:log_confidential_note", {});
     }
     // Task 6 (N1): per-project lastKey — смена namespace между запусками → warn.
     // Проектный state.json живёт в <memoryDataDir>/<root-hash>/state.json.
@@ -830,11 +805,8 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       // subtree-ноги (domain/related) молча ломаются.
       key: effectiveKey,
       originRemote: gitRemote ? canonicalizeRemote(gitRemote) : "",
-      confidentialPatterns: confidentialPaths,
-      // Task 7 (v5.2): artifact-links — globs из конфига + resolved
-      // confidential-набор для artifact-фильтра (I2, Z4).
+      // Task 7 (v5.2): artifact-links — globs allowlist из конфига.
       artifactGlobs: config.artifact_globs,
-      artifactConfidentialPatterns,
       // Task 3: аудит-лог-хелперы (memoryLog ?? log) — lifecycle-события
       // индексатора уходят в maestro-memory-*.log (spec §2.2).
       logInfo, logDebug, logWarn, logError,
@@ -877,8 +849,6 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
       // Task 4: аудит-лог-хелперы (memoryLog ?? log) — effectiveness-события
       // recall уходят в maestro-memory-*.log (spec §4.2/§4.4).
       logInfo, logDebug, logWarn,
-      // Task 6: паттерны confidential-путей — запрос маскируется перед embed.
-      confidentialPatterns: confidentialPaths,
       // Task 6: домен/related-ноги для recall.
       relatedKeys,
       domainTarget,
@@ -934,10 +904,10 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
           try {
             // I3: недоступен plugin-созданным сессиям саммаризатора.
             if (SESSIONS.has(ctx?.sessionID)) return "Инструмент недоступен для служебных сессий.";
-            // Task 6: маскируем запрос перед embed (best-effort). Полностью
-            // замаскированный запрос → short-circuit (ни embed, ни FTS).
-            const maskedQuery = maskTranscript(args.query, { confidentialPatterns: confidentialPaths });
-            if (!maskedQuery || maskedQuery.trim() === "[confidential]") return "Ничего не найдено.";
+            // Task 6: маскируем запрос перед embed (generic sanitize:
+            // key=value/.env/PII). Пустой запрос → short-circuit (ни embed, ни FTS).
+            const maskedQuery = maskTranscript(args.query);
+            if (!maskedQuery) return "Ничего не найдено.";
             const vec = await embeddings.embed(maskedQuery);
             const searchOpts = {
               top_k: args.limit ?? config.top_k,
@@ -945,10 +915,9 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
               key: effectiveKey,
               // C-1: pass the text query so the sqlite backend runs the FTS
               // hybrid path (not just vector-only). Mirrors memory_recall_preview.
-              // Task 6: searchOpts.query остаётся ОРИГИНАЛЬНЫМ запросом (raw) —
-              // маскируется только вход embed (egress на централизованных
-              // бэкендах вне scope).
-              query: args.query,
+              // Hybrid (parity с auto-recall): FTS-нога получает masked-запрос
+              // без <redacted>-плейсхолдеров (OR-терм шума).
+              query: maskedQuery.replace(/<redacted>/g, " ").trim(),
             };
             // Guard (spec §3.3): пустые/нулевые фильтры не отсекают выдачу.
             // author — только непустая после trim строка; в SQL уходит НЕИЗМЕНЁННОЕ
@@ -1214,7 +1183,6 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
                   preview = extractArtifacts(messages, {
                     root,
                     globs: config.artifact_globs,
-                    confidentialPatterns: artifactConfidentialPatterns,
                   });
                 }
                 sessionSnapshot.set(c.session_id, {
@@ -1245,7 +1213,6 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
                   git: reindexGit,
                   mainline: mainline?.name ?? null,
                   records,
-                  artifactConfidentialPatterns,
                 });
                 for (const f of scan.features) {
                   gitSnapshot.set(f.specPath, f);
@@ -1320,8 +1287,6 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
               const artifactsDeps = {
                 client, storage, root, key: effectiveKey,
                 artifactGlobs: config.artifact_globs,
-                artifactConfidentialPatterns,
-                confidentialPatterns: confidentialPaths,
                 embedModelId: embeddings.modelId,
               };
               for (const sid of selected) {
@@ -1420,7 +1385,6 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
                   git: reindexGit,
                   mainline: mainline?.name ?? null,
                   records,
-                  artifactConfidentialPatterns,
                 });
                 const byPath = new Map(scan.features.map((f) => [f.specPath, f]));
                 features = [...specs].map((p) => byPath.get(p)).filter(Boolean);
@@ -1440,9 +1404,9 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
               const lines = [];
               for (const f of selected) {
                 try {
-                  // I2: маскирование спеки ДО summarize (raw-набор).
+                  // Маскирование спеки ДО summarize (generic sanitize).
                   const specText = readFileSync(join(root, f.specPath), "utf8");
-                  const masked = maskTranscript(specText, { confidentialPatterns: confidentialPaths });
+                  const masked = maskTranscript(specText);
                   if (!masked) {
                     agg.skipped.mask_empty = (agg.skipped.mask_empty ?? 0) + 1;
                     lines.push(`- ${f.specPath}: skip (mask_empty)`);
@@ -1466,8 +1430,6 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
                     originRemote: gitRemote ? canonicalizeRemote(gitRemote) : "",
                     embedModelId: embeddings.modelId,
                     embeddings: (text) => embeddings.embed(text),
-                    confidentialPatterns: confidentialPaths,
-                    artifactConfidentialPatterns,
                   }, f, llm);
                   if (res.status === "indexed") agg.indexed++;
                   else agg.already_indexed++;
@@ -1566,13 +1528,7 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
               lines.push(JSON.stringify({ ...e, embedding: Array.from(emb) }));
             }
             writeFileSync(path, lines.join("\n") + "\n");
-            // I-3: предупреждение о локальной границе — в возвращаемой строке,
-            // НЕ в файле (файл остаётся чистым JSONL для round-trip).
-            const confidentialPaths = maestroConfig?.confidential?.paths ?? [];
-            const warning = confidentialPaths.length > 0
-              ? "\nвнимание: данные замаскированы, но могут покинуть машину — осознанный выбор"
-              : "";
-            return `Экспортировано ${entries.length} записей в ${path}${warning}`;
+            return `Экспортировано ${entries.length} записей в ${path}`;
           } catch (err) {
             return `memory_export failed: ${err instanceof Error ? err.message : String(err)}`;
           }
@@ -1604,16 +1560,15 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
                 return `memory_import: строка ${i + 1} невалидна: не JSON`;
               }
               // I-2: валидируем против storage.dim/modelId (не embeddings — null до первого embed).
-              // Task 7 (v5.2): artifacts-валидация + CR-3 drop (resolved confidential-набор).
-              const reason = validateImportEntry(parsed, storage, effectiveKey, artifactConfidentialPatterns);
+              // Artifacts сохраняются как есть (globs-allowlist — только
+              // извлечение в индексере; import без доп. фильтров).
+              const reason = validateImportEntry(parsed, storage, effectiveKey);
               if (reason) return `memory_import: строка ${i + 1} невалидна: ${reason}`;
               entries.push(parsed);
             }
-            // Атомарность: все строки валидны → применяем. Сначала re-mask.
-            // Task 7 (v5.2, F2): maskEntry фильтрует artifacts через resolved
-            // confidential-набор (artifactConfidentialPatterns); маскирование
-            // текста остаётся на raw confidentialPaths (I2).
-            const masked = entries.map((e) => maskEntry(e, { confidentialPatterns: maestroConfig?.confidential?.paths ?? [], artifactConfidentialPatterns }));
+            // Атомарность: все строки валидны → применяем. Сначала re-mask
+            // (generic sanitize текстовых полей).
+            const masked = entries.map((e) => maskEntry(e));
             // I-4: replace выполняется только после успешной валидации всех строк.
             if (args.replace === true) {
               await storage.deleteByFilter({ key: effectiveKey });
@@ -1640,10 +1595,10 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             // I3: недоступен plugin-созданным сессиям саммаризатора.
             if (SESSIONS.has(ctx?.sessionID)) return "memory_recall_preview недоступен для служебных сессий.";
             if (!args?.query) return "memory_recall_preview: укажите query";
-            // Task 6: маскируем запрос перед embed (best-effort). Полностью
-            // замаскированный запрос → short-circuit (ни embed, ни FTS).
-            const maskedQuery = maskTranscript(args.query, { confidentialPatterns: confidentialPaths });
-            if (!maskedQuery || maskedQuery.trim() === "[confidential]") return "Ничего не найдено.";
+            // Task 6: маскируем запрос перед embed (generic sanitize:
+            // key=value/.env/PII). Пустой запрос → short-circuit (ни embed, ни FTS).
+            const maskedQuery = maskTranscript(args.query);
+            if (!maskedQuery) return "Ничего не найдено.";
             const vec = await embeddings.embed(maskedQuery);
             // M-3 (§7): тот же scope-логика, что у memory_search (дефолтный
             // scope; branch_context=false → project). mainline unresolved →
@@ -1652,7 +1607,9 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
               top_k: config.top_k,
               min_score: config.min_score,
               key: effectiveKey,
-              query: args.query,
+              // Hybrid (parity с memory_search/auto-recall): masked-запрос
+              // без <redacted>-плейсхолдеров.
+              query: maskedQuery.replace(/<redacted>/g, " ").trim(),
               // Task 6: subtree-ноги — те же, что у memory_search/recall
               // (parity: preview показывает те же ноги, что и реальный recall).
               subtree: subtreeLegs(),
@@ -1862,19 +1819,6 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
             if (!sets.mainline) {
               out.push("Диагностика: mainline_unresolved — branch-context flat (нет резолвнутого mainline)");
             }
-            // unmasked_branch_metadata — централизованный бэкенд + непустые
-            // confidential.paths (имена веток, минующие sanitize, уходят на сервер).
-            const centralized = config.storage.type === "qdrant" || config.storage.type === "pgvector";
-            if (centralized && confidentialPaths.length > 0) {
-              out.push("Диагностика: unmasked_branch_metadata — имена веток (минуя sanitize) уходят на сервер");
-            }
-            // external_embedder_unmasked_queries — внешний (openai) embedder +
-            // непустые confidential.paths (запросы/контент, замаскированные
-            // best-effort, уходят генерическому внешнему вендору). Spec §5.2:
-            // init-warn дублируется в выдаче @maestro-memory.
-            if (isOpenai && confidentialPaths.length > 0) {
-              out.push("Диагностика: external_embedder_unmasked_queries — запросы и контент (замаскированные best-effort) уходят генерическому внешнему вендору");
-            }
             return out.join("\n");
           } catch (err) {
             return `memory_stats_detail failed: ${err instanceof Error ? err.message : String(err)}`;
@@ -1900,12 +1844,12 @@ export async function registerMemoryHooks({ client, config: maestroConfig, log, 
               return rows.map((r) => `${r.file}  ts=${r.ts}  size=${r.size}B  jsonl=${r.jsonl ? "ok" : "MISSING"} manifest=${r.manifest_ok ? "ok" : "MISSING"}`).join("\n");
             }
             if (args.action === "backup") {
-              const r = await runBackup({ storage, backupCfg: backupRes, effectiveKey, storageType: config.storage.type, modelId: storage.modelId, dim: storage.dim, pluginVersion: version, maskPatterns: { confidential: confidentialPaths, artifacts: artifactConfidentialPatterns }, log: logInfo, gitRoot: root });
+              const r = await runBackup({ storage, backupCfg: backupRes, effectiveKey, storageType: config.storage.type, modelId: storage.modelId, dim: storage.dim, pluginVersion: version, log: logInfo, gitRoot: root });
               return `OK: ${r.file}\nзаписей: ${r.count}${r.warn ? `\nWARN: ${gitignoreWarnText(r.warn)}` : ""}`;
             }
             if (args.action === "restore") {
               if (!args.file) return "memory_backup: restore требует file (уточните через action: \"list\")";
-              const r = await runRestore({ storage, backupCfg: backupRes, effectiveKey, storageType: config.storage.type, modelId: storage.modelId, dim: storage.dim, file: resolve(args.file), replace: args.replace === true, channel: "tool", pluginVersion: version, maskPatterns: { confidential: confidentialPaths, artifacts: artifactConfidentialPatterns }, log: logInfo, gitRoot: root });
+              const r = await runRestore({ storage, backupCfg: backupRes, effectiveKey, storageType: config.storage.type, modelId: storage.modelId, dim: storage.dim, file: resolve(args.file), replace: args.replace === true, channel: "tool", pluginVersion: version, log: logInfo, gitRoot: root });
               return `OK: restore (${r.mode}), записей: ${r.count}, перезаписано: ${r.overwritten}, добавлено: ${r.added}${r.warn ? `\nWARN: ${r.warn}` : ""}`;
             }
             return "memory_backup: неизвестный action (backup | restore | list)";

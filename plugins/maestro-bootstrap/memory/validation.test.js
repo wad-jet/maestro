@@ -112,14 +112,13 @@ test("validateImportEntry: artifacts опционален → без artifacts n
   assert.equal(validateImportEntry(e, storage8, "k1"), null);
 });
 
-// ── CR-3: confidential artifact drop (mutation) ────────────────────────────
+// ── CR-3 удалён: confidential-дропа артефактов при импорте нет ─────────────
 
-test("validateImportEntry: CR-3 — confidential artifact дропается, запись null", () => {
+test("validateImportEntry: путь, матчащий старый confidential-паттерн, сохраняется (CR-3 удалён)", () => {
   const e = baseEntry({ artifacts: ["docs/confidential/x.md"] });
-  const patterns = ["docs/confidential/**"];
-  const reason = validateImportEntry(e, storage8, "k1", patterns);
-  assert.equal(reason, null, "запись должна пройти валидацию");
-  assert.deepStrictEqual(e.artifacts, [], "confidential артефакт дропнут");
+  const reason = validateImportEntry(e, storage8, "k1");
+  assert.equal(reason, null, "запись проходит валидацию");
+  assert.deepStrictEqual(e.artifacts, ["docs/confidential/x.md"], "артефакт не дропается");
 });
 
 // ── Mutation contract: absent artifacts → empty array ──────────────────────

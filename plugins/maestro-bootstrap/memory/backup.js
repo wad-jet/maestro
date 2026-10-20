@@ -282,8 +282,8 @@ export function gitIgnoreFallback(relPath, gitRoot) {
 }
 
 /**
- * Бэкап (spec §5.1): preflight → scan(SCAN_FIELDS) → maskEntry (текущий
- * confidential-набор) → JSONL+манифест → gitignore-warn → retention → audit.
+ * Бэкап (spec §5.1): preflight → scan(SCAN_FIELDS) → maskEntry (sanitize) →
+ * JSONL+манифест → gitignore-warn → retention → audit.
  * Ошибки — throw (обёртки tool/CLI форматируют).
  *
  * @param {object} opts
@@ -293,14 +293,13 @@ export function gitIgnoreFallback(relPath, gitRoot) {
  * @param {string} opts.modelId — модель эмбеддингов
  * @param {number} opts.dim — размерность эмбеддингов
  * @param {string} opts.pluginVersion — версия плагина
- * @param {object} opts.maskPatterns — { confidential: string[], artifacts: string[] }
  * @param {object} opts.backupCfg — { path: string, retention: number }
  * @param {(msg: string, extra: object) => void} [opts.log] — опциональный логгер
  * @param {string?} [opts.gitRoot] — корень git-репозитория
  * @param {() => number} [opts.now] — детерминированный таймстамп
  * @returns {{ file: string, manifest: string, count: number, warn: string|null }}
  */
-export async function runBackup({ storage, backupCfg, effectiveKey, storageType, modelId, dim, pluginVersion, maskPatterns, log, gitRoot, now = () => Date.now() }) {
+export async function runBackup({ storage, backupCfg, effectiveKey, storageType, modelId, dim, pluginVersion, log, gitRoot, now = () => Date.now() }) {
   if (storageType !== "sqlite") throw new Error("memory_backup: v1 — только storage.type sqlite");
 
   const rows = await storage.scan({ key: effectiveKey, fields: SCAN_FIELDS });
@@ -309,10 +308,7 @@ export async function runBackup({ storage, backupCfg, effectiveKey, storageType,
   // normalizeEmbedding ДО serialisation: sqlite отдаёт BLOB как Buffer/
   // Uint8Array — JSON-массив чисел обязателен для roundtrip (см. функцию).
   const entries = rows.map((r) =>
-    maskEntry(
-      { ...r, embedding: normalizeEmbedding(r.embedding) },
-      { confidentialPatterns: maskPatterns.confidential, artifactConfidentialPatterns: maskPatterns.artifacts }
-    )
+    maskEntry({ ...r, embedding: normalizeEmbedding(r.embedding) })
   );
 
   const ts = now();
@@ -353,13 +349,12 @@ export async function runBackup({ storage, backupCfg, effectiveKey, storageType,
  *   при replace:true не проходят cli-гейты (валидация — debt)
  * @param {boolean} [opts.isTty=false] — true если CLI интерактивный терминал
  * @param {string?} [opts.confirmNamespace=null] — namespace для подтверждения replace (cli)
- * @param {object} opts.maskPatterns — { confidential: string[], artifacts: string[] }
  * @param {string?} [opts.pluginVersion] — версия плагина для warn-only сравнения
  * @param {(msg: string, extra: object) => void} [opts.log] — опциональный логгер
  * @param {string?} [opts.gitRoot] — корень git-репозитория
  * @returns {{ count: number, mode: "merge"|"replace", overwritten: number, added: number, warn: string|null }}
  */
-export async function runRestore({ storage, backupCfg, effectiveKey, storageType, modelId, dim, file, replace = false, channel = "tool", isTty = false, confirmNamespace = null, maskPatterns, pluginVersion, log, gitRoot }) {
+export async function runRestore({ storage, backupCfg, effectiveKey, storageType, modelId, dim, file, replace = false, channel = "tool", isTty = false, confirmNamespace = null, pluginVersion, log, gitRoot }) {
   if (storageType !== "sqlite") throw new Error("memory_backup: v1 — только storage.type sqlite");
   const dir = resolveBackupDir(backupCfg.path, gitRoot);
 
@@ -405,7 +400,7 @@ export async function runRestore({ storage, backupCfg, effectiveKey, storageType
     } catch {
       throw new Error(`memory_backup: строка ${i + 1} невалидна: не JSON`);
     }
-    const reason = validateImportEntry(parsed, storage, effectiveKey, maskPatterns.artifacts);
+    const reason = validateImportEntry(parsed, storage, effectiveKey);
     if (reason) throw new Error(`memory_backup: строка ${i + 1} невалидна: ${reason}`);
     entries.push(parsed);
   }
@@ -420,7 +415,7 @@ export async function runRestore({ storage, backupCfg, effectiveKey, storageType
   }
 
   const existing = new Set((await storage.scan({ key: effectiveKey, fields: ["session_id"] })).map((r) => r.session_id));
-  const masked = entries.map((e) => maskEntry(e, { confidentialPatterns: maskPatterns.confidential, artifactConfidentialPatterns: maskPatterns.artifacts }));
+  const masked = entries.map((e) => maskEntry(e));
   // sqlite upsert читает e.embedding.buffer/byteOffset (TypedArray → BLOB);
   // из JSONL embedding — plain number[] → без конверсии Buffer.from(undefined)
   // crash. Паритет с memory_import (index.js: `new Float32Array(e.embedding)`

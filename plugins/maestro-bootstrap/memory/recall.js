@@ -5,7 +5,7 @@ import { applyBranchScope, computeBranchSets } from "./membership.js";
 import { maskTranscript } from "./mask.js";
 
 export class Recall {
-  constructor({ embeddings, storage, topK, minScore, key, getUserMessageCount, branchContext = true, git = null, root = null, mainline = null, log = null, confidentialPatterns = [], logInfo = () => {}, logDebug = () => {}, logWarn = () => {}, relatedKeys = [], domainTarget = null, domainRecall = true, projectHash = null }) {
+  constructor({ embeddings, storage, topK, minScore, key, getUserMessageCount, branchContext = true, git = null, root = null, mainline = null, log = null, logInfo = () => {}, logDebug = () => {}, logWarn = () => {}, relatedKeys = [], domainTarget = null, domainRecall = true, projectHash = null }) {
     this.embeddings = embeddings;
     this.storage = storage;
     this.topK = topK;
@@ -21,9 +21,6 @@ export class Recall {
     this.relatedKeys = relatedKeys;
     this.domainTarget = domainTarget;
     this.domainRecall = domainRecall;
-    // Task 6: паттерны confidential-путей — запрос маскируется перед embed
-    // (best-effort, line-level); полностью замаскированный запрос → short-circuit.
-    this.confidentialPatterns = confidentialPatterns;
     // Task 6: дефолтный scope для auto-recall (branch_context=false → project).
     this.branchContext = branchContext;
     this.git = git;
@@ -57,22 +54,17 @@ export class Recall {
     try {
       const count = await this.getUserMessageCount(sessionID);
       if (count !== 1) return;
-      // Task 6: маскируем запрос перед embed (best-effort). Полностью
-      // замаскированный запрос (однострочный → "[confidential]") → short-circuit
-      // всего поиска: ни embed, ни FTS (follow-up 3).
-      const masked = maskTranscript(text, { confidentialPatterns: this.confidentialPatterns });
-      if (!masked || masked.trim() === "[confidential]") { this.buffer.set(sessionID, []); return; }
-      // Hybrid (spec §3.2): FTS-нога получает masked-запрос без строк-плейсхолдеров —
-      // токен плейсхолдера (OR-терм после AND→OR) матчаил бы все замаскированные
-      // записи. Вход эмбеддера не меняется (полный masked). Пустой FTS-текст →
-      // векторный fallback (storage сам пропускает пустой query).
+      // Task 6: маскируем запрос перед embed (best-effort: sanitize —
+      // key=value/.env/PII). Пустой masked → short-circuit всего поиска:
+      // ни embed, ни FTS (follow-up 3).
+      const masked = maskTranscript(text);
+      if (!masked) { this.buffer.set(sessionID, []); return; }
+      // Hybrid (spec §3.2): FTS-нога получает masked-запрос без
+      // инлайн-плейсхолдеров — токен <redacted> (sanitize, key=value/
+      // whole-fragment) становился бы OR-термом, матчащим все записи с такой
+      // редакцией. Вход эмбеддера не меняется (полный masked). Пустой
+      // FTS-текст → векторный fallback (storage сам пропускает пустой query).
       const ftsQuery = masked
-        .split("\n")
-        .filter((l) => l.trim() !== "[confidential]")
-        .join("\n")
-        // follow-up (финальное ревью): инлайн-плейсхолдер <redacted> (sanitize,
-        // key=value/whole-fragment) тоже становится OR-термом, матчащим все
-        // записи с такой редакцией — тот же класс шума, что и [confidential]-строки.
         .replace(/<redacted>/g, " ")
         .trim();
       // Task 4: замер embed+search (effectiveness-события, spec §4.2).
