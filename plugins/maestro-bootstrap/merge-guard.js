@@ -50,12 +50,13 @@ export function detectGuardCommand(command) {
  * @param {string} root  Корень проекта.
  * @param {string} sessionID  sessionID текущей сессии.
  * @param {number} nowMs  Текущее время, ms (инъектируемо для тестов).
- * @param {{ttlSec: number}} conf  Конфиг гварда (TTL в секундах).
+ * @param {{ttlSec: number, headPin: boolean}} conf  Конфиг гварда (TTL в секундах, head-pin flag).
+ * @param {{ execGit?: (args: string[]) => string }} [opts]  DI seam (для head-pin).
  * @returns {{allow: boolean, reason: string}}  Reasons: marker_ok | no_marker |
  *   marker_bad_json | marker_session_mismatch | marker_incomplete |
- *   marker_expired | guard_error.
+ *   marker_expired | marker_head_mismatch | guard_error.
  */
-export function checkMergeMarker(root, sessionID, nowMs, conf) {
+export function checkMergeMarker(root, sessionID, nowMs, conf, { execGit } = {}) {
   try {
     const markerPath = path.join(root, ".maestro", "gates", `merge-${sessionID}.json`);
     let raw;
@@ -84,6 +85,23 @@ export function checkMergeMarker(root, sessionID, nowMs, conf) {
       return { allow: false, reason: "marker_incomplete" };
     }
     if (nowMs - data.ts > conf.ttlSec * 1000) return { allow: false, reason: "marker_expired" };
+
+    // Head-pin validation (v2 marker): если маркер содержит head и head_pin включен
+    // HEAD обязан совпадать с маркером (detect post-approve mutation).
+    // Маркер без поля head (v1) игнорируем head-pin (backward compat).
+    if (conf.headPin && typeof data.head === "string") {
+      let currentHead;
+      try {
+        currentHead = (typeof execGit === "function" ? execGit : defaultExecGit)(
+          ["-C", root, "rev-parse", "HEAD"]);
+      } catch {
+        return { allow: false, reason: "guard_error" };
+      }
+      if (currentHead.trim() !== data.head.trim()) {
+        return { allow: false, reason: "marker_head_mismatch" };
+      }
+    }
+
     return { allow: true, reason: "marker_ok" };
   } catch {
     return { allow: false, reason: "guard_error" };

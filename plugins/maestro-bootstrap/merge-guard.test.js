@@ -257,6 +257,69 @@ describe("merge-guard checkMergeMarker", () => {
   });
 });
 
+describe("merge-guard checkMergeMarker: head-pin (v2)", () => {
+  let root;
+  const conf = { enabled: true, ttlSec: 600, headPin: true };
+  const confNoHeadPin = { enabled: true, ttlSec: 600, headPin: false };
+  const now = 1_000_000_000_000;
+  // SHA при создании маркера
+  const markerHead = "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa";
+  // Фейковый HEAD (различается)
+  const differentHead = "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb";
+
+  before(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "mg-headpin-"));
+  });
+
+  after(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  function writeMarkerV2(sessionID, headField) {
+    const gates = path.join(root, ".maestro", "gates");
+    fs.mkdirSync(gates, { recursive: true });
+    const marker = { sessionID, ts: now - 1000, gate: 17, decision: "a" };
+    if (headField !== undefined) marker.head = headField;
+    fs.writeFileSync(
+      path.join(gates, `merge-${sessionID}.json`),
+      JSON.stringify(marker), "utf8");
+  }
+
+  const execGitMatch = { execGit: () => markerHead };
+  const execGitDiff = { execGit: () => differentHead };
+  const execGitThrow = { execGit: () => { throw new Error("git boom"); } };
+
+  it("HEAD == marker.head, head_pin=true → allow/marker_ok", () => {
+    writeMarkerV2("hp-ok", markerHead);
+    assert.deepEqual(checkMergeMarker(root, "hp-ok", now, conf, execGitMatch),
+      { allow: true, reason: "marker_ok" });
+  });
+
+  it("HEAD != marker.head, head_pin=true → deny/marker_head_mismatch", () => {
+    writeMarkerV2("hp-mismatch", markerHead);
+    assert.deepEqual(checkMergeMarker(root, "hp-mismatch", now, conf, execGitDiff),
+      { allow: false, reason: "marker_head_mismatch" });
+  });
+
+  it("v1 marker (no head field), head_pin=true → allow (backward compat)", () => {
+    writeMarkerV2("hp-v1", undefined);
+    assert.deepEqual(checkMergeMarker(root, "hp-v1", now, conf, execGitDiff),
+      { allow: true, reason: "marker_ok" });
+  });
+
+  it("v1 marker, head_pin=false → allow (no head-pin at all)", () => {
+    writeMarkerV2("hp-nopin", undefined);
+    assert.deepEqual(checkMergeMarker(root, "hp-nopin", now, confNoHeadPin, execGitDiff),
+      { allow: true, reason: "marker_ok" });
+  });
+
+  it("v2 marker + execGit throws → deny/guard_error", () => {
+    writeMarkerV2("hp-err", markerHead);
+    assert.deepEqual(checkMergeMarker(root, "hp-err", now, conf, execGitThrow),
+      { allow: false, reason: "guard_error" });
+  });
+});
+
 describe("merge-guard resolveMergeGuardConf", () => {
   it("undefined config → defaults", () => {
     assert.deepEqual(resolveMergeGuardConf(undefined),
