@@ -1,6 +1,6 @@
 # maestro
 
-[![Version](https://img.shields.io/badge/version-6.7.0-blue)](package.json)
+[![Version](https://img.shields.io/badge/version-6.8.0-blue)](package.json)
 [![License: Apache--2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
 [![Tests](https://img.shields.io/badge/tests-passing-green)](#plugin-tests)
 

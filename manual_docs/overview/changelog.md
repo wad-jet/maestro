@@ -9,6 +9,10 @@
 
 ## [Unreleased]
 
+## [2026-10-22]
+
+> **Версия 6.8.0** — docker/maestro-setup-docker.sh: полный бутстрап docker-serve (self-clone, wizard, non-interactive, lifecycle)
+
 ## [2026-10-21]
 
 > **Версия 6.7.0** — Retro pipeline improvements P1–P7: авто-зона вопросов в авто-режимах, семантика push ≠ merge, статус-дисциплина/resume, batched task-review с ruling, git-гигиена оркестратора, 18.5-auto без молчаливого пропуска, полный диф на гейте 17
