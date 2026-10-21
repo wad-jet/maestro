@@ -93,12 +93,10 @@ self_clone() {
     git clone --quiet --depth 1 https://github.com/wad-jet/maestro.git "$target"
   fi
 
-  # Re-invoke из клона
+  # Re-invoke из клона (self-clone)
   log "self-clone: re-invoke из клона ..."
-  local self_path="$SCRIPT_DIR/maestro-setup-docker.sh"
   local self_name
-  self_name="$(basename "$0")"
-  shift "$#"  # сбрасываем аргументы
+  self_name="$(basename "$BASH_SOURCE")"
   exec bash "$target/docker/$self_name" "$@"
 }
 
@@ -549,7 +547,7 @@ main() {
 
   # --- 2. Parse --flags ---
   if [ ${#flags_args[@]} -gt 0 ]; then
-    parse_args "${flags_args[@]}"
+    parse_flags "${flags_args[@]}"
   fi
 
   # --- 3. Parse command ---
