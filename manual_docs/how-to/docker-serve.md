@@ -67,6 +67,42 @@ OC_PROVIDERS_JSON='{"myprov":{"npm":"@ai-sdk/openai-compatible","options":{"base
 
 Провайдер ID `myprov` автоматически попадает в allowlist из `OC_PROVIDERS_JSON` (entrypoint генерирует allow для всех provider-ID, видимых в env).
 
+## 2.5 Настройка аккаунтов провайдеров
+
+Модели задаются через `OC_*_MODEL` (провайдер/id, например `akash/Qwen3.6-35B-A3B`), но **сам провайдер нужно зарегистрировать** через `opencode auth import`.
+
+### Встроенные провайдеры (akash, openai, anthropic)
+
+Входят с `@opencode/cli` (установлен в образе). Аккаунт настраивается **внутри контейнера**:
+
+```bash
+# 1. Подключиться к контейнеру
+docker exec -it maestro-<project> sh
+
+# 2. Зарегистрировать аккаунт (внутри контейнера)
+opencode auth import akash sk-xxxxxxxxxxxxxxxx
+
+# 3. Выйти
+exit
+```
+
+> **Важно:** `opencode auth import` выполняется внутри контейнера, а не на хосте. Данные аккаунта живут в `/data/` (named volume `oc-data-<project>`), переживают рестарты.
+
+> **Безопасность:** API-ключи предпочтительно хранить в `opencode auth import` (credential store), а не в `.env.docker` через `{env:VAR}`.
+
+### Кастомные провайдеры
+
+Для провайдеров, которых нет в built-in (например, корпоративный OpenAI-compatible):
+
+```bash
+# Добавить в .env.docker
+OC_PROVIDERS_JSON='{"myprov":{"npm":"@ai-sdk/openai-compatible","options":{"baseURL":"https://api.company.com/v1","apiKey":"{env:INTERNAL_KEY}"},"models":{"my-model":{}}}}'
+```
+
+Provider ID `myprov` автоматически попадает в allowlist: entrypoint парсит `OC_PROVIDERS_JSON` и генерирует `provider.use` allow для всех видимых ID (встроенный механизм, не требует ручной правки конфигурации).
+
+> **Ограничение:** `{env:VAR}` в `OC_PROVIDERS_JSON` поддерживает только `OC_*_MODEL` и `OPENCODE_*` (review spec §2.8). Для остальных секретов используйте `opencode auth import` после старта контейнера.
+
 ---
 
 ## 3. Режим A: self-contained

@@ -218,6 +218,42 @@ OC_SANITIZER_MODEL="akash/Qwen3.6-35B-A3B"
 
 ---
 
+## 🔐 Настройка провайдеров
+
+Модели задаются через `OC_*_MODEL` (провайдер/id, например `akash/Qwen3.6-35B-A3B`), но **сам провайдер нужно зарегистрировать**.
+
+### Встроенные провайдеры (akash, openai, anthropic)
+
+Идут с `@opencode/cli` (установлен в Dockerfile, не требуют отдельной установки). Аккаунт настраивается через `auth import` **внутри контейнера**:
+
+```bash
+# 1. Подключиться к контейнеру
+docker exec -it maestro-<project> sh
+
+# 2. Зарегистрировать аккаунт провайдера (внутри контейнера)
+opencode auth import akash sk-xxxxxxxxxxxxxxxx
+
+# 3. Выйти из контейнера
+exit
+```
+
+> **Важно:** `opencode auth import` выполняется внутри контейнера, а не на хосте. Данные аккаунта живут в `/data/` (named volume `oc-data`), переживают рестарты.
+
+### Кастомные провайдеры
+
+Для провайдеров, которых нет в built-in (например, корпоративный OpenAI-compatible):
+
+```bash
+# Добавить в .env.docker
+OC_PROVIDERS_JSON='{"myprov":{"npm":"@ai-sdk/openai-compatible","options":{"baseURL":"https://api.company.com/v1","apiKey":"{env:INTERNAL_KEY}"},"models":{"my-model":{}}}}'
+```
+
+Provider ID `myprov` автоматически попадает в allowlist: entrypoint парсит `OC_PROVIDERS_JSON` и генерирует `provider.use` allow для всех видимых ID (встроенный механизм, не требует ручной правки конфигурации).
+
+> **Ограничение:** `{env:VAR}` в `OC_PROVIDERS_JSON` поддерживает только `OC_*_MODEL` и `OPENCODE_*` (review spec §2.8). Для остальных секретов используйте `opencode auth import` после старта контейнера.
+
+---
+
 ## ⚠️ Известные ограничения
 
 | Ограничение | Детали |

@@ -64,6 +64,8 @@ OPENCODE_PASSWORD=dev-password opencode --server http://127.0.0.1:4096
 
 **Результат:** спека + план в `docs/superpowers/`, ветка в `origin`, логи в `~/maestro-state/hello/logs/`.
 
+> **Настройка провайдера:** в примере используется `akash/Qwen3.6-35B-A3B`. Аккаунт akash регистрируется через `docker exec -it maestro-hello sh` → `opencode auth import akash sk-...`. Подробнее — [Настройка провайдеров](../../manual_docs/how-to/docker-setup-script.md#-настройка-провайдеров).
+
 ---
 
 ## Полный запуск (maestro-setup-docker.sh)
