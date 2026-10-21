@@ -78,52 +78,11 @@ curl -fsSL https://raw.githubusercontent.com/wad-jet/maestro/main/docker/maestro
   | bash -s --
 ```
 
-Скрипт сам: клонирует репо maestro, создаст папки, задаст вопросы про REPO_URL/token/модель,
-соберёт образ и запустит контейнер. В конце напечатает команду для подключения.
+> Полная инструкция — [Docker: полный запуск через maestro-setup-docker.sh](../../manual_docs/how-to/docker-setup-script.md).
 
-### Команды (из клона репо)
+### Команды (кратко)
 
-```bash
-./docker/maestro-setup-docker.sh              # setup — полный бутстрап с нуля
-./docker/maestro-setup-docker.sh up           # запуск (авто-build)
-./docker/maestro-setup-docker.sh down         # остановить и удалить
-./docker/maestro-setup-docker.sh logs         # логи (-f tail)
-./docker/maestro-setup-docker.sh health       # проверка healthcheck
-./docker/maestro-setup-docker.sh ps           # список контейнеров
-./docker/maestro-setup-docker.sh build        # пересобрать образ
-./docker/maestro-setup-docker.sh help         # справка
-```
-
-### Неинтерактивный режим (CI)
-
-```bash
-./docker/maestro-setup-docker.sh setup \
-  --project myapp \
-  --repo-url https://github.com/you/myapp.git \
-  --git-token "$PAT" \
-  --password "mypass" \
-  --model "akash/Qwen3.6-35B-A3B" \
-  --non-interactive
-```
-
-### Dry-run
-
-```bash
-./docker/maestro-setup-docker.sh setup --dry-run
-# покажет план, не выполняя build/up
-```
-
-### Переменные окружения
-
-| Переменная | По умолчанию | Описание |
-|---|---|---|
-| `PROJECT_NAME` | `default` | имя проекта (для контейнера и volumes) |
-| `PROJECT_PORT` | `4096` | порт хоста |
-| `IMAGE_TAG` | `6.x` | тег образа |
-| `MAESTRO_STATE` | `~/maestro-state/<project>` | хост-путь `/maestro` |
-| `MAESTRO_CONF` | `~/maestro-confidential/<project>` | хост-путь `.confidential` |
-| `DOCKER_MODE` | `A` | `A` (self-contained) или `B` (live-mount) |
-| `MODEL` | `akash/Qwen3.6-35B-A3B` | модель для всех агентов |
+`up` — запуск, `down` — стоп, `logs` — логи, `health` — проверка, `ps` — список, `build` — пересборка. Без команды = `setup` (полный бутстрап).
 
 ---
 

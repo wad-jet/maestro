@@ -37,7 +37,8 @@ primary-сессии.
 - [Выбор и замена модели эмбеддингов](how-to/choose-embedding-model.md) — критерии, рекомендуемые модели, настройка, переиндексация (пошагово), командный сценарий, чек-лист ошибок, проверка
 - [Учёт стоимости сессий (cost tracking)](how-to/enable-cost-tracking.md) — цены моделей в конфиге opencode, «Стоимость» в TUI и feedback-отчёте
 - [Бенчмарк maestro](how-to/benchmark.md) — фиксированное задание в песочнице, отчёт и свёрка с прошлыми результатами
-- [Docker: запуск через compose](how-to/docker-serve.md) — запуск maestro в контейнере (режимы A/B)
+- [Docker: полный запуск через maestro-setup-docker.sh](how-to/docker-setup-script.md) — полный бутстрап docker-serve (curl, wizard, non-interactive, управление контейнером)
+- [Docker: запуск через compose](how-to/docker-serve.md) — подробная документация по docker-serve (режимы A/B, hardening, backup, сценарии)
 - [Docker MCP-интеграция](how-to/docker-mcp.md) — подключение maestro через Docker
 - [Восстановление не сохранённой сессии (память)](how-to/restore-unsaved-session-memory.md) — аварийное восстановление данных memory layer
 
