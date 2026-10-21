@@ -14,7 +14,7 @@ import {
   writeFileSync,
   mkdirSync,
 } from "node:fs";
-import { join, dirname } from "node:path";
+import { join, dirname, basename } from "node:path";
 import { fileURLToPath } from "node:url";
 import { tmpdir } from "node:os";
 
@@ -1248,6 +1248,53 @@ test("docs-drift real repo: 0 нарушений", () => {
     [],
     `Найдено ${totalViolations} нарушений дрейфа документации:\n${all.join("\n")}`
   );
+});
+
+// D9: link integrity — no broken internal links in README.md, README.en.md, manual_docs/**/*.md
+test('D9: link integrity (broken links)', () => {
+  const repoRoot = TMP_DIR;
+  const violations = [];
+
+  // Collect all MD files
+  const mdFiles = [];
+  // README.md at root
+  const readmePath = join(repoRoot, "README.md");
+  if (existsSync(readmePath)) mdFiles.push(readmePath);
+  // README.en.md at root
+  const readmeEnPath = join(repoRoot, "README.en.md");
+  if (existsSync(readmeEnPath)) mdFiles.push(readmeEnPath);
+  // manual_docs/**/*.md
+  function walkDir(dir) {
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const p = join(dir, e.name);
+      if (e.isDirectory()) walkDir(p);
+      else if (e.name.endsWith(".md")) mdFiles.push(p);
+    }
+  }
+  const mdDir = join(repoRoot, "manual_docs");
+  if (existsSync(mdDir)) walkDir(mdDir);
+
+  // Parse each file for local markdown links
+  const linkRx = /\[([^\]]*)\]\(([^)#\s]+)(?:#[^)\s]*)?\)/g;
+  for (const f of mdFiles) {
+    const text = readFileSync(f, "utf8");
+    let m;
+    while ((m = linkRx.exec(text))) {
+      const link = m[2];
+      // Skip external URLs, anchors only, headers only
+      if (/^https?:/.test(link)) continue;
+      if (/^#/.test(link)) continue;
+      // Resolve relative to the file's directory
+      const target = join(dirname(f), link);
+      if (!existsSync(target)) {
+        violations.push(`${basename(f)} → ${link}`);
+      }
+    }
+  }
+
+  if (violations.length > 0) {
+    throw new Error(`${violations.length} broken links found: ${violations.join(", ")}`);
+  }
 });
 
 after(() => {
