@@ -1,6 +1,6 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": ["/opt/maestro/plugins/maestro-bootstrap/index.js", "/opt/superpowers"],
+  "plugins": ["/opt/maestro/plugins/maestro-bootstrap", "/opt/superpowers"],
   "update": "disable",
   "default_agent": "build",
   "subagent_depth": 1,

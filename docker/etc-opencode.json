@@ -42,7 +42,7 @@
   ],
   "policies": [
     { "action": "integration.use", "resource": "plugin:*", "effect": "deny" },
-    { "action": "integration.use", "resource": "plugin:/opt/maestro/plugins/maestro-bootstrap/index.js", "effect": "allow" },
+    { "action": "integration.use", "resource": "plugin:/opt/maestro/plugins/maestro-bootstrap", "effect": "allow" },
     { "action": "integration.use", "resource": "plugin:/opt/superpowers", "effect": "allow" },
     { "action": "integration.use", "resource": "mcp:*", "effect": "deny" },
     { "action": "provider.use", "resource": "*", "effect": "deny" },
