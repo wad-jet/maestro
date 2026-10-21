@@ -232,7 +232,9 @@ Trusted по роли: `custodian` + `sanitizer` (обоим доступен `d
 ## Deployment с Docker
 
 maestro можно запустить через Docker:
-- `docker-compose.yml` — локальный образ с pre-installed maestro
+- `docker/maestro-setup-docker.sh` — полный бутстрап с нуля: preflight, wizard, build, up (6.8.0)
+- `docker-compose.yml` — compose-файл с volumes и healthcheck
+- `docker/README.md` — quick start (hello world за 5 минут)
 - `docker-serve` — запуск maestro в контейнере (режимы A/B)
 - [Подробнее](manual_docs/how-to/docker-serve.md)
 

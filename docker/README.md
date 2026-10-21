@@ -66,6 +66,67 @@ OPENCODE_PASSWORD=dev-password opencode --server http://127.0.0.1:4096
 
 ---
 
+## Полный запуск (maestro-setup-docker.sh)
+
+`docker/maestro-setup-docker.sh` — полный бутстрап: подготовка хоста, сборка образа, запуск контейнера.
+От чистой машины до работающего контейнера — одной командой.
+
+### Быстрый старт (curl-one-liner)
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/wad-jet/maestro/main/docker/maestro-setup-docker.sh \
+  | bash -s --
+```
+
+Скрипт сам: клонирует репо maestro, создаст папки, задаст вопросы про REPO_URL/token/модель,
+соберёт образ и запустит контейнер. В конце напечатает команду для подключения.
+
+### Команды (из клона репо)
+
+```bash
+./docker/maestro-setup-docker.sh              # setup — полный бутстрап с нуля
+./docker/maestro-setup-docker.sh up           # запуск (авто-build)
+./docker/maestro-setup-docker.sh down         # остановить и удалить
+./docker/maestro-setup-docker.sh logs         # логи (-f tail)
+./docker/maestro-setup-docker.sh health       # проверка healthcheck
+./docker/maestro-setup-docker.sh ps           # список контейнеров
+./docker/maestro-setup-docker.sh build        # пересобрать образ
+./docker/maestro-setup-docker.sh help         # справка
+```
+
+### Неинтерактивный режим (CI)
+
+```bash
+./docker/maestro-setup-docker.sh setup \
+  --project myapp \
+  --repo-url https://github.com/you/myapp.git \
+  --git-token "$PAT" \
+  --password "mypass" \
+  --model "akash/Qwen3.6-35B-A3B" \
+  --non-interactive
+```
+
+### Dry-run
+
+```bash
+./docker/maestro-setup-docker.sh setup --dry-run
+# покажет план, не выполняя build/up
+```
+
+### Переменные окружения
+
+| Переменная | По умолчанию | Описание |
+|---|---|---|
+| `PROJECT_NAME` | `default` | имя проекта (для контейнера и volumes) |
+| `PROJECT_PORT` | `4096` | порт хоста |
+| `IMAGE_TAG` | `6.x` | тег образа |
+| `MAESTRO_STATE` | `~/maestro-state/<project>` | хост-путь `/maestro` |
+| `MAESTRO_CONF` | `~/maestro-confidential/<project>` | хост-путь `.confidential` |
+| `DOCKER_MODE` | `A` | `A` (self-contained) или `B` (live-mount) |
+| `MODEL` | `akash/Qwen3.6-35B-A3B` | модель для всех агентов |
+
+---
+
 ## Управление контейнером
 
 ### Проверка здоровья
