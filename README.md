@@ -1,5 +1,9 @@
 # maestro
 
+[![Version](https://img.shields.io/badge/version-6.7.0-blue)](package.json)
+[![License: Apache--2.0](https://img.shields.io/badge/License-Apache--2.0-blue.svg)](LICENSE)
+[![Tests](https://img.shields.io/badge/tests-passing-green)](#plugin-tests)
+
 Система оркестрации сквозной реализации фич и багфиксов в целевом приложении
 через OpenCode. Pipeline от дизайна до мержа: ** brainstorm → spec → plan → SDD → review → docs ** —
 с HITL-гейтами на ключевых точках.
@@ -7,6 +11,11 @@
 > Это **authoring-репозиторий** (источник скиллов, агентов, команд). Нет приложения —
 > установите скриптом `maestro-install.sh` (глобальный или проектный режим; см.
 > [Документация](manual_docs/index.md)).
+
+```
+design → brainstorm → spec → plan → SDD → review → docs
+brainstorm ↑    spec-review ↑    final-review ↑
+```
 
 ## Что это
 
@@ -17,7 +26,7 @@
 | **Субагенты** | `custodian`, `haiku`, `sonnet`, `opus`, `fable`, `reviewer`, `sanitizer` |
 | **Плагин** | `maestro-bootstrap` — санитайзинг промптов, audit-логи |
 | **Память (опционально)** | Memory layer плагина — векторная память сессий (`memory_search`, авто-вспоминание); включается секцией `memory` в `maestro.json` |
-| **Команды** | `/maestro-init`, `/maestro-setup`, `/maestro-design`, `/regression`, `/test-agents` |
+| **Команды** | `/maestro-init`, `/maestro-setup`, `/maestro-design`, `/regression`, `/test-agents`, `/maestro-version`, `/maestro-assistant`, `@maestro-memory`, `@maestro-memory-report`, `@maestro-memory-prune`, `@maestro-memory-reindex`, `@maestro-memory-backup`, `@maestro-benchmark`, `@maestro-feedback-report` |
 
 ## Maestro vs superpowers напрямую
 
@@ -220,6 +229,13 @@ Trusted по роли: `custodian` + `sanitizer` (обоим доступен `d
 краткости — **шаг 14 (обновление пользовательской документации) обязателен**
 для всех категорий (для простых пропускаются только шаги 8-10).
 
+## Deployment с Docker
+
+maestro можно запустить через Docker:
+- `docker-compose.yml` — локальный образ с pre-installed maestro
+- `docker-serve` — preview-сервер для документации
+- [Подробнее](manual_docs/how-to/docker-serve.md)
+
 ## Память maestro (опциональный модуль)
 
 Плагин `maestro-bootstrap` содержит опциональный **memory layer** — векторную
@@ -239,12 +255,16 @@ qdrant/pgvector. Управление: `memory_forget`, `memory_export`/`memory_
 ## Docs
 
 Полная документация по скиллу `maestro` — в [Diátaxis-справочнике](manual_docs/index.md).
+- [Журнал изменений](manual_docs/overview/changelog.md) — история версий
+- [Роадмап](docs/roadmap.md) — текущие задачи и приоритеты
 
 ## Структура
 
 ```
 agents/            — конфиги субагентов (custodian, haiku, sonnet, opus, fable, reviewer, sanitizer)
 commands/          — @command конфиги (/maestro-init, /maestro-setup, /regression, /test-agents)
+docker/            — Docker-конфигурация (docker-compose.yml, Dockerfile)
+docker-compose.yml — compose-файл для локального запуска
 plugins/           — maestro-bootstrap (ESM-плагин: sanitize, observability)
 skills/            — скиллы (maestro, maestro-setup, maestro-design, manual-docs — generic user-docs)
 specs/             — дизайн-спеки и план-ы этого репо (never in root!)
@@ -261,6 +281,10 @@ node --test plugins/maestro-bootstrap/index.test.js
 # или:
 npm test
 ```
+
+## License
+
+[Apache-2.0](LICENSE) — используйте, модифицируйте, distribute.
 
 ---
 
