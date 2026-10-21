@@ -1,0 +1,54 @@
+{
+  "$schema": "https://opencode.ai/config.json",
+  "plugins": ["/opt/maestro/plugins/maestro-bootstrap/index.js", "/opt/superpowers"],
+  "update": "disable",
+  "default_agent": "build",
+  "subagent_depth": 1,
+  "worktree": { "directory": "./.worktrees" },
+  "agents": {
+    "build": {
+      "model": "{env:OC_BUILD_MODEL}",
+      "permissions": [{ "action": "maestro_config", "resource": "*", "effect": "ask" }]
+    },
+    "plan":  {
+      "model": "{env:OC_PLAN_MODEL}",
+      "permissions": [{ "action": "maestro_config", "resource": "*", "effect": "ask" }]
+    },
+    "custodian": {
+      "model": "{env:OC_CUSTODIAN_MODEL}",
+      "permissions": [
+        { "action": "read",  "resource": "*", "effect": "allow" },
+        { "action": "read",  "resource": "docs/confidential/*", "effect": "allow" },
+        { "action": "read",  "resource": ".confidential/**", "effect": "allow" },
+        { "action": "glob",  "resource": "docs/confidential/*", "effect": "allow" },
+        { "action": "glob",  "resource": ".confidential/**", "effect": "allow" },
+        { "action": "grep",  "resource": "docs/confidential/*", "effect": "allow" },
+        { "action": "grep",  "resource": ".confidential/**", "effect": "allow" },
+        { "action": "edit",  "resource": "*", "effect": "deny" },
+        { "action": "shell", "resource": "*", "effect": "deny" },
+        { "action": "subagent", "resource": "*", "effect": "deny" },
+        { "action": "maestro_config", "resource": "*", "effect": "deny" }
+      ]
+    },
+    "sanitizer": {
+      "model": "{env:OC_SANITIZER_MODEL}",
+      "permissions": [
+        { "action": "read",  "resource": "docs/confidential/*", "effect": "allow" },
+        { "action": "read",  "resource": ".confidential/**", "effect": "allow" },
+        { "action": "glob",  "resource": "docs/confidential/*", "effect": "allow" },
+        { "action": "glob",  "resource": ".confidential/**", "effect": "allow" },
+        { "action": "grep",  "resource": "docs/confidential/*", "effect": "allow" },
+        { "action": "grep",  "resource": ".confidential/**", "effect": "allow" },
+        { "action": "edit",  "resource": "*", "effect": "deny" },
+        { "action": "shell", "resource": "*", "effect": "deny" },
+        { "action": "subagent", "resource": "*", "effect": "deny" },
+        { "action": "maestro_config", "resource": "*", "effect": "deny" }
+      ]
+    },
+    "opus":    { "model": "{env:OC_OPUS_MODEL}" },
+    "sonnet":  { "model": "{env:OC_SONNET_MODEL}" },
+    "haiku":   { "model": "{env:OC_HAIKU_MODEL}" },
+    "fable":   { "model": "{env:OC_FABLE_MODEL}" },
+    "reviewer":{ "model": "{env:OC_REVIEWER_MODEL}" }
+  }
+}
