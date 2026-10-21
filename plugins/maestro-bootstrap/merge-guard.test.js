@@ -4,6 +4,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { detectGuardCommand, checkMergeMarker, resolveMergeGuardConf,
+  detectCheckoutCommand, checkBranchBaseGuard,
   detectCommitCommand, hasMainlineSwitch, checkCommitGuard } from "./merge-guard.js";
 import { createBootstrapPlugin } from "./core.js";
 
@@ -257,38 +258,44 @@ describe("merge-guard checkMergeMarker", () => {
 });
 
 describe("merge-guard resolveMergeGuardConf", () => {
-  it("undefined config → { enabled: true, ttlSec: 600, commitGuard: 'warn' }", () => {
-    assert.deepEqual(resolveMergeGuardConf(undefined), { enabled: true, ttlSec: 600, commitGuard: "warn" });
+  it("undefined config → defaults", () => {
+    assert.deepEqual(resolveMergeGuardConf(undefined),
+      { enabled: true, ttlSec: 600, commitGuard: "warn", branchBaseGuard: "warn", headPin: false });
   });
 
   it("explicit enabled: false", () => {
     assert.deepEqual(resolveMergeGuardConf({ merge_guard: { enabled: false } }),
-      { enabled: false, ttlSec: 600, commitGuard: "warn" });
+      { enabled: false, ttlSec: 600, commitGuard: "warn", branchBaseGuard: "warn", headPin: false });
   });
 
   it("non-numeric ttlSec → 600", () => {
     assert.deepEqual(resolveMergeGuardConf({ merge_guard: { ttlSec: "x" } }),
-      { enabled: true, ttlSec: 600, commitGuard: "warn" });
+      { enabled: true, ttlSec: 600, commitGuard: "warn", branchBaseGuard: "warn", headPin: false });
   });
 
   it("valid ttlSec → kept", () => {
     assert.deepEqual(resolveMergeGuardConf({ merge_guard: { ttlSec: 120 } }),
-      { enabled: true, ttlSec: 120, commitGuard: "warn" });
+      { enabled: true, ttlSec: 120, commitGuard: "warn", branchBaseGuard: "warn", headPin: false });
   });
 
   it("commit_guard: 'deny' → commitGuard 'deny'", () => {
     assert.deepEqual(resolveMergeGuardConf({ merge_guard: { commit_guard: "deny" } }),
-      { enabled: true, ttlSec: 600, commitGuard: "deny" });
+      { enabled: true, ttlSec: 600, commitGuard: "deny", branchBaseGuard: "warn", headPin: false });
   });
 
   it("commit_guard: 'off' → commitGuard 'off'", () => {
     assert.deepEqual(resolveMergeGuardConf({ merge_guard: { commit_guard: "off" } }),
-      { enabled: true, ttlSec: 600, commitGuard: "off" });
+      { enabled: true, ttlSec: 600, commitGuard: "off", branchBaseGuard: "warn", headPin: false });
   });
 
   it("commit_guard: 'bogus' → soft-fallback 'warn'", () => {
     assert.deepEqual(resolveMergeGuardConf({ merge_guard: { commit_guard: "bogus" } }),
-      { enabled: true, ttlSec: 600, commitGuard: "warn" });
+      { enabled: true, ttlSec: 600, commitGuard: "warn", branchBaseGuard: "warn", headPin: false });
+  });
+
+  it("valid ttlSec + all new keys", () => {
+    assert.deepEqual(resolveMergeGuardConf({ merge_guard: { ttlSec: 120, head_pin: true } }),
+      { enabled: true, ttlSec: 120, commitGuard: "warn", branchBaseGuard: "warn", headPin: true });
   });
 });
 
@@ -388,5 +395,149 @@ describe("merge-guard hook integration (tool.execute.before)", () => {
       },
       /merge-guard:deny.*git merge/,
     );
+  });
+});
+
+// --- Branch-base guard tests ---
+describe("merge-guard detectCheckoutCommand", () => {
+  it("git checkout -b new-branch → checkout-b", () => {
+    assert.deepEqual(detectCheckoutCommand("git checkout -b feature/x"), { kind: "checkout-b" });
+  });
+
+  it("git checkout -b new-branch main → checkout-b", () => {
+    assert.deepEqual(detectCheckoutCommand("git checkout -b feature/x main"), { kind: "checkout-b" });
+  });
+
+  it("git checkout -b --orphan new-branch → null (skip orphan)", () => {
+    assert.equal(detectCheckoutCommand("git checkout -b --orphan new-branch"), null);
+  });
+
+  it("git worktree add -b new-branch dir → worktree-add-b", () => {
+    assert.deepEqual(detectCheckoutCommand("git worktree add -b feature/x .worktrees/feature/x"), { kind: "worktree-add-b" });
+  });
+
+  it("git worktree add -b new-branch dir main → worktree-add-b (has base)", () => {
+    assert.deepEqual(detectCheckoutCommand("git worktree add -b feature/x .worktrees/feature/x main"), { kind: "worktree-add-b" });
+  });
+
+  it("git checkout -m → null (not -b)", () => {
+    assert.equal(detectCheckoutCommand("git checkout -m"), null);
+  });
+
+  it("git checkout feature/x → null (no -b)", () => {
+    assert.equal(detectCheckoutCommand("git checkout feature/x"), null);
+  });
+
+  it("echo git checkout -b → null", () => {
+    assert.equal(detectCheckoutCommand('echo "git checkout -b x"'), null);
+  });
+
+  it("empty / non-string → null", () => {
+    assert.equal(detectCheckoutCommand(""), null);
+    assert.equal(detectCheckoutCommand(undefined), null);
+  });
+});
+
+describe("merge-guard checkBranchBaseGuard", () => {
+  let root;
+  const confWarn = { enabled: true, branchBaseGuard: "warn", ttlSec: 600 };
+  const confDeny = { enabled: true, branchBaseGuard: "deny", ttlSec: 600 };
+  const confOff = { enabled: true, branchBaseGuard: "off", ttlSec: 600 };
+
+  before(() => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "mg-bb-"));
+  });
+
+  after(() => {
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  const exec = (out) => ({ execGit: () => out });
+  const throwExec = { execGit: () => { throw new Error("git boom"); } };
+
+  it("mainline branch → allow/mainline_base (no explicit base needed)", () => {
+    assert.deepEqual(
+      checkBranchBaseGuard("git checkout -b new-branch", "checkout-b", root, root, confWarn, exec("main")),
+      { allow: true, reason: "mainline_base" });
+  });
+
+  it("feature branch + explicit base → allow/explicit_base", () => {
+    assert.deepEqual(
+      checkBranchBaseGuard("git checkout -b new-branch main", "checkout-b", root, root, confWarn, exec("feature/x")),
+      { allow: true, reason: "explicit_base" });
+  });
+
+  it("feature branch + no explicit base, warn mode → allow/branch_base_warning", () => {
+    assert.deepEqual(
+      checkBranchBaseGuard("git checkout -b new-branch", "checkout-b", root, root, confWarn, exec("feature/x")),
+      { allow: true, reason: "branch_base_warning" });
+  });
+
+  it("feature branch + no explicit base, deny mode → deny/branch_base_violation", () => {
+    assert.deepEqual(
+      checkBranchBaseGuard("git checkout -b new-branch", "checkout-b", root, root, confDeny, exec("feature/x")),
+      { allow: false, reason: "branch_base_violation" });
+  });
+
+  it("worktree add -b with explicit base → allow", () => {
+    assert.deepEqual(
+      checkBranchBaseGuard("git worktree add -b feature/x .wt feature/x", "worktree-add-b", root, root, confWarn, exec("feature/x")),
+      { allow: true, reason: "explicit_base" });
+  });
+
+  it("worktree add -b without base → warn", () => {
+    assert.deepEqual(
+      checkBranchBaseGuard("git worktree add -b feature/x .wt", "worktree-add-b", root, root, confWarn, exec("feature/x")),
+      { allow: true, reason: "branch_base_warning" });
+  });
+
+  it("off mode → allow/no check", () => {
+    assert.deepEqual(
+      checkBranchBaseGuard("git checkout -b new-branch", "checkout-b", root, root, confOff, exec("feature/x")),
+      { allow: true, reason: "branch_base_warning" });
+  });
+
+  it("execGit throws, deny → deny/guard_error (fail-closed)", () => {
+    assert.deepEqual(
+      checkBranchBaseGuard("git checkout -b new-branch", "checkout-b", root, root, confDeny, throwExec),
+      { allow: false, reason: "guard_error" });
+  });
+
+  it("execGit throws, warn → allow/guard_error", () => {
+    assert.deepEqual(
+      checkBranchBaseGuard("git checkout -b new-branch", "checkout-b", root, root, confWarn, throwExec),
+      { allow: true, reason: "guard_error" });
+  });
+});
+
+describe("merge-guard resolveMergeGuardConf: new keys", () => {
+  it("branch_base_guard: 'deny' → kept", () => {
+    assert.deepEqual(resolveMergeGuardConf({ merge_guard: { branch_base_guard: "deny" } }),
+      { enabled: true, ttlSec: 600, commitGuard: "warn", branchBaseGuard: "deny", headPin: false });
+  });
+
+  it("branch_base_guard: 'off' → kept", () => {
+    assert.deepEqual(resolveMergeGuardConf({ merge_guard: { branch_base_guard: "off" } }),
+      { enabled: true, ttlSec: 600, commitGuard: "warn", branchBaseGuard: "off", headPin: false });
+  });
+
+  it("branch_base_guard: bogus → soft-fallback 'warn'", () => {
+    assert.deepEqual(resolveMergeGuardConf({ merge_guard: { branch_base_guard: "bogus" } }),
+      { enabled: true, ttlSec: 600, commitGuard: "warn", branchBaseGuard: "warn", headPin: false });
+  });
+
+  it("head_pin: true → true", () => {
+    assert.deepEqual(resolveMergeGuardConf({ merge_guard: { head_pin: true } }),
+      { enabled: true, ttlSec: 600, commitGuard: "warn", branchBaseGuard: "warn", headPin: true });
+  });
+
+  it("head_pin: false → false", () => {
+    assert.deepEqual(resolveMergeGuardConf({ merge_guard: { head_pin: false } }),
+      { enabled: true, ttlSec: 600, commitGuard: "warn", branchBaseGuard: "warn", headPin: false });
+  });
+
+  it("head_pin missing → false (default)", () => {
+    assert.deepEqual(resolveMergeGuardConf({ merge_guard: {} }),
+      { enabled: true, ttlSec: 600, commitGuard: "warn", branchBaseGuard: "warn", headPin: false });
   });
 });

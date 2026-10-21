@@ -28,7 +28,7 @@ import { registerCommunicationHooks } from "./communication.js";
 import { registerRestrictedDataHooks, checkSection12Drift } from "./restricted-data.js";
 import { registerFeedbackReportHooks } from "./feedback-report.js";
 import { registerPipelineStatusHooks, makePipelineStatusTool } from "./pipeline-status.js";
-import { detectGuardCommand, checkMergeMarker, resolveMergeGuardConf, detectCommitCommand, checkCommitGuard } from "./merge-guard.js";
+import { detectGuardCommand, checkMergeMarker, resolveMergeGuardConf, detectCheckoutCommand, checkBranchBaseGuard, detectCommitCommand, checkCommitGuard } from "./merge-guard.js";
 
 const LOG_LEVELS = { debug: 10, info: 20, warn: 30, error: 40 };
 
@@ -1189,6 +1189,33 @@ export async function createBootstrapPlugin(ctx) {
             const err = new Error(
               `[merge-guard:deny] git ${kind === "merge" ? "merge" : "push (mainline)"} заблокирован: ` +
               `нет явного HITL-аппрува гейта 17. Обсуди с пользователем гейт 17, после явного (a) создай маркер и повтори.`
+            );
+            err.mergeGuard = true;
+            throw err;
+          }
+        }
+      }
+
+      // Branch-base guard: prevent `git checkout -b` / `git worktree add -b`
+      // from non-mainline without explicit base argument.
+      // warn (default) — allow + log + one-time notice;
+      // deny — fail-closed throw; off — disabled.
+      if (input.tool === "shell" && mergeGuardConf.enabled && mergeGuardConf.branchBaseGuard !== "off") {
+        const cmd = typeof event.input?.command === "string" ? event.input.command : "";
+        const detected = detectCheckoutCommand(cmd);
+        if (detected) {
+          const workdir = typeof event.input?.workdir === "string" ? event.input.workdir : root;
+          const res = checkBranchBaseGuard(cmd, detected.kind, root, workdir, mergeGuardConf);
+          const base = { sessionID: input.sessionID, callID: input.callID, kind: detected.kind, reason: res.reason };
+          if (res.allow) {
+            if (res.reason === "branch_base_warning") {
+              log.warn("branch_base_guard", { action: "warn", ...base });
+              warnedCommitSessions.add(input.sessionID);
+            }
+          } else {
+            log.warn("branch_base_guard", { action: "deny", ...base });
+            const err = new Error(
+              `[branch-base-guard:deny] Создание ветки заблокировано: текущая ветка не mainline без явного base.`
             );
             err.mergeGuard = true;
             throw err;

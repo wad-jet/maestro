@@ -94,20 +94,101 @@ export function checkMergeMarker(root, sessionID, nowMs, conf) {
  * Извлечение конфига merge guard из распарсенного `maestro.json`.
  * `merge_guard.enabled` — boolean (default true); `ttlSec` — число > 0
  * (default 600); `commit_guard` (R4) — "warn" | "deny" | "off" (default
- * "warn"). Не-валидные значения → дефолт (soft-fallback).
+ * "warn"); `branch_base_guard` — "warn" | "deny" | "off" (default "warn");
+ * `head_pin` — boolean (default false). Не-валидные значения → дефолт (soft-fallback).
  * @param {object} [maestroConf]  Распарсенный `maestro.json`.
- * @returns {{enabled: boolean, ttlSec: number, commitGuard: string}}
+ * @returns {{enabled: boolean, ttlSec: number, commitGuard: string, branchBaseGuard: string, headPin: boolean}}
  */
 export function resolveMergeGuardConf(maestroConf) {
   const section = maestroConf?.merge_guard;
   const sec = section && typeof section === "object" ? section : {};
   const commitGuard = typeof sec.commit_guard === "string"
     && ["warn", "deny", "off"].includes(sec.commit_guard) ? sec.commit_guard : "warn";
+  const branchBaseGuard = typeof sec.branch_base_guard === "string"
+    && ["warn", "deny", "off"].includes(sec.branch_base_guard) ? sec.branch_base_guard : "warn";
+  const headPin = typeof sec.head_pin === "boolean" ? sec.head_pin : false;
   return {
     enabled: typeof sec.enabled === "boolean" ? sec.enabled : true,
     ttlSec: typeof sec.ttlSec === "number" && sec.ttlSec > 0 ? sec.ttlSec : 600,
     commitGuard,
+    branchBaseGuard,
+    headPin,
   };
+}
+
+
+/**
+ * Детект команд, требующих branch-base guard:
+ * - `git checkout -b <branch>` (без --orphan/-t)
+ * - `git worktree add -b <branch> <dir>`
+ * Возвращает `{ kind: "checkout-b"|"worktree-add-b" }` или null.
+ * @param {string} command  Bash-команда.
+ * @returns {{ kind: "checkout-b"|"worktree-add-b" }|null}
+ */
+export function detectCheckoutCommand(command) {
+  if (typeof command !== "string" || !command.trim()) return null;
+  const first = command.trimStart().split(/\s+/)[0];
+  if (first === "echo") return null;
+  // git checkout -b <branch> [--orphan] [--track] [<base>]
+  const checkoutMatch = command.match(/git\s+checkout\s+-b\s+(\S+)/);
+  if (checkoutMatch) {
+    // Has --orphan → skip (not creating from HEAD)
+    if (/\s--orphan\b/.test(command)) return null;
+    return { kind: "checkout-b" };
+  }
+  // git worktree add -b <branch> <dir> [<base>]
+  const worktreeMatch = command.match(/git\s+worktree\s+add\s+-b\s+(\S+)/);
+  if (worktreeMatch) return { kind: "worktree-add-b" };
+  return null;
+}
+
+/**
+ * Проверка branch-base guard.
+ * 1. Текущая ветка == mainline (main/master/develop)?
+ * 2. Если нет → есть ли явный base-аргумент в команде?
+ * 3. Нет base + не mainline → warn/deny.
+ * @param {string} command  Bash-команда (из detectCheckoutCommand).
+ * @param {"checkout-b"|"worktree-add-b"} detectedKind  Тип команды.
+ * @param {string} root  Корень проекта.
+ * @param {string} workdir  Working directory для git-вызова.
+ * @param {{ branchBaseGuard: string, ttlSec: number }} conf  Конфиг гварда.
+ * @param {{ execGit?: (args: string[]) => string }} [opts]  DI seam.
+ * @returns {{ allow: boolean, reason: string }}
+ */
+export function checkBranchBaseGuard(command, detectedKind, root, workdir, conf, { execGit } = {}) {
+  // Проверяем наличие явного base-аргумента в команде
+  const hasExplicitBase = detectedKind === "checkout-b"
+    // git checkout -b <branch> <base> — base в конце команды (2+ слов после -b <branch>)
+    ? /\s+-b\s+\S+\s+\S+\s*$/.test(command) && !/--orphan/.test(command)
+    : detectedKind === "worktree-add-b"
+      // git worktree add -b <branch> <dir> [<base>] — с base = 7+ токенов, без base = 6
+      ? command.trim().split(/\s+/).length >= 7
+      : false;
+
+  // Определяем текущую ветку
+  let branch;
+  try {
+    branch = (typeof execGit === "function" ? execGit : defaultExecGit)(
+      ["-C", workdir, "branch", "--show-current"]);
+  } catch {
+    return conf.branchBaseGuard === "deny"
+      ? { allow: false, reason: "guard_error" }
+      : { allow: true, reason: "guard_error" };
+  }
+  const b = typeof branch === "string" ? branch.trim() : "";
+
+  // Если текущая ветка — mainline → разрешаем (guard не нужен)
+  const mainlines = ["main", "master", "develop"];
+  if (mainlines.includes(b)) return { allow: true, reason: "mainline_base" };
+
+  // Если указан явный base → разрешаем
+  if (hasExplicitBase) return { allow: true, reason: "explicit_base" };
+
+  // Нет base на не-mainline ветке → warn или deny
+  if (conf.branchBaseGuard === "deny") {
+    return { allow: false, reason: "branch_base_violation" };
+  }
+  return { allow: true, reason: "branch_base_warning" };
 }
 
 /**
