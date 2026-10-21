@@ -98,7 +98,7 @@ opt-in при обновлении maestro.
 | `probe_cooldown_min` | `number` | `30` | Интервал в минутах между live-probe модели на старте (кэш результата в `state.json`); число > 0 |
 | `artifact_globs` | `string[]` | `["docs/superpowers/specs/**", "docs/superpowers/plans/**"]` | Allowlist-глобы артефактов (спеки/планы, v5.2): repo-relative пути из `write`/`edit` сессии, матчащие глобы, попадают в поле записи `artifacts[]`. `[]` — явный off. ≤16 непустых строк; невалиден → память disabled (`artifact_globs_invalid`) |
 | `history_globs` | `string[]` \| `null` | `null` (inherit `artifact_globs`) | Allowlist-глобы для **git-history backfill** (`memory_reindex`, v3.5.0): repo-relative пути спек в git-истории — кандидаты на синтез записей. `null`/absent → **inherit** `artifact_globs` (резолв на use-site); `[]` — явный off (кандидатов нет). Валидный массив: ≤16 непустых строк (trim + unique). Невалидное (non-array / не-строки / >16) → **soft fallback** на `artifact_globs` + warn `memory:config_fallback` — память НЕ отключается, нового `disabled_reason` нет |
-| `backup.path` | `string` | `.maestro/memory/backup` | Каталог бэкапов (`memory_backup`, 4.7.0; v1 — sqlite): repo-relative, резолвится от git-корня (абсолютный путь допустим). Дефолт — под `.maestro/` (в `.gitignore`) → бэкапы **не коммитятся** по умолчанию (модель «коммит = осознанная настройка» — в [Бэкап и восстановление](../how-to/memory-backup-restore.md)) |
+| `backup.path` | `string` | `.maestro/memory/backup` | Каталог бэкапов (`memory_backup`, 4.7.0; v1 — sqlite): repo-relative, резолвится от git-корня (абсолютный путь допустим). **Docker-serve:** в Docker-контейнере — `/maestro/memory/backup` (host-visible bind-mount `~/maestro-state/<project>:/maestro`). Дефолт — под `.maestro/` (в `.gitignore`) → бэкапы **не коммитятся** по умолчанию (модель «коммит = осознанная настройка» — в [Бэкап и восстановление](../how-to/memory-backup-restore.md)) |
 | `backup.retention` | `number` | `3` | Сколько последних пар бэкапов (`.jsonl` + `.manifest.json`) хранить; `0` = без ограничений (off). Невалидная секция `backup` → **soft fallback** на дефолты + warn `memory:config_fallback` (память НЕ отключается, нового `disabled_reason` нет) |
 
 | `identity` | `string` \| `null` | `null` | Явный override identity (напр. сервисный аккаунт). Обычно identity берётся из `identity_env` → git `user.name` |
@@ -143,6 +143,24 @@ opt-in при обновлении maestro.
 | `storage.pgvector.connection_string_env` | `string` | — | Имя env-переменной с DSN Postgres (обязателен для `type: pgvector`) |
 | `storage.pgvector.table` | `string` | `maestro_memory` | Таблица pgvector |
 | `storage.pgvector.text_search_config` | `string` | `russian` | Postgres text-search конфигурация для гибридного поиска (только при `type: pgvector`). Валидация: `/^[a-z][a-z0-9_]*$/`, ≤63 символа. Default `russian` — стеммер; на кастомных PG без `russian`-конфига — fail-loud |
+
+### Docker-serve: память (deferred)
+
+Memory layer — **отложен (deferred) для docker-serve MVP.** Не реализован в
+MVP-версии docker-serve; memory disabled (`memory.enabled: false`) по умолчанию.
+
+**Фиктивные ключи (future):** в docker-serve design (§2.11) упоминаются
+`memory.data_dir` и `memory.cache_dir` как **фиктивные ключи** — они **отсутствуют**
+в коде плагина и не имеют эффекта. Реализация потребовала бы:
+- правки `plugins/maestro-bootstrap/memory/index.js` (резолв `data_dir` из config/env)
+- обновления `manual_docs/reference/memory.md`
+- тестов coverage в `index.test.js`
+
+По умолчанию opencode резолвит data-dir через `XDG_DATA_HOME` (на `/data` в
+Docker) — это работает. `memory/index.js` **читает** `XDG_DATA_HOME` →
+`memory.db` корректно попадает в `/data/maestro/memory/<key>/`. Захардкожен
+только `cache_dir` эмбеддера (`embeddings.js:41`) — кэш модели не на `/cache`.
+Следующий шаг — явный `cache_dir` override (требуется правка `memory/embeddings.js`).
 
 ### Валидация и деградация конфигурации
 
