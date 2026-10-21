@@ -36,6 +36,10 @@ primary-сессии.
 - [Бэкап и восстановление памяти maestro](how-to/memory-backup-restore.md) — бэкап/restore memory layer (команда, аварийный CLI, приватные репо)
 - [Выбор и замена модели эмбеддингов](how-to/choose-embedding-model.md) — критерии, рекомендуемые модели, настройка, переиндексация (пошагово), командный сценарий, чек-лист ошибок, проверка
 - [Учёт стоимости сессий (cost tracking)](how-to/enable-cost-tracking.md) — цены моделей в конфиге opencode, «Стоимость» в TUI и feedback-отчёте
+- [Бенчмарк maestro](how-to/benchmark.md) — фиксированное задание в песочнице, отчёт и свёрка с прошлыми результатами
+- [Docker: запуск через compose](how-to/docker-serve.md) — локальный preview-сервер для документации
+- [Docker MCP-интеграция](how-to/docker-mcp.md) — подключение maestro через Docker
+- [Восстановление не сохранённой сессии (память)](how-to/restore-unsaved-session-memory.md) — аварийное восстановление данных memory layer
 
 ## Reference (справочник)
 
@@ -45,6 +49,7 @@ primary-сессии.
 - [Команды](reference/commands.md) — доступные `@command`
 - [Конфигурация](reference/config.md) — maestro.json, .opencode/opencode.json, env vars
 - [Память maestro](reference/memory.md) — memory layer: конфиг, бэкенды, memory_search, данные
+- [Статус пайплайна (pipeline-status)](reference/pipeline-status.md) — status indication API для шагов пайплайна
 
 ## Explanation (пояснения)
 
@@ -52,6 +57,7 @@ primary-сессии.
 - [Агенты и модель доверия](explanation/agents-and-trust.md) — trust, sanitizer, роли
 - [Project Context (14 категорий)](explanation/project-context.md) — формат `docs/project-context.md`
 - [Простой язык: как это работает](explanation/plain-language.md) — механика режима `communication` / `--plain`
+- [Residual-ограничения Docker](explanation/docker-residuals.md) — что не покрывает docker-деплой и известные ограничения
 
 ## Примеры
 
