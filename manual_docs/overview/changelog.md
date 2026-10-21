@@ -16,7 +16,7 @@
 - **P3 — статус-дисциплина pipeline:** `maestro_pipeline_status(action: "get")` перед анонсом шага (исключает рассинхрон нумерации); resume-протокол после компакции/обрыва — статус + ledger + git log (не по памяти сессии), выбор execution-скилла по фактическому состоянию
 - **P4 — batched task-review (-aa/-ai):** режимы per-task / phase-batched / final-only; batched-режим — только с ruling в ledger (причина/состав/риск); молчаливый пропуск task-review остаётся процессным нарушением (hard-floor — per-task review)
 - **P5 — git-гигиена оркестратора:** stash-drop только после осмотра содержимого; блок анти-паттернов (blind stash drop, bump версии на feature-ветке до merge)
-- **P6 — шаг 18.5 auto:** молчаливый пропуск feedback-report в -ai — процессное нарушение; осознанный пропуск — только с ruling-строкой в ledger
+- **P6 — шаг 18.5 auto:** молчаливый пропуск feedback-report в режиме `auto` (feedback_report) — процессное нарушение; осознанный пропуск — только с ruling-строкой в ledger
 - **P7 — полный диф на гейте 17 + сверка коммита шага 12:** `git diff <mainline>...HEAD` (визуальное ревью всего объёма изменений до merge; при больших дифах — порог ~300 строк и секционный fallback); сверка состава коммита шага 12 (design + plan оба в staging)
 
 ## [2026-10-21]
