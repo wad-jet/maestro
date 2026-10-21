@@ -81,6 +81,8 @@ function isVersionAllowlisted(line, currentVer) {
   if (/\([^)]*?\d+\.\d+\.\d+[^)]*\)/.test(line)) return true;
   // 7. blockquote continuation lines (migration notes)
   if (/^>/.test(line)) return true;
+  // 8. spec-секция ссылки (§N.N / §N.N.N) — номера разделов спеки, не версии
+  if (/[§]\s*\d/.test(line)) return true;
   // default: violation
   return false;
 }

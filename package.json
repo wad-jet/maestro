@@ -10,7 +10,7 @@
     "url": "https://github.com/wad-jet/maestro.git"
   },
   "scripts": {
-    "test": "node --test plugins/maestro-bootstrap/index.test.js plugins/maestro-bootstrap/pipeline-status.test.js maestro-install/docs-drift.test.mjs skills/maestro/references-coverage.test.mjs skills/maestro-memory/references-coverage.test.mjs skills/maestro-feedback-report/timeline.test.mjs skills/maestro-benchmark/diff.test.mjs skills/maestro-benchmark/sandbox-smoke.test.mjs maestro-install/test-coverage.test.mjs plugins/maestro-bootstrap/merge-guard.test.js",
+    "test": "node --test plugins/maestro-bootstrap/index.test.js plugins/maestro-bootstrap/pipeline-status.test.js maestro-install/docs-drift.test.mjs skills/maestro/references-coverage.test.mjs skills/maestro-memory/references-coverage.test.mjs skills/maestro-feedback-report/timeline.test.mjs skills/maestro-benchmark/diff.test.mjs skills/maestro-benchmark/sandbox-smoke.test.mjs maestro-install/test-coverage.test.mjs plugins/maestro-bootstrap/merge-guard.test.js plugins/maestro-bootstrap/tests/confidential-git-check.test.mjs plugins/maestro-bootstrap/tests/docker-verification.test.mjs plugins/maestro-bootstrap/tests/entrypoint-verify.test.mjs",
     "test:memory": "node --test 'plugins/maestro-bootstrap/memory/**/*.test.js'"
   },
   "devDependencies": {

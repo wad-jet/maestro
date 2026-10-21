@@ -25,6 +25,8 @@
 #   --clean       удалить .sandbox/ (фиктивные данные)
 #   --qdrant      настроить qdrant backend (docker-compose + maestro.json + .env)
 #   --benchmark   benchmark-режим (JS-фикстура, доставка maestro, git, state)
+#   --docker      верификация docker-serve артефактов (Dockerfile, compose,
+#                 entrypoint, JSON-конфиги, COPY-пути) — без запуска контейнеров
 #   --help        краткая справка
 #
 # Идемпотентен: повторный `create` не ломает существующую песочницу
@@ -51,7 +53,7 @@ BENCH_TASK_ID="discount-module-v1"
 
 usage() {
   cat <<EOF
-Использование: $0 [create|--reset|--clean|--help] [--qdrant] [--benchmark]
+Использование: $0 [create|--reset|--clean|--help] [--qdrant] [--benchmark] [--docker]
 
   create        создать/пересоздать песочницу .sandbox/ (по умолчанию)
   --reset       полный сброс: удалить .sandbox/ и создать заново
@@ -62,6 +64,12 @@ usage() {
   --benchmark   benchmark-режим песочницы: JS-фикстура (node --test),
                 доставка maestro (skills/agents/commands + opencode.json),
                 git-инициализация, .benchmark-state.json
+  --docker      верификация docker-serve артефактов (без запуска контейнеров):
+                Dockerfile (структура + COPY-пути в репо), docker-compose.yml,
+                entrypoint.sh/healthcheck.sh (bash -n),
+                etc-opencode.json/user-opencode.json (валидный JSON);
+                при наличии docker — дополнительно docker build --check (BuildKit
+                lint) и docker compose config
   --help        показать эту справку
 
 QA: после create/--reset печатается путь к чеклисту
@@ -719,11 +727,136 @@ do_create() {
   fi
 }
 
+# ---------- docker verification ----------
+# --docker: статическая + (опционально) docker-верификация docker-serve
+# артефактов (0 LLM, контейнеры не поднимаются):
+#   - Dockerfile: базовая структура (FROM/ENTRYPOINT) + все COPY-источники
+#     существуют в репо (build context = корень authoring-репо);
+#   - docker-compose.yml: базовая структура (services.opencode/healthcheck/volumes);
+#   - entrypoint.sh + healthcheck.sh: bash -n;
+#   - docker/etc-opencode.json + docker/user-opencode.json: валидный JSON;
+#   - при наличии docker (+ daemon): docker build --check (BuildKit lint)
+#     и docker compose config (интерполяция; .env.docker — stub в temp-dir).
+
+DOCKER_CHECKS=0
+DOCKER_FAILS=0
+
+dcheck() { # <label> <cmd...> — ✅/❌ счётчик
+  local label="$1"; shift
+  DOCKER_CHECKS=$((DOCKER_CHECKS + 1))
+  if "$@" >/dev/null 2>&1; then
+    say "  ✅ $label"
+  else
+    say "  ❌ $label"
+    DOCKER_FAILS=$((DOCKER_FAILS + 1))
+  fi
+}
+
+docker_daemon_ok() {
+  command -v docker >/dev/null 2>&1 && docker info >/dev/null 2>&1
+}
+
+docker_dockerfile_static() { # структура + existence COPY-источников (build context = REPO_ROOT)
+  node -e '
+    const fs = require("fs");
+    const root = process.argv[1];
+    const src = fs.readFileSync(root + "/docker/Dockerfile", "utf8");
+    let from = 0; let entrypoint = false;
+    const missing = [];
+    for (const line of src.split("\n")) {
+      if (/^\s*FROM\s+\S+/.test(line)) from++;
+      if (/^\s*ENTRYPOINT\s*\[/.test(line)) entrypoint = true;
+      const m = line.match(/^\s*COPY\s+(\S+)/);
+      if (m && !fs.existsSync(root + "/" + m[1])) missing.push(m[1]);
+    }
+    if (from < 1) { console.error("нет FROM"); process.exit(1); }
+    if (!entrypoint) { console.error("нет ENTRYPOINT"); process.exit(1); }
+    if (missing.length) { console.error("COPY-источники отсутствуют: " + missing.join(", ")); process.exit(1); }
+  ' "$REPO_ROOT"
+}
+
+docker_compose_static() { # базовая структура compose-файла
+  node -e '
+    const fs = require("fs");
+    const src = fs.readFileSync(process.argv[1] + "/docker-compose.yml", "utf8");
+    for (const needle of ["services:", "opencode:", "image:", "healthcheck:", "test:", "volumes:"]) {
+      if (!src.includes(needle)) { console.error("отсутствует: " + needle); process.exit(1); }
+    }
+  ' "$REPO_ROOT"
+}
+
+docker_compose_validate() { # docker compose config: stub .env.docker в temp-dir
+  # (env_file из compose-файла резолвится относительно project-dir; интерполяция
+  # переменных — из --env-file). Контент docker-compose.yml тот же, что в репо.
+  local tmp
+  tmp="$(mktemp -d)"
+  cp "$REPO_ROOT/docker-compose.yml" "$tmp/docker-compose.yml"
+  cat >"$tmp/.env.docker" <<'EOF'
+PROJECT_NAME=sandbox-check
+REPO_NAME=sandbox-check
+PROJECT_PORT=127.0.0.1:4096
+EOF
+  local rc=0
+  docker compose --env-file "$tmp/.env.docker" -f "$tmp/docker-compose.yml" config --quiet || rc=$?
+  rm -rf "$tmp"
+  return "$rc"
+}
+
+docker_build_lint() { # docker build --check (BuildKit lint, без сборки)
+  local out rc
+  out="$(docker build -f "$REPO_ROOT/docker/Dockerfile" --check "$REPO_ROOT" 2>&1)"; rc=$?
+  if [ "$rc" -eq 0 ]; then
+    return 0
+  fi
+  if printf '%s\n' "$out" | grep -q "unknown flag: --check"; then
+    say "  ⚠️  docker build --check недоступен (docker < 24 / без buildkit) — пропущен"
+    return 0
+  fi
+  printf '%s\n' "$out" | tail -5
+  return "$rc"
+}
+
+do_docker_check() {
+  say "Дocker-верификация (docker-serve артефакты, без запуска контейнеров) ..."
+  dcheck "docker/Dockerfile — структура (FROM/ENTRYPOINT) + COPY-пути в репо" docker_dockerfile_static
+  dcheck "docker-compose.yml — структура" docker_compose_static
+  dcheck "docker/entrypoint.sh — bash -n" bash -n "$REPO_ROOT/docker/entrypoint.sh"
+  dcheck "docker/healthcheck.sh — bash -n" bash -n "$REPO_ROOT/docker/healthcheck.sh"
+  dcheck "docker/etc-opencode.json — валидный JSON" node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$REPO_ROOT/docker/etc-opencode.json"
+  dcheck "docker/user-opencode.json — валидный JSON" node -e 'JSON.parse(require("fs").readFileSync(process.argv[1],"utf8"))' "$REPO_ROOT/docker/user-opencode.json"
+
+  if command -v docker >/dev/null 2>&1; then
+    dcheck "docker compose config (интерполяция, stub .env.docker)" docker_compose_validate
+    if docker_daemon_ok; then
+      DOCKER_CHECKS=$((DOCKER_CHECKS + 1))
+      if docker_build_lint; then
+        say "  ✅ docker build --check (BuildKit lint)"
+      else
+        say "  ❌ docker build --check (BuildKit lint)"
+        DOCKER_FAILS=$((DOCKER_FAILS + 1))
+      fi
+    else
+      say "  ⚠️  docker daemon недоступен — docker build --check пропущен"
+    fi
+  else
+    say "  ⚠️  docker недоступен — только статические проверки"
+  fi
+
+  say ""
+  if [ "$DOCKER_FAILS" -gt 0 ]; then
+    say "❌ docker-верификация: $DOCKER_FAILS из $DOCKER_CHECKS проверок упало"
+    return 1
+  fi
+  say "✅ docker-верификация: все проверки прошли ($DOCKER_CHECKS)"
+  return 0
+}
+
 # ---------- main ----------
 
 ACTION="create"
 QDRANT="0"
 BENCHMARK="0"
+DOCKER="0"
 
 for arg in "$@"; do
   case "$arg" in
@@ -732,6 +865,9 @@ for arg in "$@"; do
       ;;
     --benchmark)
       BENCHMARK="1"
+      ;;
+    --docker)
+      DOCKER="1"
       ;;
     create|--reset|--clean|--help|-h)
       ACTION="${arg#--}"
@@ -755,6 +891,12 @@ case "$ACTION" in
     exit 0
     ;;
 esac
+
+# --docker — автономная верификация docker-артефактов (не создаёт .sandbox/).
+if [ "$DOCKER" = "1" ]; then
+  do_docker_check
+  exit $?
+fi
 
 if [ "$ACTION" = "clean" ]; then
   if [ -d "$SANDBOX" ]; then

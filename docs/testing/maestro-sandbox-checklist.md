@@ -117,6 +117,17 @@
 | G5 | `@maestro-benchmark diff` | ✅ | таблица дельф (метрики + флаги same/regress/fix) в чате; при смене моделей — пометка `models_changed` | |
 | G6 | Сверка permission-baseline с каноном R1+R4 | ⚠️ | при изменении канона (maestro-assistant) сверить генерируемый `.sandbox/.opencode/opencode.json` с каноном (smoke-тест проверяет ключевые deny) | |
 
+## H. Docker-сервер (автоматизированный smoke)
+
+> `./maestro-sandbox.sh --docker`: верификация docker-serve артефактов без
+> запуска контейнеров (0 LLM). Поведенческие тесты entrypoint/plugin-слоя —
+> `node --test plugins/maestro-bootstrap/tests/docker-verification.test.mjs
+> plugins/maestro-bootstrap/tests/entrypoint-verify.test.mjs` (входят в `npm test`).
+
+| # | Сценарий | Тип | Проверка | Результат |
+|---|---|---|---|---|
+| H1 | `./maestro-sandbox.sh --docker` | ✅ | Dockerfile: структура (FROM/ENTRYPOINT) + все COPY-источники существуют в репо; docker-compose.yml — структура; entrypoint.sh/healthcheck.sh — `bash -n`; etc-opencode.json/user-opencode.json — валидный JSON; при наличии docker (+ daemon): `docker compose config` (stub `.env.docker`) + `docker build --check` (BuildKit lint); exit 0 = все проверки | |
+
 ---
 
 ## Завершение QA
