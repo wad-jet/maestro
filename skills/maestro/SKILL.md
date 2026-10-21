@@ -416,6 +416,13 @@ skip-path по канону или откат к пропущенному шаг
       **Авто-режимы:** auto-answer — авто (a) да (P1.3); auto-ai — авто (a), полный
       pre-flight выполняется (не срезается).
 🟡  3. [agent] Pre-flight: диагностика состояния (см. ниже Фазу 1)
+      — **Workspace occupancy (новый):**
+        - `git branch --show-current` ≠ mainline (main/master/develop, auto-детект)
+          И ветка матчит паттерн `feature/*|fix/*|hotfix/*` → **SIGNAL: workspace occupied by foreign feature**
+          (показать имя ветки) → isolation recommendation = **worktree**
+        - `git branch --show-current` ≠ mainline, other pattern → сигнал + явный HITL
+        - `git branch --show-current` == mainline → "free workspace"
+        — Результат в сессию: «Предуведомление: текущий workspace занят веткой `<name>` (чужая активная фича). Рекомендуется worktree.»
 🟡  4. [agent] Pre-flight: запрос действия у пользователя (см. ниже Фазу 2)
 🟡  5. [agent] Имя ветки (inline-конвенция)
       — Имя зависит от маршрута шага 1:
@@ -424,9 +431,20 @@ skip-path по канону или откат к пропущенному шаг
         - hotfix → `hotfix/<kebab-case>`, например `hotfix/fix-broken-tests`
       — `<kebab-case>` — короткое название на латинице, выводится оркестратором,
         без отдельного скила. При неоднозначности — уточнить у пользователя.
-🟢  6. [agent] Изоляция:
-      - Если выбран worktree -> using-git-worktrees (git worktree add -b <branch>)
-      - Если выбрана просто ветка -> git checkout -b <branch>
+🟢  6. [agent] Загрузить `using-git-worktrees`
+      -- HITL GATE: выбрать изоляцию --
+      (a) worktree [рекомендуется, если workspace occupied]
+          `git worktree add -b <branch> <dir> <mainline>`
+      (b) plain branch
+          `git checkout -b <branch> <mainline>`
+          Только при mainline + clean tree
+      (c) отмена
+      Примечание:
+        - База ВСЕГДА <mainline> — явный, не implicit HEAD
+        - Исключение (stacked на чужую фичу): только явный HITL
+          «Я знаю, что делаю: стекаю поверх <branch>» — с предупреждением о рисках
+        - Записать в session vars: BRANCH_BASE_SHA, BRANCH_NAME
+        - При worktree: вызвать `tools.opencode.session_move` к worktree-dir
 🟡  7. -- HITL GATE: категория фичи (см. Feature Classification) --
       ВАРИАНТЫ:
         (a) Сложная / Архитектурная — полный pipeline (шаги 8-10).
