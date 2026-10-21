@@ -49,7 +49,7 @@ description: Initialize maestro for a new or existing project — quick setup (A
 - При (a): загрузить `init-context.md`, опросить обязательные секции (1,2,3,4,9,14), создать файл;
   секция 12 (Безопасность) — включать строку `- **Confidential-данные:** <restricted-пути>`
   (канонический формат M2: одна строка, repo-relative пути, через запятую). Для нового
-  проекта — `docs/confidential/*` (deny-baseline, Задача 3); source of truth —
+  проекта — `docs/confidential/*` и `.confidential/**` (deny-baseline, Задача 3); source of truth —
   нативные permissions, §12 — строка-зеркало; дальше строку ведёт воркфлоу
   `maestro-assistant` «Настройка restricted-путей» (одной операцией с нативными deny)
 - При (b): записать статус `context: deferred` в `.maestro/last-run.md`
@@ -119,7 +119,7 @@ description: Initialize maestro for a new or existing project — quick setup (A
 
 #### .gitignore
 
-Добавить `.maestro/` и `.opencode/` (не дублировать).
+Добавить `.maestro/`, `.opencode/` и `.confidential/` (не дублировать).
 
 #### regression/
 
@@ -129,7 +129,7 @@ description: Initialize maestro for a new or existing project — quick setup (A
 
 Глобальная установка существует — флоу состоит ровно из 6 пунктов:
 
-1. Создаёт `.maestro/` (если нет) + `.gitignore` entry `.maestro/` (если нет).
+1. Создаёт `.maestro/` (если нет) + `.gitignore` entries `.maestro/` и `.confidential/` (если нет).
 2. Создаёт `.maestro/maestro.json` с `memory: { enabled: true, namespace: <auto-derive> }`. Auto-derive: Вариант A из git remote (domain.owner.repo), fallback C (parent_dir.project_dir.local), pad/truncate до 3 сегментов. Если namespace уже задан явно в любом проектном слое (`.maestro/maestro.json` или root) — не перезаписывает.
 3. Опционально: создаёт root `maestro.json` — только если пользователь просит «зафиксировать в репозитории». В глобальном режиме по умолчанию — root-файл не создаётся.
 4. Не создаёт `.opencode/` зеркало (скиллы глобальные).
