@@ -1,7 +1,7 @@
 # Docker: запуск maestro в контейнере
 
 > Полное руководство по запуску maestro в Docker — от быстрого старта до production-настроек.
-> Расширяет [spec §5](../specs/2026-10-20-docker-serve-design.md#5-how-to-запуск-maestro-в-docker).
+> Расширяет [spec §5](../../docs/superpowers/specs/2026-10-20-docker-serve-design.md#5-how-to-запуск-maestro-в-docker).
 > Быстрый hello world — в [docker/README.md](../../docker/README.md).
 
 ---
@@ -11,7 +11,7 @@
 1. **Docker** с поддержкой named volumes и bind mounts (Docker Desktop / Docker Engine ≥ 24).
 2. **Token для git** (`GH_PAT` или `GIT_TOKEN`) — **fine-grained personal access token** с scope `contents: write` на целевую репо (и только на неё). **Обязательно**: expiry 30 дней, без org-admin scope. Для режима live-mount без git — не требуется.
 3. **Model env-переменные** — `OC_BUILD_MODEL`, `OC_PLAN_MODEL`, `OC_CUSTODIAN_MODEL`, `OC_SANITIZER_MODEL`, `OC_OPUS_MODEL`, `OC_SONNET_MODEL`, `OC_HAIKU_MODEL`, `OC_FABLE_MODEL`, `OC_REVIEWER_MODEL`.
-4. **API-ключи провайдеров** — предпочтительно через `opencode auth import` (credential store), а не env-переменные. Если env — см. residual-ограничения в [spec §3](../specs/2026-10-20-docker-serve-design.md#3-security-considerations) (config-substitution, bash-env-access).
+4. **API-ключи провайдеров** — предпочтительно через `opencode auth import` (credential store), а не env-переменные. Если env — см. residual-ограничения в [spec §3](../../docs/superpowers/specs/2026-10-20-docker-serve-design.md#3-security-considerations) (config-substitution, bash-env-access).
 5. **Password** — `OPENCODE_PASSWORD` (для Basic auth сервера).
 6. **Каталоги хоста:**
 
@@ -102,7 +102,7 @@ docker run -d \
 ### Важные нюансы режима A
 
 - `-e` **не дублировать** поверх `--env-file`: `-e` имеет больший приоритет и при `unset`-переменной подставит пустую строку, перекрывая значение из файла.
-- `.confidential/` требует доп. bind-mount с хоста — см. [spec §2.5](../specs/2026-10-20-docker-serve-design.md#25-режим-a-безопасный-клон).
+- `.confidential/` требует доп. bind-mount с хоста — см. [spec §2.5](../../docs/superpowers/specs/2026-10-20-docker-serve-design.md#25-режим-a-безопасный-клон).
 - Token хранится в tmpfs — не виден в `ps`, не в image layers, умирает с контейнером.
 
 ---
@@ -611,7 +611,7 @@ OpenCode нативно поддерживает worktrees (`worktree.directory:
 
 Каждая сессия работает в своём worktree `.worktrees/<branch>/` — файлы не конфликтуют. Merge — последовательно через гейт 17.
 
-**Confidential-асимметрия:** `.confidential/` только в базовом дереве, не в worktree (см. [spec §2.5](../specs/2026-10-20-docker-serve-design.md#25-режим-a-безопасный-клон)).
+**Confidential-асимметрия:** `.confidential/` только в базовом дереве, не в worktree (см. [spec §2.5](../../docs/superpowers/specs/2026-10-20-docker-serve-design.md#25-режим-a-безопасный-клон)).
 
 #### Паттерн B2: контейнер на фичу
 
@@ -660,24 +660,24 @@ docker run -d \
 
 | Раздел | Ссылка |
 |---|---|
-| [spec §2.2](../specs/2026-10-20-docker-serve-design.md#22-режимы-источника-кода) | Режимы A (self-contained) и B (live-mount) |
-| [spec §2.3](../specs/2026-10-20-docker-serve-design.md#23-volume-раскладка) | Volume-раскладка |
-| [spec §2.5](../specs/2026-10-20-docker-serve-design.md#25-режим-a-безопасный-клон) | Безопасный клон режима A |
-| [spec §2.7](../specs/2026-10-20-docker-serve-design.md#27-config-слои) | Config-слои (managed/skeleton/user) |
-| [spec §2.8](../specs/2026-10-20-docker-serve-design.md#28-config-слои) | Config-подстановка (`OPENCODE_CONFIG_CONTENT`, `OC_PROVIDERS_JSON`) |
-| [spec §2.8.1](../specs/2026-10-20-docker-serve-design.md#281-etcopencodeopencodejson--managed-layer) | Managed layer `/etc/opencode/` |
-| [spec §2.8.2](../specs/2026-10-20-docker-serve-design.md#282-config-opencodejson--global-skeleton-user-layer) | Global skeleton `~/.config/opencode/` |
-| [spec §2.9](../specs/2026-10-20-docker-serve-design.md#29-git-токен-tmpfs-credential-store) | tmpfs credential-store |
-| [spec §2.12](../specs/2026-10-20-docker-serve-design.md#212-dockerfile-specification-базовый-образ) | Dockerfile specification |
-| [spec §2.13](../specs/2026-10-20-docker-serve-design.md#213-per-agent-access-matrix) | Per-agent access matrix |
-| [spec §2.14](../specs/2026-10-20-docker-serve-design.md#214-policies-stable-api-p4-hygiene) | Policies (plugin/provider allowlist) |
-| [spec §3.1](../specs/2026-10-20-docker-serve-design.md#31-operator-customization-без-коммита-в-репо) | Operator customization |
-| [spec §5.3](../specs/2026-10-20-docker-serve-design.md#53-режим-a-self-contained) | Режим A commands |
-| [spec §5.4](../specs/2026-10-20-docker-serve-design.md#54-режим-b-live-mount) | Режим B commands |
-| [spec §5.5](../specs/2026-10-20-docker-serve-design.md#55-docker-composeyml) | docker-compose.yml |
-| [spec §5.9](../specs/2026-10-20-docker-serve-design.md#59-hardening-рекомендуемый-набор) | Hardening |
-| [spec §5.10](../specs/2026-10-20-docker-serve-design.md#510-hello-world-быстрый-старт-5-минут) | Hello world |
-| [spec §5.11](../specs/2026-10-20-docker-serve-design.md#511-полный-цикл-разработки-фичи) | Полный цикл фичи |
-| [spec §5.12](../specs/2026-10-20-docker-serve-design.md#512-сценарии-от-простого-к-сложному) | Scenarios ladder |
-| [spec §5.13](../specs/2026-10-20-docker-serve-design.md#513-параллельная-разработка-разные-репо) | Параллельная: разные репо |
-| [spec §5.14](../specs/2026-10-20-docker-serve-design.md#514-параллельная-разработка-одно-репо-worktrees) | Параллельная: worktrees |
+| [spec §2.2](../../docs/superpowers/specs/2026-10-20-docker-serve-design.md#22-режимы-источника-кода) | Режимы A (self-contained) и B (live-mount) |
+| [spec §2.3](../../docs/superpowers/specs/2026-10-20-docker-serve-design.md#23-volume-раскладка) | Volume-раскладка |
+| [spec §2.5](../../docs/superpowers/specs/2026-10-20-docker-serve-design.md#25-режим-a-безопасный-клон) | Безопасный клон режима A |
+| [spec §2.7](../../docs/superpowers/specs/2026-10-20-docker-serve-design.md#27-config-слои) | Config-слои (managed/skeleton/user) |
+| [spec §2.8](../../docs/superpowers/specs/2026-10-20-docker-serve-design.md#28-config-слои) | Config-подстановка (`OPENCODE_CONFIG_CONTENT`, `OC_PROVIDERS_JSON`) |
+| [spec §2.8.1](../../docs/superpowers/specs/2026-10-20-docker-serve-design.md#281-etcopencodeopencodejson--managed-layer) | Managed layer `/etc/opencode/` |
+| [spec §2.8.2](../../docs/superpowers/specs/2026-10-20-docker-serve-design.md#282-config-opencodejson--global-skeleton-user-layer) | Global skeleton `~/.config/opencode/` |
+| [spec §2.9](../../docs/superpowers/specs/2026-10-20-docker-serve-design.md#29-git-токен-tmpfs-credential-store) | tmpfs credential-store |
+| [spec §2.12](../../docs/superpowers/specs/2026-10-20-docker-serve-design.md#212-dockerfile-specification-базовый-образ) | Dockerfile specification |
+| [spec §2.13](../../docs/superpowers/specs/2026-10-20-docker-serve-design.md#213-per-agent-access-matrix) | Per-agent access matrix |
+| [spec §2.14](../../docs/superpowers/specs/2026-10-20-docker-serve-design.md#214-policies-stable-api-p4-hygiene) | Policies (plugin/provider allowlist) |
+| [spec §3.1](../../docs/superpowers/specs/2026-10-20-docker-serve-design.md#31-operator-customization-без-коммита-в-репо) | Operator customization |
+| [spec §5.3](../../docs/superpowers/specs/2026-10-20-docker-serve-design.md#53-режим-a-self-contained) | Режим A commands |
+| [spec §5.4](../../docs/superpowers/specs/2026-10-20-docker-serve-design.md#54-режим-b-live-mount) | Режим B commands |
+| [spec §5.5](../../docs/superpowers/specs/2026-10-20-docker-serve-design.md#55-docker-composeyml) | docker-compose.yml |
+| [spec §5.9](../../docs/superpowers/specs/2026-10-20-docker-serve-design.md#59-hardening-рекомендуемый-набор) | Hardening |
+| [spec §5.10](../../docs/superpowers/specs/2026-10-20-docker-serve-design.md#510-hello-world-быстрый-старт-5-минут) | Hello world |
+| [spec §5.11](../../docs/superpowers/specs/2026-10-20-docker-serve-design.md#511-полный-цикл-разработки-фичи) | Полный цикл фичи |
+| [spec §5.12](../../docs/superpowers/specs/2026-10-20-docker-serve-design.md#512-сценарии-от-простого-к-сложному) | Scenarios ladder |
+| [spec §5.13](../../docs/superpowers/specs/2026-10-20-docker-serve-design.md#513-параллельная-разработка-разные-репо) | Параллельная: разные репо |
+| [spec §5.14](../../docs/superpowers/specs/2026-10-20-docker-serve-design.md#514-параллельная-разработка-одно-репо-worktrees) | Параллельная: worktrees |

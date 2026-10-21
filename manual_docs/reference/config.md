@@ -66,7 +66,7 @@
 > параметров в сессии — плагин-тул `maestro_config` (permission `ask`, только
 > top-level primary; сабагенты — per-agent deny + плагинный fail-closed guard);
 > bash-чтение запрещено процессным каноном
-> (см. [`SECURITY.md`](../../../SECURITY.md) → P6).
+> (см. [`SECURITY.md`](../../SECURITY.md) → P6).
 
 ### Секция `trust` (удалена, 6.4.0, B)
 
@@ -1033,7 +1033,7 @@ Docker-образа для конфигурации без пересборки.
 
 ## 🔗 Связанные разделы
 
-- [Требования и оценка ИБ (SECURITY.md)](../../../SECURITY.md) — модель доверия
+- [Требования и оценка ИБ (SECURITY.md)](../../SECURITY.md) — модель доверия
   (role-set), restricted-данные (нативные permissions), memory
 - [Кастомизация скилла](../how-to/customize-maestro.md)
 - [Агенты и модель доверия](../explanation/agents-and-trust.md)

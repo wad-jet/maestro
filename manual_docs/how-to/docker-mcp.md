@@ -116,5 +116,5 @@ HTTP/SSE (запуск на хосте, контейнер подключает�
 ## 🔗 Связанные разделы
 
 - [Docker-serve residuals](../explanation/docker-residuals.md) — ограничения docker-serve
-- [Конфигурация](config.md) — переменные окружения и managed-слой
+- [Конфигурация](../reference/config.md) — переменные окружения и managed-слой
 - [Пайплайн overview](../explanation/pipeline-overview.md) — why maestro doesn't need MCP
