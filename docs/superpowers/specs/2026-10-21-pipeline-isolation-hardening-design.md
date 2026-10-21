@@ -125,7 +125,10 @@
 
 И проверяет:
 1. Текущая ветка == mainline (main/master/develop, auto-детект)?
-2. Если нет → проверять, есть ли явный base-аргумент (git: `<base-ref>`, worktree: 3-й аргумент = `<base>`).
+2. Если нет → есть ли явный base-аргумент. **Детекция base — по числу токенов** (`command.trim().split(/\s+/)`), устойчиво к дополнительным флагам:
+   - `git checkout -b <name>` — 4 токена → base нет; 5+ токенов → base есть;
+   - `git worktree add -b <name> <dir>` — 6 токенов → base нет; 7+ токенов → base есть;
+   - `--orphan` → guard не применяется.
 3. Нет base + не mainline → **warn** (default) / **deny** (`branch_base_guard: "deny"` в `maestro.json`).
 
 **Конфиг:** `merge_guard.branch_base_guard: "warn" | "deny" | "off"` (default `"warn"`).
@@ -138,9 +141,13 @@
 
 Модификация `checkMergeMarker`:
 
-1. При создании маркера (оркестратор записывает файл):
-   - Маркер v2: `{ sessionID, ts, gate: 17, decision: "a", head: <SHA at marker time> }`
-   - Поле `head` — `git rev-parse HEAD` в момент создания маркера.
+1. **Порядок создания маркера (строгий):**
+   1. Merge-scope review (HITL-гейт выше) пройден, scope чист;
+   2. `head = git rev-parse HEAD` — **снимок HEAD сразу после аппрува, до любых дальнейших действий**;
+   3. Запись маркера v2: `{ sessionID, ts, gate: 17, decision: "a", head }`;
+   4. Выполнение merge/push.
+   
+   Любой коммит между шагами 2–4 меняет HEAD → маркер невалиден → merge-guard deny.
 
 2. При проверке (при `git merge`/`git push mainline`):
    - Читаем `head` из маркера.
@@ -153,18 +160,15 @@
 
 ### 4.6. Тесты
 
-**Plugin (plugin/index.test.js):**
-- `describe("merge-guard branch-base")`
-  - `it("warns when checkout -b from non-mainline without explicit base")`
-  - `it("denies when branch_base_guard='deny' and no explicit base")`
-  - `it("allows checkout -b <base> from any branch")`
-  - `it("allows from mainline without explicit base")`
-- `describe("merge-guard head-pin")`
-  - `it("allows merge when HEAD == marker.head")`
-  - `it("denies merge when HEAD != marker.head")`
-  - `it("allows v1 marker (no head field) for backward compat")`
+**Unit (`merge-guard.test.js`):**
+- `describe("merge-guard detectCheckoutCommand")` — детект `checkout -b` / `worktree add -b` (вкл. `--orphan` skip, `echo` skip, без `-b` → null);
+- `describe("merge-guard checkBranchBaseGuard")` — mainline base / explicit base / warn / deny / guard_error (fail-closed при deny);
+- `describe("merge-guard checkMergeMarker: head-pin (v2)")` — HEAD==marker.head / HEAD≠marker.head / v1-marker backward compat / head_pin=false / execGit throw;
+- `describe("merge-guard resolveMergeGuardConf")` — новые ключи `branch_base_guard`, `head_pin` + дефолты.
 
-**Docs-drift:** SKILL.md changes → D-проверки (version refs, path canonical) должны проходить.
+**Integration (`index.test.js`):** hook в core.js — warn-path (log + notice, без throw) и deny-path (throw блокирует bash-вызов).
+
+**Docs-drift:** `maestro-install/docs-drift.test.mjs` (версии, пути SKILL.md).
 
 ### 4.7. Документация
 

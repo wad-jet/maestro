@@ -1179,11 +1179,15 @@ skip-path по канону или откат к пропущенному шаг
 
        Механический индикатор: merge-base(mainline, HEAD) должно == BRANCH_BASE_SHA
        (записано при создании ветки на шаге 6). Расхождение = сигнал «scope загрязнён».
-       **Маркер аппрува (5.6.0, обязательный):** после явного (a) пользователя,
-       **до выполнения merge**, создай `.maestro/gates/merge-<sessionID>.json` с
-       `{"sessionID": "<id>", "ts": <Date.now()>, "gate": 17, "decision": "a"}`.
-       Без маркера merge-guard плагина (5.6.0) заблокирует `git merge`/`git push`
-       в mainline (fail-closed, TTL 600 с).
+       **Маркер аппрува (5.6.0, обязательный; head-pin — 6.5.0):** после явного
+       (a) пользователя, **до выполнения merge**, создай
+       `.maestro/gates/merge-<sessionID>.json` с
+       `{"sessionID": "<id>", "ts": <Date.now()>, "gate": 17, "decision": "a",
+       "head": "<git rev-parse HEAD>"}`.
+       `head` — снимок HEAD сразу после аппрува: любой коммит после маркера,
+       но до merge → HEAD не совпадёт → merge-guard deny (`marker_head_mismatch`).
+       Без маркера merge-guard плагина заблокирует `git merge`/`git push`
+       в mainline (fail-closed, TTL — `merge_guard.ttlSec`, default 600 с).
 🟢 18. [agent] finishing-a-development-branch
       — При fast-forward merge: `$TEST_COMMAND` на merged результате
         не выполняется. Fast-forward = HEAD feature-ветки становится
