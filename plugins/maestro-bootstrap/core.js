@@ -1017,6 +1017,9 @@ export async function createBootstrapPlugin(ctx) {
   // Commit-guard (R4): sessions warned about a mainline commit without a
   // gate-17 marker (one notice per session).
   const warnedCommitSessions = new Set();
+  // Branch-base guard: sessions warned about branch creation from
+  // non-mainline without an explicit base (one notice per session).
+  const warnedBranchBaseSessions = new Set();
   const trustedAgents = loadTrustConfig(config);
   // D6/B: секция trust не читается — legacy-ключи → warn + игнор (однократно на init).
   const trustKeys = deprecatedTrustKeys(config);
@@ -1137,6 +1140,32 @@ export async function createBootstrapPlugin(ctx) {
     log.error("commit_guard: notice hook init failed", { error: err instanceof Error ? err.message : String(err) });
   }
 
+  // --- Branch-base-guard notice: one warning per session for a branch
+  // created from non-mainline without an explicit base (warn path).
+  // Fail-soft, same context-hook pattern as commit-guard notice.
+  let branchBaseNoticeDispose = () => {};
+  try {
+    const bbNoticeReg = await ctx.session.hook?.("context", async (event) => {
+      try {
+        const sessionID = event?.sessionID;
+        if (!sessionID || !warnedBranchBaseSessions.has(sessionID)) return;
+        warnedBranchBaseSessions.delete(sessionID);
+        if (!event.system) event.system = [];
+        event.system.push({ type: "text", text:
+          `⚠️ [branch-base-guard] Создание ветки от non-mainline без явного base-аргумента. ` +
+          `Ветка унаследует чужие коммиты текущей ветки (риск merge-scope contamination). ` +
+          `Рекомендуется: git checkout -b <branch> <mainline> / git worktree add -b <branch> <dir> <mainline>. ` +
+          `Если ветвление осознанное (stacked) — проигнорируй (режим warn).` });
+        log.debug?.("branch_base_guard", { action: "notice_injected", sessionID });
+      } catch (err) {
+        log?.error?.("branch_base_guard:notice_failed", { error: err instanceof Error ? err.message : String(err) });
+      }
+    });
+    branchBaseNoticeDispose = () => { try { bbNoticeReg?.dispose?.(); } catch { /* fail-soft */ } };
+  } catch (err) {
+    log.error("branch_base_guard: notice hook init failed", { error: err instanceof Error ? err.message : String(err) });
+  }
+
   // --- Event subscription ---
   const eventController = new AbortController();
   void (async () => {
@@ -1180,7 +1209,11 @@ export async function createBootstrapPlugin(ctx) {
         const detected = detectGuardCommand(typeof event.input?.command === "string" ? event.input.command : "");
         if (detected) {
           const kind = detected.kind;
-          const res = checkMergeMarker(root, input.sessionID, Date.now(), mergeGuardConf);
+          // Worktree-aware (C2): маркер и HEAD оркестратор пишет/снимает в cwd
+          // сессии (worktree после session_move) — гард обязан проверять там же,
+          // где исполняется merge (workdir shell-вызова), а не в первичном root.
+          const markerDir = typeof event.input?.workdir === "string" ? event.input.workdir : root;
+          const res = checkMergeMarker(markerDir, input.sessionID, Date.now(), mergeGuardConf);
           const base = { sessionID: input.sessionID, callID: input.callID, kind, reason: res.reason };
           if (res.allow) {
             log.info("merge_guard", { action: "allow", ...base });
@@ -1210,7 +1243,7 @@ export async function createBootstrapPlugin(ctx) {
           if (res.allow) {
             if (res.reason === "branch_base_warning") {
               log.warn("branch_base_guard", { action: "warn", ...base });
-              warnedCommitSessions.add(input.sessionID);
+              warnedBranchBaseSessions.add(input.sessionID);
             }
           } else {
             log.warn("branch_base_guard", { action: "deny", ...base });
@@ -1417,6 +1450,7 @@ export async function createBootstrapPlugin(ctx) {
     fbDispose();
     pipelineStatusDispose();
     commitGuardNoticeDispose();
+    branchBaseNoticeDispose();
     log.info("plugin disposing", {});
   };
 }

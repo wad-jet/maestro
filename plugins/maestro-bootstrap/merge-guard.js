@@ -136,6 +136,21 @@ export function resolveMergeGuardConf(maestroConf) {
 
 
 /**
+ * Извлечение последнего сегмента составной bash-команды (`&&`, `||`, `;`, `|`):
+ * `git checkout main && git checkout -b fix/x` → `git checkout -b fix/x`.
+ * Гварды оценивают фактическое итоговое действие, а не подстроку из
+ * произвольного сегмента (ремедиация инцидента: «сначала на main, потом
+ * ветку» не должна ложно срабатывать).
+ * @param {string} command  Bash-команда.
+ * @returns {string}
+ */
+export function lastCommandSegment(command) {
+  if (typeof command !== "string" || !command.trim()) return "";
+  const segments = command.split(/\s*(?:&&|\|\||;|\|)\s*/);
+  return segments[segments.length - 1] ?? "";
+}
+
+/**
  * Детект команд, требующих branch-base guard:
  * - `git checkout -b <branch>` (без --orphan/-t)
  * - `git worktree add -b <branch> <dir>`
@@ -145,17 +160,21 @@ export function resolveMergeGuardConf(maestroConf) {
  */
 export function detectCheckoutCommand(command) {
   if (typeof command !== "string" || !command.trim()) return null;
-  const first = command.trimStart().split(/\s+/)[0];
+  // Segment-aware: оцениваем последний сегмент составной команды
+  // (`git checkout main && git checkout -b fix/x` → детект по второму сегменту).
+  const cmd = lastCommandSegment(command);
+  if (!cmd.trim()) return null;
+  const first = cmd.trimStart().split(/\s+/)[0];
   if (first === "echo") return null;
   // git checkout -b <branch> [--orphan] [--track] [<base>]
-  const checkoutMatch = command.match(/git\s+checkout\s+-b\s+(\S+)/);
+  const checkoutMatch = cmd.match(/git\s+checkout\s+-b\s+(\S+)/);
   if (checkoutMatch) {
     // Has --orphan → skip (not creating from HEAD)
-    if (/\s--orphan\b/.test(command)) return null;
+    if (/\s--orphan\b/.test(cmd)) return null;
     return { kind: "checkout-b" };
   }
   // git worktree add -b <branch> <dir> [<base>]
-  const worktreeMatch = command.match(/git\s+worktree\s+add\s+-b\s+(\S+)/);
+  const worktreeMatch = cmd.match(/git\s+worktree\s+add\s+-b\s+(\S+)/);
   if (worktreeMatch) return { kind: "worktree-add-b" };
   return null;
 }
@@ -174,13 +193,21 @@ export function detectCheckoutCommand(command) {
  * @returns {{ allow: boolean, reason: string }}
  */
 export function checkBranchBaseGuard(command, detectedKind, root, workdir, conf, { execGit } = {}) {
+  // Segment-aware: base-детекция по последнему сегменту составной команды
+  const cmd = lastCommandSegment(command);
+  // Составная команда с переключением на mainline перед созданием ветки
+  // (`git checkout main && git checkout -b fix/x`) — эквивалент явного base
+  // (ремедиационный паттерн инцидента; сегменты до последнего).
+  const segments = command.split(/\s*(?:&&|\|\||;|\|)\s*/);
+  const hasMainlineSwitch = segments.slice(0, -1).some((s) =>
+    /^git\s+(?:checkout|switch)\s+(?:main|master|develop)\b/.test(s.trim()));
   // Проверяем наличие явного base-аргумента в команде
   const hasExplicitBase = detectedKind === "checkout-b"
     // git checkout -b <branch> <base> — base в конце команды (2+ слов после -b <branch>)
-    ? /\s+-b\s+\S+\s+\S+\s*$/.test(command) && !/--orphan/.test(command)
+    ? /\s+-b\s+\S+\s+\S+\s*$/.test(cmd) && !/--orphan/.test(cmd)
     : detectedKind === "worktree-add-b"
       // git worktree add -b <branch> <dir> [<base>] — с base = 7+ токенов, без base = 6
-      ? command.trim().split(/\s+/).length >= 7
+      ? cmd.trim().split(/\s+/).length >= 7
       : false;
 
   // Определяем текущую ветку
@@ -199,8 +226,8 @@ export function checkBranchBaseGuard(command, detectedKind, root, workdir, conf,
   const mainlines = ["main", "master", "develop"];
   if (mainlines.includes(b)) return { allow: true, reason: "mainline_base" };
 
-  // Если указан явный base → разрешаем
-  if (hasExplicitBase) return { allow: true, reason: "explicit_base" };
+  // Если указан явный base (аргументом или pre-switch на mainline) → разрешаем
+  if (hasExplicitBase || hasMainlineSwitch) return { allow: true, reason: "explicit_base" };
 
   // Нет base на не-mainline ветке → warn или deny
   if (conf.branchBaseGuard === "deny") {

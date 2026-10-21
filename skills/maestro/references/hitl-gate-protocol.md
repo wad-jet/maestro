@@ -239,3 +239,43 @@ Bugfix:
    - (a) Approve → следующий шаг pipeline
    - (b) Revise → вернуться к указанному шагу, исправить, повторный gate
    - (c) Reject → STOP, pipeline завершён
+
+## Workspace Occupancy & Isolation (шаги 3, 6 — канон, 6.5.0)
+
+**Шаг 3 — workspace occupancy:**
+- `git branch --show-current` ≠ mainline (main/master/develop, авто-детект):
+  - ветка матчит `feature/*|fix/*|hotfix/*` → **SIGNAL: workspace occupied by
+    foreign feature** (показать имя ветки) → isolation recommendation = worktree;
+  - иной паттерн → сигнал + явный HITL;
+  - == mainline → «free workspace».
+- Результат в сессию: «Предуведомление: текущий workspace занят веткой `<name>`
+  (чужая активная фича). Рекомендуется worktree.»
+
+**Шаг 6 — isolation HITL:**
+- (a) worktree: `git worktree add -b <branch> <dir> <mainline>`; (b) plain branch
+  (только mainline + clean tree): `git checkout -b <branch> <mainline>`; (c) отмена.
+- **Правило базы:** `<mainline>` — всегда явный аргумент, не implicit HEAD.
+- **Stacked-исключение** (ветка поверх чужой фичи): только явный HITL «Я знаю,
+  что делаю: стекаю поверх <branch>» — с предупреждением: «Стекинг поверх чужой
+  фичи создаёт риск merge-scope contamination; при merge в mainline будет
+  проверяться чужой контент».
+- В session vars: `BRANCH_BASE_SHA`, `BRANCH_NAME`. При worktree —
+  `tools.opencode.session_move` к worktree-dir.
+
+## Merge-scope protocol (гейт 17 — канон, 6.5.0)
+
+Пред-гейт перед (a) Approve merge:
+1. Показать: `$ git log --oneline <mainline>..HEAD` + `$ git diff --stat
+   <mainline>...HEAD` — сравнить с ожидаемыми коммитами пайплайна
+   (design+plan + SDD tasks).
+2. Коммиты, не созданные этим пайплайном (до шага 6 или чужая ветка) →
+   **HARD STOP**: «Merge scope содержит N чужих коммитов»:
+   (a) rebase fix branch onto mainline и продолжить; (b) продолжить с явным
+   acknowledge «я осознаю, что мержит чужую работу»; (c) отмена.
+3. **Механический индикатор:** merge-base(mainline, HEAD) == BRANCH_BASE_SHA
+   (записан на шаге 6). Расхождение = сигнал «scope загрязнён».
+
+Механический контур (плагин): branch-base guard (`git checkout -b` /
+`git worktree add -b` от non-mainline без явного base → warn/deny,
+`merge_guard.branch_base_guard`) + head-pin маркера (v2, `head` — снимок HEAD
+после аппрува; пост-аппрув мутация → `marker_head_mismatch`).

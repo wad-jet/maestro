@@ -125,9 +125,10 @@
 
 И проверяет:
 1. Текущая ветка == mainline (main/master/develop, auto-детект)?
-2. Если нет → есть ли явный base-аргумент. **Детекция base — по числу токенов** (`command.trim().split(/\s+/)`), устойчиво к дополнительным флагам:
+2. Если нет → есть ли явный base-аргумент. **Детекция — segment-aware** (последний сегмент составной команды `&&`/`||`/`;`/`|`; `command.trim().split(/\s+/)`):
    - `git checkout -b <name>` — 4 токена → base нет; 5+ токенов → base есть;
    - `git worktree add -b <name> <dir>` — 6 токенов → base нет; 7+ токенов → base есть;
+   - pre-switch на mainline (`git checkout main && git checkout -b fix/x`) = base (ремедиационный паттерн);
    - `--orphan` → guard не применяется.
 3. Нет base + не mainline → **warn** (default) / **deny** (`branch_base_guard: "deny"` в `maestro.json`).
 
@@ -149,9 +150,9 @@
    
    Любой коммит между шагами 2–4 меняет HEAD → маркер невалиден → merge-guard deny.
 
-2. При проверке (при `git merge`/`git push mainline`):
+2. При проверке (при `git merge`/`git push mainline`) — **workdir-семантика (worktree-aware):** маркер ищется и HEAD снимается в workdir shell-вызова (после `session_move` это worktree), не в первичном root:
    - Читаем `head` из маркера.
-   - `git rev-parse HEAD` текущего времени.
+   - `git -C <workdir> rev-parse HEAD` текущего времени.
    - **HEAD не совпадает** → deny: `reason: "marker_head_mismatch"`.
 
 **Обратная совместимость:** маркеры v1 (без `head`) → игнорируем head-pin (прежнее поведение). Old-marker + head-mismatch = allow (no-break). New-marker = enforced.

@@ -416,13 +416,9 @@ skip-path по канону или откат к пропущенному шаг
       **Авто-режимы:** auto-answer — авто (a) да (P1.3); auto-ai — авто (a), полный
       pre-flight выполняется (не срезается).
 🟡  3. [agent] Pre-flight: диагностика состояния (см. ниже Фазу 1)
-      — **Workspace occupancy (новый):**
-        - `git branch --show-current` ≠ mainline (main/master/develop, auto-детект)
-          И ветка матчит паттерн `feature/*|fix/*|hotfix/*` → **SIGNAL: workspace occupied by foreign feature**
-          (показать имя ветки) → isolation recommendation = **worktree**
-        - `git branch --show-current` ≠ mainline, other pattern → сигнал + явный HITL
-        - `git branch --show-current` == mainline → "free workspace"
-        — Результат в сессию: «Предуведомление: текущий workspace занят веткой `<name>` (чужая активная фича). Рекомендуется worktree.»
+      — **Workspace occupancy:** ветка ≠ mainline (main/master/develop, авто) →
+        сигнал «workspace занят `<name>` (чужая фича)» + рекомендация worktree;
+        == mainline → «free workspace». Канон — `references/hitl-gate-protocol.md`.
 🟡  4. [agent] Pre-flight: запрос действия у пользователя (см. ниже Фазу 2)
 🟡  5. [agent] Имя ветки (inline-конвенция)
       — Имя зависит от маршрута шага 1:
@@ -435,16 +431,10 @@ skip-path по канону или откат к пропущенному шаг
       -- HITL GATE: выбрать изоляцию --
       (a) worktree [рекомендуется, если workspace occupied]
           `git worktree add -b <branch> <dir> <mainline>`
-      (b) plain branch
-          `git checkout -b <branch> <mainline>`
-          Только при mainline + clean tree
+      (b) plain branch (mainline + clean tree): `git checkout -b <branch> <mainline>`
       (c) отмена
-      Примечание:
-        - База ВСЕГДА <mainline> — явный, не implicit HEAD
-        - Исключение (stacked на чужую фичу): только явный HITL
-          «Я знаю, что делаю: стекаю поверх <branch>» — с предупреждением о рисках
-        - Записать в session vars: BRANCH_BASE_SHA, BRANCH_NAME
-        - При worktree: вызвать `tools.opencode.session_move` к worktree-dir
+      База ВСЕГДА явный <mainline>; stacked — только явный HITL с предупреждением.
+      Session vars: BRANCH_BASE_SHA, BRANCH_NAME. Канон — `references/hitl-gate-protocol.md`.
 🟡  7. -- HITL GATE: категория фичи (см. Feature Classification) --
       ВАРИАНТЫ:
         (a) Сложная / Архитектурная — полный pipeline (шаги 8-10).
@@ -1163,31 +1153,16 @@ skip-path по канону или откат к пропущенному шаг
             замечаний (только follow-up, не блокирует)».
         (c) Отмена
        -- HITL GATE: ревью merge-scope --
-       Оркестратор обязан показать:
-         $ git log --oneline <mainline>..HEAD
-         $ git diff --stat <mainline>...HEAD
-       — и сравнить с ожидаемыми коммитами пайплайна (design+plan + SDD tasks).
-
-       Если в scope обнаружены коммиты, не созданные этим пайплайном
-       (до шага 6, или чужая ветка):
-         **HARD STOP**: «Merge scope содержит N чужих коммитов»
-         (a) rebase fix branch onto mainline и продолжить
-         (b) продолжить с явным acknowledge: «я осознаю, что мержит чужую работу»
-         (c) отмена
-
-       Если scope чист — продолжить к маркеру гейта 17.
-
-       Механический индикатор: merge-base(mainline, HEAD) должно == BRANCH_BASE_SHA
-       (записано при создании ветки на шаге 6). Расхождение = сигнал «scope загрязнён».
-       **Маркер аппрува (5.6.0, обязательный; head-pin — 6.5.0):** после явного
-       (a) пользователя, **до выполнения merge**, создай
-       `.maestro/gates/merge-<sessionID>.json` с
-       `{"sessionID": "<id>", "ts": <Date.now()>, "gate": 17, "decision": "a",
-       "head": "<git rev-parse HEAD>"}`.
-       `head` — снимок HEAD сразу после аппрува: любой коммит после маркера,
-       но до merge → HEAD не совпадёт → merge-guard deny (`marker_head_mismatch`).
+       До (a): показать `git log --oneline <mainline>..HEAD` + `git diff --stat
+       <mainline>...HEAD`; чужие коммиты → HARD STOP. Протокол и индикатор
+       BRANCH_BASE_SHA — `references/hitl-gate-protocol.md` (канон).
+       **Маркер аппрува (5.6.0; head-pin — 6.5.0):** после явного (a), **до
+       merge**, создай `.maestro/gates/merge-<sessionID>.json` =
+       `{"sessionID","ts","gate":17,"decision":"a","head":"<git rev-parse HEAD>"}`.
+       Любой коммит после маркера, но до merge → HEAD не совпадёт →
+       merge-guard deny (`marker_head_mismatch`); без маркера merge/push в
+       mainline блокируются (fail-closed, TTL `merge_guard.ttlSec`).
        Без маркера merge-guard плагина заблокирует `git merge`/`git push`
-       в mainline (fail-closed, TTL — `merge_guard.ttlSec`, default 600 с).
 🟢 18. [agent] finishing-a-development-branch
       — При fast-forward merge: `$TEST_COMMAND` на merged результате
         не выполняется. Fast-forward = HEAD feature-ветки становится

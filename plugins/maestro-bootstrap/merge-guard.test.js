@@ -459,6 +459,61 @@ describe("merge-guard hook integration (tool.execute.before)", () => {
       /merge-guard:deny.*git merge/,
     );
   });
+
+  it("branch-base warn path: checkout -b from non-mainline (guard_error, warn mode) — not rejected", async () => {
+    // Temp dir не git repo → branch --show-current падает → guard_error →
+    // warn-режим (default) → allow + log (no throw). Hook-обвязка branch-base.
+    await assert.doesNotReject(
+      hooks["tool.execute.before"](
+        { tool: "shell", sessionID: "ses_bb", callID: "c7", input: { command: "git checkout -b fix/x" } },
+      ),
+    );
+  });
+
+  it("branch-base deny path: checkout -b from non-mainline → throw", async () => {
+    const denyDir = fs.mkdtempSync(path.join(os.tmpdir(), "mg-hook-bb-deny-"));
+    try {
+      fs.writeFileSync(
+        path.join(denyDir, "maestro.json"),
+        JSON.stringify({ merge_guard: { enabled: true, branch_base_guard: "deny" } }),
+      );
+      const denyCtx = makeV2Ctx(denyDir);
+      await createBootstrapPlugin(denyCtx);
+      const denyHooks = denyCtx._hooks;
+      await assert.rejects(
+        denyHooks["tool.execute.before"](
+          { tool: "shell", sessionID: "ses_bd", callID: "c8", input: { command: "git checkout -b fix/x" } },
+        ),
+        /branch-base-guard:deny/,
+      );
+    } finally {
+      fs.rmSync(denyDir, { recursive: true, force: true });
+    }
+  });
+
+  it("merge marker is read from shell workdir (worktree-aware, C2)", async () => {
+    // Маркер создан в workdir вызова (worktree-режим после session_move) —
+    // merge-guard обязан найти его там, а не только в первичном root.
+    const wtDir = fs.mkdtempSync(path.join(os.tmpdir(), "mg-hook-wt-"));
+    try {
+      const wtGates = path.join(wtDir, ".maestro", "gates");
+      fs.mkdirSync(wtGates, { recursive: true });
+      fs.writeFileSync(
+        path.join(wtGates, "merge-ses_wt.json"),
+        JSON.stringify({ sessionID: "ses_wt", ts: Date.now(), gate: 17, decision: "a" }),
+      );
+      await assert.doesNotReject(
+        hooks["tool.execute.before"](
+          {
+            tool: "shell", sessionID: "ses_wt", callID: "c9",
+            input: { command: "git merge --ff-only f", workdir: wtDir },
+          },
+        ),
+      );
+    } finally {
+      fs.rmSync(wtDir, { recursive: true, force: true });
+    }
+  });
 });
 
 // --- Branch-base guard tests ---
@@ -493,6 +548,22 @@ describe("merge-guard detectCheckoutCommand", () => {
 
   it("echo git checkout -b → null", () => {
     assert.equal(detectCheckoutCommand('echo "git checkout -b x"'), null);
+  });
+
+  it("composite: git checkout main && git checkout -b fix/x → checkout-b (last segment)", () => {
+    assert.deepEqual(
+      detectCheckoutCommand("git checkout main && git checkout -b fix/x"),
+      { kind: "checkout-b" });
+  });
+
+  it("composite: git status && git checkout -b x → checkout-b (last segment)", () => {
+    assert.deepEqual(
+      detectCheckoutCommand("git status && git checkout -b x"),
+      { kind: "checkout-b" });
+  });
+
+  it("composite: git checkout -b x && git checkout main → null (last segment wins)", () => {
+    assert.equal(detectCheckoutCommand("git checkout -b x && git checkout main"), null);
   });
 
   it("empty / non-string → null", () => {
@@ -551,6 +622,24 @@ describe("merge-guard checkBranchBaseGuard", () => {
   it("worktree add -b without base → warn", () => {
     assert.deepEqual(
       checkBranchBaseGuard("git worktree add -b feature/x .wt", "worktree-add-b", root, root, confWarn, exec("feature/x")),
+      { allow: true, reason: "branch_base_warning" });
+  });
+
+  it("composite: git checkout main && git checkout -b fix/x → allow (mainline pre-switch = base)", () => {
+    assert.deepEqual(
+      checkBranchBaseGuard("git checkout main && git checkout -b fix/x", "checkout-b", root, root, confWarn, exec("feature/x")),
+      { allow: true, reason: "explicit_base" });
+  });
+
+  it("composite: git switch main ; git checkout -b fix/x → allow (switch pre-switch)", () => {
+    assert.deepEqual(
+      checkBranchBaseGuard("git switch main ; git checkout -b fix/x", "checkout-b", root, root, confDeny, exec("feature/x")),
+      { allow: true, reason: "explicit_base" });
+  });
+
+  it("composite: git checkout other-branch && git checkout -b fix/x → still warn (no mainline switch)", () => {
+    assert.deepEqual(
+      checkBranchBaseGuard("git checkout other-branch && git checkout -b fix/x", "checkout-b", root, root, confWarn, exec("feature/x")),
       { allow: true, reason: "branch_base_warning" });
   });
 

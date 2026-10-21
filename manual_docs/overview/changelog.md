@@ -15,11 +15,12 @@
 
 ### Добавлено
 
-- **Pipeline isolation hardening:** предвращение протаскивания чужих коммитов при merge в mainline (инцидент 2026-10-21)
+- **Pipeline isolation hardening:** предотвращение протаскивания чужих коммитов при merge в mainline (инцидент 2026-10-21)
   - `SKILL.md`: step 3 — детект «workspace occupied by foreign feature»; step 6 — явный HITL-гейт изоляции с правилом базы = mainline; step 17 — ревью merge-scope (hard stop при чужих коммитах)
   - Плагин merge-guard: `branch_base_guard` (warn/deny/off) — блокирует `git checkout -b`/`git worktree add -b` от не-mainline ветки без явного base; `head_pin: true` — маркер v2 с полем `head`, проверка совпадения HEAD при merge (detect post-approve mutation)
+  - Механика: segment-aware детект (последний сегмент составной команды, pre-switch на mainline = base); маркер читается из workdir shell-вызова (worktree-режим после `session_move`)
 
-###
+## [2026-10-20]
 
 > **Версия 6.4.0** — Major: отказ от секций `confidential` и `trust` в `maestro.json` — нативные OpenCode permissions становятся **единственным барьером** доступа к restricted-данным (fail-closed в ядре, не зависит от плагина); trusted = hardcoded role-set `{custodian, sanitizer}`; dual mode: legacy-режим (плагинный enforcement) работает, пока секция `confidential` есть; плагин — shadow-аудит (observability), директива, U1, merge-guard; memory — только generic-маскирование (SEC-5 — признанный риск).
 
