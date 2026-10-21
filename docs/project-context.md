@@ -228,7 +228,7 @@
   не конфигурируется; секция `trust` удалена из схемы в 6.4.0, старые ключи →
   warn + игнор). U1-маскирование task-промптов — для всех агентов вне
   role-set (вкл. кастомные).
-- **Confidential-данные:** docs/confidential/**
+- **Confidential-данные:** docs/confidential/*
 - **Секреты:** `.env`, `*.env.*` — дефолт ядра OpenCode; `*.pem`/`*.key`/
   `*.crt`/`*.p12`/`*.pfx` — init-базелин (при наличии в нативном конфиге).
 - **File-доступ — нативный:** deny/ask в `.opencode/opencode.json`
