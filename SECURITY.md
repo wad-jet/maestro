@@ -524,3 +524,5 @@
 - TODO #14 — модели trusted-агентов (анализ завершён, решения P2/P3).
 - TODO #23 — изолированная (локальная) модель для trusted-агентов.
 - TODO #50 — безопасная миграция проекта через `docs/confidential/migration`.
+- Pipeline isolation hardening: branch-base guard + head-pin marker v2
+  (resolved by feature/pipeline-isolation-hardening, 2026-10-21).
