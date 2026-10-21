@@ -131,8 +131,6 @@ curl -fsSL https://raw.githubusercontent.com/wad-jet/maestro/main/docker/maestro
 
 ### Проверка здоровья
 
-### Проверка здоровья
-
 ```bash
 # HTTP healthcheck (не интерполирует пароль — безопасно для docker inspect)
 curl -sf -u "opencode:${OPENCODE_PASSWORD}" http://127.0.0.1:4096/api/info
