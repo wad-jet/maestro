@@ -1,0 +1,27 @@
+services:
+  opencode:
+    image: maestro-opencode:6.x
+    env_file: .env.docker
+    volumes:
+      - oc-ws:/workspace
+      - oc-data:/data
+      - oc-cache:/cache
+      - ${MAESTRO_STATE_DIR:-${HOME}/maestro-state}/${PROJECT_NAME}:/maestro
+      - ${MAESTRO_CONF_DIR:-${HOME}/maestro-confidential}/${PROJECT_NAME}:/workspace/${REPO_NAME}/.confidential:ro
+    ports:
+      - "${PROJECT_PORT:-127.0.0.1:4096}:4096"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/healthcheck.sh"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 120s
+
+volumes:
+  oc-ws:
+    name: oc-ws-${PROJECT_NAME}
+  oc-data:
+    name: oc-data-${PROJECT_NAME}
+  oc-cache:
+    name: oc-cache-${PROJECT_NAME}
