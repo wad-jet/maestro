@@ -956,6 +956,63 @@ MAESTRO_MEMORY_LOG_DIR="/var/log/maestro"
 По умолчанию — каталог bootstrap-лога (`<project>/.maestro/logs`). Логи
 разбиваются по дням: `.maestro/logs/maestro-memory-2026-09-08.log`.
 
+### Переменные окружения Docker-serve
+
+Следующие переменные окружения используются **только в `opencode serve`** (не в
+CLI-режимах `opencode run`/`opencode debug` и т.д.). Инжекционируются через
+`OPENCODE_CONFIG_CONTENT` с высшим приоритетом (после project-слоя).
+
+> **Защитный контракт:** `OPENCODE_CONFIG_CONTENT` содержит **строго**
+> `agents.*.model`, `default_agent` и `providers`. **Запрещено** содержать
+> `permissions`, `policies`, `plugins`, `instructions` — эти секции
+> управляются на уровне managed-слоя (`/etc/opencode/`) или baked skeleton.
+
+#### `OC_*_MODEL`
+
+Привязка модели на агента:
+
+| Переменная | Агент |
+|---|---|
+| `OC_BUILD_MODEL` | `agents.build.model` |
+| `OC_PLAN_MODEL` | `agents.plan.model` |
+| `OC_CUSTODIAN_MODEL` | `agents.custodian.model` |
+| `OC_SANITIZER_MODEL` | `agents.sanitizer.model` |
+| `OC_OPUS_MODEL` | `agents.opus.model` |
+| `OC_SONNET_MODEL` | `agents.sonnet.model` |
+| `OC_HAIKU_MODEL` | `agents.haiku.model` |
+| `OC_FABLE_MODEL` | `agents.fable.model` |
+| `OC_REVIEWER_MODEL` | `agents.reviewer.model` |
+
+Пример: `OC_BUILD_MODEL="akash/Qwen3.6-35B-A3B"`.
+
+#### `OC_PROVIDERS_JSON`
+
+JSON-строка с секцией `providers` (кастомный провайдер). **Пример:**
+
+```bash
+OC_PROVIDERS_JSON='{"myprov":{"npm":"@ai-sdk/openai-compatible","options":{"base_url":"https://api.myprov.com/v1"},"models":{"my-model":{}}}}'
+```
+
+Provider-определения из `OC_PROVIDERS_JSON` — высший приоритет, repo не
+перекроет.
+
+#### `OPENCODE_CONFIG_CONTENT`
+
+Инъекция частичного JSON в конфиг (serve-only, высший приоритет). Содержит
+`agents.*.model` + `default_agent` + `providers`. Используется entrypoint'ом
+Docker-образа для конфигурации без пересборки.
+
+#### `OPENCODE_DEFAULT_AGENT`
+
+Дефолтный агент (по умолчанию `"build"`). Защищает от подмены `default_agent`
+из репо-конфига.
+
+#### `OPENCODE_PASSWORD`
+
+Пароль для Basic auth сервера (username `opencode`). Не инъектируется в JSON —
+используется напрямую для аутентификации. При заданном env — пароль не
+печатается в stdout. Healthcheck скрипт читает пароль из env.
+
 ## 📁 Файлы, создаваемые / используемые pipeline
 
 | Путь | Назначение | В git? |

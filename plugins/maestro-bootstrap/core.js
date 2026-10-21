@@ -62,6 +62,27 @@ export function getGitConfig(root, exec = execSync) {
   return result;
 }
 
+// --- Confidential git-tracked check (Task 9) ---
+// Warn if .confidential/ directory is tracked in git — this is a security risk.
+export function checkConfidentialTrackedInGit(root, log) {
+  try {
+    const gitTrackedCheck = execSync("git ls-files .confidential/ 2>/dev/null || true", {
+      cwd: root,
+      encoding: "utf-8",
+    });
+    if (gitTrackedCheck.trim()) {
+      log?.warn?.("confidential.tracked_in_git", { sessionID: undefined, files: gitTrackedCheck.trim().split("\n") });
+      console.warn(
+        "confidential.tracked_in_git: .confidential/ appears to be tracked in git. " +
+        "This is a security risk — confidential data should NOT be in git. " +
+        "Fix: git rm -r --cached .confidential/ && git commit -m \"remove .confidential from git tracking\" && echo \".confidential/\" >> .gitignore",
+      );
+    }
+  } catch {
+    // git command failed — not a git repo, silently ignore
+  }
+}
+
 // --- Context Sanitizer ------------------------------------------------------
 
 const RULE_NAMES = ["env_secret", "data_field", "env_file", "db_credential", "private_key", "auth_header"];
@@ -1042,6 +1063,9 @@ export async function createBootstrapPlugin(ctx) {
   writePluginVersionFile(root, version);
 
   log.info("plugin initialized", { version, logDir: log.logDir, level: log.level, mask: log.mask });
+
+  // --- Confidential git-tracked check (Task 9) ---
+  checkConfidentialTrackedInGit(root, log);
 
   const toolCalls = makeBoundedMap(2048);
   const sessionTrustCache = makeBoundedMap(2048);

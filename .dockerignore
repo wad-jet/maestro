@@ -1,0 +1,28 @@
+# .dockerignore — гигиена build context (docker build -f docker/Dockerfile .)
+#
+# Docker отправляет ВЕСЬ context в daemon — даже то, что не COPY-ится в образ.
+# Restricted-данные (SECURITY: docs/confidential) и эфемерное состояние в
+# context попадать не должны. Зеркалит .gitignore + исключает .git.
+
+# Git-история (в образ не нужна)
+.git/
+
+# Эфемерное состояние / dev-зеркала (gitignored)
+.maestro/
+.opencode/
+.superpowers/
+.worktrees/
+.sandbox/
+.claude/
+TODO.md
+
+# Restricted (SECURITY: docs/confidential не покидает репозиторий)
+docs/confidential/
+.confidential/
+
+# Секреты и мусор
+.env
+.env.*
+*.log
+.DS_Store
+node_modules/

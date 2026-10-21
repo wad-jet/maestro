@@ -11,6 +11,28 @@
 
 ## [2026-10-21]
 
+> **Версия 6.6.0** — Dockerized `opencode serve`: полностью рабочий Docker-образ для запуска opencode serve в изолированном контейнере с двумя режимами (self-contained + live-mount), security baseline через managed config, healthcheck, docker-compose, документация
+
+### Добавлено
+
+- **Dockerized `opencode serve`** (spec §2, plan task 1–13): полностью рабочий Docker-образ для запуска opencode serve
+  - `docker/Dockerfile` — multi-stage сборка (maestro-base + per-project), pin maestro SHA + superpowers SHA, опencode v2.0.32
+  - `docker/entrypoint.sh` — core orchestration: автодетект режима A/B (self-contained clone / live-mount), config injection (`OC_*_MODEL` → `agents.*.model`), provider allowlist, log retention, `core.hooksPath` disable, root → non-root drop через `gosu`
+  - `docker-compose.yml` — production config: named volumes, healthcheck (`start_period: 120s`), restart `unless-stopped`, localhost-only bind
+  - `docker/etc-opencode.json` — managed security baseline (permissions + policies, highest precedence)
+  - `docker/user-opencode.json` — global skeleton config (plugins, agents, worktree, `update: "disable"`)
+  - `docker/healthcheck.sh` — HTTP `/api/info` check + TCP fallback
+  - `docker/README.md` — quick start guide (hello world, 5 минут)
+  - `.dockerignore` — build context hygiene (не включать `.maestro/`, `.env*`, `node_modules/`, секретные файлы)
+  - Plugin: `confidential.tracked_in_git` check при bootstrap (warn при `.confidential/` в git)
+  - Entrypoint: `{env:}` whitelist валидация (reject non-whitelisted placeholders)
+  - Entrypoint: REPO_URL `https://` scheme validation
+- **Docker-serve документация:** `manual_docs/how-to/docker-serve.md` (прerequisites, режимы A/B, compose, hardening, debugging, scenarios ladder), `manual_docs/how-to/docker-mcp.md` (MCP in Docker), `manual_docs/explanation/docker-residuals.md` (config substitution, bash-env access, container sandbox)
+- **maestro-setup:** dual default `confidential.paths` (`docs/confidential/**` + `.confidential/**`), `.confidential/` в `.gitignore`
+- **TDD:** 27 новых тестов (plugin verification, entrypoint behavioral, docker smoke) — `npm test` 595/595 pass
+
+## [2026-10-21]
+
 > **Версия 6.5.0** — pipeline isolation hardening (branch-base guard, head-pin merge marker v2, merge-scope review gate 17)
 
 ### Добавлено
