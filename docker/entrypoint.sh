@@ -4,7 +4,7 @@
 #
 # Режимы запуска (авто-детект, spec §2.1/§5.4):
 #   A (self-contained): REPO_URL задан → tmpfs credential-store (GIT_TOKEN →
-#      /dev/shm), safe clone (полный, НЕ shallow — Task 5), serve
+#      /dev/shm), safe clone (полный, НЕ shallow, Task 5 — выполнено), serve
 #   B (live-mount):     REPO_URL НЕ задан + git-дерево в /workspace[/<repo>]
 #      → serve на смонтированном дереве
 #
@@ -25,7 +25,7 @@
 #   9.  chown volumes → gosu <uid>:<gid> → opencode serve
 #
 # Окружение:
-#   REPO_URL, GIT_TOKEN, GIT_BRANCH        — режим A (GIT_BRANCH — Task 5)
+#   REPO_URL, GIT_TOKEN, GIT_BRANCH        — режим A
 #   OC_*_MODEL (OC_BUILD_MODEL, …)         — модели агентов (provider/model)
 #   OC_PROVIDERS_JSON                      — custom providers (JSON, top-level
 #                                             keys = provider IDs)
@@ -143,10 +143,60 @@ setup_mode_a() {
   else
     log "WARN: mode A without GIT_TOKEN — assuming public repo / tokenless auth"
   fi
-  # Task 5: safe clone flow (temp-clone + rsync, full clone — не shallow)
-  # + update-existing-clone fallback + GIT_BRANCH checkout.
-  # До Task 5 workspace-корень — /workspace.
-  PROJECT_ROOT="$WORKSPACE"
+
+  # --- safe clone flow (temp-clone + rsync, full clone — не shallow) ----------
+  # Полный клон: --depth=1 ломает ancestry-фичи (merge-guard P9, branch-aware
+  # memory v3, memory_reindex git-history).
+
+  # Определяем имя репо из URL (strip .git, последний компонент пути)
+  local url_without_git="${REPO_URL%.git}"
+  local REPO_NAME="${url_without_git##*/}"
+  [ -n "$REPO_NAME" ] || die "mode A: cannot derive repo name from REPO_URL=$REPO_URL"
+
+  local TARGET_DIR="$WORKSPACE/$REPO_NAME"
+
+  if [ -d "$TARGET_DIR/.git" ]; then
+    # --- существующий workspace: update fallback ---------------------------
+    log "mode A: workspace already exists at $TARGET_DIR — fetching + checkout"
+    GIT_TERMINAL_PROMPT=0 git -C "$TARGET_DIR" fetch --all --prune ||
+      die "mode A: fetch failed for $TARGET_DIR"
+    local branch="${GIT_BRANCH:-main}"
+    # fallback: если origin/branch не существует — пробуем master
+    if ! git -C "$TARGET_DIR" show-ref --verify --quiet "refs/remotes/origin/$branch" 2>/dev/null; then
+      branch="master"
+    fi
+    git -C "$TARGET_DIR" checkout -B "$branch" "origin/$branch" ||
+      die "mode A: checkout failed for $branch in $TARGET_DIR"
+    # -e .opencode — defense-in-depth для bind-mounted .opencode/ с хоста
+    # (mode A с кастомным провайдером)
+    git -C "$TARGET_DIR" clean -fd \
+      -e .confidential \
+      -e .opencode ||
+      die "mode A: git clean failed in $TARGET_DIR"
+    log "mode A: workspace updated (branch=$branch)"
+  else
+    # --- fresh clone: /tmp/clone → rsync → TARGET_DIR ---------------------
+    log "mode A: cloning $REPO_URL → /tmp/clone (full clone, not shallow)"
+    GIT_TERMINAL_PROMPT=0 git clone "$REPO_URL" /tmp/clone ||
+      die "mode A: git clone failed for $REPO_URL"
+    rsync -a /tmp/clone/ "$TARGET_DIR/" ||
+      die "mode A: rsync failed from /tmp/clone to $TARGET_DIR"
+    rm -rf /tmp/clone
+    log "mode A: clone complete → $TARGET_DIR"
+    # checkout branch если задан
+    if [ -n "${GIT_BRANCH:-}" ]; then
+      local branch="$GIT_BRANCH"
+      if ! git -C "$TARGET_DIR" show-ref --verify --quiet "refs/remotes/origin/$branch" 2>/dev/null; then
+        branch="master"
+        log "WARN: origin/$GIT_BRANCH not found — falling back to master"
+      fi
+      git -C "$TARGET_DIR" checkout -B "$branch" "origin/$branch" ||
+        die "mode A: initial checkout failed for $branch"
+      log "mode A: checked out branch=$branch"
+    fi
+  fi
+
+  PROJECT_ROOT="$TARGET_DIR"
 }
 
 # Режим B: live-mount — проверяем дерево, warn при отсутствии .confidential
