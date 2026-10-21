@@ -233,7 +233,7 @@ Trusted по роли: `custodian` + `sanitizer` (обоим доступен `d
 
 maestro можно запустить через Docker:
 - `docker-compose.yml` — локальный образ с pre-installed maestro
-- `docker-serve` — preview-сервер для документации
+- `docker-serve` — запуск maestro в контейнере (режимы A/B)
 - [Подробнее](manual_docs/how-to/docker-serve.md)
 
 ## Память maestro (опциональный модуль)

@@ -27,7 +27,7 @@ function read(rel, base = ROOT) {
 }
 
 function globRecursive(dir, pattern, base = ROOT) {
-  const full = join(base, dir);
+  const full = join(base || ROOT, dir);
   if (!existsSync(full)) return [];
   const results = [];
   const stack = [full];
@@ -1242,6 +1242,11 @@ test("docs-drift real repo: 0 нарушений", () => {
     totalViolations += d10.length;
     all = all.concat(d10);
   }
+  const d11 = checkD11(ROOT);
+  if (d11.length) {
+    totalViolations += d11.length;
+    all = all.concat(d11);
+  }
 
   assert.deepEqual(
     all,
@@ -1250,13 +1255,15 @@ test("docs-drift real repo: 0 нарушений", () => {
   );
 });
 
-// D9: link integrity — no broken internal links in README.md, README.en.md, manual_docs/**/*.md
-test('D9: link integrity (broken links)', () => {
-  const repoRoot = TMP_DIR;
+/**
+ * D11: check link integrity in a repo — broken internal markdown links.
+ * @param {string} repoRoot
+ * @returns {string[]} violations
+ */
+function checkD11(repoRoot) {
   const violations = [];
-
-  // Collect all MD files
   const mdFiles = [];
+
   // README.md at root
   const readmePath = join(repoRoot, "README.md");
   if (existsSync(readmePath)) mdFiles.push(readmePath);
@@ -1264,15 +1271,8 @@ test('D9: link integrity (broken links)', () => {
   const readmeEnPath = join(repoRoot, "README.en.md");
   if (existsSync(readmeEnPath)) mdFiles.push(readmeEnPath);
   // manual_docs/**/*.md
-  function walkDir(dir) {
-    for (const e of readdirSync(dir, { withFileTypes: true })) {
-      const p = join(dir, e.name);
-      if (e.isDirectory()) walkDir(p);
-      else if (e.name.endsWith(".md")) mdFiles.push(p);
-    }
-  }
-  const mdDir = join(repoRoot, "manual_docs");
-  if (existsSync(mdDir)) walkDir(mdDir);
+  const mdGlobFiles = globRecursive("manual_docs", /\.md$/, repoRoot);
+  for (const p of mdGlobFiles) mdFiles.push(p);
 
   // Parse each file for local markdown links
   const linkRx = /\[([^\]]*)\]\(([^)#\s]+)(?:#[^)\s]*)?\)/g;
@@ -1281,10 +1281,8 @@ test('D9: link integrity (broken links)', () => {
     let m;
     while ((m = linkRx.exec(text))) {
       const link = m[2];
-      // Skip external URLs, anchors only, headers only
       if (/^https?:/.test(link)) continue;
       if (/^#/.test(link)) continue;
-      // Resolve relative to the file's directory
       const target = join(dirname(f), link);
       if (!existsSync(target)) {
         violations.push(`${basename(f)} → ${link}`);
@@ -1292,9 +1290,31 @@ test('D9: link integrity (broken links)', () => {
     }
   }
 
-  if (violations.length > 0) {
-    throw new Error(`${violations.length} broken links found: ${violations.join(", ")}`);
-  }
+  return violations;
+}
+
+// D11: link integrity — fixture test with planted broken link
+test('D11: link integrity (broken links)', () => {
+  const repoRoot = TMP_DIR;
+  const mdFiles = [];
+
+  // README.md at root
+  const readmePath = join(repoRoot, "README.md");
+  if (existsSync(readmePath)) mdFiles.push(readmePath);
+  // README.en.md at root
+  const readmeEnPath = join(repoRoot, "README.en.md");
+  if (existsSync(readmeEnPath)) mdFiles.push(readmeEnPath);
+  // Plant a broken link fixture in manual_docs
+  const mdDir = join(repoRoot, "manual_docs");
+  mkdirSync(mdDir, { recursive: true });
+  writeFileSync(join(mdDir, "broken-link-test.md"), "# Test\n\nBroken: [link](nonexistent-target.md)\n");
+  const mdGlobFiles = globRecursive("manual_docs", /\.md$/, repoRoot);
+  for (const p of mdGlobFiles) mdFiles.push(p);
+
+  const violations = checkD11(repoRoot);
+  assert.ok(violations.length > 0, "Fixture должен содержать хотя бы одно битую ссылку для проверки D11");
+  const broken = violations.find(v => v.includes("broken-link-test.md"));
+  assert.ok(broken, "Найдена битая ссылка из фитчера: " + broken);
 });
 
 after(() => {
