@@ -127,6 +127,12 @@ oc_model_vars() {
 # Режим A: tmpfs credential-store (spec §2.9). Токен — в /dev/shm (600), умирает
 # с контейнером; remote URL остаётся чистым; токен не в ps, не в image layers.
 setup_mode_a() {
+  # Validate REPO_URL scheme (security: prevent file:// or git@ attacker-controlled URLs)
+  case "$REPO_URL" in
+    https://*) ;; # allowed
+    *) die "mode A: REPO_URL must use https:// scheme (got: ${REPO_URL%%/*})" ;;
+  esac
+
   if [ -n "${GIT_TOKEN:-}" ]; then
     # host credential-store: явный $HOST побеждает, иначе — из REPO_URL
     local cred_host="${HOST:-${REPO_URL#*://}}"
