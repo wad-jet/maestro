@@ -392,6 +392,39 @@ disable_git_hooks() {
   log "git: hooks disabled (core.hooksPath=/var/empty)"
 }
 
+# --- 7.5. {env:} whitelist validation (review: Important fix) -------------------------
+validate_env_whitelist() {
+  local file="$1"
+  local -a allowed=("^OC_[A-Z_]*MODEL$" "^OPENCODE_DEFAULT_AGENT$" "^OPENCODE_PASSWORD$" "^OPENCODE_CONFIG_CONTENT$" "^OPENCODE_DATA_DIR$" "^OPENCODE_CACHE_DIR$" "^OPENCODE_WORKTREE_DIR$" "^MAESTRO_LOG_RETENTION_DAYS$" "^MAESTRO_AUDIT_LOG_RETENTION_DAYS$")
+  if [[ ! -f "$file" ]]; then
+    return 0  # skip non-existent
+  fi
+  # Extract all {env:VAR} references (portable: no -P, use sed + grep)
+  local vars
+  vars=$(sed -n 's/.*{env:\([^}]*\)}.*/\1/p' "$file" 2>/dev/null | sort -u)
+  if [[ -z "$vars" ]]; then
+    return 0  # no placeholders
+  fi
+  local invalid=()
+  while IFS= read -r var; do
+    local pat
+    local found=false
+    for pat in "${allowed[@]}"; do
+      if [[ "$var" =~ ^${pat}$ ]]; then
+        found=true
+        break
+      fi
+    done
+    if [[ "$found" == "false" ]]; then
+      invalid+=("$var")
+    fi
+  done <<< "$vars"
+  if [[ ${#invalid[@]} -gt 0 ]]; then
+    die "Forbidden {env:} placeholders in $file: ${invalid[*]}. Only whitelisted vars (OC_*_MODEL, OPENCODE_*) are allowed. Review spec §2.8 for the allowed substitution scope."
+  fi
+  log "config: validated $file — {env:} whitelist OK"
+}
+
 # --- 8. chown volumes + drop + serve ---------------------------------------------------
 chown_volumes() {
   log "chown volumes → ${DROP_UID}:${DROP_GID} (/workspace /data /cache /maestro)"
@@ -412,7 +445,9 @@ prune_logs 'maestro-bootstrap-*.log' "${MAESTRO_LOG_RETENTION_DAYS:-30}" bootstr
 prune_logs 'maestro-memory-*.log'    "${MAESTRO_LOG_RETENTION_DAYS:-30}" memory
 prune_logs 'maestro-audit-*.log'     "${MAESTRO_AUDIT_LOG_RETENTION_DAYS:-90}" audit
 
+validate_env_whitelist "$ETC_CONFIG"
 seed_skeleton
+validate_env_whitelist "${XDG_CONFIG_HOME:-$HOME/.config}/opencode/opencode.json"
 chown_volumes
 
 cd "$PROJECT_ROOT"

@@ -426,3 +426,75 @@ gitTest("entrypoint (d): git clean -fd -e .opencode -e .confidential — mount p
     fs.rmSync(dir, { recursive: true, force: true });
   }
 });
+
+// --- (e) {env:} whitelist validation (review: Important fix) ---------------------
+
+test("entrypoint (e): {env:} whitelist — разрешённые переменные проходят", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "maestro-ep-whitelist-"));
+  try {
+    const cfg = path.join(dir, "opencode.json");
+    // Only whitelisted {env:} placeholders
+    fs.writeFileSync(cfg, JSON.stringify({
+      agents: {
+        build: { model: "{env:OC_BUILD_MODEL}" },
+        plan: { model: "{env:OC_PLAN_MODEL}" },
+      },
+      default_agent: "{env:OPENCODE_DEFAULT_AGENT}",
+    }));
+    const escaped = cfg.replace(/"/g, '\\"');
+    const res = runEntrypointCase({
+      fnNames: ["validate_env_whitelist"],
+      call: `validate_env_whitelist "${escaped}"`,
+      env: {},
+    });
+    assert.equal(res.status, 0, `allowed vars: ${res.stderr}`);
+    assert.ok(res.stderr.includes("{env:} whitelist OK"), "log: whitelist OK");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("entrypoint (e): {env:} whitelist — запрещённые переменные отклоняются", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "maestro-ep-whitelist-"));
+  try {
+    const cfg = path.join(dir, "opencode.json");
+    // Forbidden: OPENAI_API_KEY is not whitelisted
+    fs.writeFileSync(cfg, JSON.stringify({
+      agents: {
+        build: { model: "{env:OC_BUILD_MODEL}" },
+      },
+      env_vars: { key: "{env:OPENAI_API_KEY}" },
+    }));
+    const escaped = cfg.replace(/"/g, '\\"');
+    const res = runEntrypointCase({
+      fnNames: ["validate_env_whitelist"],
+      call: `validate_env_whitelist "${escaped}"`,
+      env: {},
+    });
+    assert.notEqual(res.status, 0, "forbidden vars: expected non-zero");
+    assert.ok(res.stderr.includes("Forbidden {env:} placeholders"), "die message: forbidden placeholders");
+    assert.ok(res.stderr.includes("OPENAI_API_KEY"), "die message: mentions the bad var");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
+
+test("entrypoint (e): {env:} whitelist — файл без {env:} пропускается", () => {
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), "maestro-ep-whitelist-"));
+  try {
+    const cfg = path.join(dir, "opencode.json");
+    fs.writeFileSync(cfg, JSON.stringify({
+      agents: { build: { model: "akash/Qwen3.6-35B-A3B" } },
+      default_agent: "build",
+    }));
+    const escaped = cfg.replace(/"/g, '\\"');
+    const res = runEntrypointCase({
+      fnNames: ["validate_env_whitelist"],
+      call: `validate_env_whitelist "${escaped}"`,
+      env: {},
+    });
+    assert.equal(res.status, 0, "no placeholders: passes");
+  } finally {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
+});
